@@ -5,6 +5,11 @@ $pageSubtitle = 'Turno actual · ' . date('l, d \d\e F \d\e Y');
 
 require __DIR__ . '/includes/config.php';
 
+// Protección: si no hay sesión activa, redirigir al login
+if (empty($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
 /*
  * Ejemplo de consultas reales (comentadas). Descoméntalas cuando existan
  * las tablas correspondientes en tu base de datos.
