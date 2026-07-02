@@ -12,7 +12,7 @@ function pc_nav_class($page, $active) {
         <img src="assets/img/logo.png" alt="Plásticos Chepito">
         <div class="pc-sidebar-brand-text">
             <div class="name">Plásticos Chepito</div>
-            <div class="sub">Módulo de producción</div>
+            <div class="sub">Sistema de Gestión de Producción</div>
         </div>
     </div>
 
