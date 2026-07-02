@@ -38,6 +38,9 @@ function pc_nav_class($page, $active) {
     <a href="<?= htmlspecialchars(appUrl('materia_prima.php')) ?>" class="<?= pc_nav_class('materia_prima', $activePage) ?>">
         <i class="fa-solid fa-flask"></i> Materia prima
     </a>
+    <a href="<?= htmlspecialchars(appUrl('usuarios.php')) ?>" class="<?= pc_nav_class('usuarios', $activePage) ?>">
+        <i class="fa-solid fa-user-shield"></i> Usuarios
+    </a>
     <a href="<?= htmlspecialchars(appUrl('ordenes.php')) ?>" class="<?= pc_nav_class('ordenes', $activePage) ?>">
         <i class="fa-solid fa-clipboard-list"></i> Órdenes de producción
     </a>
