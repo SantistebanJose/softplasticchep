@@ -154,6 +154,17 @@ a { text-decoration: none; color: inherit; }
   font-weight: 600;
 }
 
+/* Sub-items for nested navigation (productos -> categorias / modelos) */
+.pc-nav-sub {
+  padding-left: 20px !important;
+  font-size: 0.95em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-nav-sub i { font-size: 14px; width: 18px; text-align: center; }
+
 .pc-sidebar-user {
   margin-top: auto;
   padding-top: 14px;

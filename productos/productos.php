@@ -1,12 +1,15 @@
 <?php
 require __DIR__ . '/../includes/config.php';
 require __DIR__ . '/../controllers/ProductController.php';
+require __DIR__ . '/../controllers/CategoriaController.php';
 
 $activePage  = 'productos';
 $pageTitle   = 'Productos';
 $pageSubtitle = 'Catálogo de productos terminados';
 
 $controller = new ProductController($pdo);
+$categoriaController = new CategoriaController($pdo);
+$categorias = $categoriaController->getAll();
 
 // ------------------------------------------------------------------
 // Manejo de acciones (AJAX): guardar (crear/editar) y eliminar

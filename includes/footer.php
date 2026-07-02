@@ -6,6 +6,6 @@
 </div>
 </div>
 
-<script src="assets/js/app.js"></script>
+<script src="<?= htmlspecialchars(appUrl('assets/js/app.js')) ?>"></script>
 </body>
 </html>
