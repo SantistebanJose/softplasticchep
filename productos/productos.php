@@ -1,9 +1,12 @@
 <?php
 require __DIR__ . '/../includes/config.php';
+require __DIR__ . '/../controllers/ProductController.php';
 
 $activePage  = 'productos';
 $pageTitle   = 'Productos';
 $pageSubtitle = 'Catálogo de productos terminados';
+
+$controller = new ProductController($pdo);
 
 // ------------------------------------------------------------------
 // Manejo de acciones (AJAX): guardar (crear/editar) y eliminar
@@ -13,51 +16,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
     try {
         switch ($_POST['accion']) {
-
             case 'guardar':
-                $id           = $_POST['id'] ?? null;
-                $codigo       = trim($_POST['codigo'] ?? '');
-                $nombre       = trim($_POST['nombre'] ?? '');
-                $categoria_id = $_POST['categoria_id'] ?: null;
-                $modelo_id    = $_POST['modelo_id'] ?: null;
-                $color        = trim($_POST['color'] ?? '');
-                $medida       = trim($_POST['medida'] ?? '');
-                $precio       = $_POST['precio'] ?: 0;
-                $stock_min    = $_POST['stock_minimo'] ?: 0;
-
-                if ($nombre === '' || !$categoria_id) {
-                    echo json_encode(['ok' => false, 'msg' => 'Nombre y categoría son obligatorios.']);
-                    exit;
-                }
-
-                if ($id) {
-                    // Editar
-                    $stmt = $pdo->prepare("
-                        UPDATE productos SET
-                            codigo = :codigo, nombre = :nombre, categoria_id = :categoria_id,
-                            modelo_id = :modelo_id, color = :color, medida = :medida,
-                            precio = :precio, stock_minimo = :stock_minimo, updated_at = NOW()
-                        WHERE id = :id
-                    ");
-                    $stmt->execute([
-                        'codigo' => $codigo, 'nombre' => $nombre, 'categoria_id' => $categoria_id,
-                        'modelo_id' => $modelo_id, 'color' => $color, 'medida' => $medida,
-                        'precio' => $precio, 'stock_minimo' => $stock_min, 'id' => $id
-                    ]);
-                    echo json_encode(['ok' => true, 'msg' => 'Producto actualizado correctamente.']);
-                } else {
-                    // Crear
-                    $stmt = $pdo->prepare("
-                        INSERT INTO productos (codigo, nombre, categoria_id, modelo_id, color, medida, precio, stock_minimo)
-                        VALUES (:codigo, :nombre, :categoria_id, :modelo_id, :color, :medida, :precio, :stock_minimo)
-                    ");
-                    $stmt->execute([
-                        'codigo' => $codigo, 'nombre' => $nombre, 'categoria_id' => $categoria_id,
-                        'modelo_id' => $modelo_id, 'color' => $color, 'medida' => $medida,
-                        'precio' => $precio, 'stock_minimo' => $stock_min
-                    ]);
-                    echo json_encode(['ok' => true, 'msg' => 'Producto creado correctamente.']);
-                }
+                $result = $controller->save([
+                    'id' => $_POST['id'] ?? null,
+                    'codigo' => trim($_POST['codigo'] ?? ''),
+                    'nombre' => trim($_POST['nombre'] ?? ''),
+                    'categoria_id' => $_POST['categoria_id'] ?: null,
+                    'modelo_id' => $_POST['modelo_id'] ?: null,
+                    'color' => trim($_POST['color'] ?? ''),
+                    'medida' => trim($_POST['medida'] ?? ''),
+                    'precio' => $_POST['precio'] ?: 0,
+                    'stock_minimo' => $_POST['stock_minimo'] ?: 0,
+                ]);
+                echo json_encode($result);
                 exit;
 
             case 'eliminar':
@@ -66,24 +37,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     echo json_encode(['ok' => false, 'msg' => 'ID inválido.']);
                     exit;
                 }
-                // Desactivar en vez de borrar (mantiene historial en órdenes de producción)
-                $stmt = $pdo->prepare("UPDATE productos SET activo = FALSE WHERE id = :id");
-                $stmt->execute(['id' => $id]);
-                echo json_encode(['ok' => true, 'msg' => 'Producto eliminado.']);
+                echo json_encode($controller->delete((int) $id));
                 exit;
 
             case 'obtener':
                 $id = $_POST['id'] ?? null;
-                $stmt = $pdo->prepare("SELECT * FROM productos WHERE id = :id");
-                $stmt->execute(['id' => $id]);
-                echo json_encode(['ok' => true, 'data' => $stmt->fetch()]);
+                $data = $controller->getById((int) $id);
+                echo json_encode(['ok' => true, 'data' => $data]);
                 exit;
 
             case 'modelos_por_categoria':
                 $categoria_id = $_POST['categoria_id'] ?? null;
-                $stmt = $pdo->prepare("SELECT id, nombre FROM modelos_producto WHERE categoria_id = :cid AND activo = TRUE ORDER BY nombre");
-                $stmt->execute(['cid' => $categoria_id]);
-                echo json_encode(['ok' => true, 'data' => $stmt->fetchAll()]);
+                echo json_encode(['ok' => true, 'data' => $controller->getModelsByCategory((int) $categoria_id)]);
                 exit;
         }
     } catch (PDOException $e) {
@@ -95,17 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 // ------------------------------------------------------------------
 // Datos para el listado inicial
 // ------------------------------------------------------------------
-$productos = $pdo->query("
-    SELECT p.*, c.nombre AS categoria_nombre, m.nombre AS modelo_nombre
-    FROM productos p
-    JOIN categorias_producto c ON c.id = p.categoria_id
-    LEFT JOIN modelos_producto m ON m.id = p.modelo_id
-    WHERE p.activo = TRUE
-    ORDER BY p.nombre
-")->fetchAll();
-
-$categorias = $pdo->query("SELECT id, nombre FROM categorias_producto WHERE activo = TRUE ORDER BY nombre")->fetchAll();
-
+$productos = $controller->getAllActive();
 require __DIR__ . '/../includes/header.php';
 ?>
 

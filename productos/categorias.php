@@ -1,42 +1,34 @@
 <?php
 require __DIR__ . '/../includes/config.php';
+require __DIR__ . '/../controllers/CategoriaController.php';
 
 $activePage   = 'productos';
 $pageTitle    = 'Categorías de producto';
 $pageSubtitle = 'Ganchos, colgadores, matamoscas, etc.';
+
+$controller = new CategoriaController($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     header('Content-Type: application/json; charset=utf-8');
     try {
         switch ($_POST['accion']) {
             case 'guardar':
-                $id     = $_POST['id'] ?? null;
-                $nombre = trim($_POST['nombre'] ?? '');
-                $desc   = trim($_POST['descripcion'] ?? '');
-                if ($nombre === '') {
-                    echo json_encode(['ok' => false, 'msg' => 'El nombre es obligatorio.']); exit;
-                }
-                if ($id) {
-                    $stmt = $pdo->prepare("UPDATE categorias_producto SET nombre = :n, descripcion = :d WHERE id = :id");
-                    $stmt->execute(['n' => $nombre, 'd' => $desc, 'id' => $id]);
-                } else {
-                    $stmt = $pdo->prepare("INSERT INTO categorias_producto (nombre, descripcion) VALUES (:n, :d)");
-                    $stmt->execute(['n' => $nombre, 'd' => $desc]);
-                }
-                echo json_encode(['ok' => true, 'msg' => 'Categoría guardada correctamente.']);
+                $result = $controller->save([
+                    'id' => $_POST['id'] ?? null,
+                    'nombre' => trim($_POST['nombre'] ?? ''),
+                    'descripcion' => trim($_POST['descripcion'] ?? ''),
+                ]);
+                echo json_encode($result);
                 exit;
 
             case 'eliminar':
                 $id = $_POST['id'] ?? null;
-                $stmt = $pdo->prepare("UPDATE categorias_producto SET activo = FALSE WHERE id = :id");
-                $stmt->execute(['id' => $id]);
-                echo json_encode(['ok' => true, 'msg' => 'Categoría eliminada.']);
+                echo json_encode($controller->delete((int) $id));
                 exit;
 
             case 'obtener':
-                $stmt = $pdo->prepare("SELECT * FROM categorias_producto WHERE id = :id");
-                $stmt->execute(['id' => $_POST['id']]);
-                echo json_encode(['ok' => true, 'data' => $stmt->fetch()]);
+                $data = $controller->getById((int) ($_POST['id'] ?? 0));
+                echo json_encode(['ok' => true, 'data' => $data]);
                 exit;
         }
     } catch (PDOException $e) {
@@ -45,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     }
 }
 
-$categorias = $pdo->query("SELECT * FROM categorias_producto WHERE activo = TRUE ORDER BY nombre")->fetchAll();
+$categorias = $controller->getAll();
 
 require __DIR__ . '/../includes/header.php';
 ?>

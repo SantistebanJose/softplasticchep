@@ -7,8 +7,7 @@ require __DIR__ . '/includes/config.php';
 
 // Protección: si no hay sesión activa, redirigir al login
 if (empty($_SESSION['usuario_id'])) {
-    header('Location: login.php');
-    exit;
+    redirect('login.php');
 }
 /*
  * Ejemplo de consultas reales (comentadas). Descoméntalas cuando existan
@@ -24,6 +23,14 @@ $maquinasActivas = 6;
 $maquinasTotal   = 8;
 $mermaPorcentaje = 2.4;
 $stockCritico    = 3;
+
+try {
+    $totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuario')->fetchColumn();
+    $usuariosActivos = (int) $pdo->query('SELECT COUNT(*) FROM usuario WHERE deleted_at IS NULL')->fetchColumn();
+} catch (PDOException $e) {
+    $totalUsuarios = 0;
+    $usuariosActivos = 0;
+}
 
 $ordenes = [
     ['codigo' => 'OP-0184', 'producto' => 'Pinza de ropa 8cm',   'maquina' => 'Inyectora 03', 'cantidad' => 1200, 'estado' => 'proceso'],
@@ -59,6 +66,15 @@ require __DIR__ . '/includes/header.php';
         </div>
         <div class="value"><?= $maquinasActivas ?> / <?= $maquinasTotal ?></div>
         <div class="delta neutral"><?= $maquinasTotal - $maquinasActivas ?> en mantenimiento</div>
+    </div>
+
+    <div class="pc-card pc-metric-card">
+        <div class="top">
+            <span class="label">Usuarios activos</span>
+            <i class="fa-solid fa-user-check icon"></i>
+        </div>
+        <div class="value"><?= $usuariosActivos ?> / <?= $totalUsuarios ?></div>
+        <div class="delta neutral"><?= max(0, $totalUsuarios - $usuariosActivos) ?> inactivos</div>
     </div>
 
     <div class="pc-card pc-metric-card">

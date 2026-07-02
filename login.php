@@ -2,34 +2,60 @@
 require __DIR__ . '/includes/config.php';
 
 if (!empty($_SESSION['usuario_id'])) {
-    header('Location: index.php');
-    exit;
+    redirect('index.php');
 }
 
 $error = '';
+$user_ = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user_    = trim($_POST['user_'] ?? '');
-    $password = $_POST['password'] ?? '';
+        $user_    = trim($_POST['user_'] ?? '');
+        $password = trim($_POST['password'] ?? '');
 
-    if ($user_ === '' || $password === '') {
-        $error = 'Ingresa tu usuario y tu contraseña.';
-    } else {
-        $stmt = $pdo->prepare('
-            SELECT id, user_, pass_, nombre_completo, rol_y_perfiles, deleted_at
-            FROM usuario
-            WHERE user_ = :user_
-        ');
-        $stmt->execute(['user_' => $user_]);
-        $usuario = $stmt->fetch();
-
-        if (!$usuario || !password_verify($password, $usuario['pass_'])) {
-            $error = 'Usuario o contraseña incorrectos.';
-        } elseif ($usuario['deleted_at'] !== null) {
-            $error = 'Este usuario está desactivado. Contacta a un administrador.';
+        if ($user_ === '' || $password === '') {
+            $error = 'Ingresa tu usuario y tu contraseña.';
         } else {
-            session_regenerate_id(true);
+            $stmt = $pdo->prepare('
+                SELECT id, user_, pass_, nombre_completo, rol_y_perfiles, deleted_at
+                FROM usuario
+                WHERE user_ = :user_
+            ');
+            $stmt->execute(['user_' => $user_]);
+            $usuario = $stmt->fetch();
 
+            $passwordValid = false;
+            $needsRehash = false;
+            if ($usuario) {
+                $storedPassword = $usuario['pass_'];
+                $storedIsHash = password_get_info($storedPassword)['algo'] !== 0;
+
+                if ($storedIsHash && password_verify($password, $storedPassword)) {
+                    $passwordValid = true;
+                    if (password_needs_rehash($storedPassword, PASSWORD_DEFAULT)) {
+                        $needsRehash = true;
+                    }
+                } elseif (!$storedIsHash && $password === $storedPassword) {
+                    // Si la contraseña en la base de datos está en texto plano,
+                    // la aceptamos y actualizamos a un hash seguro.
+                    $passwordValid = true;
+                    $needsRehash = true;
+                }
+            }
+
+            if (!$usuario || !$passwordValid) {
+                $error = 'Usuario o contraseña incorrectos.';
+            } elseif ($usuario['deleted_at'] !== null) {
+                $error = 'Este usuario está desactivado. Contacta a un administrador.';
+            } else {
+                session_regenerate_id(true);
+
+                if ($needsRehash) {
+                    $newHash = password_hash($password, PASSWORD_DEFAULT);
+                    if ($newHash !== false) {
+                        $update = $pdo->prepare('UPDATE usuario SET pass_ = :pass_ WHERE id = :id');
+                        $update->execute(['pass_' => $newHash, 'id' => $usuario['id']]);
+                    }
+                }
             $rolPerfiles = $usuario['rol_y_perfiles']
                 ? json_decode($usuario['rol_y_perfiles'], true)
                 : [];
@@ -40,8 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['rol_usuario']    = $rolPerfiles['rol'] ?? null;
             $_SESSION['perfiles']       = $rolPerfiles['perfiles'] ?? [];
 
-            header('Location: index.php');
-            exit;
+            redirect('index.php');
         }
     }
 }
@@ -71,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="post" action="login.php" autocomplete="off">
             <div class="pc-field">
                 <label for="user_">Usuario</label>
-                <input class="pc-input" type="text" id="user_" name="user_" placeholder="usuario" required autofocus>
+                <input class="pc-input" type="text" id="user_" name="user_" value="<?= htmlspecialchars($user_) ?>" placeholder="usuario" required autofocus>
             </div>
             <div class="pc-field">
                 <label for="password">Contraseña</label>

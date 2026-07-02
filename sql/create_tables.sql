@@ -1,0 +1,107 @@
+-- Tablas base para el sistema de producción de Plásticos Chepito
+
+-- Tabla de usuarios
+CREATE TABLE IF NOT EXISTS usuario (
+    id SERIAL PRIMARY KEY,
+    user_ VARCHAR(100) NOT NULL UNIQUE,
+    pass_ TEXT NOT NULL,
+    nombre_completo VARCHAR(255) NOT NULL,
+    rol_y_perfiles JSONB NOT NULL DEFAULT '{"rol": "operario", "perfiles": []}',
+    json_historial JSONB,
+    js_ultima_modificacion JSONB,
+    fecha_cambio_pass TIMESTAMP WITHOUT TIME ZONE,
+    json_contrasenia_ultimo_cambio JSONB,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITHOUT TIME ZONE
+);
+
+-- Tablas de catálogo de productos
+CREATE TABLE IF NOT EXISTS categorias_producto (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL,
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS modelos_producto (
+    id SERIAL PRIMARY KEY,
+    categoria_id INTEGER NOT NULL REFERENCES categorias_producto(id),
+    nombre VARCHAR(150) NOT NULL,
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS productos (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(80),
+    nombre VARCHAR(255) NOT NULL,
+    categoria_id INTEGER NOT NULL REFERENCES categorias_producto(id),
+    modelo_id INTEGER REFERENCES modelos_producto(id),
+    color VARCHAR(120),
+    medida VARCHAR(120),
+    precio NUMERIC(12,2) DEFAULT 0,
+    stock_actual INTEGER DEFAULT 0,
+    stock_minimo INTEGER DEFAULT 0,
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tablas de producción y órdenes
+CREATE TABLE IF NOT EXISTS ordenes_produccion (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(100) NOT NULL UNIQUE,
+    producto_id INTEGER NOT NULL REFERENCES productos(id),
+    maquina VARCHAR(150),
+    cantidad INTEGER NOT NULL DEFAULT 0,
+    estado VARCHAR(50) NOT NULL DEFAULT 'pendiente',
+    fecha_inicio TIMESTAMP WITHOUT TIME ZONE,
+    fecha_fin TIMESTAMP WITHOUT TIME ZONE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS maquinas (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL,
+    estado VARCHAR(50) NOT NULL DEFAULT 'inactiva',
+    ubicacion VARCHAR(255),
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS operarios (
+    id SERIAL PRIMARY KEY,
+    nombre_completo VARCHAR(255) NOT NULL,
+    cargo VARCHAR(150),
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS materia_prima (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(255) NOT NULL,
+    unidad_medida VARCHAR(50) NOT NULL,
+    stock_actual NUMERIC(12,2) DEFAULT 0,
+    stock_minimo NUMERIC(12,2) DEFAULT 0,
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS produccion (
+    id SERIAL PRIMARY KEY,
+    orden_id INTEGER NOT NULL REFERENCES ordenes_produccion(id),
+    operario_id INTEGER REFERENCES operarios(id),
+    maquina_id INTEGER REFERENCES maquinas(id),
+    cantidad INTEGER NOT NULL DEFAULT 0,
+    fecha TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    observaciones TEXT,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
