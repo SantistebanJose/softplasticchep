@@ -1,7 +1,8 @@
 <?php
-define('SKIP_AUTH', true);
-require __DIR__ . '/includes/config.php';
+session_start();
+require __DIR__ . '/controllers/clssAuth.php';
 
-$_SESSION = [];
-session_destroy();
-redirect('login.php');
+cerrarSesionUsuario();
+
+header('Location: login.php');
+exit;

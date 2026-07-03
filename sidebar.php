@@ -1,21 +1,23 @@
 <?php
+
 /**
  * sidebar.php
  * Recibe $activePage desde la página que lo incluye
  * para resaltar el ítem de menú correspondiente.
  */
-function pc_nav_class($page, $active) {
+function pc_nav_class($page, $active)
+{
     return 'pc-nav-item' . ($page === $active ? ' active' : '');
 }
 ?>
 <aside class="pc-sidebar" id="pcSidebar">
-    <div class="pc-sidebar-brand">
+    <a href="index.php" class="pc-sidebar-brand" style="text-decoration:none;color:inherit;">
         <img src="assets/img/logo.png" alt="Plásticos Chepito">
         <div class="pc-sidebar-brand-text">
             <div class="name">Plásticos Chepito</div>
             <div class="sub">Sistema de Gestión de Producción</div>
         </div>
-    </div>
+    </a>
 
     <div class="pc-nav-label">Principal</div>
     <a href="index.php" class="<?= pc_nav_class('dashboard', $activePage) ?>">

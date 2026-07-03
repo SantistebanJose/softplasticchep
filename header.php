@@ -4,8 +4,18 @@
  * Recibe (opcionalmente) $pageTitle, $pageSubtitle y $activePage
  * desde la página que lo incluye, ANTES del require de este archivo.
  *
- * Requiere que la página que lo incluye ya haya llamado session_start().
+ * Se encarga de arrancar la sesión y exigir login en TODAS las páginas
+ * que lo incluyan. login.php NO debe incluir este header.
  */
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+if (empty($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">

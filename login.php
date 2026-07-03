@@ -1,9 +1,10 @@
 <?php
-require __DIR__ . '/includes/config.php';
+session_start();
 require __DIR__ . '/controllers/clssAuth.php';
 
 if (!empty($_SESSION['usuario_id'])) {
-    redirect('index.php');
+    header('Location: index.php');
+    exit;
 }
 
 $error = '';
@@ -13,10 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user_    = trim($_POST['user_'] ?? '');
     $password = trim($_POST['password'] ?? '');
 
-    $result = intentarLogin($pdo, $user_, $password);
+    $result = intentarLogin($user_, $password);
 
     if ($result['success']) {
-        redirect('index.php');
+        header('Location: index.php');
+        exit;
     } else {
         $error = $result['error'];
     }

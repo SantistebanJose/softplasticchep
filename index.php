@@ -2,13 +2,13 @@
 $activePage   = 'dashboard';
 $pageTitle    = 'Resumen de producción';
 $pageSubtitle = 'Turno actual · ' . date('l, d \d\e F \d\e Y');
-
-require __DIR__ . '/includes/config.php';
-
-// Protección: si no hay sesión activa, redirigir al login
-if (empty($_SESSION['usuario_id'])) {
-    redirect('login.php');
-}
+ 
+// La sesión y el login se validan dentro de header.php.
+// OJO: aquí $pdo todavía no existe porque header.php se incluye más abajo.
+// Lo creamos igual, ya que solo se usa DESPUÉS del include.
+require __DIR__ . '/controllers/bd.php';
+$pdo = conectar_oll_BD();
+ 
 /*
  * Ejemplo de consultas reales (comentadas). Descoméntalas cuando existan
  * las tablas correspondientes en tu base de datos.
@@ -16,14 +16,14 @@ if (empty($_SESSION['usuario_id'])) {
  * $unidadesHoy = $pdo->query("SELECT COALESCE(SUM(cantidad),0) FROM produccion WHERE fecha = CURRENT_DATE")->fetchColumn();
  * $maquinasActivas = $pdo->query("SELECT COUNT(*) FROM maquinas WHERE estado = 'activa'")->fetchColumn();
  */
-
+ 
 // Datos de ejemplo mientras se conecta la base de datos real.
 $unidadesHoy     = 4280;
 $maquinasActivas = 6;
 $maquinasTotal   = 8;
 $mermaPorcentaje = 2.4;
 $stockCritico    = 3;
-
+ 
 try {
     $totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuario')->fetchColumn();
     $usuariosActivos = (int) $pdo->query('SELECT COUNT(*) FROM usuario WHERE deleted_at IS NULL')->fetchColumn();
@@ -31,23 +31,23 @@ try {
     $totalUsuarios = 0;
     $usuariosActivos = 0;
 }
-
+ 
 $ordenes = [
     ['codigo' => 'OP-0184', 'producto' => 'Pinza de ropa 8cm',   'maquina' => 'Inyectora 03', 'cantidad' => 1200, 'estado' => 'proceso'],
     ['codigo' => 'OP-0183', 'producto' => 'Gancho reforzado',    'maquina' => 'Inyectora 01', 'cantidad' => 800,  'estado' => 'pendiente'],
     ['codigo' => 'OP-0182', 'producto' => 'Matamoscas clásico',  'maquina' => 'Inyectora 05', 'cantidad' => 2000, 'estado' => 'completada'],
     ['codigo' => 'OP-0181', 'producto' => 'Colgador universal',  'maquina' => 'Inyectora 02', 'cantidad' => 1500, 'estado' => 'completada'],
 ];
-
+ 
 $estadoPill = [
     'proceso'    => ['label' => 'En proceso',  'class' => 'success'],
     'pendiente'  => ['label' => 'Pendiente',   'class' => 'warning'],
     'completada' => ['label' => 'Completada',  'class' => 'info'],
     'detenida'   => ['label' => 'Detenida',    'class' => 'danger'],
 ];
-
-require __DIR__ . '/includes/header.php';
+include("header.php");
 ?>
+ 
 
 <div class="pc-metric-grid">
     <div class="pc-card pc-metric-card">
@@ -125,4 +125,4 @@ require __DIR__ . '/includes/header.php';
     </table>
 </div>
 
-<?php require __DIR__ . '/includes/footer.php'; ?>
+<?php include("footer.php");?>

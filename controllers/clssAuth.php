@@ -3,14 +3,17 @@
 /**
  * controllers/clssAuth.php
  * Lógica de autenticación (login/logout). Sin clases — funciones sueltas.
- * Usa el $pdo global creado en includes/config.php.
+ * Usa bd.php (conectar_oll_BD) + executeQuery.php, igual que clssProductos.php.
  */
+
+require_once __DIR__ . '/bd.php';
+require_once __DIR__ . '/executeQuery.php';
 
 /**
  * Intenta autenticar al usuario. Si tiene éxito, deja la sesión seteada.
  * Devuelve ['success' => bool, 'error' => string|null]
  */
-function intentarLogin(PDO $pdo, string $user_, string $password): array
+function intentarLogin(string $user_, string $password): array
 {
     $user_    = trim($user_);
     $password = trim($password);
@@ -19,17 +22,20 @@ function intentarLogin(PDO $pdo, string $user_, string $password): array
         return ['success' => false, 'error' => 'Ingresa tu usuario y tu contraseña.'];
     }
 
-    $stmt = $pdo->prepare('
-        SELECT id, user_, pass_, nombre_completo, rol_y_perfiles, deleted_at
-        FROM usuario
-        WHERE user_ = :user_
-    ');
-    $stmt->execute(['user_' => $user_]);
-    $usuario = $stmt->fetch();
+    $conectar = conectar_oll_BD();
 
-    if (!$usuario) {
+    $result = executeQuery(
+        $conectar,
+        "SELECT id, user_, pass_, nombre_completo, rol_y_perfiles, deleted_at
+         FROM usuario
+         WHERE user_ = :user_",
+        ['user_' => $user_]
+    );
+
+    if (empty($result)) {
         return ['success' => false, 'error' => 'Usuario o contraseña incorrectos.'];
     }
+    $usuario = $result[0];
 
     [$passwordValid, $needsRehash] = verificarPasswordUsuario($password, $usuario['pass_']);
 
@@ -44,7 +50,7 @@ function intentarLogin(PDO $pdo, string $user_, string $password): array
     session_regenerate_id(true);
 
     if ($needsRehash) {
-        actualizarHashUsuario($pdo, $usuario['id'], $password);
+        actualizarHashUsuario($conectar, $usuario['id'], $password);
     }
 
     guardarSesionUsuario($usuario);
@@ -78,12 +84,15 @@ function verificarPasswordUsuario(string $password, string $storedPassword): arr
     return [false, false];
 }
 
-function actualizarHashUsuario(PDO $pdo, int $usuarioId, string $password): void
+function actualizarHashUsuario($conectar, int $usuarioId, string $password): void
 {
     $newHash = password_hash($password, PASSWORD_DEFAULT);
     if ($newHash !== false) {
-        $update = $pdo->prepare('UPDATE usuario SET pass_ = :pass_ WHERE id = :id');
-        $update->execute(['pass_' => $newHash, 'id' => $usuarioId]);
+        executeQuery(
+            $conectar,
+            "UPDATE usuario SET pass_ = :pass_ WHERE id = :id",
+            ['pass_' => $newHash, 'id' => $usuarioId]
+        );
     }
 }
 

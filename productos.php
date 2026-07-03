@@ -1,26 +1,9 @@
 <?php
-// ⚠️ TEMPORAL — quitar en producción, solo para diagnosticar
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-/**
- * productos.php
- * CRUD de Productos (Mercadería para la venta)
- * Consume: controllers/clssProductos.php
- */
-session_start();
-
-if (empty($_SESSION['usuario_id'])) {
-    header('Location: login.php');
-    exit;
-}
-
 $pageTitle    = 'Productos';
 $pageSubtitle = 'Catálogo de mercadería para la venta';
 $activePage   = 'productos';
 
-require __DIR__ . '/header.php';
+include("header.php");
 ?>
 
 <div class="pc-card">
