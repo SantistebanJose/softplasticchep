@@ -26,10 +26,10 @@ function pc_nav_class($page, $active)
     <a href="productos.php" class="<?= pc_nav_class('productos', $activePage) ?>">
         <i class="fa-solid fa-box"></i> Productos
     </a>
-    <a href="productos/categorias.php" class="<?= pc_nav_class('categorias', $activePage) ?> pc-nav-sub">
+    <a href="categorias.php" class="<?= pc_nav_class('categorias', $activePage) ?> pc-nav-sub">
         <i class="fa-solid fa-tags"></i> Categorías
     </a>
-    <a href="productos/modelos.php" class="<?= pc_nav_class('modelos', $activePage) ?> pc-nav-sub">
+    <a href="modelos.php" class="<?= pc_nav_class('modelos', $activePage) ?> pc-nav-sub">
         <i class="fa-solid fa-boxes-stacked"></i> Modelos
     </a>
     <a href="maquinas.php" class="<?= pc_nav_class('maquinas', $activePage) ?>">
