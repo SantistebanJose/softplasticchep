@@ -9,6 +9,7 @@
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 
+
 /**
  * Intenta autenticar al usuario. Si tiene éxito, deja la sesión seteada.
  * Devuelve ['success' => bool, 'error' => string|null]
@@ -107,6 +108,7 @@ function guardarSesionUsuario(array $usuario): void
     $_SESSION['user_usuario']   = $usuario['user_'];
     $_SESSION['rol_usuario']    = $rolPerfiles['rol'] ?? null;
     $_SESSION['perfiles']       = $rolPerfiles['perfiles'] ?? [];
+    $_SESSION['mostrar_bienvenida'] = true;
 }
 
 function cerrarSesionUsuario(): void
