@@ -1,6 +1,8 @@
 <?php
-require __DIR__ . '/includes/config.php';
+require __DIR__ . '/controllers/bd.php';
 require __DIR__ . '/controllers/UserController.php';
+
+$pdo = conectar_oll_BD();
 
 $activePage   = 'usuarios';
 $pageTitle    = 'Usuarios';
@@ -55,8 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 }
 
 $usuarios = $controller->getAllUsers();
-require __DIR__ . '/includes/header.php';
-?>
+require __DIR__ . '/header.php';?>
 
 <div class="pc-card">
     <div class="pc-card-header">
@@ -241,4 +242,4 @@ function eliminarUsuario(id) {
 }
 </script>
 
-<?php require __DIR__ . '/includes/footer.php'; ?>
+<?php require __DIR__ . '/footer.php'; ?>

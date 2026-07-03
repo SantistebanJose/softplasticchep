@@ -1,5 +1,5 @@
 <?php
-//bd_oll.php
+//bd.php
 function conectar_oll_BD() {
     $host = "bi.back-mrsoft.com";
     $user = "usrweb";

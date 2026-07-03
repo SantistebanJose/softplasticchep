@@ -6,12 +6,131 @@ $activePage   = 'productos';
 include("header.php");
 ?>
 
+<style>
+    /* ── Mejoras visuales específicas de esta vista (no rompe tus estilos globales) ── */
+    .pc-card {
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .pc-card-header h2 {
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        margin: 0;
+    }
+    .pc-filtros {
+        background: #f8f9fb;
+        padding: 14px 16px;
+        border-radius: 10px;
+        border: 1px solid #eceef1;
+    }
+    .pc-filtros .form-control,
+    .pc-filtros .form-select {
+        border-radius: 8px;
+    }
+    .pc-table-wrapper {
+        overflow-x: auto;
+        border-radius: 10px;
+        border: 1px solid #eceef1;
+    }
+    .pc-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin: 0;
+    }
+    .pc-table thead th {
+        background: #f8f9fb;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+        font-weight: 600;
+        padding: 12px 14px;
+        border-bottom: 2px solid #eceef1;
+        position: sticky;
+        top: 0;
+        white-space: nowrap;
+    }
+    .pc-table tbody td {
+        padding: 11px 14px;
+        border-bottom: 1px solid #f1f2f4;
+        vertical-align: middle;
+        font-size: 0.92rem;
+    }
+    .pc-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .pc-table tbody tr:hover {
+        background-color: #f6f8fb;
+    }
+    .pc-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .pc-badge-estado {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+    }
+    .pc-icon-btn {
+        border: none;
+        background: #f1f2f4;
+        color: #4b5563;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 4px;
+        transition: all 0.15s ease;
+    }
+    .pc-icon-btn:hover {
+        background: #e5e7eb;
+        color: #111827;
+    }
+    .pc-icon-btn[title="Desactivar"]:hover {
+        background: #fee2e2;
+        color: #b91c1c;
+    }
+    .pc-icon-btn[title="Reactivar"]:hover {
+        background: #dcfce7;
+        color: #15803d;
+    }
+    .pc-btn {
+        border-radius: 8px;
+        font-weight: 500;
+        padding: 8px 16px;
+    }
+    .pc-btn-export {
+        background: #1d6f42; /* verde estilo Excel */
+        color: #fff;
+        border: none;
+    }
+    .pc-btn-export:hover {
+        background: #175c37;
+        color: #fff;
+    }
+    .pc-empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: #9ca3af;
+    }
+</style>
+
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Mercadería para la venta</h2>
-        <button class="pc-btn pc-btn-primary" onclick="abrirModalCrear()">
-            <i class="fa-solid fa-plus"></i> Nuevo producto
-        </button>
+        <div class="d-flex gap-2 flex-wrap">
+            <button class="pc-btn pc-btn-export" onclick="exportarExcel()">
+                <i class="fa-solid fa-file-excel"></i> Exportar a Excel
+            </button>
+            <button class="pc-btn pc-btn-primary" onclick="abrirModalCrear()">
+                <i class="fa-solid fa-plus"></i> Nuevo producto
+            </button>
+        </div>
     </div>
 
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
@@ -22,27 +141,27 @@ include("header.php");
             <option value="activo" selected>Activos</option>
             <option value="inactivo">Inactivos</option>
         </select>
-        <button class="pc-btn pc-btn-secondary" onclick="cargarProductos()">
-            <i class="fa-solid fa-filter"></i> Filtrar
-        </button>
+       
     </div>
 
-    <table class="pc-table" id="tablaProductos">
-        <thead>
-            <tr>
-                <th>Código</th>
-                <th>Descripción</th>
-                <th>U. Medida</th>
-                <th>Equivale</th>
-                <th>Peso unit. (g)</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody id="tbodyProductos">
-            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
-        </tbody>
-    </table>
+    <div class="pc-table-wrapper">
+        <table class="pc-table" id="tablaProductos">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Descripción</th>
+                    <th>U. Medida</th>
+                    <th>Equivale</th>
+                    <th>Peso unit. (g)</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="tbodyProductos">
+                <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <!-- Modal Crear/Editar -->
@@ -108,10 +227,13 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<!-- SheetJS: librería para generar archivos Excel (.xlsx) 100% en el navegador -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 const CONTROLADOR = 'controllers/clssProductos.php'; // clssProductos.php vive en su propia carpeta
 const modalProducto = new bootstrap.Modal(document.getElementById('modalProducto'));
 let unidadesCache = [];
+let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarUnidades()
@@ -121,7 +243,20 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('tbodyProductos').innerHTML =
                 `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
         });
+
+    // ── Filtrado automático ──────────────────────────────────────────────
+    // Texto: espera 350ms desde la última tecla presionada (debounce),
+    // así no se dispara una petición al servidor por cada letra escrita.
+    let debounceTimer;
+    document.getElementById('f_texto').addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(cargarProductos, 350);
+    });
+
+    // Estado: se filtra apenas el usuario cambia la opción del select.
+    document.getElementById('f_estado').addEventListener('change', cargarProductos);
 });
+
 
 // ── Llamada genérica al controlador ─────────────────────────────────────────
 async function llamar(accion, params = {}) {
@@ -168,12 +303,15 @@ async function cargarProductos() {
 
     if (!json.success) {
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
+        productosCache = [];
         return;
     }
 
     const productos = json.productos || [];
+    productosCache = productos; // se guarda para el export
+
     if (productos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay productos registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7"><div class="pc-empty-state"><i class="fa-solid fa-box-open fa-2x mb-2"></i><br>No hay productos registrados.</div></td></tr>';
         return;
     }
 
@@ -185,8 +323,8 @@ async function cargarProductos() {
             <td>${p.cant_equivale ? p.cant_equivale + ' ' + (p.unidad_equivale_codigo ?? '') : '-'}</td>
             <td>${p.peso_unitario_g ?? '-'}</td>
             <td>${p.activo
-                ? '<span class="badge bg-success">Activo</span>'
-                : '<span class="badge bg-secondary">Inactivo</span>'}
+                ? '<span class="pc-badge-estado bg-success text-white">Activo</span>'
+                : '<span class="pc-badge-estado bg-secondary text-white">Inactivo</span>'}
             </td>
             <td>
                 <button class="pc-icon-btn" onclick="abrirModalEditar(${p.id})" title="Editar">
@@ -201,6 +339,44 @@ async function cargarProductos() {
             </td>
         </tr>
     `).join('');
+}
+
+// ── Exportar a Excel ─────────────────────────────────────────────────────────
+function exportarExcel() {
+    if (!productosCache || productosCache.length === 0) {
+        Swal.fire('Sin datos', 'No hay productos para exportar. Carga o filtra el listado primero.', 'info');
+        return;
+    }
+
+    // Se arma la data en el mismo orden/columnas que se ve en la tabla
+    const datos = productosCache.map(p => ({
+        'Código'            : p.codigo,
+        'Descripción'       : p.descripcion,
+        'U. Medida'         : p.unidad_venta_codigo ?? '',
+        'Cant. Equivale'    : p.cant_equivale ?? '',
+        'U. Equivale'       : p.unidad_equivale_codigo ?? '',
+        'Peso unitario (g)' : p.peso_unitario_g ?? '',
+        'Estado'            : p.activo ? 'Activo' : 'Inactivo',
+    }));
+
+    const hoja = XLSX.utils.json_to_sheet(datos);
+
+    // Ancho de columnas aproximado según el contenido
+    hoja['!cols'] = [
+        { wch: 14 }, // Código
+        { wch: 40 }, // Descripción
+        { wch: 12 }, // U. Medida
+        { wch: 14 }, // Cant. Equivale
+        { wch: 12 }, // U. Equivale
+        { wch: 16 }, // Peso unitario
+        { wch: 10 }, // Estado
+    ];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Productos');
+
+    const fecha = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(libro, `productos_${fecha}.xlsx`);
 }
 
 // ── Crear / Editar ───────────────────────────────────────────────────────────
