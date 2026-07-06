@@ -66,7 +66,7 @@ include("header.php");
     position: fixed;
     inset: 0;
     z-index: 9999;
-    background: #0f172a;
+    background: #1331c7;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -83,7 +83,7 @@ include("header.php");
     font-size: 1.4rem;
 }
 .pc-welcome-box p {
-    color: #94a3b8;
+    color: white;
     font-size: 0.9rem;
 }
 .pc-spinner {
