@@ -95,6 +95,82 @@ function obtenerMaquina($id)
     responder(true, 'OK', ['maquina' => $result[0]]);
 }
 
+/**
+ * Obtiene la IP real del cliente, considerando proxies/balanceadores comunes.
+ */
+function obtenerIpCliente(): string
+{
+    // Si el servidor está detrás de un proxy (Cloudflare, Nginx, etc.)
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        // Puede venir una lista "ip_cliente, ip_proxy1, ip_proxy2" — tomamos la primera
+        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        return trim($ips[0]);
+    }
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        return trim($_SERVER['HTTP_X_REAL_IP']);
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
+}
+
+/**
+ * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
+ * $cambios: arreglo de ['campo' => .., 'valor_antes' => .., 'valor_despues' => ..]
+ */
+function obtenerMovimientoSesion(string $accion, array $cambios = []): array
+{
+    return [
+        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
+        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
+        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
+        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
+        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
+        'accion'    => $accion,
+        'ip'        => obtenerIpCliente(),
+        'cambios'   => $cambios,
+        'timestamp' => date('Y-m-d H:i:s'),
+    ];
+}
+
+/**
+ * Compara un registro anterior (array asociativo de la BD) contra los datos nuevos
+ * y devuelve solo los campos cuyo valor cambió, mapeados con etiqueta legible.
+ *
+ * $mapaCampos: ['columna_bd' => 'Etiqueta bonita']
+ * $anterior:   registro actual tal cual viene de la BD (o [] si es creación)
+ * $nuevo:      ['columna_bd' => valor_nuevo]
+ */
+function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
+{
+    $cambios = [];
+    foreach ($mapaCampos as $campo => $etiqueta) {
+        $valorAntes   = $anterior[$campo] ?? null;
+        $valorDespues = $nuevo[$campo]    ?? null;
+
+        // Normalizamos vacíos para comparar de forma justa (null vs '' se tratan igual)
+        $antesComp   = ($valorAntes   === '' ? null : $valorAntes);
+        $despuesComp = ($valorDespues === '' ? null : $valorDespues);
+
+        if ($antesComp !== $despuesComp) {
+            $cambios[] = [
+                'campo'         => $etiqueta,
+                'valor_antes'   => $valorAntes   ?? '(vacío)',
+                'valor_despues' => $valorDespues ?? '(vacío)',
+            ];
+        }
+    }
+    return $cambios;
+}
+
+/**
+ * Traduce el código de estado de la máquina ('A'/'M') a texto legible.
+ */
+function textoEstadoMaquina(?string $estado): string
+{
+    if ($estado === 'A') return 'Activa';
+    if ($estado === 'M') return 'Mantenimiento';
+    return '(sin estado)';
+}
+
 function guardarMaquina()
 {
     $conectar    = conectar_oll_BD();
@@ -117,31 +193,71 @@ function guardarMaquina()
     );
     if (!empty($chk)) responder(false, 'Ya existe una máquina con ese nombre.');
 
+    // Mapa de campos editables → etiqueta legible para el historial
+    $mapaCampos = [
+        'nombre'          => 'Nombre',
+        'descripcion'     => 'Descripción',
+        'estado_legible'  => 'Estado de la máquina',
+    ];
+
+    $datosNuevos = [
+        'nombre'          => $nombre,
+        'descripcion'     => $descripcion !== '' ? $descripcion : null,
+        'estado_legible'  => textoEstadoMaquina($estado),
+    ];
+
     if ($id === 0) {
+        // Creación: "antes" está vacío para todos los campos
+        $cambios = compararCambios([], $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('crear', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         $result = executeQuery($conectar, "
-            INSERT INTO maquina (nombre, descripcion, estado, created_at)
-            VALUES (:nombre, :descripcion, :estado, NOW())
+            INSERT INTO maquina (nombre, descripcion, estado, created_at, js_session, js_historial)
+            VALUES (:nombre, :descripcion, :estado, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
-            'nombre'      => $nombre,
-            'descripcion' => $descripcion !== '' ? $descripcion : null,
-            'estado'      => $estado,
+            'nombre'       => $nombre,
+            'descripcion'  => $descripcion !== '' ? $descripcion : null,
+            'estado'       => $estado,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Máquina creada correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
+        // Edición: traemos el registro actual para comparar campo por campo
+        $actual = executeQuery($conectar, "SELECT * FROM maquina WHERE id = :id", ['id' => $id]);
+        if (empty($actual)) responder(false, 'Máquina no encontrada.');
+        $registroAnterior = $actual[0];
+
+        // Traducimos el estado anterior a texto legible antes de comparar
+        $registroAnterior['estado_legible'] = textoEstadoMaquina($registroAnterior['estado']);
+
+        $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('editar', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         executeQuery($conectar, "
             UPDATE maquina SET
-                nombre      = :nombre,
-                descripcion = :descripcion,
-                estado      = :estado,
-                update_at   = NOW()
+                nombre       = :nombre,
+                descripcion  = :descripcion,
+                estado       = :estado,
+                update_at    = NOW(),
+                js_session   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'nombre'      => $nombre,
-            'descripcion' => $descripcion !== '' ? $descripcion : null,
-            'estado'      => $estado,
-            'id'          => $id,
+            'nombre'       => $nombre,
+            'descripcion'  => $descripcion !== '' ? $descripcion : null,
+            'estado'       => $estado,
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
         ]);
         responder(true, 'Máquina actualizada correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
@@ -160,10 +276,29 @@ function eliminarMaquina()
         responder(false, 'Esta máquina ya estaba inactiva.');
     }
 
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Activo',
+        'valor_despues' => 'Inactivo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('desactivar', $cambios);
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE maquina SET deleted_at = NOW(), update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE maquina SET
+            deleted_at   = NOW(),
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Máquina desactivada correctamente.');
 }
@@ -174,10 +309,29 @@ function reactivarMaquina()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Inactivo',
+        'valor_despues' => 'Activo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('reactivar', $cambios);
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE maquina SET deleted_at = NULL, update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE maquina SET
+            deleted_at   = NULL,
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Máquina reactivada correctamente.');
 }

@@ -90,9 +90,27 @@ function obtenerColor($id)
 }
 
 /**
- * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
+ * Obtiene la IP real del cliente, considerando proxies/balanceadores comunes.
  */
-function obtenerMovimientoSesion(string $accion): array
+function obtenerIpCliente(): string
+{
+    // Si el servidor está detrás de un proxy (Cloudflare, Nginx, etc.)
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        // Puede venir una lista "ip_cliente, ip_proxy1, ip_proxy2" — tomamos la primera
+        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        return trim($ips[0]);
+    }
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        return trim($_SERVER['HTTP_X_REAL_IP']);
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
+}
+
+/**
+ * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
+ * $cambios: arreglo de ['campo' => .., 'valor_antes' => .., 'valor_despues' => ..]
+ */
+function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
     return [
         'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
@@ -101,8 +119,40 @@ function obtenerMovimientoSesion(string $accion): array
         'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
         'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
         'accion'    => $accion,
+        'ip'        => obtenerIpCliente(),
+        'cambios'   => $cambios,
         'timestamp' => date('Y-m-d H:i:s'),
     ];
+}
+
+/**
+ * Compara un registro anterior (array asociativo de la BD) contra los datos nuevos
+ * y devuelve solo los campos cuyo valor cambió, mapeados con etiqueta legible.
+ *
+ * $mapaCampos: ['columna_bd' => 'Etiqueta bonita']
+ * $anterior:   registro actual tal cual viene de la BD (o [] si es creación)
+ * $nuevo:      ['columna_bd' => valor_nuevo]
+ */
+function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
+{
+    $cambios = [];
+    foreach ($mapaCampos as $campo => $etiqueta) {
+        $valorAntes   = $anterior[$campo] ?? null;
+        $valorDespues = $nuevo[$campo]    ?? null;
+
+        // Normalizamos vacíos para comparar de forma justa (null vs '' se tratan igual)
+        $antesComp   = ($valorAntes   === '' ? null : $valorAntes);
+        $despuesComp = ($valorDespues === '' ? null : $valorDespues);
+
+        if ($antesComp !== $despuesComp) {
+            $cambios[] = [
+                'campo'         => $etiqueta,
+                'valor_antes'   => $valorAntes   ?? '(vacío)',
+                'valor_despues' => $valorDespues ?? '(vacío)',
+            ];
+        }
+    }
+    return $cambios;
 }
 
 function guardarColor()
@@ -112,10 +162,6 @@ function guardarColor()
     $nombre      = trim($_POST['nombre'] ?? '');
     $descripcion = trim($_POST['descripcion'] ?? '');
     $rgb         = trim($_POST['rgb'] ?? '');
-
-    $movimiento          = obtenerMovimientoSesion($id === 0 ? 'crear' : 'editar');
-    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
@@ -134,21 +180,52 @@ function guardarColor()
     );
     if (!empty($chk)) responder(false, 'Ya existe un color con ese nombre.');
 
+    // Mapa de campos editables → etiqueta legible para el historial
+    $mapaCampos = [
+        'nombre'      => 'Nombre',
+        'descripcion' => 'Descripción',
+        'rgb'         => 'RGB/HEX',
+    ];
+
+    $datosNuevos = [
+        'nombre'      => $nombre,
+        'descripcion' => $descripcion !== '' ? $descripcion : null,
+        'rgb'         => $rgb !== '' ? $rgb : null,
+    ];
+
     if ($id === 0) {
+        // Creación: "antes" está vacío para todos los campos
+        $cambios = compararCambios([], $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('crear', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         $result = executeQuery($conectar, "
             INSERT INTO color (nombre, descripcion, rgb, created_at, js_session, js_historial)
             VALUES (:nombre, :descripcion, :rgb, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
-            'nombre'       => $nombre,
-            'descripcion'  => $descripcion !== '' ? $descripcion : null,
-            'rgb'          => $rgb !== '' ? $rgb : null,
+            'nombre'       => $datosNuevos['nombre'],
+            'descripcion'  => $datosNuevos['descripcion'],
+            'rgb'          => $datosNuevos['rgb'],
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Color creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
+        // Edición: traemos el registro actual para comparar campo por campo
+        $actual = executeQuery($conectar, "SELECT * FROM color WHERE id = :id", ['id' => $id]);
+        if (empty($actual)) responder(false, 'Color no encontrado.');
+        $registroAnterior = $actual[0];
+
+        $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('editar', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         executeQuery($conectar, "
             UPDATE color SET
                 nombre       = :nombre,
@@ -159,9 +236,9 @@ function guardarColor()
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'nombre'       => $nombre,
-            'descripcion'  => $descripcion !== '' ? $descripcion : null,
-            'rgb'          => $rgb !== '' ? $rgb : null,
+            'nombre'       => $datosNuevos['nombre'],
+            'descripcion'  => $datosNuevos['descripcion'],
+            'rgb'          => $datosNuevos['rgb'],
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
@@ -183,7 +260,13 @@ function eliminarColor()
         responder(false, 'Este color ya estaba inactivo.');
     }
 
-    $movimiento          = obtenerMovimientoSesion('desactivar');
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Activo',
+        'valor_despues' => 'Inactivo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('desactivar', $cambios);
     $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -210,7 +293,13 @@ function reactivarColor()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $movimiento          = obtenerMovimientoSesion('reactivar');
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Inactivo',
+        'valor_despues' => 'Activo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('reactivar', $cambios);
     $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 

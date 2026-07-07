@@ -94,6 +94,90 @@ function obtenerMaterial($id)
     responder(true, 'OK', ['material' => $result[0]]);
 }
 
+/**
+ * Obtiene la IP real del cliente, considerando proxies/balanceadores comunes.
+ */
+function obtenerIpCliente(): string
+{
+    // Si el servidor está detrás de un proxy (Cloudflare, Nginx, etc.)
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        // Puede venir una lista "ip_cliente, ip_proxy1, ip_proxy2" — tomamos la primera
+        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        return trim($ips[0]);
+    }
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        return trim($_SERVER['HTTP_X_REAL_IP']);
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
+}
+
+/**
+ * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
+ * $cambios: arreglo de ['campo' => .., 'valor_antes' => .., 'valor_despues' => ..]
+ */
+function obtenerMovimientoSesion(string $accion, array $cambios = []): array
+{
+    return [
+        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
+        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
+        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
+        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
+        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
+        'accion'    => $accion,
+        'ip'        => obtenerIpCliente(),
+        'cambios'   => $cambios,
+        'timestamp' => date('Y-m-d H:i:s'),
+    ];
+}
+
+/**
+ * Compara un registro anterior (array asociativo de la BD) contra los datos nuevos
+ * y devuelve solo los campos cuyo valor cambió, mapeados con etiqueta legible.
+ *
+ * $mapaCampos: ['columna_bd' => 'Etiqueta bonita']
+ * $anterior:   registro actual tal cual viene de la BD (o [] si es creación)
+ * $nuevo:      ['columna_bd' => valor_nuevo]
+ */
+function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
+{
+    $cambios = [];
+    foreach ($mapaCampos as $campo => $etiqueta) {
+        $valorAntes   = $anterior[$campo] ?? null;
+        $valorDespues = $nuevo[$campo]    ?? null;
+
+        // Normalizamos vacíos para comparar de forma justa (null vs '' se tratan igual)
+        $antesComp   = ($valorAntes   === '' ? null : $valorAntes);
+        $despuesComp = ($valorDespues === '' ? null : $valorDespues);
+
+        if ($antesComp !== $despuesComp) {
+            $cambios[] = [
+                'campo'         => $etiqueta,
+                'valor_antes'   => $valorAntes   ?? '(vacío)',
+                'valor_despues' => $valorDespues ?? '(vacío)',
+            ];
+        }
+    }
+    return $cambios;
+}
+
+/**
+ * Traduce un id de unidad_medida a su nombre legible, para que el historial
+ * no quede lleno de números sueltos.
+ */
+function obtenerNombreUnidad($conectar, $unidadMedidaId): string
+{
+    if (empty($unidadMedidaId)) return 'Sin unidad de medida';
+
+    $result = executeQuery(
+        $conectar,
+        "SELECT nombre, nombre_corto FROM unidad_medida WHERE id = :id",
+        ['id' => $unidadMedidaId]
+    );
+    if (empty($result)) return "Unidad #$unidadMedidaId (no encontrada)";
+
+    return $result[0]['nombre'] . ' (' . $result[0]['nombre_corto'] . ')';
+}
+
 function guardarMaterial()
 {
     $conectar    = conectar_oll_BD();
@@ -128,27 +212,67 @@ function guardarMaterial()
     );
     if (!empty($chk)) responder(false, 'Ya existe un material con ese nombre.');
 
+    // Mapa de campos editables → etiqueta legible para el historial
+    $mapaCampos = [
+        'nombre'         => 'Nombre',
+        'nombre_unidad'  => 'Unidad de medida',
+        'stock_minimo'   => 'Stock mínimo',
+        'stock_actual'   => 'Stock actual',
+    ];
+
+    $datosNuevos = [
+        'nombre'         => $nombre,
+        'nombre_unidad'  => obtenerNombreUnidad($conectar, $unidadMedidaId),
+        'stock_minimo'   => $stockMinimo,
+        'stock_actual'   => $stockActual,
+    ];
+
     if ($id === 0) {
+        // Creación: "antes" está vacío para todos los campos
+        $cambios = compararCambios([], $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('crear', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         $result = executeQuery($conectar, "
-            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, created_at)
-            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, NOW())
+            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, created_at, js_session, js_historial)
+            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'           => $nombre,
             'unidad_medida_id' => $unidadMedidaId,
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
+            'js_session'       => $js_session,
+            'js_historial'     => $js_historial_nuevo,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Material creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
+        // Edición: traemos el registro actual para comparar campo por campo
+        $actual = executeQuery($conectar, "SELECT * FROM material WHERE id = :id", ['id' => $id]);
+        if (empty($actual)) responder(false, 'Material no encontrado.');
+        $registroAnterior = $actual[0];
+
+        // Traducimos también la unidad anterior a nombre legible antes de comparar
+        $registroAnterior['nombre_unidad'] = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
+
+        $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+
+        $movimiento          = obtenerMovimientoSesion('editar', $cambios);
+        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
         executeQuery($conectar, "
             UPDATE material SET
                 nombre           = :nombre,
                 unidad_medida_id = :unidad_medida_id,
                 stock_minimo     = :stock_minimo,
                 stock_actual     = :stock_actual,
-                update_at        = NOW()
+                update_at        = NOW(),
+                js_session       = :js_session,
+                js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
             'nombre'           => $nombre,
@@ -156,6 +280,8 @@ function guardarMaterial()
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
             'id'               => $id,
+            'js_session'       => $js_session,
+            'js_historial'     => $js_historial_nuevo,
         ]);
         responder(true, 'Material actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
@@ -174,10 +300,29 @@ function eliminarMaterial()
         responder(false, 'Este material ya estaba inactivo.');
     }
 
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Activo',
+        'valor_despues' => 'Inactivo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('desactivar', $cambios);
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE material SET deleted_at = NOW(), update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE material SET
+            deleted_at   = NOW(),
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Material desactivado correctamente.');
 }
@@ -188,10 +333,29 @@ function reactivarMaterial()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
+    $cambios = [[
+        'campo'         => 'Estado',
+        'valor_antes'   => 'Inactivo',
+        'valor_despues' => 'Activo',
+    ]];
+
+    $movimiento          = obtenerMovimientoSesion('reactivar', $cambios);
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE material SET deleted_at = NULL, update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE material SET
+            deleted_at   = NULL,
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Material reactivado correctamente.');
 }
