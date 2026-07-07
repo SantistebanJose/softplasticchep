@@ -33,7 +33,6 @@ include("header.php");
                 <th>Nombre</th>
                 <th>Ubicación</th>
                 <th>Estado</th>
-                <th>Molde actual</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -74,35 +73,6 @@ include("header.php");
   </div>
 </div>
 
-<!-- Modal Cambiar Molde -->
-<div class="modal fade" id="modalCambiarMolde" tabindex="-1">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <form id="formCambiarMolde">
-        <div class="modal-header">
-          <h5 class="modal-title">Cambiar molde</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <input type="hidden" id="cm_maquina_id">
-          <p class="mb-2">Máquina: <strong id="cm_maquina_nombre">-</strong></p>
-          <p class="mb-2 text-muted small">Molde actual: <span id="cm_molde_actual">-</span></p>
-
-          <div class="mb-2">
-            <label class="form-label">Nuevo molde *</label>
-            <select class="form-select" id="cm_molde_id" required>
-                <option value="">Cargando moldes...</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Cambiar molde</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
