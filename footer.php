@@ -4,12 +4,37 @@
 
 <!--
     Nota: Bootstrap JS y SweetAlert2 NO se cargan aquí.
-    Cada vista que los necesite debe cargarlos en su propio <script> JUSTO ANTES
-    de su bloque de JS inline (ej. antes de "const modalX = new bootstrap.Modal(...)"),
-    para garantizar el orden de ejecución. Si se cargan aquí en el footer, se
-    ejecutan DESPUÉS del script de la vista y rompen cualquier uso de bootstrap/Swal
-    en el primer render (error "Cannot access ... before initialization").
+    ...
 -->
+
+<script>
+// ── Sidebar responsivo (toggle mobile) ───────────────────────────────────────
+function pcToggleSidebar() {
+    document.getElementById('pcSidebar').classList.toggle('open');
+    document.getElementById('pcSidebarOverlay').classList.toggle('show');
+}
+
+// Cierra el sidebar automáticamente si el usuario agranda la ventana
+// (evita que quede "abierto" en modo desktop tras rotar o resize)
+window.addEventListener('resize', () => {
+    if (window.innerWidth > 992) {
+        document.getElementById('pcSidebar').classList.remove('open');
+        document.getElementById('pcSidebarOverlay').classList.remove('show');
+    }
+});
+
+// Cierra el sidebar al hacer click en cualquier link del menú (mobile)
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('#pcSidebar a, #pcSidebar .pc-nav-subitem').forEach(link => {
+        link.addEventListener('click', () => {
+            if (window.innerWidth <= 992) {
+                document.getElementById('pcSidebar').classList.remove('open');
+                document.getElementById('pcSidebarOverlay').classList.remove('show');
+            }
+        });
+    });
+});
+</script>
 
 </body>
 </html>

@@ -24,6 +24,8 @@ $mantenimientoOpen  = in_array($activePage, $mantenimientoPages);
 $administracionOpen = in_array($activePage, $administracionPages);
 $analisisOpen       = in_array($activePage, $analisisPages);
 ?>
+<div class="pc-sidebar-overlay" id="pcSidebarOverlay" onclick="pcToggleSidebar()"></div>
+
 <aside class="pc-sidebar" id="pcSidebar">
     <a href="index.php" class="pc-sidebar-brand" style="text-decoration:none;color:inherit;">
         <img src="assets/img/logo.png" alt="Plásticos Chepito">
@@ -73,17 +75,17 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             <a href="moldes.php" class="<?= pc_sub_class('moldes', $activePage) ?>">
                 <span class="dot"></span> Moldes
             </a>
-            <a href="materiales.php" class="<?= pc_sub_class('materiales', $activePage) ?>">
+            <a href="material.php" class="<?= pc_sub_class('materiales', $activePage) ?>">
                 <span class="dot"></span> Materiales
             </a>
             <a href="maquinas.php" class="<?= pc_sub_class('maquinas', $activePage) ?>">
                 <span class="dot"></span> Máquinas
             </a>
-            <a href="colores.php" class="<?= pc_sub_class('colores', $activePage) ?>">
+            <a href="color.php" class="<?= pc_sub_class('colores', $activePage) ?>">
                 <span class="dot"></span> Colores
             </a>
-            <a href="unidades_medida.php" class="<?= pc_sub_class('unidades_medida', $activePage) ?>">
-                <span class="dot"></span> Unidades de Medida
+            <a href="unidad_medida.php" class="<?= pc_sub_class('unidad_medida', $activePage) ?>">
+                <span class="dot"></span> Unidad de Medida
             </a>
         </div>
     </details>

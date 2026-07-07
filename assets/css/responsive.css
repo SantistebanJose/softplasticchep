@@ -1,0 +1,200 @@
+/* ============================================================
+   Plásticos Chepito — responsive.css
+   Hoja de estilos RESPONSIVA reutilizable en todo el sistema.
+   Cárgala DESPUÉS de tu CSS principal (estilos.css) en header.php:
+   <link rel="stylesheet" href="assets/css/estilos.css">
+   <link rel="stylesheet" href="assets/css/responsive.css">
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   1) TOPBAR: botón hamburguesa + overlay para el sidebar mobile
+   ------------------------------------------------------------ */
+.pc-sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 20, 45, 0.55);
+  z-index: 90; /* debajo del sidebar (100), encima del resto */
+}
+
+.pc-sidebar-overlay.show { display: block; }
+
+/* El botón hamburguesa ya tiene la clase .pc-menu-toggle en estilos.css,
+   solo la mostramos/activamos aquí para no duplicar reglas base */
+.pc-menu-toggle {
+  background: none;
+  border: none;
+}
+
+/* ------------------------------------------------------------
+   2) TABLAS — diseño mejorado (desktop)
+   ------------------------------------------------------------ */
+.pc-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--pc-radius, 12px);
+}
+
+.pc-table {
+  border-radius: var(--pc-radius, 12px);
+  overflow: hidden;
+}
+
+.pc-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.pc-table tbody tr {
+  transition: background .12s ease, box-shadow .12s ease;
+}
+
+.pc-table tbody tr:nth-child(even) {
+  background: rgba(11, 77, 166, 0.02);
+}
+
+.pc-table tbody tr:hover {
+  background: var(--pc-blue-light, #E6F1FB);
+}
+
+.pc-table tbody td {
+  vertical-align: middle;
+}
+
+.pc-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pc-border, #E2E6EE);
+  border-radius: 8px;
+  background: var(--pc-surface, #fff);
+  color: var(--pc-muted, #6B7686);
+  cursor: pointer;
+  transition: all .15s ease;
+  margin-right: 4px;
+}
+
+.pc-icon-btn:hover {
+  border-color: var(--pc-blue, #0B4DA6);
+  color: var(--pc-blue, #0B4DA6);
+  background: var(--pc-blue-light, #E6F1FB);
+}
+
+.pc-icon-btn[title="Desactivar"]:hover,
+.pc-icon-btn[title="Eliminar"]:hover {
+  border-color: var(--pc-red, #E31937);
+  color: var(--pc-red, #E31937);
+  background: var(--pc-red-light, #FCEBEB);
+}
+
+/* ------------------------------------------------------------
+   3) BREAKPOINT TABLET (≤ 992px) — sidebar off-canvas
+   ------------------------------------------------------------ */
+@media (max-width: 992px) {
+  .pc-menu-toggle { display: inline-flex !important; }
+
+  .pc-metric-grid { grid-template-columns: repeat(2, 1fr); }
+
+  .pc-filtros { flex-direction: column; align-items: stretch; }
+  .pc-filtros input,
+  .pc-filtros select { max-width: 100% !important; }
+}
+
+/* ------------------------------------------------------------
+   4) BREAKPOINT MOBILE (≤ 640px) — tablas tipo "card"
+   ------------------------------------------------------------ */
+@media (max-width: 640px) {
+  .pc-main { padding: 16px 14px 24px; }
+
+  .pc-card, .pc-panel { padding: 14px; }
+
+  .pc-card-header {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .pc-card-header .pc-btn { width: 100%; justify-content: center; }
+
+  .pc-metric-grid { grid-template-columns: 1fr; }
+
+  /* --- Conversión de tabla a lista de tarjetas --- */
+  .pc-table-responsive-cards table,
+  .pc-table-responsive-cards thead,
+  .pc-table-responsive-cards tbody,
+  .pc-table-responsive-cards th,
+  .pc-table-responsive-cards td,
+  .pc-table-responsive-cards tr {
+    display: block;
+    width: 100%;
+  }
+
+  .pc-table-responsive-cards thead {
+    position: absolute;
+    top: -9999px;
+    left: -9999px; /* oculta el encabezado visualmente, accesible para lectores */
+  }
+
+  .pc-table-responsive-cards tbody tr {
+    background: var(--pc-surface, #fff);
+    border: 1px solid var(--pc-border, #E2E6EE);
+    border-radius: var(--pc-radius, 12px);
+    margin-bottom: 12px;
+    padding: 6px 4px;
+    box-shadow: 0 1px 3px rgba(20, 30, 60, 0.06);
+  }
+
+  .pc-table-responsive-cards tbody tr:nth-child(even) {
+    background: var(--pc-surface, #fff); /* sin zebra en modo card */
+  }
+
+  .pc-table-responsive-cards tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: right;
+    padding: 10px 14px;
+    border-top: 1px solid var(--pc-border, #E2E6EE);
+  }
+
+  .pc-table-responsive-cards tbody td:first-child {
+    border-top: none;
+    font-weight: 600;
+  }
+
+  /* Etiqueta a la izquierda, generada desde data-label */
+  .pc-table-responsive-cards tbody td::before {
+    content: attr(data-label);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--pc-muted, #6B7686);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  /* La celda de acciones no necesita quedar a la derecha en flex-between */
+  .pc-table-responsive-cards tbody td.pc-td-acciones {
+    justify-content: flex-end;
+  }
+  .pc-table-responsive-cards tbody td.pc-td-acciones::before {
+    display: none;
+  }
+
+  /* Modales a pantalla completa en mobile */
+  .modal-dialog { margin: 10px; }
+  .modal-footer { flex-direction: column-reverse; gap: 8px; }
+  .modal-footer .btn { width: 100%; margin: 0 !important; }
+}
+
+/* ------------------------------------------------------------
+   5) Pantallas muy chicas (≤ 380px)
+   ------------------------------------------------------------ */
+@media (max-width: 380px) {
+  .pc-sidebar-brand-text .sub { display: none; }
+  .pc-page-title h1 { font-size: 17px; }
+}

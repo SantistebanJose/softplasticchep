@@ -3,6 +3,8 @@
 /**
  * controllers/clssMoldes.php
  * Controlador del módulo de Moldes
+ * Tabla real: molde (id, nombre, forma, js_session, js_historial, created_at, update_at, deleted_at)
+ * Soft delete vía deleted_at (no existe columna 'activo').
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -52,16 +54,16 @@ function listarMoldes()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(nombre) LIKE LOWER(:texto) OR LOWER(codigo) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(nombre) LIKE LOWER(:texto) OR LOWER(forma) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
-        $where[] = "activo = true";
+        $where[] = "deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "activo = false";
+        $where[] = "deleted_at IS NOT NULL";
     }
 
-    $sql = "SELECT * FROM moldes WHERE " . implode(' AND ', $where) . " ORDER BY nombre";
+    $sql = "SELECT * FROM molde WHERE " . implode(' AND ', $where) . " ORDER BY nombre";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['moldes' => $result]);
@@ -74,7 +76,7 @@ function obtenerMolde($id)
 
     $result = executeQuery(
         $conectar,
-        "SELECT * FROM moldes WHERE id = :id",
+        "SELECT * FROM molde WHERE id = :id",
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Molde no encontrado.');
@@ -84,59 +86,59 @@ function obtenerMolde($id)
 function guardarMolde()
 {
     $conectar = conectar_oll_BD();
-    $id       = intval($_POST['id'] ?? 0);
-    $nombre   = trim($_POST['nombre'] ?? '');
-    $codigo   = trim($_POST['codigo'] ?? '');
+    $id     = intval($_POST['id'] ?? 0);
+    $nombre = trim($_POST['nombre'] ?? '');
+    $forma  = trim($_POST['forma'] ?? '');
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
-    if (empty($codigo)) responder(false, 'El código es obligatorio.');
+    if (empty($forma))  responder(false, 'La forma es obligatoria.');
 
-    // Código único (excluyendo el propio registro si es edición)
+    // Nombre único (excluyendo el propio registro si es edición)
     $chk = executeQuery(
         $conectar,
-        "SELECT id FROM moldes WHERE LOWER(codigo) = LOWER(:codigo) AND id <> :id",
-        ['codigo' => $codigo, 'id' => $id]
+        "SELECT id FROM molde WHERE LOWER(nombre) = LOWER(:nombre) AND id <> :id",
+        ['nombre' => $nombre, 'id' => $id]
     );
-    if (!empty($chk)) responder(false, 'Ya existe un molde con ese código.');
+    if (!empty($chk)) responder(false, 'Ya existe un molde con ese nombre.');
 
     if ($id === 0) {
         $result = executeQuery($conectar, "
-            INSERT INTO moldes (nombre, codigo, activo, created_at, updated_at)
-            VALUES (:nombre, :codigo, true, NOW(), NOW())
+            INSERT INTO molde (nombre, forma, created_at)
+            VALUES (:nombre, :forma, NOW())
             RETURNING id
         ", [
             'nombre' => $nombre,
-            'codigo' => $codigo,
+            'forma'  => $forma,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Molde creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
         executeQuery($conectar, "
-            UPDATE moldes SET
-                nombre = :nombre,
-                codigo = :codigo,
-                updated_at = NOW()
+            UPDATE molde SET
+                nombre    = :nombre,
+                forma     = :forma,
+                update_at = NOW()
             WHERE id = :id
         ", [
             'nombre' => $nombre,
-            'codigo' => $codigo,
+            'forma'  => $forma,
             'id'     => $id,
         ]);
         responder(true, 'Molde actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
 }
 
-// Soft delete: se cambia activo a false, no se borra físicamente.
+// Soft delete: se marca deleted_at, no se borra físicamente.
 function eliminarMolde()
 {
     $conectar = conectar_oll_BD();
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, activo FROM moldes WHERE id = :id", ['id' => $id]);
+    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM molde WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Molde no encontrado.');
-    if ($existe[0]['activo'] === false || $existe[0]['activo'] === 'f') {
+    if (!empty($existe[0]['deleted_at'])) {
         responder(false, 'Este molde ya estaba inactivo.');
     }
 
@@ -152,7 +154,7 @@ function eliminarMolde()
 
     executeQuery(
         $conectar,
-        "UPDATE moldes SET activo = false, updated_at = NOW() WHERE id = :id",
+        "UPDATE molde SET deleted_at = NOW(), update_at = NOW() WHERE id = :id",
         ['id' => $id]
     );
     responder(true, 'Molde desactivado correctamente.');
@@ -166,7 +168,7 @@ function reactivarMolde()
 
     executeQuery(
         $conectar,
-        "UPDATE moldes SET activo = true, updated_at = NOW() WHERE id = :id",
+        "UPDATE molde SET deleted_at = NULL, update_at = NOW() WHERE id = :id",
         ['id' => $id]
     );
     responder(true, 'Molde reactivado correctamente.');

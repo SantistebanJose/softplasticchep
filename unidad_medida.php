@@ -1,24 +1,24 @@
 <?php
-$pageTitle    = 'Moldes';
-$pageSubtitle = 'Moldes de producción';
-$activePage   = 'moldes';
+$pageTitle    = 'Unidad de Medida';
+$pageSubtitle = 'Unidades de medida para materiales';
+$activePage   = 'unidad_medida';
 
 include("header.php");
 ?>
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2>Moldes</h2>
-        <button class="pc-btn pc-btn-primary" onclick="abrirModalCrearMolde()">
-            <i class="fa-solid fa-plus"></i> Nuevo molde
+        <h2>Unidad de Medida</h2>
+        <button class="pc-btn pc-btn-primary" onclick="abrirModalCrearUnidad()">
+            <i class="fa-solid fa-plus"></i> Nueva unidad
         </button>
     </div>
 
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
-        <input type="text" id="fm_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por nombre o forma...">
-        <select id="fm_estado" class="form-select" style="max-width:160px">
+        <input type="text" id="fu_texto" class="form-control" style="max-width:260px"
+               placeholder="Buscar por nombre o abreviatura...">
+        <select id="fu_estado" class="form-select" style="max-width:160px">
             <option value="">Todos</option>
             <option value="activa" selected>Activos</option>
             <option value="inactiva">Inactivos</option>
@@ -26,44 +26,44 @@ include("header.php");
     </div>
 
     <div class="pc-table-wrap pc-table-responsive-cards">
-    <table class="pc-table" id="tablaMoldes">
+    <table class="pc-table" id="tablaUnidades">
         <thead>
             <tr>
                 <th>Nombre</th>
-                <th>Forma</th>
+                <th>Abreviatura</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
-        <tbody id="tbodyMoldes">
+        <tbody id="tbodyUnidades">
             <tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
-
 </div>
 
 <!-- Modal Crear/Editar -->
-<div class="modal fade" id="modalMolde" tabindex="-1">
+<div class="modal fade" id="modalUnidad" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form id="formMolde">
+      <form id="formUnidad">
         <div class="modal-header">
-          <h5 class="modal-title" id="modalMoldeTitulo">Nuevo molde</h5>
+          <h5 class="modal-title" id="modalUnidadTitulo">Nueva unidad de medida</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <input type="hidden" name="id" id="molde_id">
+          <input type="hidden" name="id" id="unidad_id">
 
           <div class="mb-2">
             <label class="form-label">Nombre *</label>
-            <input type="text" class="form-control" name="nombre" id="molde_nombre" required>
+            <input type="text" class="form-control" name="nombre" id="unidad_nombre"
+                   placeholder="Ej: Kilogramo" required>
           </div>
 
           <div class="mb-2">
-            <label class="form-label">Forma *</label>
-            <input type="text" class="form-control" name="forma" id="molde_forma"
-                   placeholder="Ej: cuchara, cadena, gancho..." required>
+            <label class="form-label">Abreviatura *</label>
+            <input type="text" class="form-control" name="nombre_corto" id="unidad_nombre_corto"
+                   placeholder="Ej: kg" required>
           </div>
         </div>
         <div class="modal-footer">
@@ -78,32 +78,32 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php'; // clssMoldes.php vive en su propia carpeta
-const modalMolde = new bootstrap.Modal(document.getElementById('modalMolde'));
+const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php'; // clssUnidadMedida.php vive en su propia carpeta
+const modalUnidad = new bootstrap.Modal(document.getElementById('modalUnidad'));
 
 document.addEventListener('DOMContentLoaded', () => {
-    cargarMoldes().catch(err => {
+    cargarUnidades().catch(err => {
         console.error('Error cargando datos iniciales:', err);
-        document.getElementById('tbodyMoldes').innerHTML =
+        document.getElementById('tbodyUnidades').innerHTML =
             `<tr><td colspan="4" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
     let debounceTimer = null;
-    document.getElementById('fm_texto').addEventListener('input', () => {
+    document.getElementById('fu_texto').addEventListener('input', () => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(cargarMoldes, 350);
+        debounceTimer = setTimeout(cargarUnidades, 350);
     });
 
-    document.getElementById('fm_estado').addEventListener('change', () => {
-        cargarMoldes();
+    document.getElementById('fu_estado').addEventListener('change', () => {
+        cargarUnidades();
     });
 });
 
 // ── Llamada genérica al controlador ─────────────────────────────────────────
-async function llamarMoldes(accion, params = {}) {
+async function llamarUnidades(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_MOLDES, {
+    const resp = await fetch(CONTROLADOR_UNIDADES, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body
@@ -118,40 +118,40 @@ async function llamarMoldes(accion, params = {}) {
 }
 
 // ── Listado ──────────────────────────────────────────────────────────────────
-async function cargarMoldes() {
-    const texto  = document.getElementById('fm_texto').value.trim();
-    const estado = document.getElementById('fm_estado').value;
+async function cargarUnidades() {
+    const texto  = document.getElementById('fu_texto').value.trim();
+    const estado = document.getElementById('fu_estado').value;
 
-    const json = await llamarMoldes('LISTARMOLDES', { texto, estado });
-    const tbody = document.getElementById('tbodyMoldes');
+    const json = await llamarUnidades('LISTARUNIDADESMEDIDA', { texto, estado });
+    const tbody = document.getElementById('tbodyUnidades');
 
     if (!json.success) {
         tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
-    const moldes = json.moldes || [];
-    if (moldes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay moldes registrados.</td></tr>';
+    const unidades = json.unidades || [];
+    if (unidades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay unidades de medida registradas.</td></tr>';
         return;
     }
 
-    tbody.innerHTML = moldes.map(m => `
-    <tr id="fila-molde-${m.id}">
-        <td data-label="Nombre">${m.nombre}</td>
-        <td data-label="Forma">${m.forma ?? '-'}</td>
-        <td data-label="Estado">${!m.deleted_at
+    tbody.innerHTML = unidades.map(u => `
+    <tr id="fila-unidad-${u.id}">
+        <td data-label="Nombre">${u.nombre}</td>
+        <td data-label="Abreviatura">${u.nombre_corto ?? '-'}</td>
+        <td data-label="Estado">${!u.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
             : '<span class="badge bg-secondary">Inactivo</span>'}
         </td>
         <td data-label="Acciones" class="pc-td-acciones">
-            <button class="pc-icon-btn" onclick="abrirModalEditarMolde(${m.id})" title="Editar">
+            <button class="pc-icon-btn" onclick="abrirModalEditarUnidad(${u.id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
             </button>
-            ${!m.deleted_at
-                ? `<button class="pc-icon-btn" onclick="eliminarMolde(${m.id})" title="Desactivar">
+            ${!u.deleted_at
+                ? `<button class="pc-icon-btn" onclick="eliminarUnidad(${u.id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
-                : `<button class="pc-icon-btn" onclick="reactivarMolde(${m.id})" title="Reactivar">
+                : `<button class="pc-icon-btn" onclick="reactivarUnidad(${u.id})" title="Reactivar">
                        <i class="fa-solid fa-rotate-left"></i></button>`
             }
         </td>
@@ -160,69 +160,69 @@ async function cargarMoldes() {
 }
 
 // ── Crear / Editar ───────────────────────────────────────────────────────────
-function abrirModalCrearMolde() {
-    document.getElementById('formMolde').reset();
-    document.getElementById('molde_id').value = '';
-    document.getElementById('modalMoldeTitulo').textContent = 'Nuevo molde';
-    modalMolde.show();
+function abrirModalCrearUnidad() {
+    document.getElementById('formUnidad').reset();
+    document.getElementById('unidad_id').value = '';
+    document.getElementById('modalUnidadTitulo').textContent = 'Nueva unidad de medida';
+    modalUnidad.show();
 }
 
-async function abrirModalEditarMolde(id) {
-    const json = await llamarMoldes('OBTENERMOLDE', { id });
+async function abrirModalEditarUnidad(id) {
+    const json = await llamarUnidades('OBTENERUNIDADMEDIDA', { id });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
-    const m = json.molde;
-    document.getElementById('modalMoldeTitulo').textContent = 'Editar molde';
-    document.getElementById('molde_id').value = m.id;
-    document.getElementById('molde_nombre').value = m.nombre ?? '';
-    document.getElementById('molde_forma').value = m.forma ?? '';
+    const u = json.unidad;
+    document.getElementById('modalUnidadTitulo').textContent = 'Editar unidad de medida';
+    document.getElementById('unidad_id').value = u.id;
+    document.getElementById('unidad_nombre').value = u.nombre ?? '';
+    document.getElementById('unidad_nombre_corto').value = u.nombre_corto ?? '';
 
-    modalMolde.show();
+    modalUnidad.show();
 }
 
-document.getElementById('formMolde').addEventListener('submit', async function (e) {
+document.getElementById('formUnidad').addEventListener('submit', async function (e) {
     e.preventDefault();
     const formData = new FormData(this);
-    formData.append('accion', 'GUARDARMOLDE');
+    formData.append('accion', 'GUARDARUNIDADMEDIDA');
 
-    const resp = await fetch(CONTROLADOR_MOLDES, { method: 'POST', body: formData });
+    const resp = await fetch(CONTROLADOR_UNIDADES, { method: 'POST', body: formData });
     const json = await resp.json();
 
     if (json.success) {
-        modalMolde.hide();
+        modalUnidad.hide();
         Swal.fire('Listo', json.message, 'success');
-        cargarMoldes();
+        cargarUnidades();
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
 
 // ── Eliminar / Reactivar ─────────────────────────────────────────────────────
-function eliminarMolde(id) {
+function eliminarUnidad(id) {
     Swal.fire({
-        title: '¿Desactivar molde?',
-        text: 'Podrás reactivarlo luego desde el listado de inactivos.',
+        title: '¿Desactivar unidad de medida?',
+        text: 'Podrás reactivarla luego desde el listado de inactivos.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'Sí, desactivar',
         cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const json = await llamarMoldes('ELIMINARMOLDE', { id });
+        const json = await llamarUnidades('ELIMINARUNIDADMEDIDA', { id });
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
-            cargarMoldes();
+            cargarUnidades();
         } else {
             Swal.fire('Error', json.message, 'error');
         }
     });
 }
 
-function reactivarMolde(id) {
-    llamarMoldes('REACTIVARMOLDE', { id }).then(json => {
+function reactivarUnidad(id) {
+    llamarUnidades('REACTIVARUNIDADMEDIDA', { id }).then(json => {
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
-            cargarMoldes();
+            cargarUnidades();
         } else {
             Swal.fire('Error', json.message, 'error');
         }
