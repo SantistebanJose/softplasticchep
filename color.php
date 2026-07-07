@@ -15,6 +15,7 @@ include("header.php");
     </div>
 
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
+        <br>
         <input type="text" id="fcol_texto" class="form-control" style="max-width:260px"
                placeholder="Buscar por nombre...">
         <select id="fcol_estado" class="form-select" style="max-width:160px">
