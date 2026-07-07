@@ -37,7 +37,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyColores">
-            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarColores().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyColores').innerHTML =
-            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="5" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
@@ -145,13 +145,13 @@ async function cargarColores() {
     const tbody = document.getElementById('tbodyColores');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const colores = json.colores || [];
     if (colores.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay colores registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay colores registrados.</td></tr>';
         return;
     }
 
