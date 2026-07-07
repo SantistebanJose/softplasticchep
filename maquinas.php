@@ -1,7 +1,7 @@
 <?php
 $pageTitle    = 'Máquinas';
 $pageSubtitle = 'Máquinas de producción';
-$activePage   = 'maquina';
+$activePage = 'maquinas'; // antes: 'maquina'
 
 include("header.php");
 ?>

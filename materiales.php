@@ -1,7 +1,7 @@
 <?php
 $pageTitle    = 'Materia Prima';
 $pageSubtitle = 'Materiales e insumos de producción';
-$activePage   = 'materia_prima';
+$activePage   = 'materiales';
 
 include("header.php");
 ?>

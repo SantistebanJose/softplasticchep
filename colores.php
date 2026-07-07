@@ -1,7 +1,7 @@
 <?php
 $pageTitle    = 'Colores';
 $pageSubtitle = 'Colores utilizados en producción';
-$activePage   = 'color';
+$activePage   = 'colores';
 
 include("header.php");
 ?>

@@ -14,8 +14,8 @@ function pc_sub_class($page, $active)
     return 'pc-nav-subitem' . ($page === $active ? ' active' : '');
 }
 
-$produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes', 'operarios', 'materia_prima'];
-$mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidades_medida'];
+$produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes', 'operarios'];
+$mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidad_medida'];
 $administracionPages = ['usuarios', 'configuracion'];
 $analisisPages       = ['reportes'];
 
@@ -75,13 +75,13 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             <a href="moldes.php" class="<?= pc_sub_class('moldes', $activePage) ?>">
                 <span class="dot"></span> Moldes
             </a>
-            <a href="material.php" class="<?= pc_sub_class('materiales', $activePage) ?>">
+            <a href="materiales.php" class="<?= pc_sub_class('materiales', $activePage) ?>">
                 <span class="dot"></span> Materiales
             </a>
             <a href="maquinas.php" class="<?= pc_sub_class('maquinas', $activePage) ?>">
                 <span class="dot"></span> Máquinas
             </a>
-            <a href="color.php" class="<?= pc_sub_class('colores', $activePage) ?>">
+            <a href="colores.php" class="<?= pc_sub_class('colores', $activePage) ?>">
                 <span class="dot"></span> Colores
             </a>
             <a href="unidad_medida.php" class="<?= pc_sub_class('unidad_medida', $activePage) ?>">
