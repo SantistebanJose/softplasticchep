@@ -83,12 +83,32 @@ function obtenerMolde($id)
     responder(true, 'OK', ['molde' => $result[0]]);
 }
 
+/**
+ * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
+ */
+function obtenerMovimientoSesion(string $accion): array
+{
+    return [
+        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
+        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
+        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
+        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
+        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
+        'accion'    => $accion,
+        'timestamp' => date('Y-m-d H:i:s'),
+    ];
+}
+
 function guardarMolde()
 {
     $conectar = conectar_oll_BD();
     $id     = intval($_POST['id'] ?? 0);
     $nombre = trim($_POST['nombre'] ?? '');
     $forma  = trim($_POST['forma'] ?? '');
+
+    $movimiento          = obtenerMovimientoSesion($id === 0 ? 'crear' : 'editar');
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
@@ -104,26 +124,32 @@ function guardarMolde()
 
     if ($id === 0) {
         $result = executeQuery($conectar, "
-            INSERT INTO molde (nombre, forma, created_at)
-            VALUES (:nombre, :forma, NOW())
+            INSERT INTO molde (nombre, forma, created_at, js_session, js_historial)
+            VALUES (:nombre, :forma, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
-            'nombre' => $nombre,
-            'forma'  => $forma,
+            'nombre'       => $nombre,
+            'forma'        => $forma,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Molde creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
         executeQuery($conectar, "
             UPDATE molde SET
-                nombre    = :nombre,
-                forma     = :forma,
-                update_at = NOW()
+                nombre       = :nombre,
+                forma        = :forma,
+                update_at    = NOW(),
+                js_session   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'nombre' => $nombre,
-            'forma'  => $forma,
-            'id'     => $id,
+            'nombre'       => $nombre,
+            'forma'        => $forma,
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
         ]);
         responder(true, 'Molde actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
@@ -152,10 +178,23 @@ function eliminarMolde()
         responder(false, 'No puedes desactivar este molde: actualmente está puesto en una máquina.');
     }
 
+    $movimiento          = obtenerMovimientoSesion('desactivar');
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE molde SET deleted_at = NOW(), update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE molde SET
+            deleted_at   = NOW(),
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Molde desactivado correctamente.');
 }
@@ -166,10 +205,23 @@ function reactivarMolde()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
+    $movimiento          = obtenerMovimientoSesion('reactivar');
+    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
     executeQuery(
         $conectar,
-        "UPDATE molde SET deleted_at = NULL, update_at = NOW() WHERE id = :id",
-        ['id' => $id]
+        "UPDATE molde SET
+            deleted_at   = NULL,
+            update_at    = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id",
+        [
+            'id'           => $id,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial_nuevo,
+        ]
     );
     responder(true, 'Molde reactivado correctamente.');
 }

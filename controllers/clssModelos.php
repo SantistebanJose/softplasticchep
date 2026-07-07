@@ -109,38 +109,12 @@ function obtenerModelo($id)
     responder(true, 'OK', ['modelo' => $result[0]]);
 }
 
-/**
- * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
- * Realizado por Franco.
- */
-function obtenerMovimientoSesion(string $accion): array
-{
-    return [
-        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
-        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
-        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
-        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
-        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
-        'accion'    => $accion,
-        'timestamp' => date('Y-m-d H:i:s'),
-    ];
-}
 
-function guardarModelo()
-{
+function guardarModelo(){
     $conectar    = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
     $categoriaId = intval($_POST['categoria_id'] ?? 0);
     $nombre      = trim($_POST['nombre'] ?? '');
-
-    $movimiento = obtenerMovimientoSesion($id === 0 ? 'crear' : 'editar');
-
-    // js_session: último movimiento (objeto plano)
-    $js_session = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-
-    // js_historial: el mismo movimiento pero envuelto en array,
-    // para poder concatenarlo con jsonb || jsonb
-    $js_historial_nuevo = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if ($categoriaId <= 0) responder(false, 'Selecciona la categoría.');
@@ -156,32 +130,27 @@ function guardarModelo()
 
     if ($id === 0) {
         $result = executeQuery($conectar, "
-            INSERT INTO modelos_producto (categoria_id, nombre, activo, created_at, updated_at, js_session, js_historial)
-            VALUES (:categoria_id, :nombre, TRUE, NOW(), NOW(), :js_session, :js_historial)
+            INSERT INTO modelos_producto (categoria_id, nombre, activo, created_at, updated_at,js_session)
+            VALUES (:categoria_id, :nombre, TRUE, NOW(), NOW())
             RETURNING id
         ", [
             'categoria_id' => $categoriaId,
             'nombre'       => $nombre,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
+           
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Modelo creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
         executeQuery($conectar, "
             UPDATE modelos_producto SET
-                categoria_id  = :categoria_id,
-                nombre        = :nombre,
-                updated_at    = NOW(),
-                js_session    = :js_session,
-                js_historial  = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                categoria_id = :categoria_id,
+                nombre = :nombre,
+                updated_at = NOW()
             WHERE id = :id
         ", [
             'categoria_id' => $categoriaId,
             'nombre'       => $nombre,
             'id'           => $id,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
         ]);
         responder(true, 'Modelo actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
@@ -198,23 +167,10 @@ function eliminarModelo()
     if (empty($existe)) responder(false, 'Modelo no encontrado.');
     if ($existe[0]['activo'] === false) responder(false, 'Este modelo ya estaba inactivo.');
 
-    $movimiento          = obtenerMovimientoSesion('desactivar');
-    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
-
     executeQuery(
         $conectar,
-        "UPDATE modelos_producto SET
-            activo       = FALSE,
-            updated_at   = NOW(),
-            js_session   = :js_session,
-            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-        WHERE id = :id",
-        [
-            'id'           => $id,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
-        ]
+        "UPDATE modelos_producto SET activo = FALSE, updated_at = NOW() WHERE id = :id",
+        ['id' => $id]
     );
     responder(true, 'Modelo desactivado correctamente.');
 }
@@ -225,23 +181,10 @@ function reactivarModelo()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $movimiento          = obtenerMovimientoSesion('reactivar');
-    $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
-
     executeQuery(
         $conectar,
-        "UPDATE modelos_producto SET
-            activo       = TRUE,
-            updated_at   = NOW(),
-            js_session   = :js_session,
-            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-        WHERE id = :id",
-        [
-            'id'           => $id,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
-        ]
+        "UPDATE modelos_producto SET activo = TRUE, updated_at = NOW() WHERE id = :id",
+        ['id' => $id]
     );
     responder(true, 'Modelo reactivado correctamente.');
 }
