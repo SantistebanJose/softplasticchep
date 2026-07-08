@@ -16,7 +16,7 @@ function pc_sub_class($page, $active)
 
 $produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes', 'operarios'];
 $mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidad_medida'];
-$administracionPages = ['usuarios', 'configuracion'];
+$administracionPages = ['usuarios', 'proveedores','configuracion'];
 $analisisPages       = ['reportes'];
 
 $produccionOpen     = in_array($activePage, $produccionPages);
@@ -99,6 +99,9 @@ $analisisOpen       = in_array($activePage, $analisisPages);
         <div class="pc-nav-sublist">
             <a href="usuarios.php" class="<?= pc_sub_class('usuarios', $activePage) ?>">
                 <span class="dot"></span> Usuarios
+            </a>
+            <a href="proveedores.php" class="<?= pc_sub_class('proveedores', $activePage) ?>">
+                <span class="dot"></span> Proveedores
             </a>
             <a href="configuracion.php" class="<?= pc_sub_class('configuracion', $activePage) ?>">
                 <span class="dot"></span> Configuración
