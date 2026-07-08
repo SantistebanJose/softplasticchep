@@ -54,15 +54,15 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             <a href="modelos.php" class="<?= pc_sub_class('modelos', $activePage) ?>">
                 <span class="dot"></span> Modelos
             </a>
-            <a href="ordenes.php" class="<?= pc_sub_class('ordenes', $activePage) ?>">
+            <!-- <a href="ordenes.php" class="<?= pc_sub_class('ordenes', $activePage) ?>">
                 <span class="dot"></span> Órdenes de producción
             </a>
             <a href="operarios.php" class="<?= pc_sub_class('operarios', $activePage) ?>">
                 <span class="dot"></span> Operarios
-            </a>
-            <a href="materia_prima.php" class="<?= pc_sub_class('materia_prima', $activePage) ?>">
+            </a> 
+             <a href="materia_prima.php" class="<?= pc_sub_class('materia_prima', $activePage) ?>">
                 <span class="dot"></span> Materia prima
-            </a>
+            </a> -->
         </div>
     </details>
 
