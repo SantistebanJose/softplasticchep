@@ -1,0 +1,738 @@
+<?php
+
+/**
+ * controllers/clssCompra.php
+ * Controlador del módulo de Compras
+ *
+ * Tablas reales:
+ *   compra (id, proveedor_id -> proveedor.ruc, fecha_compra, img_comprobante,
+ *           descripcion, total, js_detalle jsonb, js_session, js_historial,
+ *           created_at, update_at, deleted_at)
+ *   rel_compra_material (id, compra_id, material_id, cantidad, unidad_medida_id,
+ *           cantidad_base, sub_total, total, comentario, js_session, js_historial,
+ *           created_at, update_at, deleted_at)
+ *   unidad_medida (id, nombre, nombre_corto, equivalencia, ...)
+ *
+ * UNIDAD DE MEDIDA POR LÍNEA:
+ *   - Cada línea de compra guarda la unidad en la que se compró
+ *     (unidad_medida_id) y la cantidad tal cual la escribió el usuario
+ *     en esa unidad (cantidad).
+ *   - cantidad_base = cantidad * unidad_medida.equivalencia -> es la
+ *     cantidad ya convertida a la unidad base del material (la unidad
+ *     en la que se lleva material.stock_actual). Se calcula una sola
+ *     vez al guardar y se persiste, no se recalcula después.
+ *   - TODO movimiento de stock (crear, editar, desactivar, reactivar)
+ *     usa cantidad_base, NUNCA cantidad.
+ *
+ * REGLAS DE STOCK (material.stock_actual):
+ *   - Crear compra           -> SUMA cantidad_base de cada línea al stock del material.
+ *   - Editar compra          -> se eliminan físicamente las líneas anteriores (rel_compra_material)
+ *                                revirtiendo su cantidad_base del stock, y se insertan las líneas nuevas
+ *                                sumando su cantidad_base al stock. El header (compra) sigue siendo soft-delete,
+ *                                pero las líneas de detalle en una edición se reemplazan por completo:
+ *                                el historial de QUÉ cambió queda igual registrado en compra.js_historial.
+ *   - Desactivar compra      -> RESTA cantidad_base de cada línea activa del stock y hace soft-delete
+ *                                de esas líneas (rel_compra_material.deleted_at) y de la compra.
+ *   - Reactivar compra       -> restaura (deleted_at = NULL) esas mismas líneas y vuelve a SUMAR
+ *                                su cantidad_base al stock.
+ *
+ * Todo movimiento de varias tablas (compra + rel_compra_material + material.stock_actual)
+ * va envuelto en una transacción para no dejar datos a medias.
+ *
+ * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
+ */
+
+ob_start();
+
+require_once __DIR__ . '/bd.php';
+require_once __DIR__ . '/executeQuery.php';
+session_start();
+
+// Carpeta donde se guardan los comprobantes subidos (sube 1 nivel desde controllers/)
+define('CARPETA_COMPROBANTES', __DIR__ . '/../uploads/comprobantes/');
+define('RUTA_WEB_COMPROBANTES', 'uploads/comprobantes/');
+
+if (isset($_POST["accion"])) {
+    try {
+        controladorCompra($_POST["accion"]);
+    } catch (PDOException $e) {
+        error_log("Error de base de datos en clssCompra.php: " . $e->getMessage());
+        responder(false, 'Error de base de datos: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log("Error inesperado en clssCompra.php: " . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor: ' . $e->getMessage());
+    }
+}
+
+function controladorCompra($accion)
+{
+    switch ($accion) {
+        case 'LISTARCOMPRAS':
+            listarCompras();
+            break;
+        case 'OBTENERCOMPRA':
+            obtenerCompra(intval($_POST['id'] ?? 0));
+            break;
+        case 'GUARDARCOMPRA':
+            guardarCompra();
+            break;
+        case 'ELIMINARCOMPRA':
+            eliminarCompra();
+            break;
+        case 'REACTIVARCOMPRA':
+            reactivarCompra();
+            break;
+        case 'BUSCARPROVEEDORES':
+            buscarProveedores();
+            break;
+        case 'BUSCARMATERIALES':
+            buscarMateriales();
+            break;
+        case 'BUSCARUNIDADES':
+            buscarUnidades();
+            break;
+        default:
+            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
+    }
+}
+
+// =============================================================================
+// LISTADOS AUXILIARES (para los <select> del modal)
+// =============================================================================
+
+function buscarProveedores()
+{
+    $conectar = conectar_oll_BD();
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where  = ["deleted_at IS NULL"];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "(LOWER(razon_social) LIKE LOWER(:texto) OR ruc LIKE :texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    $sql = "SELECT ruc, razon_social, nombre_comercial FROM proveedor
+            WHERE " . implode(' AND ', $where) . " ORDER BY razon_social LIMIT 50";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['proveedores' => $result]);
+}
+
+function buscarMateriales()
+{
+    $conectar = conectar_oll_BD();
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where  = ["m.deleted_at IS NULL"];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    // Se agrega m.unidad_medida_id y u.equivalencia para que el frontend pueda
+    // preseleccionar la unidad base del material y mostrar la conversión.
+    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id,
+                   u.nombre_corto AS unidad_corto, u.equivalencia AS unidad_equivalencia
+            FROM material m
+            LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
+            WHERE " . implode(' AND ', $where) . " ORDER BY m.nombre LIMIT 50";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['materiales' => $result]);
+}
+
+// Lista de unidades de medida disponibles para elegir en cada línea de compra.
+function buscarUnidades()
+{
+    $conectar = conectar_oll_BD();
+
+    $sql = "SELECT id, nombre, nombre_corto, equivalencia
+            FROM unidad_medida
+            ORDER BY nombre";
+
+    $result = executeQuery($conectar, $sql, []);
+    responder(true, 'OK', ['unidades' => $result]);
+}
+
+// =============================================================================
+// COMPRAS
+// =============================================================================
+
+function listarCompras()
+{
+    $conectar = conectar_oll_BD();
+
+    $texto        = trim($_POST['texto'] ?? '');
+    $proveedor_id = trim($_POST['proveedor_id'] ?? '');
+    $estado       = trim($_POST['estado'] ?? ''); // '', 'activa', 'inactiva'
+    $fecha_desde  = trim($_POST['fecha_desde'] ?? '');
+    $fecha_hasta  = trim($_POST['fecha_hasta'] ?? '');
+
+    $where  = ["1=1"];
+    $params = [];
+
+    if ($texto !== '') {
+        $where[] = "(LOWER(p.razon_social) LIKE LOWER(:texto)
+                     OR LOWER(c.descripcion) LIKE LOWER(:texto)
+                     OR p.ruc LIKE :texto)";
+        $params['texto'] = "%$texto%";
+    }
+    if ($proveedor_id !== '') {
+        $where[] = "c.proveedor_id = :proveedor_id";
+        $params['proveedor_id'] = $proveedor_id;
+    }
+    if ($estado === 'activa') {
+        $where[] = "c.deleted_at IS NULL";
+    } elseif ($estado === 'inactiva') {
+        $where[] = "c.deleted_at IS NOT NULL";
+    }
+    if ($fecha_desde !== '') {
+        $where[] = "c.fecha_compra >= :fecha_desde";
+        $params['fecha_desde'] = $fecha_desde;
+    }
+    if ($fecha_hasta !== '') {
+        $where[] = "c.fecha_compra <= :fecha_hasta";
+        $params['fecha_hasta'] = $fecha_hasta;
+    }
+
+    $sql = "
+        SELECT
+            c.*,
+            p.razon_social,
+            p.nombre_comercial,
+            COALESCE(jsonb_array_length(c.js_detalle), 0) AS items_count
+        FROM compra c
+        JOIN proveedor p ON p.ruc = c.proveedor_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY c.fecha_compra DESC, c.id DESC
+    ";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['compras' => $result]);
+}
+
+function obtenerCompra($id)
+{
+    $conectar = conectar_oll_BD();
+    if (!$id) responder(false, 'ID inválido.');
+
+    $compra = executeQuery(
+        $conectar,
+        "SELECT c.*, p.razon_social, p.nombre_comercial
+         FROM compra c JOIN proveedor p ON p.ruc = c.proveedor_id
+         WHERE c.id = :id",
+        ['id' => $id]
+    );
+    if (empty($compra)) responder(false, 'Compra no encontrada.');
+
+    // Se agrega el join a unidad_medida para traer la unidad EN LA QUE SE COMPRÓ
+    // esa línea (rcm.unidad_medida_id), que puede ser distinta a la unidad base
+    // del material.
+    $detalle = executeQuery(
+        $conectar,
+        "SELECT rcm.*, m.nombre AS material_nombre, m.unidad_medida_id AS material_unidad_base_id,
+                um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto, um.equivalencia AS unidad_equivalencia,
+                ub.nombre_corto AS material_unidad_base_corto
+         FROM rel_compra_material rcm
+         JOIN material m ON m.id = rcm.material_id
+         LEFT JOIN unidad_medida um ON um.id = rcm.unidad_medida_id
+         LEFT JOIN unidad_medida ub ON ub.id = m.unidad_medida_id
+         WHERE rcm.compra_id = :id AND rcm.deleted_at IS NULL
+         ORDER BY rcm.id",
+        ['id' => $id]
+    );
+
+    responder(true, 'OK', ['compra' => $compra[0], 'detalle' => $detalle]);
+}
+
+/**
+ * Auditoría (idéntico patrón al resto de controladores).
+ */
+function obtenerIpCliente(): string
+{
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        return trim($ips[0]);
+    }
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        return trim($_SERVER['HTTP_X_REAL_IP']);
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
+}
+
+function obtenerMovimientoSesion(string $accion, array $cambios = []): array
+{
+    return [
+        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
+        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
+        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
+        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
+        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
+        'accion'    => $accion,
+        'ip'        => obtenerIpCliente(),
+        'cambios'   => $cambios,
+        'timestamp' => date('Y-m-d H:i:s'),
+    ];
+}
+
+/**
+ * Sube el comprobante (si vino uno en $_FILES) y devuelve la ruta relativa a guardar en BD.
+ * Devuelve null si no vino archivo.
+ */
+function subirComprobante(): ?string
+{
+    if (empty($_FILES['img_comprobante']) || $_FILES['img_comprobante']['error'] === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    $archivo = $_FILES['img_comprobante'];
+
+    if ($archivo['error'] !== UPLOAD_ERR_OK) {
+        responder(false, 'Error al subir el comprobante (código ' . $archivo['error'] . ').');
+    }
+    if ($archivo['size'] > 5 * 1024 * 1024) {
+        responder(false, 'El comprobante no puede pesar más de 5MB.');
+    }
+
+    $extension = strtolower(pathinfo($archivo['name'], PATHINFO_EXTENSION));
+    $permitidas = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
+    if (!in_array($extension, $permitidas, true)) {
+        responder(false, 'Formato de comprobante no permitido. Usa JPG, PNG, WEBP o PDF.');
+    }
+
+    if (!is_dir(CARPETA_COMPROBANTES)) {
+        mkdir(CARPETA_COMPROBANTES, 0755, true);
+    }
+
+    $nombreArchivo = 'comprobante_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+    $rutaDestino   = CARPETA_COMPROBANTES . $nombreArchivo;
+
+    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
+        responder(false, 'No se pudo guardar el archivo del comprobante en el servidor.');
+    }
+
+    return RUTA_WEB_COMPROBANTES . $nombreArchivo;
+}
+
+function borrarArchivoComprobante(?string $rutaRelativa): void
+{
+    if (empty($rutaRelativa)) return;
+    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
+    if (is_file($rutaFisica)) {
+        @unlink($rutaFisica);
+    }
+}
+
+function guardarCompra()
+{
+    $conectar = conectar_oll_BD();
+
+    $id           = intval($_POST['id'] ?? 0);
+    $proveedor_id = trim($_POST['proveedor_id'] ?? '');
+    $fecha_compra = trim($_POST['fecha_compra'] ?? '');
+    $descripcion  = trim($_POST['descripcion'] ?? '');
+    $detalleJson  = trim($_POST['detalle'] ?? '[]');
+    $eliminarComprobante = ($_POST['eliminar_comprobante'] ?? '') === '1';
+
+    // ── Validaciones básicas ─────────────────────────────────────────────────
+    if (empty($proveedor_id)) responder(false, 'Debes seleccionar un proveedor.');
+    if (empty($fecha_compra)) responder(false, 'La fecha de compra es obligatoria.');
+
+    $proveedor = executeQuery($conectar, "SELECT ruc FROM proveedor WHERE ruc = :ruc", ['ruc' => $proveedor_id]);
+    if (empty($proveedor)) responder(false, 'El proveedor seleccionado no existe.');
+
+    $detalleEntrada = json_decode($detalleJson, true);
+    if (!is_array($detalleEntrada)) $detalleEntrada = [];
+
+    $detalle = [];
+    foreach ($detalleEntrada as $linea) {
+        $materialId      = intval($linea['material_id'] ?? 0);
+        $unidadMedidaId  = intval($linea['unidad_medida_id'] ?? 0);
+        $cantidad        = floatval($linea['cantidad'] ?? 0);
+        $subTotal        = floatval($linea['sub_total'] ?? 0);
+        $total           = isset($linea['total']) && $linea['total'] !== '' ? floatval($linea['total']) : $subTotal;
+        $comentario      = trim($linea['comentario'] ?? '');
+
+        if ($materialId <= 0 || $unidadMedidaId <= 0 || $cantidad <= 0) continue; // fila incompleta, se ignora
+
+        $detalle[] = [
+            'material_id'      => $materialId,
+            'unidad_medida_id' => $unidadMedidaId,
+            'cantidad'         => $cantidad,
+            'sub_total'        => $subTotal,
+            'total'            => $total,
+            'comentario'       => $comentario ?: null,
+        ];
+    }
+
+    if (empty($detalle)) {
+        responder(false, 'Debes agregar al menos un material con cantidad y unidad de medida válidas.');
+    }
+
+    // Verificamos que todos los materiales existan y traemos su nombre para el snapshot js_detalle
+    $materialesIds = array_column($detalle, 'material_id');
+    $placeholders  = [];
+    $paramsIn      = [];
+    foreach (array_unique($materialesIds) as $i => $mid) {
+        $key = "mid$i";
+        $placeholders[] = ":$key";
+        $paramsIn[$key] = $mid;
+    }
+    $materialesInfo = executeQuery(
+        $conectar,
+        "SELECT id, nombre FROM material WHERE id IN (" . implode(',', $placeholders) . ")",
+        $paramsIn
+    );
+    $nombresMaterial = [];
+    foreach ($materialesInfo as $m) $nombresMaterial[$m['id']] = $m['nombre'];
+
+    // Verificamos que todas las unidades de medida usadas existan y traemos su
+    // equivalencia para poder calcular cantidad_base (la que mueve el stock).
+    $unidadesIds     = array_column($detalle, 'unidad_medida_id');
+    $placeholdersU   = [];
+    $paramsInU       = [];
+    foreach (array_unique($unidadesIds) as $i => $uid) {
+        $key = "uid$i";
+        $placeholdersU[] = ":$key";
+        $paramsInU[$key] = $uid;
+    }
+    $unidadesInfo = executeQuery(
+        $conectar,
+        "SELECT id, nombre, nombre_corto, equivalencia FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
+        $paramsInU
+    );
+    $infoUnidad = [];
+    foreach ($unidadesInfo as $u) $infoUnidad[$u['id']] = $u;
+
+    foreach ($detalle as &$linea) {
+        if (!isset($nombresMaterial[$linea['material_id']])) {
+            responder(false, 'Uno de los materiales seleccionados ya no existe.');
+        }
+        if (!isset($infoUnidad[$linea['unidad_medida_id']])) {
+            responder(false, 'Una de las unidades de medida seleccionadas ya no existe.');
+        }
+        $equivalencia = floatval($infoUnidad[$linea['unidad_medida_id']]['equivalencia'] ?? 1);
+        $linea['cantidad_base'] = $linea['cantidad'] * $equivalencia;
+    }
+    unset($linea);
+
+    $totalCompra = array_sum(array_column($detalle, 'total'));
+
+    $jsDetalleSnapshot = array_map(function ($linea) use ($nombresMaterial, $infoUnidad) {
+        return [
+            'material_id'      => $linea['material_id'],
+            'material_nombre'  => $nombresMaterial[$linea['material_id']],
+            'unidad_medida_id' => $linea['unidad_medida_id'],
+            'unidad_nombre'    => $infoUnidad[$linea['unidad_medida_id']]['nombre'] ?? null,
+            'cantidad'         => $linea['cantidad'],
+            'cantidad_base'    => $linea['cantidad_base'],
+            'sub_total'        => $linea['sub_total'],
+            'total'            => $linea['total'],
+            'comentario'       => $linea['comentario'],
+        ];
+    }, $detalle);
+    $jsDetalleJson = json_encode($jsDetalleSnapshot, JSON_UNESCAPED_UNICODE);
+
+    // ── Comprobante ──────────────────────────────────────────────────────────
+    $rutaNuevoComprobante = subirComprobante(); // null si no mandaron archivo nuevo
+
+    $conectar->beginTransaction();
+    try {
+        if ($id === 0) {
+            // ── CREACIÓN ─────────────────────────────────────────────────────
+            $cambios = [[
+                'campo' => 'Compra', 'valor_antes' => '(nueva)',
+                'valor_despues' => count($detalle) . ' material(es), total S/ ' . number_format($totalCompra, 2),
+            ]];
+            $movimiento   = obtenerMovimientoSesion('crear', $cambios);
+            $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+            $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+            $nuevaCompra = executeQuery($conectar, "
+                INSERT INTO compra (
+                    proveedor_id, fecha_compra, img_comprobante, descripcion,
+                    total, js_detalle, created_at, js_session, js_historial
+                ) VALUES (
+                    :proveedor_id, :fecha_compra, :img_comprobante, :descripcion,
+                    :total, :js_detalle::jsonb, NOW(), :js_session, :js_historial
+                ) RETURNING id
+            ", [
+                'proveedor_id'    => $proveedor_id,
+                'fecha_compra'    => $fecha_compra,
+                'img_comprobante' => $rutaNuevoComprobante,
+                'descripcion'     => $descripcion ?: null,
+                'total'           => $totalCompra,
+                'js_detalle'      => $jsDetalleJson,
+                'js_session'      => $js_session,
+                'js_historial'    => $js_historial,
+            ]);
+            $compraId = $nuevaCompra[0]['id'] ?? null;
+            if (!$compraId) throw new Exception('No se pudo crear la cabecera de la compra.');
+
+            insertarLineasYSumarStock($conectar, $compraId, $detalle);
+
+            $conectar->commit();
+            responder(true, 'Compra registrada correctamente.', ['id' => $compraId, 'modo' => 'crear']);
+        } else {
+            // ── EDICIÓN ──────────────────────────────────────────────────────
+            $actual = executeQuery($conectar, "SELECT * FROM compra WHERE id = :id", ['id' => $id]);
+            if (empty($actual)) throw new Exception('Compra no encontrada.');
+            if (!empty($actual[0]['deleted_at'])) {
+                throw new Exception('No puedes editar una compra inactiva. Reactívala primero.');
+            }
+            $compraAnterior = $actual[0];
+
+            // Revertimos stock de las líneas activas actuales (usando cantidad_base,
+            // no cantidad) y las eliminamos físicamente
+            $lineasAnteriores = executeQuery(
+                $conectar,
+                "SELECT * FROM rel_compra_material WHERE compra_id = :id AND deleted_at IS NULL",
+                ['id' => $id]
+            );
+            foreach ($lineasAnteriores as $linea) {
+                $cantidadRevertir = $linea['cantidad_base'] ?? $linea['cantidad']; // fallback por si es una línea antigua sin cantidad_base
+                executeNonQuery(
+                    $conectar,
+                    "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
+                    ['cantidad' => $cantidadRevertir, 'mid' => $linea['material_id']]
+                );
+            }
+            executeNonQuery($conectar, "DELETE FROM rel_compra_material WHERE compra_id = :id", ['id' => $id]);
+
+            // Insertamos las líneas nuevas y sumamos su cantidad_base al stock
+            insertarLineasYSumarStock($conectar, $id, $detalle);
+
+            // Comprobante: si subieron uno nuevo, reemplaza; si marcaron "eliminar", lo quitamos;
+            // si no, se mantiene el que ya había.
+            $rutaFinalComprobante = $compraAnterior['img_comprobante'];
+            if ($rutaNuevoComprobante !== null) {
+                borrarArchivoComprobante($compraAnterior['img_comprobante']);
+                $rutaFinalComprobante = $rutaNuevoComprobante;
+            } elseif ($eliminarComprobante) {
+                borrarArchivoComprobante($compraAnterior['img_comprobante']);
+                $rutaFinalComprobante = null;
+            }
+
+            $cambios = [[
+                'campo' => 'Compra', 'valor_antes' => 'total S/ ' . number_format($compraAnterior['total'], 2),
+                'valor_despues' => 'total S/ ' . number_format($totalCompra, 2) . ' (' . count($detalle) . ' material(es))',
+            ]];
+            $movimiento   = obtenerMovimientoSesion('editar', $cambios);
+            $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+            $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+            executeNonQuery($conectar, "
+                UPDATE compra SET
+                    proveedor_id    = :proveedor_id,
+                    fecha_compra    = :fecha_compra,
+                    img_comprobante = :img_comprobante,
+                    descripcion     = :descripcion,
+                    total           = :total,
+                    js_detalle      = :js_detalle::jsonb,
+                    update_at       = NOW(),
+                    js_session      = :js_session,
+                    js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                WHERE id = :id
+            ", [
+                'proveedor_id'    => $proveedor_id,
+                'fecha_compra'    => $fecha_compra,
+                'img_comprobante' => $rutaFinalComprobante,
+                'descripcion'     => $descripcion ?: null,
+                'total'           => $totalCompra,
+                'js_detalle'      => $jsDetalleJson,
+                'js_session'      => $js_session,
+                'js_historial'    => $js_historial,
+                'id'              => $id,
+            ]);
+
+            $conectar->commit();
+            responder(true, 'Compra actualizada correctamente.', ['id' => $id, 'modo' => 'editar']);
+        }
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        // Si habíamos subido un archivo nuevo y la transacción falló, lo borramos para no dejar huérfanos
+        if ($rutaNuevoComprobante !== null) borrarArchivoComprobante($rutaNuevoComprobante);
+        error_log("Error guardando compra: " . $e->getMessage());
+        responder(false, 'No se pudo guardar la compra: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Inserta las líneas de detalle de una compra y suma cantidad_base al stock
+ * del material correspondiente (NUNCA cantidad, que está en la unidad que
+ * eligió el usuario y puede no coincidir con la unidad base del material).
+ */
+function insertarLineasYSumarStock($conectar, int $compraId, array $detalle): void
+{
+    foreach ($detalle as $linea) {
+        $movimiento   = obtenerMovimientoSesion('crear_linea');
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+        executeNonQuery($conectar, "
+            INSERT INTO rel_compra_material (
+                compra_id, material_id, cantidad, unidad_medida_id, cantidad_base,
+                sub_total, total, comentario,
+                created_at, js_session, js_historial
+            ) VALUES (
+                :compra_id, :material_id, :cantidad, :unidad_medida_id, :cantidad_base,
+                :sub_total, :total, :comentario,
+                NOW(), :js_session, :js_historial
+            )
+        ", [
+            'compra_id'        => $compraId,
+            'material_id'      => $linea['material_id'],
+            'cantidad'         => $linea['cantidad'],
+            'unidad_medida_id' => $linea['unidad_medida_id'],
+            'cantidad_base'    => $linea['cantidad_base'],
+            'sub_total'        => $linea['sub_total'],
+            'total'            => $linea['total'],
+            'comentario'       => $linea['comentario'],
+            'js_session'       => $js_session,
+            'js_historial'     => $js_historial,
+        ]);
+
+        executeNonQuery(
+            $conectar,
+            "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+            ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
+        );
+    }
+}
+
+// Soft delete: revierte el stock (cantidad_base) de las líneas activas y desactiva compra + líneas.
+function eliminarCompra()
+{
+    $conectar = conectar_oll_BD();
+    $id = intval($_POST['id'] ?? 0);
+    if (!$id) responder(false, 'ID inválido.');
+
+    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM compra WHERE id = :id", ['id' => $id]);
+    if (empty($existe)) responder(false, 'Compra no encontrada.');
+    if (!empty($existe[0]['deleted_at'])) responder(false, 'Esta compra ya estaba inactiva.');
+
+    $conectar->beginTransaction();
+    try {
+        $lineas = executeQuery(
+            $conectar,
+            "SELECT * FROM rel_compra_material WHERE compra_id = :id AND deleted_at IS NULL",
+            ['id' => $id]
+        );
+
+        foreach ($lineas as $linea) {
+            $cantidadRevertir = $linea['cantidad_base'] ?? $linea['cantidad'];
+            executeNonQuery(
+                $conectar,
+                "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
+                ['cantidad' => $cantidadRevertir, 'mid' => $linea['material_id']]
+            );
+        }
+
+        executeNonQuery(
+            $conectar,
+            "UPDATE rel_compra_material SET deleted_at = NOW(), update_at = NOW() WHERE compra_id = :id AND deleted_at IS NULL",
+            ['id' => $id]
+        );
+
+        $cambios = [[
+            'campo' => 'Estado', 'valor_antes' => 'Activa', 'valor_despues' => 'Inactiva (stock revertido)',
+        ]];
+        $movimiento   = obtenerMovimientoSesion('desactivar', $cambios);
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+        executeNonQuery(
+            $conectar,
+            "UPDATE compra SET
+                deleted_at   = NOW(),
+                update_at    = NOW(),
+                js_session   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id",
+            ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]
+        );
+
+        $conectar->commit();
+        responder(true, 'Compra desactivada y stock revertido correctamente.');
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error desactivando compra: " . $e->getMessage());
+        responder(false, 'No se pudo desactivar la compra: ' . $e->getMessage());
+    }
+}
+
+// Restaura las líneas que fueron desactivadas junto con la compra y vuelve a sumar cantidad_base al stock.
+function reactivarCompra()
+{
+    $conectar = conectar_oll_BD();
+    $id = intval($_POST['id'] ?? 0);
+    if (!$id) responder(false, 'ID inválido.');
+
+    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM compra WHERE id = :id", ['id' => $id]);
+    if (empty($existe)) responder(false, 'Compra no encontrada.');
+    if (empty($existe[0]['deleted_at'])) responder(false, 'Esta compra ya estaba activa.');
+
+    $conectar->beginTransaction();
+    try {
+        $lineas = executeQuery(
+            $conectar,
+            "SELECT * FROM rel_compra_material WHERE compra_id = :id AND deleted_at IS NOT NULL",
+            ['id' => $id]
+        );
+
+        foreach ($lineas as $linea) {
+            $cantidadRestaurar = $linea['cantidad_base'] ?? $linea['cantidad'];
+            executeNonQuery(
+                $conectar,
+                "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                ['cantidad' => $cantidadRestaurar, 'mid' => $linea['material_id']]
+            );
+        }
+
+        executeNonQuery(
+            $conectar,
+            "UPDATE rel_compra_material SET deleted_at = NULL, update_at = NOW() WHERE compra_id = :id AND deleted_at IS NOT NULL",
+            ['id' => $id]
+        );
+
+        $cambios = [[
+            'campo' => 'Estado', 'valor_antes' => 'Inactiva', 'valor_despues' => 'Activa (stock restaurado)',
+        ]];
+        $movimiento   = obtenerMovimientoSesion('reactivar', $cambios);
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+        executeNonQuery(
+            $conectar,
+            "UPDATE compra SET
+                deleted_at   = NULL,
+                update_at    = NOW(),
+                js_session   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id",
+            ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]
+        );
+
+        $conectar->commit();
+        responder(true, 'Compra reactivada y stock restaurado correctamente.');
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error reactivando compra: " . $e->getMessage());
+        responder(false, 'No se pudo reactivar la compra: ' . $e->getMessage());
+    }
+}
+
+// =============================================================================
+// HELPER
+// =============================================================================
+
+function responder(bool $ok, string $msg, array $extra = []): void
+{
+    if (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json');
+    echo json_encode(array_merge(['success' => $ok, 'message' => $msg], $extra));
+    exit;
+}
