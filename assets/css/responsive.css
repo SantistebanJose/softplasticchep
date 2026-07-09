@@ -198,3 +198,53 @@
   .pc-sidebar-brand-text .sub { display: none; }
   .pc-page-title h1 { font-size: 17px; }
 }
+
+
+/* ------------------------------------------------------------
+   6) DETALLE DE COMPRA — badge de conversión + alerta de unidad
+   ------------------------------------------------------------ */
+.pc-conversion-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--pc-blue, #0B4DA6);
+  background: var(--pc-blue-light, #E6F1FB);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pc-conversion-badge i { font-size: 10px; }
+
+.pc-unidad-alerta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--pc-red, #E31937);
+}
+
+/* En mobile, la tabla de detalle de compra pasa a modo tarjeta,
+   igual que el resto de tablas del sistema. */
+@media (max-width: 640px) {
+  #tablaDetalleCompra.pc-table tbody td {
+    text-align: right;
+  }
+  #tablaDetalleCompra.pc-table tbody td .form-select,
+  #tablaDetalleCompra.pc-table tbody td .form-control {
+    text-align: right;
+  }
+  #tablaDetalleCompra.pc-table tbody td.pc-td-fila-acciones {
+    justify-content: flex-end;
+  }
+  #tablaDetalleCompra.pc-table tbody td.pc-td-fila-acciones::before {
+    display: none;
+  }
+  .pc-conversion-badge, .pc-unidad-alerta {
+    justify-content: flex-end;
+    width: 100%;
+    text-align: right;
+  }
+}

@@ -6,12 +6,12 @@
  *
  * Tablas reales:
  *   compra (id, proveedor_id -> proveedor.ruc, fecha_compra, img_comprobante,
- *           descripcion, total, js_detalle jsonb, js_session, js_historial,
- *           created_at, update_at, deleted_at)
+ *           descripcion, total, total_img_cargado, js_detalle jsonb, js_session,
+ *           js_historial, created_at, update_at, deleted_at)
  *   rel_compra_material (id, compra_id, material_id, cantidad, unidad_medida_id,
  *           cantidad_base, sub_total, total, comentario, js_session, js_historial,
  *           created_at, update_at, deleted_at)
- *   unidad_medida (id, nombre, nombre_corto, equivalencia, ...)
+ *   unidad_medida (id, nombre, nombre_corto, unidad_base_id, equivalencia, ...)
  *
  * UNIDAD DE MEDIDA POR LÍNEA:
  *   - Cada línea de compra guarda la unidad en la que se compró
@@ -23,6 +23,25 @@
  *     vez al guardar y se persiste, no se recalcula después.
  *   - TODO movimiento de stock (crear, editar, desactivar, reactivar)
  *     usa cantidad_base, NUNCA cantidad.
+ *   - `sub_total` en rel_compra_material representa el PRECIO UNITARIO
+ *     (P.U) de la línea; `total` = cantidad * sub_total. El nombre de
+ *     columna se mantiene por compatibilidad, pero su significado real
+ *     es P.U, no un subtotal de línea.
+ *
+ * VALIDACIÓN DE FAMILIA (unidad ↔ material):
+ *   - La unidad elegida en cada línea debe pertenecer a la misma familia
+ *     que la unidad base del material: o ES esa unidad raíz, o es una
+ *     compuesta cuyo unidad_base_id apunta exactamente a esa raíz.
+ *     Se valida en el backend además del frontend, para que nadie
+ *     pueda colar una unidad incompatible manipulando el request.
+ *
+ * total_img_cargado:
+ *   - Campo opcional (nullable) en `compra`. Guarda el monto REAL que
+ *     figura en el comprobante subido (img_comprobante), que puede no
+ *     coincidir con `total` (suma calculada de las líneas de material)
+ *     por fletes, descuentos, redondeos, etc. Pensado para alimentar
+ *     el futuro módulo de egresos: el egreso real de caja usa este
+ *     campo (o `total` como fallback si no se cargó monto de comprobante).
  *
  * REGLAS DE STOCK (material.stock_actual):
  *   - Crear compra           -> SUMA cantidad_base de cada línea al stock del material.
@@ -143,7 +162,9 @@ function buscarMateriales()
     responder(true, 'OK', ['materiales' => $result]);
 }
 
-// Lista de unidades de medida disponibles para elegir en cada línea de compra.
+// Lista general de unidades de medida (se mantiene por compatibilidad; el
+// selector de unidad por línea en el modal ya NO usa esta acción, usa
+// LISTARUNIDADESCOMPATIBLES de clssUnidadMedida.php para filtrar por familia).
 function buscarUnidades()
 {
     $conectar = conectar_oll_BD();
@@ -197,6 +218,8 @@ function listarCompras()
         $params['fecha_hasta'] = $fecha_hasta;
     }
 
+    // c.* ya incluye total_img_cargado automáticamente, no se requiere tocar
+    // esta consulta para exponer el nuevo campo al frontend.
     $sql = "
         SELECT
             c.*,
@@ -335,9 +358,17 @@ function guardarCompra()
     $detalleJson  = trim($_POST['detalle'] ?? '[]');
     $eliminarComprobante = ($_POST['eliminar_comprobante'] ?? '') === '1';
 
+    // Monto real del comprobante subido (para el futuro módulo de egresos).
+    // Opcional: si no lo mandan o mandan vacío, queda NULL.
+    $totalImgCargadoRaw = trim($_POST['total_img_cargado'] ?? '');
+    $totalImgCargado = ($totalImgCargadoRaw !== '') ? floatval($totalImgCargadoRaw) : null;
+
     // ── Validaciones básicas ─────────────────────────────────────────────────
     if (empty($proveedor_id)) responder(false, 'Debes seleccionar un proveedor.');
     if (empty($fecha_compra)) responder(false, 'La fecha de compra es obligatoria.');
+    if ($totalImgCargado !== null && $totalImgCargado < 0) {
+        responder(false, 'El monto del comprobante no puede ser negativo.');
+    }
 
     $proveedor = executeQuery($conectar, "SELECT ruc FROM proveedor WHERE ruc = :ruc", ['ruc' => $proveedor_id]);
     if (empty($proveedor)) responder(false, 'El proveedor seleccionado no existe.');
@@ -350,7 +381,7 @@ function guardarCompra()
         $materialId      = intval($linea['material_id'] ?? 0);
         $unidadMedidaId  = intval($linea['unidad_medida_id'] ?? 0);
         $cantidad        = floatval($linea['cantidad'] ?? 0);
-        $subTotal        = floatval($linea['sub_total'] ?? 0);
+        $subTotal        = floatval($linea['sub_total'] ?? 0); // P.U (precio unitario) de la línea
         $total           = isset($linea['total']) && $linea['total'] !== '' ? floatval($linea['total']) : $subTotal;
         $comentario      = trim($linea['comentario'] ?? '');
 
@@ -370,7 +401,9 @@ function guardarCompra()
         responder(false, 'Debes agregar al menos un material con cantidad y unidad de medida válidas.');
     }
 
-    // Verificamos que todos los materiales existan y traemos su nombre para el snapshot js_detalle
+    // Traemos los materiales usados junto con su unidad_medida_id (la unidad
+    // RAÍZ del material, en la que se lleva el stock). La necesitamos para
+    // el snapshot y para validar que la unidad elegida sea de su misma familia.
     $materialesIds = array_column($detalle, 'material_id');
     $placeholders  = [];
     $paramsIn      = [];
@@ -381,14 +414,14 @@ function guardarCompra()
     }
     $materialesInfo = executeQuery(
         $conectar,
-        "SELECT id, nombre FROM material WHERE id IN (" . implode(',', $placeholders) . ")",
+        "SELECT id, nombre, unidad_medida_id FROM material WHERE id IN (" . implode(',', $placeholders) . ")",
         $paramsIn
     );
-    $nombresMaterial = [];
-    foreach ($materialesInfo as $m) $nombresMaterial[$m['id']] = $m['nombre'];
+    $infoMaterial = [];
+    foreach ($materialesInfo as $m) $infoMaterial[$m['id']] = $m; // id, nombre, unidad_medida_id
 
-    // Verificamos que todas las unidades de medida usadas existan y traemos su
-    // equivalencia para poder calcular cantidad_base (la que mueve el stock).
+    // Traemos las unidades usadas junto con unidad_base_id, para saber a qué
+    // familia pertenece cada una (si unidad_base_id es NULL, es ella misma la raíz).
     $unidadesIds     = array_column($detalle, 'unidad_medida_id');
     $placeholdersU   = [];
     $paramsInU       = [];
@@ -399,35 +432,61 @@ function guardarCompra()
     }
     $unidadesInfo = executeQuery(
         $conectar,
-        "SELECT id, nombre, nombre_corto, equivalencia FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
+        "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
         $paramsInU
     );
     $infoUnidad = [];
     foreach ($unidadesInfo as $u) $infoUnidad[$u['id']] = $u;
 
     foreach ($detalle as &$linea) {
-        if (!isset($nombresMaterial[$linea['material_id']])) {
+        if (!isset($infoMaterial[$linea['material_id']])) {
             responder(false, 'Uno de los materiales seleccionados ya no existe.');
         }
         if (!isset($infoUnidad[$linea['unidad_medida_id']])) {
             responder(false, 'Una de las unidades de medida seleccionadas ya no existe.');
         }
-        $equivalencia = floatval($infoUnidad[$linea['unidad_medida_id']]['equivalencia'] ?? 1);
+
+        $materialActual = $infoMaterial[$linea['material_id']];
+        $unidadElegida  = $infoUnidad[$linea['unidad_medida_id']];
+        $raizMaterialId = $materialActual['unidad_medida_id']; // puede ser NULL
+
+        // ── Validación de familia ────────────────────────────────────────────
+        // La unidad elegida en la línea debe pertenecer a la misma familia que
+        // la unidad base del material: o ES esa raíz, o es una compuesta cuyo
+        // unidad_base_id apunta exactamente a esa raíz. Si el material no tiene
+        // unidad base asignada (caso legado/opcional), no hay forma de validar,
+        // así que lo dejamos pasar tal cual estaba antes.
+        if ($raizMaterialId !== null) {
+            $esLaMismaRaiz           = ((int)$linea['unidad_medida_id'] === (int)$raizMaterialId);
+            $esCompuestaDeEsaFamilia = ((int)($unidadElegida['unidad_base_id'] ?? 0) === (int)$raizMaterialId);
+
+            if (!$esLaMismaRaiz && !$esCompuestaDeEsaFamilia) {
+                responder(
+                    false,
+                    'La unidad "' . $unidadElegida['nombre'] . '" no es compatible con el material "'
+                    . $materialActual['nombre'] . '". Elige la unidad base del material o una unidad '
+                    . 'compuesta de su misma familia (ej: si el material es por kg, usa Kilogramo, '
+                    . 'Saco 25kg, Bolsa 25kg, etc.).'
+                );
+            }
+        }
+
+        $equivalencia = floatval($unidadElegida['equivalencia'] ?? 1);
         $linea['cantidad_base'] = $linea['cantidad'] * $equivalencia;
     }
     unset($linea);
 
     $totalCompra = array_sum(array_column($detalle, 'total'));
 
-    $jsDetalleSnapshot = array_map(function ($linea) use ($nombresMaterial, $infoUnidad) {
+    $jsDetalleSnapshot = array_map(function ($linea) use ($infoMaterial, $infoUnidad) {
         return [
             'material_id'      => $linea['material_id'],
-            'material_nombre'  => $nombresMaterial[$linea['material_id']],
+            'material_nombre'  => $infoMaterial[$linea['material_id']]['nombre'],
             'unidad_medida_id' => $linea['unidad_medida_id'],
             'unidad_nombre'    => $infoUnidad[$linea['unidad_medida_id']]['nombre'] ?? null,
             'cantidad'         => $linea['cantidad'],
             'cantidad_base'    => $linea['cantidad_base'],
-            'sub_total'        => $linea['sub_total'],
+            'sub_total'        => $linea['sub_total'], // P.U de la línea
             'total'            => $linea['total'],
             'comentario'       => $linea['comentario'],
         ];
@@ -452,20 +511,21 @@ function guardarCompra()
             $nuevaCompra = executeQuery($conectar, "
                 INSERT INTO compra (
                     proveedor_id, fecha_compra, img_comprobante, descripcion,
-                    total, js_detalle, created_at, js_session, js_historial
+                    total, total_img_cargado, js_detalle, created_at, js_session, js_historial
                 ) VALUES (
                     :proveedor_id, :fecha_compra, :img_comprobante, :descripcion,
-                    :total, :js_detalle::jsonb, NOW(), :js_session, :js_historial
+                    :total, :total_img_cargado, :js_detalle::jsonb, NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
-                'proveedor_id'    => $proveedor_id,
-                'fecha_compra'    => $fecha_compra,
-                'img_comprobante' => $rutaNuevoComprobante,
-                'descripcion'     => $descripcion ?: null,
-                'total'           => $totalCompra,
-                'js_detalle'      => $jsDetalleJson,
-                'js_session'      => $js_session,
-                'js_historial'    => $js_historial,
+                'proveedor_id'      => $proveedor_id,
+                'fecha_compra'      => $fecha_compra,
+                'img_comprobante'   => $rutaNuevoComprobante,
+                'descripcion'       => $descripcion ?: null,
+                'total'             => $totalCompra,
+                'total_img_cargado' => $totalImgCargado,
+                'js_detalle'        => $jsDetalleJson,
+                'js_session'        => $js_session,
+                'js_historial'      => $js_historial,
             ]);
             $compraId = $nuevaCompra[0]['id'] ?? null;
             if (!$compraId) throw new Exception('No se pudo crear la cabecera de la compra.');
@@ -524,26 +584,28 @@ function guardarCompra()
 
             executeNonQuery($conectar, "
                 UPDATE compra SET
-                    proveedor_id    = :proveedor_id,
-                    fecha_compra    = :fecha_compra,
-                    img_comprobante = :img_comprobante,
-                    descripcion     = :descripcion,
-                    total           = :total,
-                    js_detalle      = :js_detalle::jsonb,
-                    update_at       = NOW(),
-                    js_session      = :js_session,
-                    js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                    proveedor_id       = :proveedor_id,
+                    fecha_compra       = :fecha_compra,
+                    img_comprobante    = :img_comprobante,
+                    descripcion        = :descripcion,
+                    total              = :total,
+                    total_img_cargado  = :total_img_cargado,
+                    js_detalle         = :js_detalle::jsonb,
+                    update_at          = NOW(),
+                    js_session         = :js_session,
+                    js_historial       = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
                 WHERE id = :id
             ", [
-                'proveedor_id'    => $proveedor_id,
-                'fecha_compra'    => $fecha_compra,
-                'img_comprobante' => $rutaFinalComprobante,
-                'descripcion'     => $descripcion ?: null,
-                'total'           => $totalCompra,
-                'js_detalle'      => $jsDetalleJson,
-                'js_session'      => $js_session,
-                'js_historial'    => $js_historial,
-                'id'              => $id,
+                'proveedor_id'      => $proveedor_id,
+                'fecha_compra'      => $fecha_compra,
+                'img_comprobante'   => $rutaFinalComprobante,
+                'descripcion'       => $descripcion ?: null,
+                'total'             => $totalCompra,
+                'total_img_cargado' => $totalImgCargado,
+                'js_detalle'        => $jsDetalleJson,
+                'js_session'        => $js_session,
+                'js_historial'      => $js_historial,
+                'id'                => $id,
             ]);
 
             $conectar->commit();

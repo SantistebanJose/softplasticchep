@@ -66,6 +66,11 @@ include("header.php");
             <select class="form-select" name="unidad_medida_id" id="material_unidad_medida_id">
                 <option value="">Sin unidad de medida</option>
             </select>
+            <div class="form-text">
+                Solo se muestran unidades <strong>raíz</strong> (ej: Kilogramo, Unidad, Litro).
+                Las unidades compuestas (ej: Saco 25kg, Rollo 50m) se eligen únicamente al registrar
+                una compra, y el sistema convierte automáticamente a esta unidad para actualizar el stock.
+            </div>
           </div>
 
           <div class="row">
@@ -103,7 +108,6 @@ document.addEventListener('DOMContentLoaded', () => {
             `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
-    // ── Búsqueda automática ──────────────────────────────────────────────────
     let debounceTimer = null;
     document.getElementById('fmat_texto').addEventListener('input', () => {
         clearTimeout(debounceTimer);
@@ -135,9 +139,15 @@ async function llamar(url, accion, params = {}) {
 const llamarMateriales = (accion, params = {}) => llamar(CONTROLADOR_MATERIALES, accion, params);
 const llamarUnidades   = (accion, params = {}) => llamar(CONTROLADOR_UNIDADES, accion, params);
 
-// ── Selector de unidades (solo activas) ──────────────────────────────────────
+// ── Selector de unidades: solo RAÍZ, activas ─────────────────────────────────
+// Una unidad "compuesta" (ej. Saco 25kg, unidad_base_id -> Kilogramo) NO debe
+// poder asignarse como unidad propia de un material: rompería la conversión
+// que se usa en Compras (cantidad_base = cantidad_comprada * equivalencia),
+// porque esa fórmula asume que el stock del material ya está en su unidad raíz.
+// El filtro real vive en el backend (LISTARUNIDADESRAIZ + validación en
+// GUARDARMATERIAL); aquí solo consumimos esa acción dedicada.
 async function cargarUnidadesSelect() {
-    const json = await llamarUnidades('LISTARUNIDADESMEDIDA', { texto: '', estado: 'activa' });
+    const json = await llamarUnidades('LISTARUNIDADESRAIZ');
     const select = document.getElementById('material_unidad_medida_id');
     if (!json.success) return;
 

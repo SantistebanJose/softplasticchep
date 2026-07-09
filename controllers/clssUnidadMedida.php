@@ -3,9 +3,11 @@
 /**
  * controllers/clssUnidadMedida.php
  * Controlador del módulo de Unidad de Medida
- * Tabla real: unidad_medida (id, nombre, nombre_corto, js_session, js_historial, created_at, update_at, deleted_at)
+ * Tabla real: unidad_medida (id, nombre, nombre_corto, unidad_base_id, equivalencia,
+ *             js_session, js_historial, created_at, update_at, deleted_at)
+ * unidad_base_id NULL => unidad RAÍZ (kg, metro, unidad...). NOT NULL => unidad COMPUESTA
+ * que pertenece a la familia de esa raíz (ej: "Saco 25kg" -> raíz "Kilogramo").
  * Soft delete vía deleted_at.
- * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
 require_once __DIR__ . '/bd.php';
@@ -21,6 +23,12 @@ function controladorUnidadMedida($accion)
     switch ($accion) {
         case 'LISTARUNIDADESMEDIDA':
             listarUnidadesMedida();
+            break;
+        case 'LISTARUNIDADESRAIZ':
+            listarUnidadesRaiz();
+            break;
+        case 'LISTARUNIDADESCOMPATIBLES':
+            listarUnidadesCompatibles(intval($_POST['unidad_medida_id'] ?? 0));
             break;
         case 'OBTENERUNIDADMEDIDA':
             obtenerUnidadMedida(intval($_POST['id'] ?? 0));
@@ -54,18 +62,57 @@ function listarUnidadesMedida()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(nombre) LIKE LOWER(:texto) OR LOWER(nombre_corto) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(u.nombre) LIKE LOWER(:texto) OR LOWER(u.nombre_corto) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
-        $where[] = "deleted_at IS NULL";
+        $where[] = "u.deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "deleted_at IS NOT NULL";
+        $where[] = "u.deleted_at IS NOT NULL";
     }
 
-    $sql = "SELECT * FROM unidad_medida WHERE " . implode(' AND ', $where) . " ORDER BY nombre";
+    // Traemos también el nombre de la unidad base (familia) para mostrarlo en el listado
+    $sql = "
+        SELECT
+            u.*,
+            b.nombre       AS base_nombre,
+            b.nombre_corto AS base_corto
+        FROM unidad_medida u
+        LEFT JOIN unidad_medida b ON b.id = u.unidad_base_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY COALESCE(b.nombre, u.nombre), u.equivalencia
+    ";
 
     $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['unidades' => $result]);
+}
+
+// Solo unidades RAÍZ (unidad_base_id IS NULL), activas. Para el selector de materiales.
+function listarUnidadesRaiz()
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery(
+        $conectar,
+        "SELECT * FROM unidad_medida WHERE unidad_base_id IS NULL AND deleted_at IS NULL ORDER BY nombre"
+    );
+    responder(true, 'OK', ['unidades' => $result]);
+}
+
+// Unidades compatibles con la familia de una unidad raíz dada: la raíz misma
+// + todas las compuestas que apuntan a ella. Para el selector de compras.
+function listarUnidadesCompatibles($unidadMedidaId)
+{
+    $conectar = conectar_oll_BD();
+    if (!$unidadMedidaId) responder(false, 'Debes indicar la unidad de medida del material.');
+
+    $result = executeQuery(
+        $conectar,
+        "SELECT * FROM unidad_medida
+         WHERE deleted_at IS NULL
+           AND (id = :id OR unidad_base_id = :id)
+         ORDER BY equivalencia",
+        ['id' => $unidadMedidaId]
+    );
     responder(true, 'OK', ['unidades' => $result]);
 }
 
@@ -83,14 +130,9 @@ function obtenerUnidadMedida($id)
     responder(true, 'OK', ['unidad' => $result[0]]);
 }
 
-/**
- * Obtiene la IP real del cliente, considerando proxies/balanceadores comunes.
- */
 function obtenerIpCliente(): string
 {
-    // Si el servidor está detrás de un proxy (Cloudflare, Nginx, etc.)
     if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        // Puede venir una lista "ip_cliente, ip_proxy1, ip_proxy2" — tomamos la primera
         $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
         return trim($ips[0]);
     }
@@ -100,10 +142,6 @@ function obtenerIpCliente(): string
     return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
 }
 
-/**
- * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
- * $cambios: arreglo de ['campo' => .., 'valor_antes' => .., 'valor_despues' => ..]
- */
 function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
     return [
@@ -119,14 +157,6 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
     ];
 }
 
-/**
- * Compara un registro anterior (array asociativo de la BD) contra los datos nuevos
- * y devuelve solo los campos cuyo valor cambió, mapeados con etiqueta legible.
- *
- * $mapaCampos: ['columna_bd' => 'Etiqueta bonita']
- * $anterior:   registro actual tal cual viene de la BD (o [] si es creación)
- * $nuevo:      ['columna_bd' => valor_nuevo]
- */
 function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
 {
     $cambios = [];
@@ -134,7 +164,6 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
         $valorAntes   = $anterior[$campo] ?? null;
         $valorDespues = $nuevo[$campo]    ?? null;
 
-        // Normalizamos vacíos para comparar de forma justa (null vs '' se tratan igual)
         $antesComp   = ($valorAntes   === '' ? null : $valorAntes);
         $despuesComp = ($valorDespues === '' ? null : $valorDespues);
 
@@ -149,6 +178,19 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
     return $cambios;
 }
 
+// Traduce un id de unidad a "Nombre (corto)" legible, para el historial.
+function obtenerNombreUnidadLegible($conectar, $unidadId): string
+{
+    if (empty($unidadId)) return 'Ninguna (es unidad raíz)';
+    $result = executeQuery(
+        $conectar,
+        "SELECT nombre, nombre_corto FROM unidad_medida WHERE id = :id",
+        ['id' => $unidadId]
+    );
+    if (empty($result)) return "Unidad #$unidadId (no encontrada)";
+    return $result[0]['nombre'] . ' (' . $result[0]['nombre_corto'] . ')';
+}
+
 function guardarUnidadMedida()
 {
     $conectar     = conectar_oll_BD();
@@ -156,9 +198,35 @@ function guardarUnidadMedida()
     $nombre       = trim($_POST['nombre'] ?? '');
     $nombreCorto  = trim($_POST['nombre_corto'] ?? '');
 
+    // Si viene vacío, es unidad RAÍZ (NULL). Si viene con valor, es COMPUESTA.
+    $unidadBaseId = !empty($_POST['unidad_base_id']) ? intval($_POST['unidad_base_id']) : null;
+
+    // Si es raíz, equivalencia siempre es 1 (el trigger lo refuerza, pero validamos
+    // aquí también para dar un mensaje de error amigable antes de tocar la BD).
+    if ($unidadBaseId === null) {
+        $equivalencia = 1;
+    } else {
+        $equivalencia = floatval($_POST['equivalencia'] ?? 0);
+    }
+
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre))      responder(false, 'El nombre es obligatorio.');
     if (empty($nombreCorto)) responder(false, 'El nombre corto (abreviatura) es obligatorio.');
+
+    if ($unidadBaseId !== null) {
+        if ($unidadBaseId === $id) responder(false, 'Una unidad no puede ser su propia unidad base.');
+        if ($equivalencia <= 0)    responder(false, 'La equivalencia debe ser mayor a 0 para una unidad compuesta.');
+
+        $base = executeQuery(
+            $conectar,
+            "SELECT id, unidad_base_id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
+            ['id' => $unidadBaseId]
+        );
+        if (empty($base)) responder(false, 'La unidad base seleccionada no existe o está inactiva.');
+        if (!empty($base[0]['unidad_base_id'])) {
+            responder(false, 'La unidad base debe ser una unidad raíz (ej: Kilogramo), no otra compuesta.');
+        }
+    }
 
     // Nombre único (excluyendo el propio registro si es edición)
     $chk = executeQuery(
@@ -168,42 +236,62 @@ function guardarUnidadMedida()
     );
     if (!empty($chk)) responder(false, 'Ya existe una unidad de medida con ese nombre.');
 
-    // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
-        'nombre'       => 'Nombre',
-        'nombre_corto' => 'Abreviatura',
+        'nombre'          => 'Nombre',
+        'nombre_corto'    => 'Abreviatura',
+        'unidad_base_nom' => 'Unidad base (familia)',
+        'equivalencia'    => 'Equivalencia',
     ];
 
     $datosNuevos = [
-        'nombre'       => $nombre,
-        'nombre_corto' => $nombreCorto,
+        'nombre'          => $nombre,
+        'nombre_corto'    => $nombreCorto,
+        'unidad_base_nom' => obtenerNombreUnidadLegible($conectar, $unidadBaseId),
+        'equivalencia'    => $equivalencia,
     ];
 
     if ($id === 0) {
-        // Creación: "antes" está vacío para todos los campos
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-        $result = executeQuery($conectar, "
-            INSERT INTO unidad_medida (nombre, nombre_corto, created_at, js_session, js_historial)
-            VALUES (:nombre, :nombre_corto, NOW(), :js_session, :js_historial)
-            RETURNING id
-        ", [
-            'nombre'       => $datosNuevos['nombre'],
-            'nombre_corto' => $datosNuevos['nombre_corto'],
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
-        ]);
+        try {
+            $result = executeQuery($conectar, "
+                INSERT INTO unidad_medida (nombre, nombre_corto, unidad_base_id, equivalencia, created_at, js_session, js_historial)
+                VALUES (:nombre, :nombre_corto, :unidad_base_id, :equivalencia, NOW(), :js_session, :js_historial)
+                RETURNING id
+            ", [
+                'nombre'         => $datosNuevos['nombre'],
+                'nombre_corto'   => $datosNuevos['nombre_corto'],
+                'unidad_base_id' => $unidadBaseId,
+                'equivalencia'   => $equivalencia,
+                'js_session'     => $js_session,
+                'js_historial'   => $js_historial_nuevo,
+            ]);
+        } catch (Exception $e) {
+            responder(false, 'No se pudo guardar: ' . $e->getMessage());
+        }
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Unidad de medida creada correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
-        // Edición: traemos el registro actual para comparar campo por campo
         $actual = executeQuery($conectar, "SELECT * FROM unidad_medida WHERE id = :id", ['id' => $id]);
         if (empty($actual)) responder(false, 'Unidad de medida no encontrada.');
         $registroAnterior = $actual[0];
+        $registroAnterior['unidad_base_nom'] = obtenerNombreUnidadLegible($conectar, $registroAnterior['unidad_base_id']);
+
+        // Si esta unidad ya tiene compuestas apuntándole y se intenta convertirla en compuesta, bloquear
+        if ($unidadBaseId !== null) {
+            $hijas = executeQuery(
+                $conectar,
+                "SELECT id FROM unidad_medida WHERE unidad_base_id = :id AND deleted_at IS NULL",
+                ['id' => $id]
+            );
+            if (!empty($hijas)) {
+                responder(false, 'Esta unidad es una raíz con unidades compuestas dependiendo de ella; no puede convertirse en compuesta.');
+            }
+        }
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -211,26 +299,33 @@ function guardarUnidadMedida()
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-        executeQuery($conectar, "
-            UPDATE unidad_medida SET
-                nombre       = :nombre,
-                nombre_corto = :nombre_corto,
-                update_at    = NOW(),
-                js_session   = :js_session,
-                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-            WHERE id = :id
-        ", [
-            'nombre'       => $datosNuevos['nombre'],
-            'nombre_corto' => $datosNuevos['nombre_corto'],
-            'id'           => $id,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial_nuevo,
-        ]);
+        try {
+            executeQuery($conectar, "
+                UPDATE unidad_medida SET
+                    nombre          = :nombre,
+                    nombre_corto    = :nombre_corto,
+                    unidad_base_id  = :unidad_base_id,
+                    equivalencia    = :equivalencia,
+                    update_at       = NOW(),
+                    js_session      = :js_session,
+                    js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                WHERE id = :id
+            ", [
+                'nombre'         => $datosNuevos['nombre'],
+                'nombre_corto'   => $datosNuevos['nombre_corto'],
+                'unidad_base_id' => $unidadBaseId,
+                'equivalencia'   => $equivalencia,
+                'id'             => $id,
+                'js_session'     => $js_session,
+                'js_historial'   => $js_historial_nuevo,
+            ]);
+        } catch (Exception $e) {
+            responder(false, 'No se pudo actualizar: ' . $e->getMessage());
+        }
         responder(true, 'Unidad de medida actualizada correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
 }
 
-// Soft delete: se marca deleted_at, no se borra físicamente.
 function eliminarUnidadMedida()
 {
     $conectar = conectar_oll_BD();
@@ -243,7 +338,7 @@ function eliminarUnidadMedida()
         responder(false, 'Esta unidad de medida ya estaba inactiva.');
     }
 
-    // No permitir desactivar una unidad de medida que está en uso por algún material
+    // No permitir desactivar si está en uso por algún material
     $enUso = executeQuery(
         $conectar,
         "SELECT id FROM material WHERE unidad_medida_id = :id AND deleted_at IS NULL",
@@ -251,6 +346,16 @@ function eliminarUnidadMedida()
     );
     if (!empty($enUso)) {
         responder(false, 'No puedes desactivar esta unidad: está siendo usada por uno o más materiales activos.');
+    }
+
+    // No permitir desactivar una unidad raíz que tenga unidades compuestas activas dependiendo de ella
+    $conHijas = executeQuery(
+        $conectar,
+        "SELECT id FROM unidad_medida WHERE unidad_base_id = :id AND deleted_at IS NULL",
+        ['id' => $id]
+    );
+    if (!empty($conHijas)) {
+        responder(false, 'No puedes desactivar esta unidad: tiene unidades compuestas activas de su misma familia (ej: sacos, bolsas).');
     }
 
     $cambios = [[
@@ -312,10 +417,6 @@ function reactivarUnidadMedida()
     );
     responder(true, 'Unidad de medida reactivada correctamente.');
 }
-
-// =============================================================================
-// HELPER
-// =============================================================================
 
 function responder(bool $ok, string $msg, array $extra = []): void
 {

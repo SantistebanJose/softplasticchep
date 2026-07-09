@@ -31,12 +31,14 @@ include("header.php");
             <tr>
                 <th>Nombre</th>
                 <th>Abreviatura</th>
+                <th>Familia</th>
+                <th>Equivalencia</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyUnidades">
-            <tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -57,13 +59,42 @@ include("header.php");
           <div class="mb-2">
             <label class="form-label">Nombre *</label>
             <input type="text" class="form-control" name="nombre" id="unidad_nombre"
-                   placeholder="Ej: Kilogramo" required>
+                   placeholder="Ej: Kilogramo, Saco 25kg" required>
           </div>
 
           <div class="mb-2">
             <label class="form-label">Abreviatura *</label>
             <input type="text" class="form-control" name="nombre_corto" id="unidad_nombre_corto"
-                   placeholder="Ej: kg" required>
+                   placeholder="Ej: kg, saco25" required>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Tipo *</label>
+            <select class="form-select" id="unidad_tipo" onchange="toggleTipoUnidad()">
+                <option value="raiz">Unidad raíz (kg, metro, unidad, litro...)</option>
+                <option value="compuesta">Unidad compuesta (saco, bolsa, rollo, cartón...)</option>
+            </select>
+            <div class="form-text">
+                Una unidad <strong>raíz</strong> es la base de una familia (ej: Kilogramo).
+                Una unidad <strong>compuesta</strong> pertenece a la familia de una raíz y define
+                cuánto equivale de esa raíz (ej: "Saco 25kg" equivale a 25 Kilogramos).
+            </div>
+          </div>
+
+          <div class="mb-2" id="grupo_unidad_base" style="display:none;">
+            <label class="form-label">Unidad base (familia) *</label>
+            <select class="form-select" name="unidad_base_id" id="unidad_base_id">
+                <option value="">Selecciona la unidad raíz...</option>
+            </select>
+          </div>
+
+          <div class="mb-2" id="grupo_equivalencia" style="display:none;">
+            <label class="form-label">Equivalencia *</label>
+            <input type="number" step="0.0001" min="0.0001" class="form-control"
+                   name="equivalencia" id="unidad_equivalencia" placeholder="Ej: 25">
+            <div class="form-text" id="texto_ayuda_equivalencia">
+                ¿A cuántas unidades base equivale una unidad de esta?
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -78,17 +109,17 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php'; // clssUnidadMedida.php vive en su propia carpeta
+const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
 const modalUnidad = new bootstrap.Modal(document.getElementById('modalUnidad'));
+let unidadIdEnEdicion = null; // para excluirla del select de unidad base al editar
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarUnidades().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyUnidades').innerHTML =
-            `<tr><td colspan="4" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
-    // ── Búsqueda automática ──────────────────────────────────────────────────
     let debounceTimer = null;
     document.getElementById('fu_texto').addEventListener('input', () => {
         clearTimeout(debounceTimer);
@@ -117,6 +148,33 @@ async function llamarUnidades(accion, params = {}) {
     }
 }
 
+// ── Toggle Raíz / Compuesta dentro del modal ─────────────────────────────────
+function toggleTipoUnidad() {
+    const esCompuesta = document.getElementById('unidad_tipo').value === 'compuesta';
+    document.getElementById('grupo_unidad_base').style.display   = esCompuesta ? '' : 'none';
+    document.getElementById('grupo_equivalencia').style.display  = esCompuesta ? '' : 'none';
+
+    document.getElementById('unidad_base_id').required     = esCompuesta;
+    document.getElementById('unidad_equivalencia').required = esCompuesta;
+
+    if (!esCompuesta) {
+        document.getElementById('unidad_base_id').value = '';
+        document.getElementById('unidad_equivalencia').value = '';
+    }
+}
+
+// Carga el select de unidades raíz (para elegir la familia de una compuesta).
+// Excluye la unidad que se está editando (una unidad no puede ser su propia base).
+async function cargarSelectUnidadesBase() {
+    const json = await llamarUnidades('LISTARUNIDADESRAIZ');
+    const select = document.getElementById('unidad_base_id');
+    if (!json.success) return;
+
+    const unidades = (json.unidades || []).filter(u => u.id != unidadIdEnEdicion);
+    select.innerHTML = '<option value="">Selecciona la unidad raíz...</option>' +
+        unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+}
+
 // ── Listado ──────────────────────────────────────────────────────────────────
 async function cargarUnidades() {
     const texto  = document.getElementById('fu_texto').value.trim();
@@ -126,13 +184,13 @@ async function cargarUnidades() {
     const tbody = document.getElementById('tbodyUnidades');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const unidades = json.unidades || [];
     if (unidades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay unidades de medida registradas.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay unidades de medida registradas.</td></tr>';
         return;
     }
 
@@ -140,6 +198,11 @@ async function cargarUnidades() {
     <tr id="fila-unidad-${u.id}">
         <td data-label="Nombre">${u.nombre}</td>
         <td data-label="Abreviatura">${u.nombre_corto ?? '-'}</td>
+        <td data-label="Familia">${u.unidad_base_id
+            ? `<span class="badge bg-info text-dark">${u.base_nombre} (${u.base_corto})</span>`
+            : '<span class="badge bg-primary">Raíz</span>'}
+        </td>
+        <td data-label="Equivalencia">${u.unidad_base_id ? `${u.equivalencia} ${u.base_corto}` : '1 (es raíz)'}</td>
         <td data-label="Estado">${!u.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
             : '<span class="badge bg-secondary">Inactivo</span>'}
@@ -160,10 +223,14 @@ async function cargarUnidades() {
 }
 
 // ── Crear / Editar ───────────────────────────────────────────────────────────
-function abrirModalCrearUnidad() {
+async function abrirModalCrearUnidad() {
     document.getElementById('formUnidad').reset();
     document.getElementById('unidad_id').value = '';
     document.getElementById('modalUnidadTitulo').textContent = 'Nueva unidad de medida';
+    document.getElementById('unidad_tipo').value = 'raiz';
+    unidadIdEnEdicion = null;
+    await cargarSelectUnidadesBase();
+    toggleTipoUnidad();
     modalUnidad.show();
 }
 
@@ -172,10 +239,23 @@ async function abrirModalEditarUnidad(id) {
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
     const u = json.unidad;
+    unidadIdEnEdicion = u.id;
+
     document.getElementById('modalUnidadTitulo').textContent = 'Editar unidad de medida';
     document.getElementById('unidad_id').value = u.id;
     document.getElementById('unidad_nombre').value = u.nombre ?? '';
     document.getElementById('unidad_nombre_corto').value = u.nombre_corto ?? '';
+
+    await cargarSelectUnidadesBase();
+
+    const esCompuesta = !!u.unidad_base_id;
+    document.getElementById('unidad_tipo').value = esCompuesta ? 'compuesta' : 'raiz';
+    toggleTipoUnidad();
+
+    if (esCompuesta) {
+        document.getElementById('unidad_base_id').value = u.unidad_base_id;
+        document.getElementById('unidad_equivalencia').value = u.equivalencia;
+    }
 
     modalUnidad.show();
 }
@@ -184,6 +264,12 @@ document.getElementById('formUnidad').addEventListener('submit', async function 
     e.preventDefault();
     const formData = new FormData(this);
     formData.append('accion', 'GUARDARUNIDADMEDIDA');
+
+    // Si es raíz, no mandamos unidad_base_id ni equivalencia (el back los ignora/fuerza a 1 igual)
+    if (document.getElementById('unidad_tipo').value === 'raiz') {
+        formData.delete('unidad_base_id');
+        formData.delete('equivalencia');
+    }
 
     const resp = await fetch(CONTROLADOR_UNIDADES, { method: 'POST', body: formData });
     const json = await resp.json();

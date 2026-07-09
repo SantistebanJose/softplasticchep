@@ -40,13 +40,14 @@ include("header.php");
                 <th>Descripción</th>
                 <th>Materiales</th>
                 <th>Total</th>
+                <th>Monto comprobante</th>
                 <th>Comprobante</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyCompras">
-            <tr><td colspan="9" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -70,14 +71,23 @@ include("header.php");
                     <option value="">Selecciona un proveedor...</option>
                 </select>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-6 mb-2">
                 <label class="form-label">Fecha de compra *</label>
                 <input type="date" class="form-control" id="compra_fecha" required>
             </div>
-            <div class="col-md-3 mb-2">
+          </div>
+
+          <div class="row">
+            <div class="col-md-6 mb-2">
                 <label class="form-label">Comprobante</label>
                 <input type="file" class="form-control" id="compra_comprobante" accept=".jpg,.jpeg,.png,.webp,.pdf">
                 <div class="form-text" id="compra_comprobante_actual"></div>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Monto del comprobante (S/)</label>
+                <input type="number" step="0.01" min="0" class="form-control" id="compra_total_img_cargado"
+                       placeholder="Ej: 1180.00">
+                <div class="form-text">Monto real que figura en el documento subido (para el módulo de egresos).</div>
             </div>
           </div>
 
@@ -97,14 +107,14 @@ include("header.php");
                     <i class="fa-solid fa-plus"></i> Agregar material
                 </button>
             </label>
-            <div class="pc-table-wrap">
+            <div class="pc-table-wrap pc-table-responsive-cards" id="pc-detalle-compra-wrap">
             <table class="pc-table" id="tablaDetalleCompra">
                 <thead>
                     <tr>
                         <th style="min-width:200px">Material</th>
                         <th style="min-width:150px">Unidad</th>
-                        <th style="width:130px">Cantidad</th>
-                        <th style="width:130px">Sub total</th>
+                        <th style="width:110px">Cantidad</th>
+                        <th style="width:110px">P.U</th>
                         <th style="width:130px">Total</th>
                         <th>Comentario</th>
                         <th style="width:40px"></th>
@@ -135,22 +145,24 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-const CONTROLADOR_COMPRAS = 'controllers/clssCompra.php';
+const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
+const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
 
 let modoEdicionCompra = false;
 let compraIdActual = 0;
-let comprobanteActualRuta = null; // ruta que ya está guardada en BD (modo edición)
+let comprobanteActualRuta = null;
 let eliminarComprobanteFlag = false;
 let contadorFilaMaterial = 0;
-let unidadesCache = null; // cache de unidad_medida (id, nombre, nombre_corto, equivalencia)
+let materialesCache = null; // cache de la lista de materiales (BUSCARMATERIALES)
+let unidadesPorFamiliaCache = {}; // cache: raizId -> [unidades compatibles]
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedoresFiltro();
     cargarCompras().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyCompras').innerHTML =
-            `<tr><td colspan="9" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="10" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     let debounceTimer = null;
@@ -163,10 +175,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ── Llamada genérica (para acciones sin archivos) ────────────────────────────
-async function llamarCompras(accion, params = {}) {
+// ── Llamadas genéricas ────────────────────────────────────────────────────
+async function llamar(url, accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_COMPRAS, {
+    const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body
@@ -179,6 +191,8 @@ async function llamarCompras(accion, params = {}) {
         throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
     }
 }
+const llamarCompras  = (accion, params = {}) => llamar(CONTROLADOR_COMPRAS, accion, params);
+const llamarUnidades = (accion, params = {}) => llamar(CONTROLADOR_UNIDADES, accion, params);
 
 function badgeRegistro(deletedAt) {
     return !deletedAt
@@ -192,6 +206,24 @@ function formatearMoneda(n) {
 
 function formatearCantidad(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
+}
+
+// Muestra el monto del comprobante y, si difiere del total calculado por
+// materiales en más de 1 céntimo, agrega un ícono de alerta con el detalle.
+function renderMontoComprobante(c) {
+    if (c.total_img_cargado === null || c.total_img_cargado === undefined) {
+        return '<span class="text-muted">-</span>';
+    }
+    const montoImg = parseFloat(c.total_img_cargado);
+    const montoCalculado = parseFloat(c.total);
+    const diferencia = Math.abs(montoImg - montoCalculado);
+    const texto = formatearMoneda(montoImg);
+    if (diferencia > 0.01) {
+        return `<span title="Difiere del total calculado (${formatearMoneda(montoCalculado)}) por ${formatearMoneda(diferencia)}">
+                    ${texto} <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+                </span>`;
+    }
+    return texto;
 }
 
 // ── Selects auxiliares ───────────────────────────────────────────────────────
@@ -218,17 +250,25 @@ async function cargarProveedoresModal(seleccionarRuc = '') {
 }
 
 async function obtenerOpcionesMateriales() {
+    if (materialesCache) return materialesCache;
     const json = await llamarCompras('BUSCARMATERIALES', {});
-    if (!json.success) return [];
-    return json.materiales;
+    materialesCache = json.success ? json.materiales : [];
+    return materialesCache;
 }
 
-// Trae y cachea las unidades de medida (se comparten en todas las filas de la tabla).
-async function obtenerOpcionesUnidades() {
-    if (unidadesCache) return unidadesCache;
-    const json = await llamarCompras('BUSCARUNIDADES', {});
-    unidadesCache = json.success ? json.unidades : [];
-    return unidadesCache;
+// Trae (y cachea por familia) SOLO las unidades compatibles con la raíz
+// indicada: la raíz misma + las compuestas que apuntan a ella. raizId es
+// el material.unidad_medida_id del material elegido en la fila.
+async function obtenerUnidadesCompatibles(raizId) {
+    const key = raizId || 'sin_unidad';
+    if (unidadesPorFamiliaCache[key]) return unidadesPorFamiliaCache[key];
+    if (!raizId) {
+        unidadesPorFamiliaCache[key] = [];
+        return [];
+    }
+    const json = await llamarUnidades('LISTARUNIDADESCOMPATIBLES', { unidad_medida_id: raizId });
+    unidadesPorFamiliaCache[key] = json.success ? json.unidades : [];
+    return unidadesPorFamiliaCache[key];
 }
 
 // ── Listado ──────────────────────────────────────────────────────────────────
@@ -245,13 +285,13 @@ async function cargarCompras() {
     const tbody = document.getElementById('tbodyCompras');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const compras = json.compras || [];
     if (compras.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No hay compras registradas.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No hay compras registradas.</td></tr>';
         return;
     }
 
@@ -263,6 +303,7 @@ async function cargarCompras() {
             <td data-label="Descripción">${c.descripcion ?? '-'}</td>
             <td data-label="Materiales">${c.items_count}</td>
             <td data-label="Total">${formatearMoneda(c.total)}</td>
+            <td data-label="Monto comprobante">${renderMontoComprobante(c)}</td>
             <td data-label="Comprobante">${c.img_comprobante
                 ? `<a href="${c.img_comprobante}" target="_blank" class="pc-icon-btn" title="Ver comprobante"><i class="fa-solid fa-file-lines"></i></a>`
                 : '-'}</td>
@@ -283,12 +324,10 @@ async function cargarCompras() {
 
 // ── Detalle de materiales (dinámico) ─────────────────────────────────────────
 // datos (modo edición) puede traer: material_id, unidad_medida_id, cantidad,
-// sub_total, total, comentario (tal cual vienen de OBTENERCOMPRA).
+// sub_total (P.U guardado, aunque la BD siga llamándolo sub_total), total,
+// comentario (tal cual vienen de OBTENERCOMPRA).
 async function agregarFilaMaterial(datos = null) {
-    const [materiales, unidades] = await Promise.all([
-        obtenerOpcionesMateriales(),
-        obtenerOpcionesUnidades()
-    ]);
+    const materiales = await obtenerOpcionesMateriales();
     const filaId = 'fila-mat-' + (++contadorFilaMaterial);
     const wrap = document.getElementById('compra_detalle_wrap');
 
@@ -301,43 +340,47 @@ async function agregarFilaMaterial(datos = null) {
          </option>`
     ).join('');
 
-    const opcionesUnidadHtml = unidades.map(u =>
-        `<option value="${u.id}" data-equiv="${u.equivalencia}"
-                 ${datos && datos.unidad_medida_id == u.id ? 'selected' : ''}>
-            ${u.nombre} (${u.nombre_corto})
-         </option>`
-    ).join('');
-
     const tr = document.createElement('tr');
     tr.id = filaId;
     tr.className = 'fila-detalle-material';
     tr.innerHTML = `
-        <td><select class="form-select mat-select" required>
+        <td data-label="Material"><select class="form-select mat-select" required>
                 <option value="">Selecciona...</option>${opcionesMaterialHtml}
             </select></td>
-        <td><select class="form-select mat-unidad" required>
-                <option value="">Selecciona...</option>${opcionesUnidadHtml}
-            </select></td>
-        <td>
+        <td data-label="Unidad">
+            <select class="form-select mat-unidad" required disabled>
+                <option value="">Elige un material primero...</option>
+            </select>
+            <span class="pc-conversion-badge mat-conversion" style="display:none;">
+                <i class="fa-solid fa-arrow-right-arrow-left"></i> <span class="mat-conversion-texto"></span>
+            </span>
+            <span class="pc-unidad-alerta mat-unidad-alerta" style="display:none;">
+                <i class="fa-solid fa-triangle-exclamation"></i> Este material no tiene unidad asignada
+            </span>
+        </td>
+        <td data-label="Cantidad">
             <input type="number" class="form-control mat-cantidad" min="0.01" step="0.01"
                     value="${datos ? datos.cantidad : ''}" required>
-            <div class="form-text mat-conversion"></div>
         </td>
-        <td><input type="number" class="form-control mat-subtotal" min="0" step="0.01"
-                    value="${datos ? datos.sub_total : ''}"></td>
-        <td><input type="number" class="form-control mat-total" min="0" step="0.01"
+        <td data-label="P.U"><input type="number" class="form-control mat-pu" min="0" step="0.01"
+                    value="${datos ? datos.sub_total : ''}" placeholder="0.00"></td>
+        <td data-label="Total"><input type="number" class="form-control mat-total" min="0" step="0.01"
                     value="${datos ? datos.total : ''}"></td>
-        <td><input type="text" class="form-control mat-comentario" placeholder="Opcional"
+        <td data-label="Comentario"><input type="text" class="form-control mat-comentario" placeholder="Opcional"
                     value="${datos ? (datos.comentario ?? '') : ''}"></td>
-        <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove(); recalcularTotalCompra();">
+        <td class="pc-td-fila-acciones"><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove(); recalcularTotalCompra();">
                 <i class="fa-solid fa-xmark"></i></button></td>
     `;
     wrap.appendChild(tr);
 
-    const matSelect      = tr.querySelector('.mat-select');
+    const matSelect       = tr.querySelector('.mat-select');
     const unidadSelect    = tr.querySelector('.mat-unidad');
     const cantidadInput   = tr.querySelector('.mat-cantidad');
-    const conversionDiv   = tr.querySelector('.mat-conversion');
+    const puInput         = tr.querySelector('.mat-pu');
+    const totalInput      = tr.querySelector('.mat-total');
+    const conversionBadge = tr.querySelector('.mat-conversion');
+    const conversionTexto = tr.querySelector('.mat-conversion-texto');
+    const unidadAlerta    = tr.querySelector('.mat-unidad-alerta');
 
     function actualizarConversion() {
         const unidadOpt = unidadSelect.selectedOptions[0];
@@ -346,44 +389,76 @@ async function agregarFilaMaterial(datos = null) {
         const unidadBaseCorto = matOpt ? (matOpt.dataset.unidadCorto || '') : '';
         const cantidad = parseFloat(cantidadInput.value) || 0;
         if (cantidad > 0 && equiv && equiv !== 1) {
-            conversionDiv.textContent = `= ${formatearCantidad(cantidad * equiv)} ${unidadBaseCorto}`.trim();
+            conversionTexto.textContent = `= ${formatearCantidad(cantidad * equiv)} ${unidadBaseCorto}`.trim();
+            conversionBadge.style.display = 'inline-flex';
         } else {
-            conversionDiv.textContent = '';
+            conversionBadge.style.display = 'none';
         }
     }
 
-    // Al elegir un material, si todavía no hay unidad elegida, se autoselecciona
-    // la unidad base de ESE material (el usuario puede cambiarla después).
-    matSelect.addEventListener('change', () => {
-        if (!unidadSelect.value) {
-            const matOpt = matSelect.selectedOptions[0];
-            const unidadIdDefault = matOpt ? matOpt.dataset.unidadId : '';
-            if (unidadIdDefault) unidadSelect.value = unidadIdDefault;
+    // Total = Cantidad × P.U, recalculado en cada tecla. Si el usuario edita
+    // Total a mano, queda "congelado" ahí hasta que vuelva a tocar Cantidad
+    // o P.U (entonces retoma el cálculo automático).
+    function actualizarTotalDesdeCantidadYPU() {
+        const cantidad = parseFloat(cantidadInput.value) || 0;
+        const pu = parseFloat(puInput.value) || 0;
+        totalInput.value = (cantidad * pu).toFixed(2);
+        delete totalInput.dataset.tocadoManual;
+        recalcularTotalCompra();
+    }
+
+    // Carga en el <select> de unidad SOLO las unidades compatibles con la
+    // familia del material elegido: su unidad raíz + las compuestas que
+    // apuntan a ella (LISTARUNIDADESCOMPATIBLES). Si el material no tiene
+    // unidad base asignada, se bloquea el selector y se muestra una alerta
+    // clara en vez de dejarlo como una opción más del combo.
+    async function cargarUnidadesDeLaFila(unidadPreseleccionada = '') {
+        const matOpt = matSelect.selectedOptions[0];
+        const raizId = matOpt ? matOpt.dataset.unidadId : '';
+
+        if (!raizId) {
+            unidadSelect.disabled = true;
+            unidadSelect.innerHTML = '<option value="">Elige un material primero...</option>';
+            unidadAlerta.style.display = matOpt ? 'block' : 'none'; // solo alerta si YA eligió material sin unidad
+            conversionBadge.style.display = 'none';
+            return;
+        }
+
+        unidadAlerta.style.display = 'none';
+        const compatibles = await obtenerUnidadesCompatibles(raizId);
+        unidadSelect.disabled = false;
+        unidadSelect.innerHTML = '<option value="">Selecciona...</option>' +
+            compatibles.map(u => `<option value="${u.id}" data-equiv="${u.equivalencia}"
+                    ${unidadPreseleccionada && unidadPreseleccionada == u.id ? 'selected' : ''}>
+                ${u.nombre} (${u.nombre_corto})
+             </option>`).join('');
+
+        // Si no venía una unidad precargada (edición), se autoselecciona la
+        // raíz del material — siempre está incluida en la lista de compatibles.
+        if (!unidadPreseleccionada) {
+            unidadSelect.value = raizId;
         }
         actualizarConversion();
-    });
-    unidadSelect.addEventListener('change', actualizarConversion);
-    cantidadInput.addEventListener('input', actualizarConversion);
-
-    // Si estamos precargando una fila (edición) sin unidad_medida_id explícita
-    // (líneas antiguas), se usa la unidad base del material como fallback.
-    if (datos && !datos.unidad_medida_id) {
-        const matOpt = matSelect.selectedOptions[0];
-        if (matOpt && matOpt.dataset.unidadId) unidadSelect.value = matOpt.dataset.unidadId;
     }
-    actualizarConversion();
 
-    // Sub total -> autocompleta total (si el usuario no lo tocó manualmente todavía)
-    const subtotalInput = tr.querySelector('.mat-subtotal');
-    const totalInput = tr.querySelector('.mat-total');
-    subtotalInput.addEventListener('input', () => {
-        if (!totalInput.dataset.tocadoManual) totalInput.value = subtotalInput.value;
-        recalcularTotalCompra();
+    matSelect.addEventListener('change', () => cargarUnidadesDeLaFila());
+    unidadSelect.addEventListener('change', actualizarConversion);
+
+    cantidadInput.addEventListener('input', () => {
+        actualizarConversion();
+        if (!totalInput.dataset.tocadoManual) actualizarTotalDesdeCantidadYPU();
     });
+    puInput.addEventListener('input', actualizarTotalDesdeCantidadYPU);
     totalInput.addEventListener('input', () => {
         totalInput.dataset.tocadoManual = '1';
         recalcularTotalCompra();
     });
+
+    // Precarga inicial: si venimos de edición (o ya hay material elegido),
+    // cargamos de una vez las unidades compatibles con la unidad ya guardada.
+    if (datos && datos.material_id) {
+        await cargarUnidadesDeLaFila(datos.unidad_medida_id ?? '');
+    }
 
     recalcularTotalCompra();
 }
@@ -403,7 +478,7 @@ function obtenerDetalleJson() {
         const material_id = fila.querySelector('.mat-select').value;
         const unidad_medida_id = fila.querySelector('.mat-unidad').value;
         const cantidad = fila.querySelector('.mat-cantidad').value;
-        const sub_total = fila.querySelector('.mat-subtotal').value;
+        const precioUnitario = fila.querySelector('.mat-pu').value;
         const total = fila.querySelector('.mat-total').value;
         const comentario = fila.querySelector('.mat-comentario').value.trim();
         if (material_id && unidad_medida_id && cantidad) {
@@ -411,8 +486,8 @@ function obtenerDetalleJson() {
                 material_id,
                 unidad_medida_id,
                 cantidad,
-                sub_total: sub_total || 0,
-                total: total || sub_total || 0,
+                sub_total: precioUnitario || 0, // el backend/BD sigue llamándolo sub_total (= P.U)
+                total: total || ((precioUnitario || 0) * cantidad) || 0,
                 comentario
             });
         }
@@ -426,6 +501,7 @@ function limpiarFormularioCompra() {
     document.getElementById('compra_detalle_wrap').innerHTML = '';
     document.getElementById('compra_comprobante_actual').innerHTML = '';
     document.getElementById('compra_total_visual').textContent = formatearMoneda(0);
+    document.getElementById('compra_total_img_cargado').value = '';
     compraIdActual = 0;
     comprobanteActualRuta = null;
     eliminarComprobanteFlag = false;
@@ -452,6 +528,7 @@ async function abrirModalEditarCompra(id) {
     document.getElementById('modalCompraTitulo').textContent = 'Editar compra #' + id;
     document.getElementById('compra_fecha').value = c.fecha_compra;
     document.getElementById('compra_descripcion').value = c.descripcion ?? '';
+    document.getElementById('compra_total_img_cargado').value = c.total_img_cargado ?? '';
 
     await cargarProveedoresModal(c.proveedor_id);
 
@@ -501,6 +578,7 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     formData.append('descripcion', document.getElementById('compra_descripcion').value.trim());
     formData.append('detalle', detalleJson);
     formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
+    formData.append('total_img_cargado', document.getElementById('compra_total_img_cargado').value);
 
     const archivo = document.getElementById('compra_comprobante').files[0];
     if (archivo) formData.append('img_comprobante', archivo);

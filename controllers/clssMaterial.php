@@ -5,9 +5,11 @@
  * Controlador del módulo de Materia Prima
  * Tabla real: material (id, nombre, unidad_medida_id, stock_minimo, stock_actual,
  *             js_session, js_historial, created_at, update_at, deleted_at)
- * unidad_medida_id es OPCIONAL: un material puede registrarse sin unidad de medida.
+ * unidad_medida_id es OPCIONAL y, si se envía, DEBE ser una unidad RAÍZ
+ * (unidad_base_id IS NULL) — el stock de un material siempre se maneja en su
+ * unidad base; las unidades compuestas (sacos, bolsas, rollos) solo se eligen
+ * al momento de comprar, y se convierten con `equivalencia` hacia esta unidad.
  * Soft delete vía deleted_at.
- * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
 require_once __DIR__ . '/bd.php';
@@ -99,9 +101,7 @@ function obtenerMaterial($id)
  */
 function obtenerIpCliente(): string
 {
-    // Si el servidor está detrás de un proxy (Cloudflare, Nginx, etc.)
     if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        // Puede venir una lista "ip_cliente, ip_proxy1, ip_proxy2" — tomamos la primera
         $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
         return trim($ips[0]);
     }
@@ -113,7 +113,6 @@ function obtenerIpCliente(): string
 
 /**
  * Arma el bloque de auditoría (usuario/sesión) para un movimiento dado.
- * $cambios: arreglo de ['campo' => .., 'valor_antes' => .., 'valor_despues' => ..]
  */
 function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
@@ -131,12 +130,8 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 }
 
 /**
- * Compara un registro anterior (array asociativo de la BD) contra los datos nuevos
- * y devuelve solo los campos cuyo valor cambió, mapeados con etiqueta legible.
- *
- * $mapaCampos: ['columna_bd' => 'Etiqueta bonita']
- * $anterior:   registro actual tal cual viene de la BD (o [] si es creación)
- * $nuevo:      ['columna_bd' => valor_nuevo]
+ * Compara un registro anterior contra los datos nuevos y devuelve solo los
+ * campos cuyo valor cambió, mapeados con etiqueta legible.
  */
 function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
 {
@@ -145,7 +140,6 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
         $valorAntes   = $anterior[$campo] ?? null;
         $valorDespues = $nuevo[$campo]    ?? null;
 
-        // Normalizamos vacíos para comparar de forma justa (null vs '' se tratan igual)
         $antesComp   = ($valorAntes   === '' ? null : $valorAntes);
         $despuesComp = ($valorDespues === '' ? null : $valorDespues);
 
@@ -194,14 +188,19 @@ function guardarMaterial()
     if ($stockMinimo < 0)  responder(false, 'El stock mínimo no puede ser negativo.');
     if ($stockActual < 0)  responder(false, 'El stock actual no puede ser negativo.');
 
-    // Si se envió una unidad de medida, debe existir y estar activa.
+    // Si se envió una unidad de medida, debe existir, estar activa y ser RAÍZ.
+    // (el stock del material siempre se guarda en su unidad base; las unidades
+    // compuestas -sacos, bolsas, rollos- solo aplican al comprar).
     if ($unidadMedidaId !== null) {
         $unidad = executeQuery(
             $conectar,
-            "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
+            "SELECT id, unidad_base_id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
             ['id' => $unidadMedidaId]
         );
         if (empty($unidad)) responder(false, 'La unidad de medida seleccionada no existe o está inactiva.');
+        if (!empty($unidad[0]['unidad_base_id'])) {
+            responder(false, 'Debes elegir una unidad de medida raíz (ej: Kilogramo, Metro, Unidad), no una compuesta (ej: Saco 25kg).');
+        }
     }
 
     // Nombre único (excluyendo el propio registro si es edición)
@@ -212,7 +211,6 @@ function guardarMaterial()
     );
     if (!empty($chk)) responder(false, 'Ya existe un material con ese nombre.');
 
-    // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
         'nombre'         => 'Nombre',
         'nombre_unidad'  => 'Unidad de medida',
@@ -228,7 +226,6 @@ function guardarMaterial()
     ];
 
     if ($id === 0) {
-        // Creación: "antes" está vacío para todos los campos
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
@@ -250,12 +247,9 @@ function guardarMaterial()
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Material creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
-        // Edición: traemos el registro actual para comparar campo por campo
         $actual = executeQuery($conectar, "SELECT * FROM material WHERE id = :id", ['id' => $id]);
         if (empty($actual)) responder(false, 'Material no encontrado.');
         $registroAnterior = $actual[0];
-
-        // Traducimos también la unidad anterior a nombre legible antes de comparar
         $registroAnterior['nombre_unidad'] = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
@@ -359,10 +353,6 @@ function reactivarMaterial()
     );
     responder(true, 'Material reactivado correctamente.');
 }
-
-// =============================================================================
-// HELPER
-// =============================================================================
 
 function responder(bool $ok, string $msg, array $extra = []): void
 {
