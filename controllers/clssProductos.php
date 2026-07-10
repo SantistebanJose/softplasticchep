@@ -3,6 +3,9 @@
 /**
  * controllers/clssProductos.php
  * Controlador del módulo de Productos (Mercadería para la venta)
+ * Tabla real: producto (singular) — id, codigo, descripcion, unidad_venta_id,
+ *             cant_equivale, unidad_equivale_id, peso_unitario_g, activo,
+ *             created_at, updated_at
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -49,11 +52,13 @@ function listarUnidades()
     $conectar = conectar_oll_BD();
     $result   = executeQuery(
         $conectar,
-        "SELECT id, codigo, nombre FROM unidades_medida ORDER BY nombre"
+        "SELECT id, nombre_corto AS codigo, nombre 
+         FROM unidad_medida 
+         WHERE deleted_at IS NULL
+         ORDER BY nombre"
     );
     responder(true, 'OK', ['unidades' => $result]);
 }
-
 // =============================================================================
 // PRODUCTOS
 // =============================================================================
@@ -80,13 +85,13 @@ function listarProductos()
 
     $sql = "
         SELECT p.*,
-            uv.codigo AS unidad_venta_codigo,
+            uv.nombre_corto AS unidad_venta_codigo,
             uv.nombre AS unidad_venta_nombre,
-            ue.codigo AS unidad_equivale_codigo,
+            ue.nombre_corto AS unidad_equivale_codigo,
             ue.nombre AS unidad_equivale_nombre
-        FROM productos p
-        LEFT JOIN unidades_medida uv ON uv.id = p.unidad_venta_id
-        LEFT JOIN unidades_medida ue ON ue.id = p.unidad_equivale_id
+        FROM producto p
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+        LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY p.codigo
     ";
@@ -102,7 +107,15 @@ function obtenerProducto($id)
 
     $result = executeQuery(
         $conectar,
-        "SELECT * FROM productos WHERE id = :id",
+        "SELECT p.*,
+            uv.nombre_corto AS unidad_venta_codigo,
+            uv.nombre AS unidad_venta_nombre,
+            ue.nombre_corto AS unidad_equivale_codigo,
+            ue.nombre AS unidad_equivale_nombre
+         FROM producto p
+         LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+         LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
+         WHERE p.id = :id",
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Producto no encontrado.');
@@ -128,14 +141,14 @@ function guardarProducto()
     // Código único (excluyendo el propio registro si es edición)
     $chk = executeQuery(
         $conectar,
-        "SELECT id FROM productos WHERE LOWER(codigo) = LOWER(:cod) AND id <> :id",
+        "SELECT id FROM producto WHERE LOWER(codigo) = LOWER(:cod) AND id <> :id",
         ['cod' => $codigo, 'id' => $id]
     );
     if (!empty($chk)) responder(false, 'Ya existe un producto con ese código.');
 
     if ($id === 0) {
         $result = executeQuery($conectar, "
-            INSERT INTO productos
+            INSERT INTO producto
                 (codigo, descripcion, unidad_venta_id, cant_equivale, unidad_equivale_id, peso_unitario_g, activo)
             VALUES (:cod, :desc, :uv, :ceq, :ueq, :peso, TRUE)
             RETURNING id
@@ -151,13 +164,14 @@ function guardarProducto()
         responder(true, 'Producto creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
         executeQuery($conectar, "
-            UPDATE productos SET
+            UPDATE producto SET
                 codigo = :cod,
                 descripcion = :desc,
                 unidad_venta_id = :uv,
                 cant_equivale = :ceq,
                 unidad_equivale_id = :ueq,
-                peso_unitario_g = :peso
+                peso_unitario_g = :peso,
+                updated_at = NOW()
             WHERE id = :id
         ", [
             'cod'  => $codigo,
@@ -172,20 +186,20 @@ function guardarProducto()
     }
 }
 
-// Soft delete: igual que en capacitación, no se borra físicamente.
+// Soft delete: no se borra físicamente, solo se marca activo = FALSE.
 function eliminarProducto()
 {
     $conectar = conectar_oll_BD();
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, activo FROM productos WHERE id = :id", ['id' => $id]);
+    $existe = executeQuery($conectar, "SELECT id, activo FROM producto WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');
     if ($existe[0]['activo'] === false) responder(false, 'Este producto ya estaba inactivo.');
 
     executeQuery(
         $conectar,
-        "UPDATE productos SET activo = FALSE WHERE id = :id",
+        "UPDATE producto SET activo = FALSE, updated_at = NOW() WHERE id = :id",
         ['id' => $id]
     );
     responder(true, 'Producto desactivado correctamente.');
@@ -197,9 +211,13 @@ function reactivarProducto()
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
+    $existe = executeQuery($conectar, "SELECT id, activo FROM producto WHERE id = :id", ['id' => $id]);
+    if (empty($existe)) responder(false, 'Producto no encontrado.');
+    if ($existe[0]['activo'] === true) responder(false, 'Este producto ya estaba activo.');
+
     executeQuery(
         $conectar,
-        "UPDATE productos SET activo = TRUE WHERE id = :id",
+        "UPDATE producto SET activo = TRUE, updated_at = NOW() WHERE id = :id",
         ['id' => $id]
     );
     responder(true, 'Producto reactivado correctamente.');

@@ -14,7 +14,7 @@ function pc_sub_class($page, $active)
     return 'pc-nav-subitem' . ($page === $active ? ' active' : '');
 }
 
-$produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes', 'operarios'];
+$produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes_produccion', 'operarios'];
 $mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidad_medida'];
 $administracionPages = ['usuarios', 'proveedores','compras','configuracion'];
 $analisisPages       = ['reportes'];
@@ -54,12 +54,13 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             <a href="modelos.php" class="<?= pc_sub_class('modelos', $activePage) ?>">
                 <span class="dot"></span> Modelos
             </a>
-            <!-- <a href="ordenes.php" class="<?= pc_sub_class('ordenes', $activePage) ?>">
+             <a href="ordenes_produccion.php" class="<?= pc_sub_class('ordenes', $activePage) ?>">
                 <span class="dot"></span> Órdenes de producción
             </a>
             <a href="operarios.php" class="<?= pc_sub_class('operarios', $activePage) ?>">
                 <span class="dot"></span> Operarios
             </a> 
+            <!--
              <a href="materia_prima.php" class="<?= pc_sub_class('materia_prima', $activePage) ?>">
                 <span class="dot"></span> Materia prima
             </a> -->

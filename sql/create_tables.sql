@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS productos (
 );
 
 -- Tablas de producción y órdenes
-CREATE TABLE IF NOT EXISTS ordenes_produccion (
+CREATE TABLE IF NOT EXISTS orden_produccion (
     id SERIAL PRIMARY KEY,
     codigo VARCHAR(100) NOT NULL UNIQUE,
     producto_id INTEGER NOT NULL REFERENCES productos(id),
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS materia_prima (
 
 CREATE TABLE IF NOT EXISTS produccion (
     id SERIAL PRIMARY KEY,
-    orden_id INTEGER NOT NULL REFERENCES ordenes_produccion(id),
+    orden_id INTEGER NOT NULL REFERENCES orden_produccion(id),
     operario_id INTEGER REFERENCES operarios(id),
     maquina_id INTEGER REFERENCES maquinas(id),
     cantidad INTEGER NOT NULL DEFAULT 0,
