@@ -43,13 +43,33 @@
  *     el futuro módulo de egresos: el egreso real de caja usa este
  *     campo (o `total` como fallback si no se cargó monto de comprobante).
  *
+ * LÍNEAS DE COMPRA COMO "LOTE" EN PRODUCCIÓN:
+ *   - El módulo de producción referencia filas de rel_compra_material
+ *     por su id (rel_produccion_material.rel_compra_material_id ->
+ *     rel_compra_material.id), tratando cada línea de compra como un
+ *     lote específico.
+ *   - Por eso, al EDITAR una compra, YA NO se puede borrar físicamente
+ *     todas las líneas viejas y reinsertar nuevas (eso les cambiaría el
+ *     id y rompería el FK, o directamente el DELETE fallaría con
+ *     "violates foreign key constraint rel_produccion_material_lote_fkey").
+ *   - En vez de eso, guardarCompra() hace un DIFF entre las líneas
+ *     anteriores y las nuevas:
+ *       - Línea que sigue viniendo (trae su `id`) -> UPDATE en el sitio,
+ *         conserva su id, ajusta el stock por delta (revierte lo viejo,
+ *         suma lo nuevo).
+ *       - Línea nueva (sin `id`) -> INSERT normal, suma stock.
+ *       - Línea que existía y ya NO viene en el detalle nuevo -> se
+ *         intenta eliminar. Si está referenciada como lote en
+ *         rel_produccion_material, se rechaza toda la edición con un
+ *         mensaje explicando que ese material ya se usó en producción
+ *         y no se puede quitar (sí se puede editar su cantidad).
+ *
  * REGLAS DE STOCK (material.stock_actual):
  *   - Crear compra           -> SUMA cantidad_base de cada línea al stock del material.
- *   - Editar compra          -> se eliminan físicamente las líneas anteriores (rel_compra_material)
- *                                revirtiendo su cantidad_base del stock, y se insertan las líneas nuevas
- *                                sumando su cantidad_base al stock. El header (compra) sigue siendo soft-delete,
- *                                pero las líneas de detalle en una edición se reemplazan por completo:
- *                                el historial de QUÉ cambió queda igual registrado en compra.js_historial.
+ *   - Editar compra          -> ver diff explicado arriba. El resultado neto en
+ *                                stock es el mismo que antes (revertir lo viejo,
+ *                                aplicar lo nuevo), solo cambia CÓMO se hace a
+ *                                nivel de filas para no romper el FK de producción.
  *   - Desactivar compra      -> RESTA cantidad_base de cada línea activa del stock y hace soft-delete
  *                                de esas líneas (rel_compra_material.deleted_at) y de la compra.
  *   - Reactivar compra       -> restaura (deleted_at = NULL) esas mismas líneas y vuelve a SUMAR
@@ -252,12 +272,16 @@ function obtenerCompra($id)
 
     // Se agrega el join a unidad_medida para traer la unidad EN LA QUE SE COMPRÓ
     // esa línea (rcm.unidad_medida_id), que puede ser distinta a la unidad base
-    // del material.
+    // del material. rcm.id viaja en rcm.* -> el frontend lo necesita para poder
+    // editar la línea en el sitio en vez de recrearla (ver guardarCompra()).
     $detalle = executeQuery(
         $conectar,
         "SELECT rcm.*, m.nombre AS material_nombre, m.unidad_medida_id AS material_unidad_base_id,
                 um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto, um.equivalencia AS unidad_equivalencia,
-                ub.nombre_corto AS material_unidad_base_corto
+                ub.nombre_corto AS material_unidad_base_corto,
+                EXISTS (
+                    SELECT 1 FROM rel_produccion_material rpm WHERE rpm.rel_compra_material_id = rcm.id
+                ) AS usado_en_produccion
          FROM rel_compra_material rcm
          JOIN material m ON m.id = rcm.material_id
          LEFT JOIN unidad_medida um ON um.id = rcm.unidad_medida_id
@@ -378,16 +402,20 @@ function guardarCompra()
 
     $detalle = [];
     foreach ($detalleEntrada as $linea) {
-        $materialId      = intval($linea['material_id'] ?? 0);
-        $unidadMedidaId  = intval($linea['unidad_medida_id'] ?? 0);
-        $cantidad        = floatval($linea['cantidad'] ?? 0);
-        $subTotal        = floatval($linea['sub_total'] ?? 0); // P.U (precio unitario) de la línea
-        $total           = isset($linea['total']) && $linea['total'] !== '' ? floatval($linea['total']) : $subTotal;
-        $comentario      = trim($linea['comentario'] ?? '');
+        // id de la línea existente (rel_compra_material.id), si venía de una
+        // compra que se está editando. Vacío/0 = línea nueva.
+        $lineaId          = intval($linea['id'] ?? 0);
+        $materialId       = intval($linea['material_id'] ?? 0);
+        $unidadMedidaId   = intval($linea['unidad_medida_id'] ?? 0);
+        $cantidad         = floatval($linea['cantidad'] ?? 0);
+        $subTotal         = floatval($linea['sub_total'] ?? 0); // P.U (precio unitario) de la línea
+        $total            = isset($linea['total']) && $linea['total'] !== '' ? floatval($linea['total']) : $subTotal;
+        $comentario       = trim($linea['comentario'] ?? '');
 
         if ($materialId <= 0 || $unidadMedidaId <= 0 || $cantidad <= 0) continue; // fila incompleta, se ignora
 
         $detalle[] = [
+            'id'               => $lineaId ?: null,
             'material_id'      => $materialId,
             'unidad_medida_id' => $unidadMedidaId,
             'cantidad'         => $cantidad,
@@ -530,6 +558,7 @@ function guardarCompra()
             $compraId = $nuevaCompra[0]['id'] ?? null;
             if (!$compraId) throw new Exception('No se pudo crear la cabecera de la compra.');
 
+            // Compra nueva: todas las líneas son nuevas, se insertan tal cual.
             insertarLineasYSumarStock($conectar, $compraId, $detalle);
 
             $conectar->commit();
@@ -543,25 +572,120 @@ function guardarCompra()
             }
             $compraAnterior = $actual[0];
 
-            // Revertimos stock de las líneas activas actuales (usando cantidad_base,
-            // no cantidad) y las eliminamos físicamente
+            // Líneas activas actuales, indexadas por id, para poder diffearlas
+            // contra el detalle nuevo que mandó el frontend.
             $lineasAnteriores = executeQuery(
                 $conectar,
                 "SELECT * FROM rel_compra_material WHERE compra_id = :id AND deleted_at IS NULL",
                 ['id' => $id]
             );
-            foreach ($lineasAnteriores as $linea) {
-                $cantidadRevertir = $linea['cantidad_base'] ?? $linea['cantidad']; // fallback por si es una línea antigua sin cantidad_base
+            $lineasAnterioresPorId = [];
+            foreach ($lineasAnteriores as $la) {
+                $lineasAnterioresPorId[(int)$la['id']] = $la;
+            }
+
+            // IDs de líneas existentes que el frontend siguió enviando (se
+            // mantienen, hayan cambiado o no sus datos).
+            $idsEnviados = [];
+            foreach ($detalle as $linea) {
+                if (!empty($linea['id'])) $idsEnviados[] = (int)$linea['id'];
+            }
+
+            // Líneas que existían y YA NO vienen en el detalle nuevo = el
+            // usuario las quitó del formulario.
+            $idsAEliminar = array_diff(array_keys($lineasAnterioresPorId), $idsEnviados);
+
+            foreach ($idsAEliminar as $lineaIdEliminar) {
+                // No se puede quitar una línea de compra que ya fue usada como
+                // lote en producción (rel_produccion_material.lote_id la
+                // referencia por foreign key) - por eso el error original.
+                $usoProduccion = executeQuery(
+                    $conectar,
+                    "SELECT id FROM rel_produccion_material WHERE rel_compra_material_id = :lote_id LIMIT 1",
+                    ['lote_id' => $lineaIdEliminar]
+                );
+                if (!empty($usoProduccion)) {
+                    $lineaVieja  = $lineasAnterioresPorId[$lineaIdEliminar];
+                    $nombreMat   = $infoMaterial[$lineaVieja['material_id']]['nombre']
+                                   ?? ('material #' . $lineaVieja['material_id']);
+                    throw new Exception(
+                        'No puedes quitar "' . $nombreMat . '" de esta compra porque ese lote ya '
+                        . 'fue usado en un registro de producción. Puedes editar su cantidad, pero '
+                        . 'no eliminarlo de la compra.'
+                    );
+                }
+
+                // Es seguro eliminarla: revertimos su cantidad_base del stock y
+                // la borramos físicamente (igual que el comportamiento anterior).
+                $lineaVieja       = $lineasAnterioresPorId[$lineaIdEliminar];
+                $cantidadRevertir = $lineaVieja['cantidad_base'] ?? $lineaVieja['cantidad'];
                 executeNonQuery(
                     $conectar,
                     "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                    ['cantidad' => $cantidadRevertir, 'mid' => $linea['material_id']]
+                    ['cantidad' => $cantidadRevertir, 'mid' => $lineaVieja['material_id']]
+                );
+                executeNonQuery(
+                    $conectar,
+                    "DELETE FROM rel_compra_material WHERE id = :id",
+                    ['id' => $lineaIdEliminar]
                 );
             }
-            executeNonQuery($conectar, "DELETE FROM rel_compra_material WHERE compra_id = :id", ['id' => $id]);
 
-            // Insertamos las líneas nuevas y sumamos su cantidad_base al stock
-            insertarLineasYSumarStock($conectar, $id, $detalle);
+            // Líneas que siguen viniendo con id -> UPDATE en el sitio (conserva
+            // el id, así el lote_id de producción sigue siendo válido). Las que
+            // no traen id son líneas nuevas -> se insertan al final.
+            $detalleNuevas = [];
+            foreach ($detalle as $linea) {
+                $lineaId = $linea['id'] ? (int)$linea['id'] : null;
+
+                if ($lineaId && isset($lineasAnterioresPorId[$lineaId])) {
+                    $anterior         = $lineasAnterioresPorId[$lineaId];
+                    $cantidadRevertir = $anterior['cantidad_base'] ?? $anterior['cantidad'];
+
+                    // Ajuste de stock por delta: revierte lo que esta línea
+                    // aportaba antes y aplica lo que aporta ahora. Si no cambió
+                    // nada, el neto es cero (resta y luego suma lo mismo).
+                    executeNonQuery(
+                        $conectar,
+                        "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
+                        ['cantidad' => $cantidadRevertir, 'mid' => $anterior['material_id']]
+                    );
+                    executeNonQuery(
+                        $conectar,
+                        "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                        ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
+                    );
+
+                    executeNonQuery($conectar, "
+                        UPDATE rel_compra_material SET
+                            material_id      = :material_id,
+                            cantidad         = :cantidad,
+                            unidad_medida_id = :unidad_medida_id,
+                            cantidad_base    = :cantidad_base,
+                            sub_total        = :sub_total,
+                            total            = :total,
+                            comentario       = :comentario,
+                            update_at        = NOW()
+                        WHERE id = :id
+                    ", [
+                        'material_id'      => $linea['material_id'],
+                        'cantidad'         => $linea['cantidad'],
+                        'unidad_medida_id' => $linea['unidad_medida_id'],
+                        'cantidad_base'    => $linea['cantidad_base'],
+                        'sub_total'        => $linea['sub_total'],
+                        'total'            => $linea['total'],
+                        'comentario'       => $linea['comentario'],
+                        'id'               => $lineaId,
+                    ]);
+                } else {
+                    // Sin id (o con un id que ya no existe/no es de esta compra) = línea nueva.
+                    $detalleNuevas[] = $linea;
+                }
+            }
+
+            if (!empty($detalleNuevas)) {
+                insertarLineasYSumarStock($conectar, $id, $detalleNuevas);
+            }
 
             // Comprobante: si subieron uno nuevo, reemplaza; si marcaron "eliminar", lo quitamos;
             // si no, se mantiene el que ya había.
@@ -624,6 +748,7 @@ function guardarCompra()
  * Inserta las líneas de detalle de una compra y suma cantidad_base al stock
  * del material correspondiente (NUNCA cantidad, que está en la unidad que
  * eligió el usuario y puede no coincidir con la unidad base del material).
+ * Solo se usa para líneas realmente NUEVAS (sin id previo).
  */
 function insertarLineasYSumarStock($conectar, int $compraId, array $detalle): void
 {
