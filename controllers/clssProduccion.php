@@ -139,12 +139,12 @@ function buscarOrdenes()
 {
     $conectar = conectar_oll_BD();
     $texto  = trim($_POST['texto'] ?? '');
-    $estado = trim($_POST['estado'] ?? ''); // '', o un estado puntual ('pendiente', 'en_proceso', etc.)
+    $estado = trim($_POST['estado'] ?? '');
 
     $where  = ["1=1"];
     $params = [];
     if ($texto !== '') {
-        $where[] = "(LOWER(o.codigo) LIKE LOWER(:texto) OR LOWER(pr.nombre) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(o.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado !== '') {
@@ -156,9 +156,10 @@ function buscarOrdenes()
         SELECT
             o.id, o.codigo, o.producto_id, o.maquina, o.cantidad AS cantidad_objetivo,
             o.estado, o.fecha_inicio, o.fecha_fin,
-            CONCAT('Producto #', o.producto_id) AS producto_nombre, -- sin tabla producto todavía; ajusta si agregas un catálogo
+            p.descripcion AS producto_nombre,
             COALESCE(av.total_avanzado, 0) AS cantidad_avanzada
         FROM orden_produccion o
+        LEFT JOIN producto p ON p.id = o.producto_id
         LEFT JOIN (
             SELECT orden_id, SUM(cantidad) AS total_avanzado
             FROM produccion
@@ -173,6 +174,7 @@ function buscarOrdenes()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ordenes' => $result]);
 }
+
 
 function buscarOperarios()
 {
@@ -295,7 +297,7 @@ function listarProducciones()
         SELECT
             pd.*,
             o.codigo AS orden_codigo,
-            CASE WHEN o.producto_id IS NOT NULL THEN CONCAT('Producto #', o.producto_id) ELSE NULL END AS producto_nombre,
+            p.descripcion AS producto_nombre,
             op.nombre_completo AS operario_nombre,
             ma.nombre AS maquina_nombre,
             COALESCE((
@@ -304,6 +306,7 @@ function listarProducciones()
             ), 0) AS items_count
         FROM produccion pd
         LEFT JOIN orden_produccion o ON o.id = pd.orden_id
+        LEFT JOIN producto p ON p.id = o.producto_id
         LEFT JOIN operarios op ON op.id = pd.operario_id
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         WHERE " . implode(' AND ', $where) . "
@@ -322,10 +325,11 @@ function obtenerProduccion($id)
     $produccion = executeQuery(
         $conectar,
         "SELECT pd.*, o.codigo AS orden_codigo,
-                CASE WHEN o.producto_id IS NOT NULL THEN CONCAT('Producto #', o.producto_id) ELSE NULL END AS producto_nombre,
+                p.descripcion AS producto_nombre,
                 op.nombre_completo AS operario_nombre, ma.nombre AS maquina_nombre
          FROM produccion pd
          LEFT JOIN orden_produccion o ON o.id = pd.orden_id
+         LEFT JOIN producto p ON p.id = o.producto_id
          LEFT JOIN operarios op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
          WHERE pd.id = :id",
