@@ -142,12 +142,29 @@ include("header.php");
   </div>
 </div>
 
+<!-- Modal Ver Comprobante -->
+<div class="modal fade" id="modalVerComprobante" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Comprobante</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="cerrarVerComprobante()"></button>
+      </div>
+      <div class="modal-body text-center" id="verComprobanteBody" style="max-height:75vh; overflow:auto;">
+        <!-- contenido dinámico (img o iframe) -->
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
+const RUTA_VER_COMPROBANTE = 'controllers/ver_comprobante.php'; // sirve el archivo validando sesión
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
+const modalVerComprobante = new bootstrap.Modal(document.getElementById('modalVerComprobante'));
 
 let modoEdicionCompra = false;
 let compraIdActual = 0;
@@ -224,6 +241,24 @@ function renderMontoComprobante(c) {
                 </span>`;
     }
     return texto;
+}
+
+// ── Ver comprobante embebido (sin exponer la ruta física del archivo) ───────
+// Se pasa el ID de la compra, no la ruta. El navegador pide
+// controllers/ver_comprobante.php?id=X, que valida sesión antes de
+// devolver el archivo. Un iframe muestra correctamente tanto imágenes
+// como PDFs sin necesidad de saber la extensión en el frontend.
+function verComprobante(compraId) {
+    if (!compraId) return;
+    const body = document.getElementById('verComprobanteBody');
+    body.innerHTML = `<iframe src="${RUTA_VER_COMPROBANTE}?id=${compraId}"
+                                style="width:100%; height:70vh; border:none;"></iframe>`;
+    modalVerComprobante.show();
+}
+
+function cerrarVerComprobante() {
+    // Limpia el iframe al cerrar para no dejar el PDF/imagen cargado en memoria
+    document.getElementById('verComprobanteBody').innerHTML = '';
 }
 
 // ── Selects auxiliares ───────────────────────────────────────────────────────
@@ -305,7 +340,8 @@ async function cargarCompras() {
             <td data-label="Total">${formatearMoneda(c.total)}</td>
             <td data-label="Monto comprobante">${renderMontoComprobante(c)}</td>
             <td data-label="Comprobante">${c.img_comprobante
-                ? `<a href="${c.img_comprobante}" target="_blank" class="pc-icon-btn" title="Ver comprobante"><i class="fa-solid fa-file-lines"></i></a>`
+                ? `<button type="button" class="pc-icon-btn" onclick="verComprobante(${c.id})" title="Ver comprobante">
+                       <i class="fa-solid fa-file-lines"></i></button>`
                 : '-'}</td>
             <td data-label="Estado">${badgeRegistro(c.deleted_at)}</td>
             <td data-label="Acciones" class="pc-td-acciones">
@@ -535,8 +571,9 @@ async function abrirModalEditarCompra(id) {
     comprobanteActualRuta = c.img_comprobante || null;
     const infoComprobante = document.getElementById('compra_comprobante_actual');
     if (comprobanteActualRuta) {
+        // Usa el ID de la compra (no la ruta física) para abrir el visor embebido.
         infoComprobante.innerHTML = `
-            <a href="${comprobanteActualRuta}" target="_blank">Ver comprobante actual</a>
+            <a href="#" onclick="verComprobante(${compraIdActual}); return false;">Ver comprobante actual</a>
             &nbsp;·&nbsp;
             <a href="#" onclick="quitarComprobanteActual(event)">Quitar</a>`;
     }
