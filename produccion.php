@@ -391,13 +391,13 @@ function aplicarEstadoEmergencia() {
 
 // ── Selects auxiliares ───────────────────────────────────────────────────────
 async function cargarSelectsFiltro() {
-    const [operarios, maquinas] = await Promise.all([
+    const [operario, maquinas] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
     ]);
-    if (operarios.success) {
+    if (operario.success) {
         const s = document.getElementById('fprod_operario');
-        operarios.operarios.forEach(o => s.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}</option>`));
+        operario.operario.forEach(o => s.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}</option>`));
     }
     if (maquinas.success) {
         const s = document.getElementById('fprod_maquina');
@@ -406,7 +406,7 @@ async function cargarSelectsFiltro() {
 }
 
 async function cargarSelectsModal(seleccion = {}) {
-    const [ordenes, operarios, maquinas] = await Promise.all([
+    const [ordenes, operario, maquinas] = await Promise.all([
         llamarProduccion('BUSCARORDENES'),
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
@@ -428,7 +428,7 @@ async function cargarSelectsModal(seleccion = {}) {
 
     const operarioSelect = document.getElementById('prod_operario_id');
     operarioSelect.innerHTML = '<option value="">Selecciona...</option>';
-    if (operarios.success) operarios.operarios.forEach(o =>
+    if (operario.success) operario.operario.forEach(o =>
         operarioSelect.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}${o.cargo ? ' - ' + o.cargo : ''}</option>`));
     if (seleccion.operario_id) operarioSelect.value = seleccion.operario_id;
 

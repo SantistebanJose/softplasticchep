@@ -179,9 +179,9 @@ function buscarOrdenes()
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre_completo, cargo FROM operarios WHERE activo = true ORDER BY nombre_completo";
+    $sql = "SELECT id, nombre_completo, cargo FROM operario WHERE activo = true ORDER BY nombre_completo";
     $result = executeQuery($conectar, $sql, []);
-    responder(true, 'OK', ['operarios' => $result]);
+    responder(true, 'OK', ['operario' => $result]);
 }
 
 function buscarMaquinas()
@@ -307,7 +307,7 @@ function listarProducciones()
         FROM produccion pd
         LEFT JOIN orden_produccion o ON o.id = pd.orden_id
         LEFT JOIN producto p ON p.id = o.producto_id
-        LEFT JOIN operarios op ON op.id = pd.operario_id
+        LEFT JOIN operario op ON op.id = pd.operario_id
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.fecha DESC, pd.id DESC
@@ -330,7 +330,7 @@ function obtenerProduccion($id)
          FROM produccion pd
          LEFT JOIN orden_produccion o ON o.id = pd.orden_id
          LEFT JOIN producto p ON p.id = o.producto_id
-         LEFT JOIN operarios op ON op.id = pd.operario_id
+         LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
          WHERE pd.id = :id",
         ['id' => $id]
