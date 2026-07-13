@@ -38,6 +38,11 @@ include("header.php");
 #prod_orden_wrap .badge-opcional{ display:none; }
 #prod_orden_wrap.orden-no-aplica .badge-opcional{ display:inline-block; }
 
+.pc-color-dot{
+    display:inline-block; width:12px; height:12px; border-radius:50%;
+    border:1px solid rgba(0,0,0,.15); vertical-align:middle; margin-right:5px;
+}
+
 .pc-mat-layout{
     display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start;
 }
@@ -117,6 +122,12 @@ include("header.php");
 .pc-tk-empty{ text-align:center; color:#9a9585; font-size:.85em; padding:26px 12px; }
 .pc-tk-empty i{ font-size:1.6em; display:block; margin-bottom:6px; opacity:.5; }
 .pc-tk-footer{ padding:8px 14px; border-top:1px solid #eee7db; font-size:.78em; color:#8a8578; background:#fffefb; }
+
+/* Estado de corrida en la columna de la tabla */
+.pc-corrida-sin{ color:#9a9585; font-size:.85em; }
+.pc-corrida-curso{ font-size:.8em; }
+.pc-corrida-curso small{ display:block; color:#8a8578; margin-top:2px; }
+.pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
 </style>
 
 <div class="pc-card">
@@ -130,12 +141,18 @@ include("header.php");
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
         <input type="text" id="fprod_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por código de orden u observaciones...">
+               placeholder="Buscar por código de orden, molde u observaciones...">
         <select id="fprod_operario" class="form-select" style="max-width:200px">
             <option value="">Todos los operarios</option>
         </select>
         <select id="fprod_maquina" class="form-select" style="max-width:180px">
             <option value="">Todas las máquinas</option>
+        </select>
+        <select id="fprod_molde" class="form-select" style="max-width:180px">
+            <option value="">Todos los moldes</option>
+        </select>
+        <select id="fprod_color" class="form-select" style="max-width:160px">
+            <option value="">Todos los colores</option>
         </select>
         <input type="date" id="fprod_desde" class="form-control" style="max-width:160px" title="Desde">
         <input type="date" id="fprod_hasta" class="form-control" style="max-width:160px" title="Hasta">
@@ -158,17 +175,20 @@ include("header.php");
                 <th>#</th>
                 <th>Orden</th>
                 <th>Producto</th>
+                <th>Molde</th>
+                <th>Color</th>
                 <th>Operario</th>
                 <th>Máquina</th>
                 <th>Fecha</th>
-                <th>Cantidad</th>
+                <th>Corrida</th>
+                <th>Kg insertados</th>
                 <th>Materiales</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyProducciones">
-            <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="13" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -220,15 +240,34 @@ include("header.php");
           </div>
 
           <div class="row">
-            <div class="col-md-3 mb-2">
-                <label class="form-label">Cantidad producida (este avance) *</label>
-                <input type="number" step="1" min="1" class="form-control" id="prod_cantidad" required>
-            </div>
-            <div class="col-md-3 mb-2">
-                <label class="form-label">Fecha y hora</label>
-                <input type="datetime-local" class="form-control" id="prod_fecha">
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Molde *</label>
+                <select class="form-select" id="prod_molde_id" required>
+                    <option value="">Selecciona un molde...</option>
+                </select>
             </div>
             <div class="col-md-6 mb-2">
+                <label class="form-label">Color *</label>
+                <select class="form-select" id="prod_color_id" required>
+                    <option value="">Selecciona un color...</option>
+                </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Kg insertados en máquina (este avance) *</label>
+                <input type="number" step="1" min="1" class="form-control" id="prod_cantidad" required>
+            </div>
+
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Fecha de registro</label>
+                <input type="datetime-local" class="form-control" id="prod_fecha">
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-12 mb-2">
                 <label class="form-label" id="prod_observaciones_label">Observaciones</label>
                 <input type="text" class="form-control" id="prod_observaciones" placeholder="Opcional">
             </div>
@@ -287,11 +326,14 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
+const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el <select> de molde
+const CONTROLADOR_COLOR      = 'controllers/clssColor.php';  // para el <select> de color
 const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduccion'));
 
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let materialesProdCache = null; // cache de materiales para las cards
+let moldesProdCache = null;     // cache de moldes para selects
 let materialSeleccionadoId = null; // material activo en el panel de lotes
 let contadorLineaTicket = 0;
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
@@ -302,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyProducciones').innerHTML =
-            `<tr><td colspan="10" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="13" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     let debounceTimer = null;
@@ -310,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarProducciones, 350);
     });
-    ['fprod_operario', 'fprod_maquina', 'fprod_estado', 'fprod_emergencia', 'fprod_desde', 'fprod_hasta'].forEach(id => {
+    ['fprod_operario', 'fprod_maquina', 'fprod_molde', 'fprod_color', 'fprod_estado', 'fprod_emergencia', 'fprod_desde', 'fprod_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarProducciones);
     });
 
@@ -335,6 +377,26 @@ async function llamarProduccion(accion, params = {}) {
     }
 }
 
+async function llamarMoldes(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_MOLDES, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    return resp.json();
+}
+
+async function llamarColor(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_COLOR, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    return resp.json();
+}
+
 function badgeRegistroProd(deletedAt) {
     return !deletedAt
         ? '<span class="badge bg-success">Activo</span>'
@@ -349,6 +411,30 @@ function formatearFechaHoraLocal(fechaIso) {
     // Convierte "2026-07-10 14:30:00" a formato válido para datetime-local
     if (!fechaIso) return '';
     return fechaIso.replace(' ', 'T').substring(0, 16);
+}
+
+function formatearFechaHoraLegible(fechaIso) {
+    // Convierte "2026-07-10 14:30:00" a "10/07/2026 14:30" para mostrar en tabla
+    if (!fechaIso) return '';
+    const [fecha, hora] = fechaIso.split(' ');
+    if (!fecha) return fechaIso;
+    const [y, m, d] = fecha.split('-');
+    return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
+}
+
+// ── Estado de la corrida (columna "Corrida" en la tabla) ─────────────────
+function estadoCorridaTexto(p) {
+    if (!p.fecha_hora_inicio) {
+        return '<span class="pc-corrida-sin">Sin iniciar</span>';
+    }
+    if (!p.fecha_hora_fin) {
+        return `<span class="pc-corrida-curso"><span class="badge bg-info text-dark">En curso</span>
+                <small>Inicio: ${formatearFechaHoraLegible(p.fecha_hora_inicio)}</small></span>`;
+    }
+    return `<span class="pc-corrida-fin">
+                Inicio: ${formatearFechaHoraLegible(p.fecha_hora_inicio)}<br>
+                Fin: ${formatearFechaHoraLegible(p.fecha_hora_fin)}
+            </span>`;
 }
 
 // ── Estética de cada material: color y ícono estables por nombre, para
@@ -391,9 +477,11 @@ function aplicarEstadoEmergencia() {
 
 // ── Selects auxiliares ───────────────────────────────────────────────────────
 async function cargarSelectsFiltro() {
-    const [operario, maquinas] = await Promise.all([
+    const [operario, maquinas, moldes, colores] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
+        llamarMoldes('LISTARMOLDES', { texto: '', estado: 'activa' }),
+        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
     ]);
     if (operario.success) {
         const s = document.getElementById('fprod_operario');
@@ -403,13 +491,30 @@ async function cargarSelectsFiltro() {
         const s = document.getElementById('fprod_maquina');
         maquinas.maquinas.forEach(m => s.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
     }
+    if (moldes.success) {
+        const s = document.getElementById('fprod_molde');
+        moldes.moldes.forEach(m => s.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
+    }
+    if (colores.success) {
+        const s = document.getElementById('fprod_color');
+        colores.colores.forEach(c => s.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
+    }
+}
+
+async function obtenerMoldesProd() {
+    if (moldesProdCache) return moldesProdCache;
+    const json = await llamarMoldes('LISTARMOLDES', { texto: '', estado: 'activa' });
+    moldesProdCache = json.success ? json.moldes : [];
+    return moldesProdCache;
 }
 
 async function cargarSelectsModal(seleccion = {}) {
-    const [ordenes, operario, maquinas] = await Promise.all([
+    const [ordenes, operario, maquinas, moldes, colores] = await Promise.all([
         llamarProduccion('BUSCARORDENES'),
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
+        obtenerMoldesProd(),
+        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
     ]);
 
     const ordenSelect = document.getElementById('prod_orden_id');
@@ -437,6 +542,17 @@ async function cargarSelectsModal(seleccion = {}) {
     if (maquinas.success) maquinas.maquinas.forEach(m =>
         maquinaSelect.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
     if (seleccion.maquina_id) maquinaSelect.value = seleccion.maquina_id;
+
+    const moldeSelect = document.getElementById('prod_molde_id');
+    moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
+        (moldes || []).map(m => `<option value="${m.id}">${m.nombre} (${m.forma})</option>`).join('');
+    if (seleccion.molde_id) moldeSelect.value = seleccion.molde_id;
+
+    const colorSelect = document.getElementById('prod_color_id');
+    colorSelect.innerHTML = '<option value="">Selecciona un color...</option>';
+    if (colores.success) colores.colores.forEach(c =>
+        colorSelect.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
+    if (seleccion.color_id) colorSelect.value = seleccion.color_id;
 }
 
 function actualizarInfoOrden() {
@@ -463,6 +579,8 @@ async function cargarProducciones() {
         texto: document.getElementById('fprod_texto').value.trim(),
         operario_id: document.getElementById('fprod_operario').value,
         maquina_id: document.getElementById('fprod_maquina').value,
+        molde_id: document.getElementById('fprod_molde').value,
+        color_id: document.getElementById('fprod_color').value,
         estado: document.getElementById('fprod_estado').value,
         emergencia: document.getElementById('fprod_emergencia').value,
         fecha_desde: document.getElementById('fprod_desde').value,
@@ -473,13 +591,13 @@ async function cargarProducciones() {
     const tbody = document.getElementById('tbodyProducciones');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const producciones = json.producciones || [];
     if (producciones.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No hay registros de producción.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">No hay registros de producción.</td></tr>';
         return;
     }
 
@@ -487,21 +605,41 @@ async function cargarProducciones() {
         const ordenTexto = p.orden_codigo
             ? `${p.orden_codigo}${p.es_emergencia ? ' <span class="badge bg-warning text-dark" title="Avance de emergencia">⚡</span>' : ''}`
             : '<span class="text-muted fst-italic">⚡ Sin orden (emergencia)</span>';
+        const colorTexto = p.color_nombre
+            ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
+            : '-';
+
+        const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
+        const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+
         return `
         <tr id="fila-produccion-${p.id}">
             <td data-label="#">${p.id}</td>
             <td data-label="Orden">${ordenTexto}</td>
             <td data-label="Producto">${p.producto_nombre ?? '-'}</td>
+            <td data-label="Molde">${p.molde_nombre ?? '-'}</td>
+            <td data-label="Color">${colorTexto}</td>
             <td data-label="Operario">${p.operario_nombre ?? '-'}</td>
             <td data-label="Máquina">${p.maquina_nombre ?? '-'}</td>
             <td data-label="Fecha">${p.fecha}</td>
-            <td data-label="Cantidad">${formatearCantidadProd(p.cantidad)}</td>
+            <td data-label="Corrida">${estadoCorridaTexto(p)}</td>
+            <td data-label="Kg insertados">${formatearCantidadProd(p.cantidad)}</td>
             <td data-label="Materiales">${p.items_count}</td>
             <td data-label="Estado">${badgeRegistroProd(p.deleted_at)}</td>
             <td data-label="Acciones" class="pc-td-acciones">
                 <button class="pc-icon-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
                 </button>
+                ${puedeIniciar
+                    ? `<button class="pc-icon-btn" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
+                           <i class="fa-solid fa-play"></i></button>`
+                    : ''
+                }
+                ${puedeFinalizar
+                    ? `<button class="pc-icon-btn" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
+                           <i class="fa-solid fa-stop"></i></button>`
+                    : ''
+                }
                 ${!p.deleted_at
                     ? `<button class="pc-icon-btn" onclick="eliminarProduccion(${p.id})" title="Desactivar">
                            <i class="fa-solid fa-trash"></i></button>`
@@ -742,7 +880,8 @@ async function abrirModalEditarProduccion(id) {
     aplicarEstadoEmergencia();
 
     await cargarSelectsModal({
-        orden_id: p.orden_id, operario_id: p.operario_id, maquina_id: p.maquina_id
+        orden_id: p.orden_id, operario_id: p.operario_id, maquina_id: p.maquina_id,
+        molde_id: p.molde_id, color_id: p.color_id,
     });
     await renderGridMateriales();
 
@@ -787,6 +926,8 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         orden_id: document.getElementById('prod_orden_id').value,
         operario_id: document.getElementById('prod_operario_id').value,
         maquina_id: document.getElementById('prod_maquina_id').value,
+        molde_id: document.getElementById('prod_molde_id').value,
+        color_id: document.getElementById('prod_color_id').value,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
@@ -828,6 +969,47 @@ function eliminarProduccion(id) {
 
 function reactivarProduccion(id) {
     llamarProduccion('REACTIVARPRODUCCION', { id }).then(json => {
+        if (json.success) {
+            Swal.fire('Listo', json.message, 'success');
+            cargarProducciones();
+        } else {
+            Swal.fire('Error', json.message, 'error');
+        }
+    });
+}
+
+// ── Iniciar / Finalizar corrida (acciones directas desde la tabla) ───────────
+function iniciarProduccion(id) {
+    Swal.fire({
+        title: '¿Iniciar la corrida ahora?',
+        text: 'Se registrará la hora actual del servidor como inicio.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, iniciar',
+        cancelButtonText: 'Cancelar'
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        const json = await llamarProduccion('INICIARCORRIDA', { id });
+        if (json.success) {
+            Swal.fire('Listo', json.message, 'success');
+            cargarProducciones();
+        } else {
+            Swal.fire('Error', json.message, 'error');
+        }
+    });
+}
+
+function finalizarProduccion(id) {
+    Swal.fire({
+        title: '¿Finalizar la corrida ahora?',
+        text: 'Se registrará la hora actual del servidor como fin.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, finalizar',
+        cancelButtonText: 'Cancelar'
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        const json = await llamarProduccion('FINALIZARCORRIDA', { id });
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
             cargarProducciones();

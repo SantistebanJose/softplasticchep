@@ -17,7 +17,7 @@ include("header.php");
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
         <input type="text" id="fo_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por código, máquina o producto...">
+               placeholder="Buscar por código o producto...">
         <select id="fo_estado" class="form-select" style="max-width:180px">
             <option value="">Todos los estados</option>
             <option value="pendiente">Pendiente</option>
@@ -38,7 +38,6 @@ include("header.php");
             <tr>
                 <th>Código</th>
                 <th>Producto</th>
-                <th>Máquina</th>
                 <th>Cantidad</th>
                 <th>Estado</th>
                 <th>Inicio</th>
@@ -47,7 +46,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyOrdenes">
-            <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -66,9 +65,12 @@ include("header.php");
         <div class="modal-body">
           <input type="hidden" name="id" id="orden_id">
 
-          <div class="mb-2">
-            <label class="form-label">Código *</label>
-            <input type="text" class="form-control" name="codigo" id="orden_codigo" required>
+          <!-- El código se genera automáticamente (OP-0001, OP-0002, ...) al
+               guardar, así que no se pide aquí. En edición se muestra como
+               referencia de solo lectura. -->
+          <div class="mb-2" id="orden_codigo_wrap" style="display:none;">
+            <label class="form-label">Código</label>
+            <input type="text" class="form-control" id="orden_codigo_display" disabled>
           </div>
 
           <div class="mb-2">
@@ -79,14 +81,9 @@ include("header.php");
           </div>
 
           <div class="mb-2">
-            <label class="form-label">Máquina</label>
-            <input type="text" class="form-control" name="maquina" id="orden_maquina"
-                   placeholder="Ej: Inyectora 1">
-          </div>
-
-          <div class="mb-2">
             <label class="form-label">Cantidad *</label>
             <input type="number" class="form-control" name="cantidad" id="orden_cantidad" min="1" required>
+            <div class="form-text">La máquina, molde, color y operario se eligen en cada avance de producción, no aquí.</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -115,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Promise.all([cargarProductos(), cargarOrdenes()]).catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyOrdenes').innerHTML =
-            `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
@@ -176,13 +173,13 @@ async function cargarOrdenes() {
     const tbody = document.getElementById('tbodyOrdenes');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const ordenes = json.ordenes || [];
     if (ordenes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay órdenes registradas.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay órdenes registradas.</td></tr>';
         return;
     }
 
@@ -200,16 +197,6 @@ async function cargarOrdenes() {
             acciones += `
                 <button class="pc-icon-btn" onclick="reactivarOrden(${o.id})" title="Reactivar">
                     <i class="fa-solid fa-rotate-left"></i></button>`;
-        } else if (o.estado === 'pendiente') {
-            acciones += `
-                <button class="pc-icon-btn" onclick="abrirModalEditarOrden(${o.id})" title="Editar">
-                    <i class="fa-solid fa-pen"></i></button>
-                <button class="pc-icon-btn" onclick="iniciarOrden(${o.id})" title="Iniciar">
-                    <i class="fa-solid fa-play"></i></button>
-                <button class="pc-icon-btn" onclick="cancelarOrden(${o.id})" title="Cancelar">
-                    <i class="fa-solid fa-ban"></i></button>
-                <button class="pc-icon-btn" onclick="eliminarOrden(${o.id})" title="Desactivar">
-                    <i class="fa-solid fa-trash"></i></button>`;
         } else if (o.estado === 'en_proceso') {
             acciones += `
                 <button class="pc-icon-btn" onclick="finalizarOrden(${o.id})" title="Finalizar">
@@ -222,7 +209,6 @@ async function cargarOrdenes() {
         <tr id="fila-orden-${o.id}">
             <td data-label="Código">${o.codigo}</td>
             <td data-label="Producto">${o.producto_nombre ?? '-'}</td>
-            <td data-label="Máquina">${o.maquina ?? '-'}</td>
             <td data-label="Cantidad">${o.cantidad}</td>
             <td data-label="Estado">${badge}</td>
             <td data-label="Inicio">${formatearFecha(o.fecha_inicio)}</td>
@@ -246,7 +232,6 @@ async function verOrden(id) {
         title: `Orden ${o.codigo}`,
         html: `
             <p style="text-align:left"><b>Producto:</b> ${o.producto_nombre ?? '-'}</p>
-            <p style="text-align:left"><b>Máquina:</b> ${o.maquina ?? '-'}</p>
             <p style="text-align:left"><b>Cantidad:</b> ${o.cantidad}</p>
             <p style="text-align:left"><b>Estado:</b> ${ESTADOS_LABEL[o.estado] ?? o.estado}</p>
             <p style="text-align:left"><b>Visibilidad:</b> ${estadoVisibilidad}</p>
@@ -260,6 +245,7 @@ async function verOrden(id) {
 function abrirModalCrearOrden() {
     document.getElementById('formOrden').reset();
     document.getElementById('orden_id').value = '';
+    document.getElementById('orden_codigo_wrap').style.display = 'none';
     document.getElementById('modalOrdenTitulo').textContent = 'Nueva orden';
     modalOrden.show();
 }
@@ -269,12 +255,13 @@ async function abrirModalEditarOrden(id) {
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
     const o = json.orden;
-    document.getElementById('modalOrdenTitulo').textContent = 'Editar orden';
+    document.getElementById('modalOrdenTitulo').textContent = 'Editar orden ' + o.codigo;
     document.getElementById('orden_id').value = o.id;
-    document.getElementById('orden_codigo').value = o.codigo ?? '';
     document.getElementById('orden_producto_id').value = o.producto_id ?? '';
-    document.getElementById('orden_maquina').value = o.maquina ?? '';
     document.getElementById('orden_cantidad').value = o.cantidad ?? '';
+
+    document.getElementById('orden_codigo_display').value = o.codigo ?? '';
+    document.getElementById('orden_codigo_wrap').style.display = 'block';
 
     modalOrden.show();
 }

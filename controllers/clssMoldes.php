@@ -3,7 +3,8 @@
 /**
  * controllers/clssMoldes.php
  * Controlador del módulo de Moldes
- * Tabla real: molde (id, nombre, forma, js_session, js_historial, created_at, update_at, deleted_at)
+ * Tabla real: molde (id, nombre, forma, producto_id, js_session, js_historial, created_at, update_at, deleted_at)
+ * producto_id: FK obligatoria a producto (mercadería que produce este molde).
  * Soft delete vía deleted_at (no existe columna 'activo').
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -54,16 +55,24 @@ function listarMoldes()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(nombre) LIKE LOWER(:texto) OR LOWER(forma) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(m.nombre) LIKE LOWER(:texto) OR LOWER(m.forma) LIKE LOWER(:texto) OR LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
-        $where[] = "deleted_at IS NULL";
+        $where[] = "m.deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "deleted_at IS NOT NULL";
+        $where[] = "m.deleted_at IS NOT NULL";
     }
 
-    $sql = "SELECT * FROM molde WHERE " . implode(' AND ', $where) . " ORDER BY nombre";
+    $sql = "
+        SELECT m.*,
+               p.codigo AS producto_codigo,
+               p.descripcion AS producto_descripcion
+        FROM molde m
+        LEFT JOIN producto p ON p.id = m.producto_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY m.nombre
+    ";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['moldes' => $result]);
@@ -76,7 +85,12 @@ function obtenerMolde($id)
 
     $result = executeQuery(
         $conectar,
-        "SELECT * FROM molde WHERE id = :id",
+        "SELECT m.*,
+                p.codigo AS producto_codigo,
+                p.descripcion AS producto_descripcion
+         FROM molde m
+         LEFT JOIN producto p ON p.id = m.producto_id
+         WHERE m.id = :id",
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Molde no encontrado.');
@@ -149,16 +163,38 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
     return $cambios;
 }
 
+/**
+ * Devuelve "CODIGO - DESCRIPCION" de un producto, o null si no existe.
+ * Se usa solo para dejar el historial legible (en vez de guardar el id pelado).
+ */
+function etiquetaProducto($conectar, ?int $productoId): ?string
+{
+    if (!$productoId) return null;
+    $result = executeQuery(
+        $conectar,
+        "SELECT codigo, descripcion FROM producto WHERE id = :id",
+        ['id' => $productoId]
+    );
+    if (empty($result)) return null;
+    return $result[0]['codigo'] . ' - ' . $result[0]['descripcion'];
+}
+
 function guardarMolde()
 {
     $conectar = conectar_oll_BD();
-    $id     = intval($_POST['id'] ?? 0);
-    $nombre = trim($_POST['nombre'] ?? '');
-    $forma  = trim($_POST['forma'] ?? '');
+    $id          = intval($_POST['id'] ?? 0);
+    $nombre      = trim($_POST['nombre'] ?? '');
+    $forma       = trim($_POST['forma'] ?? '');
+    $producto_id = intval($_POST['producto_id'] ?? 0);
 
     // ── Validaciones ──────────────────────────────────────────────────────────
-    if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
-    if (empty($forma))  responder(false, 'La forma es obligatoria.');
+    if (empty($nombre))    responder(false, 'El nombre es obligatorio.');
+    if (empty($forma))     responder(false, 'La forma es obligatoria.');
+    if ($producto_id <= 0) responder(false, 'Selecciona el producto asociado.');
+
+    // El producto debe existir
+    $prodExiste = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
+    if (empty($prodExiste)) responder(false, 'El producto seleccionado no existe.');
 
     // Nombre único (excluyendo el propio registro si es edición)
     $chk = executeQuery(
@@ -170,30 +206,41 @@ function guardarMolde()
 
     // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
-        'nombre' => 'Nombre',
-        'forma'  => 'Forma',
+        'nombre'      => 'Nombre',
+        'forma'       => 'Forma',
+        'producto_id' => 'Producto',
     ];
 
     $datosNuevos = [
-        'nombre' => $nombre,
-        'forma'  => $forma,
+        'nombre'      => $nombre,
+        'forma'       => $forma,
+        'producto_id' => $producto_id,
     ];
 
     if ($id === 0) {
         // Creación: "antes" está vacío para todos los campos
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
+        // Cambiamos el valor "después" del producto de id numérico a texto legible
+        foreach ($cambios as &$c) {
+            if ($c['campo'] === 'Producto') {
+                $c['valor_despues'] = etiquetaProducto($conectar, $producto_id) ?? $c['valor_despues'];
+            }
+        }
+        unset($c);
+
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO molde (nombre, forma, created_at, js_session, js_historial)
-            VALUES (:nombre, :forma, NOW(), :js_session, :js_historial)
+            INSERT INTO molde (nombre, forma, producto_id, created_at, js_session, js_historial)
+            VALUES (:nombre, :forma, :producto_id, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'       => $datosNuevos['nombre'],
             'forma'        => $datosNuevos['forma'],
+            'producto_id'  => $datosNuevos['producto_id'],
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
@@ -207,6 +254,16 @@ function guardarMolde()
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
+        // Cambiamos los valores de producto (antes/después) de id numérico a texto legible
+        foreach ($cambios as &$c) {
+            if ($c['campo'] === 'Producto') {
+                $idAntes = $registroAnterior['producto_id'] ?? null;
+                $c['valor_antes']   = etiquetaProducto($conectar, $idAntes ? intval($idAntes) : null) ?? $c['valor_antes'];
+                $c['valor_despues'] = etiquetaProducto($conectar, $producto_id) ?? $c['valor_despues'];
+            }
+        }
+        unset($c);
+
         $movimiento          = obtenerMovimientoSesion('editar', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -215,6 +272,7 @@ function guardarMolde()
             UPDATE molde SET
                 nombre       = :nombre,
                 forma        = :forma,
+                producto_id  = :producto_id,
                 update_at    = NOW(),
                 js_session   = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -222,6 +280,7 @@ function guardarMolde()
         ", [
             'nombre'       => $datosNuevos['nombre'],
             'forma'        => $datosNuevos['forma'],
+            'producto_id'  => $datosNuevos['producto_id'],
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,

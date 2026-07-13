@@ -15,6 +15,22 @@
  * Solo se puede desactivar (soft delete) una orden mientras sigue 'pendiente'.
  * Al reactivar, la orden vuelve a quedar 'pendiente'.
  *
+ * DISEÑO (simplificado): la orden es solo la "meta" — qué producto y cuántas
+ * unidades se necesitan — y el estado del flujo. El "cómo" (máquina, molde,
+ * color, operario, kg por corrida) se decide y registra en cada AVANCE
+ * (tabla `produccion`, ver clssProduccion.php).
+ *
+ * IMPORTANTE — inicio automático: este controlador YA NO expone una acción
+ * manual "iniciar" para el usuario. El paso pendiente -> en_proceso ahora lo
+ * dispara automáticamente clssProduccion.php cuando se registra el primer
+ * avance contra la orden (ver GUARDARPRODUCCION -> bloque de auto-inicio).
+ * Esto evita depender de que alguien recuerde tocar un botón "Iniciar" antes
+ * de producir, y evita estados inconsistentes (orden marcada "pendiente"
+ * mientras ya tiene avances reales, o viceversa).
+ *
+ * `codigo` no lo escribe el usuario: se autogenera como "OP-0001", "OP-0002",
+ * etc. usando el mismo id de la orden (ver generarCodigoOrden()).
+ *
  * NOTA: Se asume una tabla "producto" (id, nombre) para el combo de productos.
  * Si el nombre real de la tabla/columnas es distinto, ajustar solo la función
  * listarProductos().
@@ -37,9 +53,6 @@ function controladorOrdenProduccion($accion)
             break;
         case 'GUARDARORDEN':
             guardarOrden();
-            break;
-        case 'INICIARORDEN':
-            iniciarOrden();
             break;
         case 'FINALIZARORDEN':
             finalizarOrden();
@@ -157,6 +170,16 @@ function registrarMovimiento($conectar, int $id, string $accion, array $cambios)
 
 const ESTADOS_VALIDOS = ['pendiente', 'en_proceso', 'completada', 'cancelada'];
 
+/**
+ * Genera el código legible de una orden a partir de su id, p. ej. id=7 -> "OP-0007".
+ * Se apoya en el propio id (autoincremental y único) en vez de contar filas,
+ * así no hay condiciones de carrera entre creaciones simultáneas.
+ */
+function generarCodigoOrden(int $id): string
+{
+    return 'OP-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT);
+}
+
 function listarOrdenes()
 {
     $conectar = conectar_oll_BD();
@@ -170,7 +193,6 @@ function listarOrdenes()
 
     if ($texto !== '') {
         $where[] = "(LOWER(op.codigo) LIKE LOWER(:texto)
-                      OR LOWER(op.maquina) LIKE LOWER(:texto)
                       OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
@@ -232,23 +254,14 @@ function guardarOrden()
     $conectar = conectar_oll_BD();
 
     $id          = intval($_POST['id'] ?? 0);
-    $codigo      = trim($_POST['codigo'] ?? '');
     $producto_id = intval($_POST['producto_id'] ?? 0);
-    $maquina     = trim($_POST['maquina'] ?? '');
     $cantidad    = intval($_POST['cantidad'] ?? 0);
 
     // ── Validaciones ─────────────────────────────────────────────────────
-    if (empty($codigo))    responder(false, 'El código es obligatorio.');
-    if (!$producto_id)     responder(false, 'Debes seleccionar un producto.');
-    if ($cantidad <= 0)    responder(false, 'La cantidad debe ser mayor a 0.');
-
-    // Código único (excluyendo el propio registro si es edición)
-    $chk = executeQuery(
-        $conectar,
-        "SELECT id FROM orden_produccion WHERE LOWER(codigo) = LOWER(:codigo) AND id <> :id",
-        ['codigo' => $codigo, 'id' => $id]
-    );
-    if (!empty($chk)) responder(false, 'Ya existe una orden con ese código.');
+    // El código ya no lo pide el usuario: se autogenera a partir del id.
+    // La máquina tampoco se pide aquí: se decide por avance en `produccion`.
+    if (!$producto_id) responder(false, 'Debes seleccionar un producto.');
+    if ($cantidad <= 0) responder(false, 'La cantidad debe ser mayor a 0.');
 
     // El producto debe existir
     $prod = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
@@ -258,43 +271,52 @@ function guardarOrden()
     $mapaCampos = [
         'codigo'      => 'Código',
         'producto_id' => 'Producto',
-        'maquina'     => 'Máquina',
         'cantidad'    => 'Cantidad',
     ];
 
-    $datosNuevos = [
-        'codigo'      => $codigo,
-        'producto_id' => $producto_id,
-        'maquina'     => $maquina !== '' ? $maquina : null,
-        'cantidad'    => $cantidad,
-    ];
-
     if ($id === 0) {
-        // Creación: "antes" está vacío para todos los campos
+        // ── CREACIÓN ─────────────────────────────────────────────────────
+        // Se obtiene el próximo id de la secuencia para poder generar el
+        // código ("OP-0007") en el mismo INSERT, sin necesidad de un UPDATE
+        // adicional después ni de contar filas (evita condiciones de carrera).
+        $idRow = executeQuery($conectar, "SELECT nextval(pg_get_serial_sequence('orden_produccion', 'id')) AS id");
+        $nuevoId = intval($idRow[0]['id'] ?? 0);
+        if (!$nuevoId) throw new Exception('No se pudo generar el id de la nueva orden.');
+
+        $codigo = generarCodigoOrden($nuevoId);
+
+        $datosNuevos = [
+            'codigo'      => $codigo,
+            'producto_id' => $producto_id,
+            'cantidad'    => $cantidad,
+        ];
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-        $result = executeQuery($conectar, "
+        executeQuery($conectar, "
             INSERT INTO orden_produccion
-                (codigo, producto_id, maquina, cantidad, estado, created_at, js_session, js_historial)
+                (id, codigo, producto_id, cantidad, estado, created_at, js_session, js_historial)
             VALUES
-                (:codigo, :producto_id, :maquina, :cantidad, 'pendiente', NOW(), :js_session, :js_historial)
-            RETURNING id
+                (:id, :codigo, :producto_id, :cantidad, 'pendiente', NOW(), :js_session, :js_historial)
         ", [
-            'codigo'       => $datosNuevos['codigo'],
-            'producto_id'  => $datosNuevos['producto_id'],
-            'maquina'      => $datosNuevos['maquina'],
-            'cantidad'     => $datosNuevos['cantidad'],
+            'id'           => $nuevoId,
+            'codigo'       => $codigo,
+            'producto_id'  => $producto_id,
+            'cantidad'     => $cantidad,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
-        $nuevo_id = $result[0]['id'] ?? null;
-        responder(true, 'Orden de producción creada correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
+
+        responder(true, 'Orden de producción creada correctamente.', [
+            'id' => $nuevoId, 'codigo' => $codigo, 'modo' => 'crear',
+        ]);
     } else {
-        // Edición: solo se permite editar datos base si la orden sigue pendiente
+        // ── EDICIÓN ──────────────────────────────────────────────────────
+        // Solo se permite editar producto/cantidad si la orden sigue pendiente.
+        // El código no se vuelve a tocar (queda fijo desde la creación).
         $actual = executeQuery($conectar, "SELECT * FROM orden_produccion WHERE id = :id", ['id' => $id]);
         if (empty($actual)) responder(false, 'Orden no encontrada.');
         $registroAnterior = $actual[0];
@@ -306,6 +328,11 @@ function guardarOrden()
             responder(false, 'Solo puedes editar una orden mientras está pendiente.');
         }
 
+        $datosNuevos = [
+            'codigo'      => $registroAnterior['codigo'], // no cambia
+            'producto_id' => $producto_id,
+            'cantidad'    => $cantidad,
+        ];
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
         $movimiento          = obtenerMovimientoSesion('editar', $cambios);
@@ -314,19 +341,15 @@ function guardarOrden()
 
         executeQuery($conectar, "
             UPDATE orden_produccion SET
-                codigo       = :codigo,
                 producto_id  = :producto_id,
-                maquina      = :maquina,
                 cantidad     = :cantidad,
                 updated_at   = NOW(),
                 js_session   = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'codigo'       => $datosNuevos['codigo'],
-            'producto_id'  => $datosNuevos['producto_id'],
-            'maquina'      => $datosNuevos['maquina'],
-            'cantidad'     => $datosNuevos['cantidad'],
+            'producto_id'  => $producto_id,
+            'cantidad'     => $cantidad,
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
@@ -335,39 +358,10 @@ function guardarOrden()
     }
 }
 
-// pendiente -> en_proceso
-function iniciarOrden()
-{
-    $conectar = conectar_oll_BD();
-    $id = intval($_POST['id'] ?? 0);
-    if (!$id) responder(false, 'ID inválido.');
-
-    $actual = executeQuery($conectar, "SELECT estado, deleted_at FROM orden_produccion WHERE id = :id", ['id' => $id]);
-    if (empty($actual)) responder(false, 'Orden no encontrada.');
-    if (!empty($actual[0]['deleted_at'])) responder(false, 'Esta orden está inactiva.');
-    if ($actual[0]['estado'] !== 'pendiente') {
-        responder(false, 'Solo puedes iniciar una orden que está pendiente.');
-    }
-
-    executeQuery($conectar, "
-        UPDATE orden_produccion SET
-            estado       = 'en_proceso',
-            fecha_inicio = NOW(),
-            updated_at   = NOW()
-        WHERE id = :id
-    ", ['id' => $id]);
-
-    $cambios = [[
-        'campo'         => 'Estado',
-        'valor_antes'   => 'Pendiente',
-        'valor_despues' => 'En proceso',
-    ]];
-    registrarMovimiento($conectar, $id, 'iniciar', $cambios);
-
-    responder(true, 'Orden iniciada correctamente.');
-}
-
-// en_proceso -> completada
+// en_proceso -> completada. Puede ejecutarse de forma manual en cualquier
+// momento; ya no requiere que la cantidad avanzada haya llegado a la meta,
+// esa validación de "está lista para finalizar" queda a criterio de quien
+// opera el sistema.
 function finalizarOrden()
 {
     $conectar = conectar_oll_BD();

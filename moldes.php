@@ -17,7 +17,7 @@ include("header.php");
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
         <input type="text" id="fm_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por nombre o forma...">
+               placeholder="Buscar por nombre, forma o producto...">
         <select id="fm_estado" class="form-select" style="max-width:160px">
             <option value="">Todos</option>
             <option value="activa" selected>Activos</option>
@@ -31,12 +31,13 @@ include("header.php");
             <tr>
                 <th>Nombre</th>
                 <th>Forma</th>
+                <th>Producto</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyMoldes">
-            <tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -65,6 +66,13 @@ include("header.php");
             <input type="text" class="form-control" name="forma" id="molde_forma"
                    placeholder="Ej: cuchara, cadena, gancho..." required>
           </div>
+
+          <div class="mb-2">
+            <label class="form-label">Producto *</label>
+            <select class="form-select" name="producto_id" id="molde_producto_id" required>
+              <option value="">Selecciona un producto...</option>
+            </select>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -78,14 +86,18 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php'; // clssMoldes.php vive en su propia carpeta
+const CONTROLADOR_MOLDES    = 'controllers/clssMoldes.php';    // clssMoldes.php vive en su propia carpeta
+const CONTROLADOR_PRODUCTOS = 'controllers/clssProductos.php'; // para llenar el <select> de producto
 const modalMolde = new bootstrap.Modal(document.getElementById('modalMolde'));
 
 document.addEventListener('DOMContentLoaded', () => {
-    cargarMoldes().catch(err => {
+    Promise.all([
+        cargarProductosSelect(),
+        cargarMoldes()
+    ]).catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyMoldes').innerHTML =
-            `<tr><td colspan="4" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="5" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
@@ -100,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ── Llamada genérica al controlador ─────────────────────────────────────────
+// ── Llamadas genéricas a los controladores ──────────────────────────────────
 async function llamarMoldes(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
     const resp = await fetch(CONTROLADOR_MOLDES, {
@@ -117,6 +129,37 @@ async function llamarMoldes(accion, params = {}) {
     }
 }
 
+async function llamarProductos(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_PRODUCTOS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    const texto = await resp.text();
+    try {
+        return JSON.parse(texto);
+    } catch (e) {
+        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
+        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
+    }
+}
+
+// ── Select de productos ──────────────────────────────────────────────────────
+async function cargarProductosSelect() {
+    const json = await llamarProductos('LISTARPRODUCTOS', { texto: '', estado: 'activo' });
+    const select = document.getElementById('molde_producto_id');
+
+    if (!json.success) {
+        console.error('No se pudo cargar la lista de productos:', json.message);
+        return;
+    }
+
+    const productos = json.productos || [];
+    select.innerHTML = '<option value="">Selecciona un producto...</option>' +
+        productos.map(p => `<option value="${p.id}">${p.codigo} - ${p.descripcion}</option>`).join('');
+}
+
 // ── Listado ──────────────────────────────────────────────────────────────────
 async function cargarMoldes() {
     const texto  = document.getElementById('fm_texto').value.trim();
@@ -126,13 +169,13 @@ async function cargarMoldes() {
     const tbody = document.getElementById('tbodyMoldes');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const moldes = json.moldes || [];
     if (moldes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay moldes registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay moldes registrados.</td></tr>';
         return;
     }
 
@@ -140,6 +183,7 @@ async function cargarMoldes() {
     <tr id="fila-molde-${m.id}">
         <td data-label="Nombre">${m.nombre}</td>
         <td data-label="Forma">${m.forma ?? '-'}</td>
+        <td data-label="Producto">${m.producto_codigo ? `${m.producto_codigo} - ${m.producto_descripcion}` : '-'}</td>
         <td data-label="Estado">${!m.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
             : '<span class="badge bg-secondary">Inactivo</span>'}
@@ -176,6 +220,7 @@ async function abrirModalEditarMolde(id) {
     document.getElementById('molde_id').value = m.id;
     document.getElementById('molde_nombre').value = m.nombre ?? '';
     document.getElementById('molde_forma').value = m.forma ?? '';
+    document.getElementById('molde_producto_id').value = m.producto_id ?? '';
 
     modalMolde.show();
 }
