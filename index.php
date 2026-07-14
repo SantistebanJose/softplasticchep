@@ -117,6 +117,34 @@ window.addEventListener('load', function () {
 </script>
 <?php endif; ?>
 
+<div class="pc-panel">
+    <div class="pc-panel-head">
+        <h3><i class="fa-solid fa-bolt" style="color:var(--pc-red);margin-right:6px;"></i> Acceso rápido</h3>
+    </div>
+    <div style="padding:20px;">
+        <div class="pc-quick-grid">
+            <a href="produccion.php" class="pc-quick-btn q-blue">
+                <i class="fa-solid fa-industry"></i> Producción
+            </a>
+            <a href="ensamblaje.php" class="pc-quick-btn q-navy">
+                <i class="fa-solid fa-puzzle-piece"></i> Ensamblaje
+            </a>
+            <a href="ordenes_produccion.php" class="pc-quick-btn q-warning">
+                <i class="fa-solid fa-box-open"></i> Empaquetado
+            </a>
+            <a href="operarios.php" class="pc-quick-btn q-success">
+                <i class="fa-solid fa-hard-hat"></i> Operarios
+            </a>
+            <a href="maquinas.php" class="pc-quick-btn q-red">
+                <i class="fa-solid fa-gears"></i> Máquinas
+            </a>
+            <a href="moldes.php" class="pc-quick-btn q-dark">
+                <i class="fa-solid fa-shapes"></i> Moldes
+            </a>
+        </div>
+    </div>
+</div>
+<!--
 <div class="pc-metric-grid">
     <div class="pc-card pc-metric-card">
         <div class="top">
@@ -163,7 +191,8 @@ window.addEventListener('load', function () {
         <div class="delta neutral">materias primas</div>
     </div>
 </div>
-
+-->
+<!--
 <div class="pc-panel">
     <div class="pc-panel-head">
         <h3>Órdenes de producción recientes</h3>
@@ -180,6 +209,7 @@ window.addEventListener('load', function () {
             </tr>
         </thead>
         <tbody>
+            
         <?php foreach ($ordenes as $o): $pill = $estadoPill[$o['estado']]; ?>
             <tr>
                 <td><?= htmlspecialchars($o['codigo']) ?></td>
@@ -188,9 +218,9 @@ window.addEventListener('load', function () {
                 <td><?= number_format($o['cantidad'], 0, ',', ',') ?></td>
                 <td><span class="pc-pill <?= $pill['class'] ?>"><?= $pill['label'] ?></span></td>
             </tr>
-        <?php endforeach; ?>
+        <?php endforeach; ?> 
         </tbody>
     </table>
-</div>
+</div> -->
 
 <?php include("footer.php");?>

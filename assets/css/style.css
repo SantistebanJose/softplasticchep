@@ -522,3 +522,50 @@ details.pc-nav-group[open] > summary.pc-nav-item::before {
   border-top: 1px solid rgba(255,255,255,0.1);
   margin: 10px 4px;
 }
+
+
+/* ---------- Acceso rápido ---------- */
+.pc-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.pc-quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border-radius: var(--pc-radius);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14.5px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+
+.pc-quick-btn i { font-size: 26px; }
+
+.pc-quick-btn:hover {
+  color: #fff;
+  transform: translateY(-3px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.16);
+}
+
+.pc-quick-btn.q-blue    { background: var(--pc-blue); }
+.pc-quick-btn.q-navy    { background: var(--pc-navy); }
+.pc-quick-btn.q-red     { background: var(--pc-red); }
+.pc-quick-btn.q-success { background: var(--pc-success); }
+.pc-quick-btn.q-warning { background: var(--pc-warning); }
+.pc-quick-btn.q-dark    { background: #152238; }
+
+@media (max-width: 992px) {
+  .pc-quick-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .pc-quick-grid { grid-template-columns: 1fr; }
+}
