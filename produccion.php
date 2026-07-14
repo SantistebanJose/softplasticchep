@@ -169,15 +169,88 @@ include("header.php");
     align-items:center; gap:6px; border-radius:8px;
 }
 .pc-prod-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
+
+
+.pc-tk-total-input{
+    width:90px; border:none; border-bottom:2px solid transparent; background:transparent;
+    font-weight:700; font-size:1.1em; color:var(--pc-blue,#2F6FED); text-align:right;
+    font-variant-numeric:tabular-nums;
+}
+.pc-tk-total-input:not([readonly]){ border-bottom-color:#d97706; }
+.pc-tk-total-input:focus{ outline:none; }
+
+.pc-btn-iniciar{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #16A34A;
+    background:#E8F7EE; color:#16A34A; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-iniciar:hover{ background:#16A34A; color:#fff; }
+.pc-btn-finalizar{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #D97706;
+    background:#FDF1E0; color:#D97706; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-finalizar:hover{ background:#D97706; color:#fff; }
+/* ---------- Chips de estadísticas rápidas ---------- */
+.pc-stat-row{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:12px;
+    margin-bottom:18px;
+}
+.pc-stat-chip{
+    border:1px solid #e7e4dd; border-radius:12px; background:#fff;
+    padding:12px 14px; display:flex; align-items:center; gap:10px;
+    transition:box-shadow .15s ease;
+}
+.pc-stat-chip:hover{ box-shadow:0 4px 12px rgba(0,0,0,.06); }
+.pc-stat-chip .ico{
+    width:34px; height:34px; border-radius:9px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:15px;
+}
+.pc-stat-chip .txt .n{ font-size:19px; font-weight:700; line-height:1.15; color:#152238; }
+.pc-stat-chip .txt .l{ font-size:11px; color:#8a8578; }
+.pc-stat-chip.s-gray .ico{ background:#EEECE6; color:#8a8578; }
+.pc-stat-chip.s-info .ico{ background:#E3F2FD; color:#0B4DA6; }
+.pc-stat-chip.s-success .ico{ background:#E8F7EE; color:#16A34A; }
+.pc-stat-chip.s-warning .ico{ background:#FDF1E0; color:#D97706; }
+
+@media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
+
+/* ---------- Estado visual en las cards de producción ---------- */
+.pc-prod-card{
+    border-left:4px solid #e2ddcd;
+    transition:border-color .2s ease, background .8s ease;
+}
+.pc-prod-card.estado-sin{ border-left-color:#c8c3b4; }
+.pc-prod-card.estado-curso{ border-left-color:#0B4DA6; }
+.pc-prod-card.estado-fin{ border-left-color:#16A34A; }
+
+.pc-prod-card.pc-flash{ animation:pc-flash-bg 1.8s ease; }
+@keyframes pc-flash-bg{
+    0%{ background:#FFF6DC; box-shadow:0 0 0 2px #F5D98A inset; }
+    100%{ background:#fff; box-shadow:none; }
+}
+
+.pc-corrida-curso .badge.bg-info{ display:inline-flex; align-items:center; gap:5px; }
+.pc-corrida-curso .badge.bg-info::before{
+    content:""; width:6px; height:6px; border-radius:50%;
+    background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite;
+}
+@keyframes pc-pulse-blue{
+    0%{ box-shadow:0 0 0 0 rgba(11,77,166,.6); }
+    70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); }
+    100%{ box-shadow:0 0 0 0 rgba(11,77,166,0); }
+}
 </style>
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Producción</h2>
         <button class="pc-btn pc-btn-primary" onclick="abrirModalCrearProduccion()">
-            <i class="fa-solid fa-plus"></i> Registrar avance
+            <i class="fa-solid fa-plus"></i> Registrar producción
         </button>
     </div>
+<br>
+    <div class="pc-stat-row" id="statRowProduccion"></div>
 
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
@@ -215,7 +288,7 @@ include("header.php");
     <div class="modal-content">
       <form id="formProduccion">
         <div class="modal-header">
-          <h5 class="modal-title" id="modalProduccionTitulo">Registrar avance de producción</h5>
+          <h5 class="modal-title" id="modalProduccionTitulo">Registrar producción</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
@@ -252,22 +325,14 @@ include("header.php");
 
           <div class="row">
             <div class="col-md-4 mb-2">
-                <label class="form-label">Kg insertados en máquina (este avance)</label>
-                <input type="number" step="1" min="1" class="form-control" id="prod_cantidad">
-            </div>
-
-            <div class="col-md-4 mb-2">
                 <label class="form-label">Fecha de registro</label>
                 <input type="datetime-local" class="form-control" id="prod_fecha">
             </div>
-          </div>
-
-          <div class="row">
-            <div class="col-12 mb-2">
+            <div class="col-md-8 mb-2">
                 <label class="form-label">Observaciones</label>
                 <input type="text" class="form-control" id="prod_observaciones" placeholder="Opcional">
             </div>
-          </div>
+        </div>
 
           <hr>
 
@@ -304,13 +369,15 @@ include("header.php");
                 <ul class="pc-tk-list" id="prod_ticket_list">
                     <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>
                 </ul>
-                <div class="pc-tk-resumen" id="prod_ticket_footer" style="display:none;">
-                    <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
-                    <div class="pc-tk-resumen-texto">
-                        <span class="total"><b id="prod_ticket_total_kg">0</b> Kg en total</span>
-                        <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
-                    </div>
+                <div class="pc-tk-resumen" id="prod_ticket_footer">
+                <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                <div class="pc-tk-resumen-texto">
+                    <span class="total">
+                    <input type="number" step="1" min="1" id="prod_cantidad" class="pc-tk-total-input" required>                        Kg en total
+                    </span>
+                    <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
                 </div>
+            </div>
             </div>
           </div>
 
@@ -360,8 +427,115 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
-});
 
+    iniciarAutoRefresh();
+});
+// =============================================================================
+// TIEMPO REAL: refresco silencioso en segundo plano
+// =============================================================================
+const POLL_INTERVAL_MS = 8000; // cada 8s, sin avisar nada al usuario
+let pollTimer = null;
+let snapshotEstados = {}; // { produccion_id: 'sin' | 'curso' | 'fin' }
+
+function iniciarAutoRefresh() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+        if (document.hidden) return; // pestaña en segundo plano: no gastar llamadas
+        if (modalProduccion._element.classList.contains('show')) return; // no interrumpir mientras editas
+        cargarProducciones(true); // silencioso = true, sin "Cargando..."
+    }, POLL_INTERVAL_MS);
+
+    // Al volver a la pestaña, refresca de inmediato (sin avisar nada)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) cargarProducciones(true);
+    });
+
+    // Al cerrar el modal (guardaste, cancelaste, o iniciaste/finalizaste desde
+    // otra pestaña), refresca de inmediato al volver a esta vista
+    document.getElementById('modalProduccion').addEventListener('hidden.bs.modal', () => {
+        cargarProducciones(true);
+    });
+}
+
+function estadoCorto(p) {
+    if (!p.fecha_hora_inicio) return 'sin';
+    if (!p.fecha_hora_fin) return 'curso';
+    return 'fin';
+}
+
+function renderStatRow(producciones) {
+    const activas = producciones.filter(p => !p.deleted_at);
+    const sinIniciar = activas.filter(p => estadoCorto(p) === 'sin').length;
+    const enCurso = activas.filter(p => estadoCorto(p) === 'curso').length;
+    const finalizadas = activas.filter(p => estadoCorto(p) === 'fin').length;
+    const kgHoy = activas
+        .filter(p => p.fecha && p.fecha.substring(0, 10) === new Date().toISOString().substring(0, 10))
+        .reduce((s, p) => s + Number(p.cantidad || 0), 0);
+
+    document.getElementById('statRowProduccion').innerHTML = `
+        <div class="pc-stat-chip s-gray">
+            <div class="ico"><i class="fa-solid fa-hourglass-half"></i></div>
+            <div class="txt"><div class="n">${sinIniciar}</div><div class="l">Sin iniciar</div></div>
+        </div>
+        <div class="pc-stat-chip s-info">
+            <div class="ico"><i class="fa-solid fa-gear"></i></div>
+            <div class="txt"><div class="n">${enCurso}</div><div class="l">En curso</div></div>
+        </div>
+        <div class="pc-stat-chip s-success">
+            <div class="ico"><i class="fa-solid fa-flag-checkered"></i></div>
+            <div class="txt"><div class="n">${finalizadas}</div><div class="l">Finalizadas</div></div>
+        </div>
+        <div class="pc-stat-chip s-warning">
+            <div class="ico"><i class="fa-solid fa-weight-hanging"></i></div>
+            <div class="txt"><div class="n">${formatearCantidadProd(kgHoy)}</div><div class="l">Kg registrados hoy</div></div>
+        </div>
+    `;
+}
+function actualizarTextoUltimaActualizacion() {
+    const el = document.getElementById('lastUpdateTxt');
+    if (!el || !ultimaActualizacion) return;
+    const segs = Math.floor((Date.now() - ultimaActualizacion) / 1000);
+    let texto;
+    if (segs < 3) texto = 'Actualizado justo ahora';
+    else if (segs < 60) texto = `Actualizado hace <b>${segs}s</b>`;
+    else texto = `Actualizado hace <b>${Math.floor(segs / 60)} min</b>`;
+    el.innerHTML = texto;
+}
+
+function estadoCorto(p) {
+    if (!p.fecha_hora_inicio) return 'sin';
+    if (!p.fecha_hora_fin) return 'curso';
+    return 'fin';
+}
+
+function renderStatRow(producciones) {
+    const activas = producciones.filter(p => !p.deleted_at);
+    const sinIniciar = activas.filter(p => estadoCorto(p) === 'sin').length;
+    const enCurso = activas.filter(p => estadoCorto(p) === 'curso').length;
+    const finalizadas = activas.filter(p => estadoCorto(p) === 'fin').length;
+    const kgHoy = activas
+        .filter(p => p.fecha && p.fecha.substring(0, 10) === new Date().toISOString().substring(0, 10))
+        .reduce((s, p) => s + Number(p.cantidad || 0), 0);
+
+    document.getElementById('statRowProduccion').innerHTML = `
+        <div class="pc-stat-chip s-gray">
+            <div class="ico"><i class="fa-solid fa-hourglass-half"></i></div>
+            <div class="txt"><div class="n">${sinIniciar}</div><div class="l">Sin iniciar</div></div>
+        </div>
+        <div class="pc-stat-chip s-info">
+            <div class="ico"><i class="fa-solid fa-gear"></i></div>
+            <div class="txt"><div class="n">${enCurso}</div><div class="l">En curso</div></div>
+        </div>
+        <div class="pc-stat-chip s-success">
+            <div class="ico"><i class="fa-solid fa-flag-checkered"></i></div>
+            <div class="txt"><div class="n">${finalizadas}</div><div class="l">Finalizadas</div></div>
+        </div>
+        <div class="pc-stat-chip s-warning">
+            <div class="ico"><i class="fa-solid fa-weight-hanging"></i></div>
+            <div class="txt"><div class="n">${formatearCantidadProd(kgHoy)}</div><div class="l">Kg registrados hoy</div></div>
+        </div>
+    `;
+}
 // ── Llamadas genéricas ────────────────────────────────────────────────────
 async function llamarProduccion(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -536,7 +710,7 @@ async function obtenerOpcionesMaterialesProd() {
 }
 
 // ── Listado en CARDS (orden por ID) ───────────────────────────────────────
-async function cargarProducciones() {
+async function cargarProducciones(silencioso = false) {
     const params = {
         texto: document.getElementById('fprod_texto').value.trim(),
         operario_id: document.getElementById('fprod_operario').value,
@@ -548,8 +722,10 @@ async function cargarProducciones() {
         fecha_hasta: document.getElementById('fprod_hasta').value,
     };
 
-    const json = await llamarProduccion('LISTARPRODUCCIONES', params);
     const grid = document.getElementById('gridProducciones');
+    if (!silencioso) grid.innerHTML = '<div class="pc-prod-empty">Cargando...</div>';
+
+    const json = await llamarProduccion('LISTARPRODUCCIONES', params);
 
     if (!json.success) {
         grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
@@ -557,11 +733,14 @@ async function cargarProducciones() {
     }
 
     const producciones = json.producciones || [];
+    renderStatRow(producciones);
     if (producciones.length === 0) {
         grid.innerHTML = '<div class="pc-prod-empty">No hay registros de producción.</div>';
+        snapshotEstados = {};
         return;
     }
 
+    const nuevosEstados = {};
     grid.innerHTML = producciones.map(p => {
         const colorTexto = p.color_nombre
             ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
@@ -571,8 +750,12 @@ async function cargarProducciones() {
         const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
         const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin;
 
+        const estado = estadoCorto(p);
+        nuevosEstados[p.id] = estado;
+        const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
+
         return `
-        <div class="pc-prod-card ${p.deleted_at ? 'inactiva' : ''}" id="fila-produccion-${p.id}">
+        <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
             <div class="pc-prod-card-head">
                 <div class="titulo">
                     <span class="id">#${p.id}</span>
@@ -615,13 +798,13 @@ async function cargarProducciones() {
                     <i class="fa-solid fa-pen"></i>
                 </button>
                 ${puedeIniciar
-                    ? `<button class="pc-icon-btn" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
-                           <i class="fa-solid fa-play"></i></button>`
+                    ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
+                        <i class="fa-solid fa-play"></i> Iniciar</button>`
                     : ''
                 }
                 ${puedeFinalizar
-                    ? `<button class="pc-icon-btn" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
-                           <i class="fa-solid fa-stop"></i></button>`
+                    ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
+                        <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
                     : ''
                 }
                 ${!p.deleted_at
@@ -638,8 +821,9 @@ async function cargarProducciones() {
             </div>
         </div>`;
     }).join('');
-}
 
+    snapshotEstados = nuevosEstados;
+}
 // =============================================================================
 // MENÚ DE MATERIALES + TICKET
 // =============================================================================
@@ -782,18 +966,17 @@ function quitarLineaTicket(tempId) {
 
 function renderTicket() {
     const list = document.getElementById('prod_ticket_list');
-    const footer = document.getElementById('prod_ticket_footer');
-
+    const totalInput = document.getElementById('prod_cantidad');
+    const detalle = document.getElementById('prod_ticket_total_detalle');
 
     if (ticketLineas.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>`;
-        footer.style.display = 'none';
+        totalInput.readOnly = false;
+        detalle.textContent = 'Sin materiales — ingresa los kg manualmente (ej. reproceso)';
         return;
     }
 
-    list.innerHTML = ticketLineas.map(l =>
-
-        `
+    list.innerHTML = ticketLineas.map(l => `
         <li class="pc-tk-item">
             <span class="pellet-sm" style="--card-color:${l.color};--card-bg:${l.bg};"><i class="fa-solid ${l.icono}"></i></span>
             <div class="cuerpo">
@@ -816,17 +999,10 @@ function renderTicket() {
         </li>
     `).join('');
 
-
-    const total = ticketLineas.reduce((suma, linea) => {
-        return suma + Number(linea.cantidad);
-    }, 0);
-
-    footer.style.display = 'flex';
-    document.getElementById('prod_ticket_total_kg').textContent = formatearCantidadProd(total);
-    document.getElementById('prod_ticket_total_detalle').textContent =
-        `${ticketLineas.length} material${ticketLineas.length === 1 ? '' : 'es'} en este avance`;
-
-    document.getElementById("prod_cantidad").value = total;
+    const total = ticketLineas.reduce((suma, linea) => suma + Number(linea.cantidad), 0);
+    totalInput.readOnly = true;
+    totalInput.value = Math.round(total); // entero, aunque las líneas tengan decimales
+    detalle.textContent = `${ticketLineas.length} material${ticketLineas.length === 1 ? '' : 'es'} en este avance`;
 }
 
 function obtenerDetalleJsonProd() {
@@ -852,7 +1028,7 @@ function limpiarFormularioProduccion() {
 async function abrirModalCrearProduccion() {
     limpiarFormularioProduccion();
     modoEdicionProduccion = false;
-    document.getElementById('modalProduccionTitulo').textContent = 'Registrar avance de producción';
+    document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
     await cargarSelectsModal();
     // Fecha/hora actual por defecto
     const ahora = new Date();
@@ -1006,6 +1182,10 @@ function finalizarProduccion(id) {
             Swal.fire('Error', json.message, 'error');
         }
     });
+}
+
+function pasarAEnsamblaje(produccionId) {
+    window.location.href = `ensamblaje.php?produccion_id=${produccionId}`;
 }
 </script>
 

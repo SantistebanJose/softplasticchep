@@ -407,18 +407,18 @@ function guardarProduccion()
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
+            // DESPUÉS
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
-                    orden_id, operario_id, maquina_id, molde_id, color_id, cantidad,
-                    fecha, observaciones, es_emergencia,
+                    operario_id, maquina_id, molde_id, color_id, cantidad,
+                    fecha, observaciones,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
-                    :orden_id, :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
-                    :fecha, :observaciones, :es_emergencia,
+                    :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
+                    :fecha, :observaciones,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
-                'orden_id'          => $orden_id,
                 'operario_id'       => $operario_id,
                 'maquina_id'        => $maquina_id,
                 'molde_id'          => $molde_id,
@@ -426,7 +426,6 @@ function guardarProduccion()
                 'cantidad'          => $cantidad,
                 'fecha'             => $fecha,
                 'observaciones'     => $observaciones ?: null,
-                'es_emergencia'     => $esEmergencia ? 'true' : 'false',
                 'js_session'        => $js_session,
                 'js_historial'      => $js_historial,
             ]);
@@ -480,9 +479,9 @@ function guardarProduccion()
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
+            // DESPUÉS
             executeNonQuery($conectar, "
                 UPDATE produccion SET
-                    orden_id           = :orden_id,
                     operario_id        = :operario_id,
                     maquina_id         = :maquina_id,
                     molde_id           = :molde_id,
@@ -490,13 +489,11 @@ function guardarProduccion()
                     cantidad           = :cantidad,
                     fecha              = :fecha,
                     observaciones      = :observaciones,
-                    es_emergencia      = :es_emergencia,
                     updated_at         = NOW(),
                     js_session         = :js_session,
                     js_historial       = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
                 WHERE id = :id
             ", [
-                'orden_id'          => $orden_id,
                 'operario_id'       => $operario_id,
                 'maquina_id'        => $maquina_id,
                 'molde_id'          => $molde_id,
@@ -504,12 +501,10 @@ function guardarProduccion()
                 'cantidad'          => $cantidad,
                 'fecha'             => $fecha,
                 'observaciones'     => $observaciones ?: null,
-                'es_emergencia'     => $esEmergencia ? 'true' : 'false',
                 'js_session'        => $js_session,
                 'js_historial'      => $js_historial,
                 'id'                => $id,
             ]);
-
             $conectar->commit();
             responder(true, 'Producción actualizada correctamente.', [
                 'id' => $id, 'modo' => 'editar',
