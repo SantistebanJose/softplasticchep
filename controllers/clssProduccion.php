@@ -2,19 +2,18 @@
 
 /**
  * controllers/clssProduccion.php
- * Controlador del módulo de Producción (avances contra una orden de producción)
+ * Controlador del módulo de Producción (avances de producción)
  *
  * Tablas reales:
- *   orden_produccion (id, codigo, producto_id, maquina [texto libre], cantidad,
- *                        estado, fecha_inicio, fecha_fin, created_at, updated_at)
  *   operarios (id, nombre_completo, cargo, activo, created_at, updated_at)
  *   molde (id, nombre, forma, producto_id, deleted_at, ...)
  *   color (id, nombre, descripcion, rgb, deleted_at, ...)
  *   producto (id, codigo, descripcion, peso_unitario_g, ...)
- *   produccion (id, orden_id -> orden_produccion, operario_id -> operarios,
- *               maquina_id -> maquina, molde_id -> molde, color_id -> color,
+ *   produccion (id, orden_id -> orden_produccion [ya no se usa, siempre NULL],
+ *               operario_id -> operarios, maquina_id -> maquina,
+ *               molde_id -> molde, color_id -> color,
  *               cantidad, fecha, fecha_hora_inicio, fecha_hora_fin,
- *               observaciones, es_emergencia,
+ *               observaciones, es_emergencia [ya no se usa, siempre false],
  *               created_at, updated_at, deleted_at, js_session, js_historial)
  *   rel_produccion_material (id, produccion_id, material_id,
  *               rel_compra_material_id, cantidad, comentario,
@@ -22,8 +21,11 @@
  *   view_lotes_material_disponible (ver produccion_ddl_ajustado.sql)
  *
  * MODELO:
- *   Cada fila de `produccion` es un AVANCE puntual contra una orden de
- *   producción (quién, cuándo, en qué máquina, con qué molde y color).
+ *   Cada fila de `produccion` es un AVANCE puntual: quién, cuándo, en qué
+ *   máquina, con qué molde y color. Ya NO se registra contra una orden de
+ *   producción (la empresa no trabaja con ese flujo), por lo que los
+ *   campos `orden_id` y `es_emergencia` se mantienen en la tabla por
+ *   compatibilidad pero siempre se guardan como NULL / false.
  *
  *   IMPORTANTE (cambio de significado de `cantidad`): `cantidad` ya NO es
  *   el número de piezas (ganchos) producidas. Ahora representa los
@@ -32,8 +34,7 @@
  *   ahora fuera del alcance de este controlador).
  *
  *   MERMA: se descartó por ahora — el campo `merma_total` ya no se pide
- *   ni se guarda desde este formulario. Si más adelante se retoma, aquí
- *   es donde habría que engancharla (ver guardarProduccion()).
+ *   ni se guarda desde este formulario.
  *
  *   Cada avance puede consumir uno o varios materiales, y CADA línea de
  *   consumo apunta a un LOTE puntual (trazabilidad FIFO por compra).
@@ -53,24 +54,11 @@
  *   - Reactivar avance   -> restaura las líneas y vuelve a RESTAR su
  *                           cantidad del stock.
  *
- * EMERGENCIAS:
- *   Cuando llega un pedido urgente y no hay stock del color/producto que
- *   toca según el orden habitual, se rompe la secuencia. El avance se
- *   marca con `es_emergencia = true`. Cuando es emergencia, la orden de
- *   producción es OPCIONAL.
- *
- * Este controlador NO crea/edita orden_produccion, molde, color ni
- * producto (cada uno tiene su propio CRUD en su respectivo clss*.php);
- * aquí solo se listan/consultan para elegir contra qué avance se registra.
+ * Este controlador NO crea/edita molde, color ni producto (cada uno tiene
+ * su propio CRUD en su respectivo clss*.php); aquí solo se listan/consultan
+ * para elegir contra qué avance se registra.
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
- *
- * MIGRACIÓN YA APLICADA (según DDL compartido):
- *   ALTER TABLE produccion ADD COLUMN molde_id integer;
- *   ALTER TABLE produccion ADD COLUMN color_id integer;
- *   ALTER TABLE produccion ADD COLUMN fecha_hora_inicio timestamp without time zone;
- *   ALTER TABLE produccion ADD COLUMN fecha_hora_fin timestamp without time zone;
- *   ALTER TABLE produccion ADD COLUMN merma_total numeric(12,4);
  */
 
 ob_start();
@@ -109,9 +97,6 @@ function controladorProduccion($accion)
         case 'REACTIVARPRODUCCION':
             reactivarProduccion();
             break;
-        case 'BUSCARORDENES':
-            buscarOrdenes();
-            break;
         case 'BUSCAROPERARIOS':
             buscarOperarios();
             break;
@@ -138,50 +123,6 @@ function controladorProduccion($accion)
 // =============================================================================
 // LISTADOS AUXILIARES (para los <select> / cards del modal)
 // =============================================================================
-
-// Órdenes de producción activas (para elegir contra cuál se registra el
-// avance). Se muestran con el nombre del producto y el avance acumulado ya
-// registrado, para que José vea de un vistazo cuánto falta.
-function buscarOrdenes()
-{
-    $conectar = conectar_oll_BD();
-    $texto  = trim($_POST['texto'] ?? '');
-    $estado = trim($_POST['estado'] ?? '');
-
-    $where  = ["1=1"];
-    $params = [];
-    if ($texto !== '') {
-        $where[] = "(LOWER(o.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
-        $params['texto'] = "%$texto%";
-    }
-    if ($estado !== '') {
-        $where[] = "o.estado = :estado";
-        $params['estado'] = $estado;
-    }
-
-    $sql = "
-        SELECT
-            o.id, o.codigo, o.producto_id, o.maquina, o.cantidad AS cantidad_objetivo,
-            o.estado, o.fecha_inicio, o.fecha_fin,
-            p.descripcion AS producto_nombre,
-            COALESCE(av.total_avanzado, 0) AS cantidad_avanzada
-        FROM orden_produccion o
-        LEFT JOIN producto p ON p.id = o.producto_id
-        LEFT JOIN (
-            SELECT orden_id, SUM(cantidad) AS total_avanzado
-            FROM produccion
-            WHERE deleted_at IS NULL AND orden_id IS NOT NULL
-            GROUP BY orden_id
-        ) av ON av.orden_id = o.id
-        WHERE " . implode(' AND ', $where) . "
-        ORDER BY o.created_at DESC
-        LIMIT 100
-    ";
-
-    $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['ordenes' => $result]);
-}
-
 
 function buscarOperarios()
 {
@@ -245,7 +186,7 @@ function buscarLotesMaterial()
 }
 
 // =============================================================================
-// PRODUCCIÓN (avances contra una orden)
+// PRODUCCIÓN (avances)
 // =============================================================================
 
 function listarProducciones()
@@ -253,13 +194,11 @@ function listarProducciones()
     $conectar = conectar_oll_BD();
 
     $texto        = trim($_POST['texto'] ?? '');
-    $orden_id     = trim($_POST['orden_id'] ?? '');
     $operario_id  = trim($_POST['operario_id'] ?? '');
     $maquina_id   = trim($_POST['maquina_id'] ?? '');
     $molde_id     = trim($_POST['molde_id'] ?? '');
     $color_id     = trim($_POST['color_id'] ?? '');
     $estado       = trim($_POST['estado'] ?? ''); // '', 'activa', 'inactiva'
-    $emergencia   = trim($_POST['emergencia'] ?? ''); // '', 'si', 'no'
     $fecha_desde  = trim($_POST['fecha_desde'] ?? '');
     $fecha_hasta  = trim($_POST['fecha_hasta'] ?? '');
 
@@ -267,12 +206,8 @@ function listarProducciones()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(pd.observaciones) LIKE LOWER(:texto) OR LOWER(o.codigo) LIKE LOWER(:texto) OR LOWER(mo.nombre) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(pd.observaciones) LIKE LOWER(:texto) OR LOWER(mo.nombre) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
-    }
-    if ($orden_id !== '') {
-        $where[] = "pd.orden_id = :orden_id";
-        $params['orden_id'] = $orden_id;
     }
     if ($operario_id !== '') {
         $where[] = "pd.operario_id = :operario_id";
@@ -295,11 +230,6 @@ function listarProducciones()
     } elseif ($estado === 'inactiva') {
         $where[] = "pd.deleted_at IS NOT NULL";
     }
-    if ($emergencia === 'si') {
-        $where[] = "pd.es_emergencia = true";
-    } elseif ($emergencia === 'no') {
-        $where[] = "pd.es_emergencia = false";
-    }
     if ($fecha_desde !== '') {
         $where[] = "pd.fecha >= :fecha_desde";
         $params['fecha_desde'] = $fecha_desde;
@@ -309,12 +239,9 @@ function listarProducciones()
         $params['fecha_hasta'] = $fecha_hasta . ' 23:59:59';
     }
 
-    // orden_id ahora puede ser NULL (avances de emergencia sin orden asociada)
     $sql = "
         SELECT
             pd.*,
-            o.codigo AS orden_codigo,
-            p.descripcion AS producto_nombre,
             op.nombre_completo AS operario_nombre,
             ma.nombre AS maquina_nombre,
             mo.nombre AS molde_nombre,
@@ -325,8 +252,6 @@ function listarProducciones()
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
             ), 0) AS items_count
         FROM produccion pd
-        LEFT JOIN orden_produccion o ON o.id = pd.orden_id
-        LEFT JOIN producto p ON p.id = o.producto_id
         LEFT JOIN operario op ON op.id = pd.operario_id
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -346,14 +271,11 @@ function obtenerProduccion($id)
 
     $produccion = executeQuery(
         $conectar,
-        "SELECT pd.*, o.codigo AS orden_codigo,
-                p.descripcion AS producto_nombre,
+        "SELECT pd.*,
                 op.nombre_completo AS operario_nombre, ma.nombre AS maquina_nombre,
-                mo.nombre AS molde_nombre, mo.producto_id AS molde_producto_id,
+                mo.nombre AS molde_nombre,
                 co.nombre AS color_nombre, co.rgb AS color_rgb
          FROM produccion pd
-         LEFT JOIN orden_produccion o ON o.id = pd.orden_id
-         LEFT JOIN producto p ON p.id = o.producto_id
          LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
          LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -420,7 +342,6 @@ function guardarProduccion()
     $conectar = conectar_oll_BD();
 
     $id                 = intval($_POST['id'] ?? 0);
-    $orden_id           = !empty($_POST['orden_id']) ? intval($_POST['orden_id']) : null;
     $operario_id        = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
     $maquina_id         = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
@@ -429,26 +350,19 @@ function guardarProduccion()
     $fecha              = trim($_POST['fecha'] ?? '');
     $observaciones      = trim($_POST['observaciones'] ?? '');
     $detalleJson        = trim($_POST['detalle'] ?? '[]');
-    $esEmergencia       = filter_var($_POST['es_emergencia'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+    // La empresa ya no maneja órdenes de producción ni el concepto de
+    // "emergencia" (que solo existía para justificar romper el orden de
+    // una orden). Ambos campos se conservan en la tabla por compatibilidad
+    // pero siempre se guardan vacíos/false.
+    $orden_id     = null;
+    $esEmergencia = false;
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
-    // La orden solo es obligatoria si NO es una emergencia.
-    if (!$orden_id && !$esEmergencia) {
-        responder(false, 'Debes seleccionar una orden de producción (o marcar el avance como emergencia).');
-    }
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
-    if ($esEmergencia && $observaciones === '') {
-        responder(false, 'Cuéntanos brevemente el motivo de la emergencia en las observaciones.');
-    }
     if (empty($fecha)) $fecha = date('Y-m-d H:i:s');
-    
-
-    if ($orden_id) {
-        $orden = executeQuery($conectar, "SELECT id, estado FROM orden_produccion WHERE id = :id", ['id' => $orden_id]);
-        if (empty($orden)) responder(false, 'La orden de producción seleccionada no existe.');
-    }
 
     $molde = executeQuery($conectar, "SELECT id FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
     if (empty($molde)) responder(false, 'El molde seleccionado no existe o está inactivo.');
@@ -480,14 +394,14 @@ function guardarProduccion()
     // (ej. reproceso, control de calidad) que no consuman material nuevo.
     // Si quieres forzarlo obligatorio, descomenta la validación siguiente:
     // if (empty($detalle)) responder(false, 'Debes agregar al menos un material con su lote de origen.');
-$conectar->beginTransaction();
+
+    $conectar->beginTransaction();
     try {
         if ($id === 0) {
             // ── CREACIÓN ─────────────────────────────────────────────────────
             $cambios = [[
                 'campo' => 'Producción', 'valor_antes' => '(nuevo)',
-                'valor_despues' => "Avance de $cantidad kg" . ($esEmergencia ? ' [EMERGENCIA]' : '')
-                    . ", " . count($detalle) . ' material(es) consumido(s)',
+                'valor_despues' => "Avance de $cantidad kg, " . count($detalle) . ' material(es) consumido(s)',
             ]];
             $movimiento   = obtenerMovimientoSesion('crear', $cambios);
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -496,13 +410,11 @@ $conectar->beginTransaction();
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
                     orden_id, operario_id, maquina_id, molde_id, color_id, cantidad,
-                    fecha, fecha_hora_inicio, fecha_hora_fin,
-                    observaciones, es_emergencia,
+                    fecha, observaciones, es_emergencia,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :orden_id, :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
-                    :fecha, :fecha_hora_inicio, :fecha_hora_fin,
-                    :observaciones, :es_emergencia,
+                    :fecha, :observaciones, :es_emergencia,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
@@ -513,8 +425,6 @@ $conectar->beginTransaction();
                 'color_id'          => $color_id,
                 'cantidad'          => $cantidad,
                 'fecha'             => $fecha,
-                'fecha_hora_inicio' => $fecha_hora_inicio ?: null,
-                'fecha_hora_fin'    => $fecha_hora_fin ?: null,
                 'observaciones'     => $observaciones ?: null,
                 'es_emergencia'     => $esEmergencia ? 'true' : 'false',
                 'js_session'        => $js_session,
@@ -525,34 +435,6 @@ $conectar->beginTransaction();
 
             if (!empty($detalle)) {
                 insertarLineasYRestarStock($conectar, $produccionId, $detalle);
-            }
-
-            // Si el avance va contra una orden que todavía está "pendiente",
-            // este es su primer avance real de trabajo: la pasamos
-            // automáticamente a "en_proceso" y le marcamos fecha_inicio.
-            // Si ya estaba en_proceso (o es un avance de emergencia sin
-            // orden, $orden_id === null), no se toca nada.
-            if ($orden_id && $orden[0]['estado'] === 'pendiente') {
-                $cambiosOrden = [[
-                    'campo' => 'Estado', 'valor_antes' => 'Pendiente', 'valor_despues' => 'En proceso',
-                ]];
-                $movimientoOrden    = obtenerMovimientoSesion('iniciar_automatico', $cambiosOrden);
-                $js_session_orden   = json_encode($movimientoOrden, JSON_UNESCAPED_UNICODE);
-                $js_historial_orden = json_encode([$movimientoOrden], JSON_UNESCAPED_UNICODE);
-
-                executeNonQuery($conectar, "
-                    UPDATE orden_produccion SET
-                        estado       = 'en_proceso',
-                        fecha_inicio = NOW(),
-                        updated_at   = NOW(),
-                        js_session   = :js_session,
-                        js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-                    WHERE id = :id
-                ", [
-                    'id'           => $orden_id,
-                    'js_session'   => $js_session_orden,
-                    'js_historial' => $js_historial_orden,
-                ]);
             }
 
             $conectar->commit();
@@ -592,7 +474,7 @@ $conectar->beginTransaction();
             $cambios = [[
                 'campo' => 'Producción',
                 'valor_antes' => $produccionAnterior['cantidad'] . ' kg',
-                'valor_despues' => "$cantidad kg" . ($esEmergencia ? ' [EMERGENCIA]' : '') . ", " . count($detalle) . ' material(es)',
+                'valor_despues' => "$cantidad kg, " . count($detalle) . ' material(es)',
             ]];
             $movimiento   = obtenerMovimientoSesion('editar', $cambios);
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -607,8 +489,6 @@ $conectar->beginTransaction();
                     color_id           = :color_id,
                     cantidad           = :cantidad,
                     fecha              = :fecha,
-                    fecha_hora_inicio  = :fecha_hora_inicio,
-                    fecha_hora_fin     = :fecha_hora_fin,
                     observaciones      = :observaciones,
                     es_emergencia      = :es_emergencia,
                     updated_at         = NOW(),
@@ -623,8 +503,6 @@ $conectar->beginTransaction();
                 'color_id'          => $color_id,
                 'cantidad'          => $cantidad,
                 'fecha'             => $fecha,
-                'fecha_hora_inicio' => $fecha_hora_inicio ?: null,
-                'fecha_hora_fin'    => $fecha_hora_fin ?: null,
                 'observaciones'     => $observaciones ?: null,
                 'es_emergencia'     => $esEmergencia ? 'true' : 'false',
                 'js_session'        => $js_session,
@@ -827,6 +705,7 @@ function reactivarProduccion()
         responder(false, 'No se pudo reactivar la producción: ' . $e->getMessage());
     }
 }
+
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
 function iniciarCorrida(int $id)
@@ -888,6 +767,7 @@ function finalizarCorrida(int $id)
 
     responder(true, 'Corrida finalizada.');
 }
+
 // =============================================================================
 // HELPER
 // =============================================================================

@@ -1,6 +1,6 @@
 <?php
 $pageTitle    = 'Producción';
-$pageSubtitle = 'Avances de producción por orden';
+$pageSubtitle = 'Avances de producción';
 $activePage = 'produccion';
 
 include("header.php");
@@ -24,19 +24,6 @@ include("header.php");
     --resina-5:#7C3AED; --resina-5-bg:#F1EAFD;
     --resina-6:#0E9488; --resina-6-bg:#E2F5F3;
 }
-
-.pc-emergencia-toggle{
-    border:1px solid #f1d0a6; background:#fff9f0; border-radius:10px;
-    padding:10px 14px; display:flex; align-items:center; gap:10px;
-    transition:.15s ease;
-}
-.pc-emergencia-toggle.activa{ background:#fff1e0; border-color:#e8a33d; }
-.pc-emergencia-toggle .form-check-input{ width:2.4em; height:1.3em; cursor:pointer; }
-.pc-emergencia-toggle .txt{ font-size:.92em; line-height:1.25; }
-.pc-emergencia-toggle .txt b{ display:block; color:#8a5a10; }
-#prod_orden_wrap.orden-no-aplica select{ background:#f4f4f4; color:#9a9a9a; }
-#prod_orden_wrap .badge-opcional{ display:none; }
-#prod_orden_wrap.orden-no-aplica .badge-opcional{ display:inline-block; }
 
 .pc-color-dot{
     display:inline-block; width:12px; height:12px; border-radius:50%;
@@ -121,7 +108,23 @@ include("header.php");
 .pc-tk-remove{ border:none; background:none; color:#c94a4a; font-size:.85em; align-self:flex-start; }
 .pc-tk-empty{ text-align:center; color:#9a9585; font-size:.85em; padding:26px 12px; }
 .pc-tk-empty i{ font-size:1.6em; display:block; margin-bottom:6px; opacity:.5; }
-.pc-tk-footer{ padding:8px 14px; border-top:1px solid #eee7db; font-size:.78em; color:#8a8578; background:#fffefb; }
+
+/* Resumen del ticket: total en kg + cantidad de materiales, justo debajo
+   de la lista, a modo de "total a pagar" de una comanda. */
+.pc-tk-resumen{
+    display:flex; align-items:center; gap:12px;
+    padding:12px 14px; border-top:1px solid #eee7db;
+    background:linear-gradient(0deg,#fffaf0,#fffefb);
+}
+.pc-tk-resumen-icon{
+    width:36px; height:36px; border-radius:10px; flex:0 0 auto;
+    background:var(--pc-blue-light,#EAF0FE); color:var(--pc-blue,#2F6FED);
+    display:flex; align-items:center; justify-content:center; font-size:1em;
+}
+.pc-tk-resumen-texto{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.pc-tk-resumen-texto .total{ font-size:.95em; color:#3a3730; }
+.pc-tk-resumen-texto .total b{ font-size:1.15em; color:var(--pc-blue,#2F6FED); }
+.pc-tk-resumen-texto .detalle{ font-size:.75em; color:#8a8578; }
 
 /* Estado de corrida dentro de la card */
 .pc-corrida-sin{ color:#9a9585; font-size:.85em; }
@@ -131,7 +134,7 @@ include("header.php");
 
 /* ===================================================================
    Listado de producción en CARDS (reemplaza la tabla). Ordenado por
-   ID. Cada card resume un avance: encabezado con orden/estado, cuerpo
+   ID. Cada card resume un avance: encabezado con ID/estado, cuerpo
    con los datos clave en pares etiqueta/valor, y pie con acciones.
 =================================================================== */
 .pc-prod-grid{
@@ -145,14 +148,13 @@ include("header.php");
 }
 .pc-prod-card:hover{ box-shadow:0 6px 16px rgba(0,0,0,.08); transform:translateY(-1px); }
 .pc-prod-card.inactiva{ opacity:.6; }
-.pc-prod-card.emergencia{ border-color:#e8a33d; }
 .pc-prod-card-head{
     padding:10px 14px; background:#fdfcfa; border-bottom:1px solid #eee7db;
     display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
 }
 .pc-prod-card-head .titulo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
 .pc-prod-card-head .id{ font-size:.72em; color:#9a9585; font-weight:600; }
-.pc-prod-card-head .orden{ font-weight:700; font-size:.95em; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pc-prod-card-head .molde-titulo{ font-weight:700; font-size:.95em; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .pc-prod-card-body{ padding:12px 14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; flex:1; }
 .pc-prod-field{ min-width:0; }
 .pc-prod-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
@@ -160,7 +162,11 @@ include("header.php");
 .pc-prod-field.span-2{ grid-column:1/-1; }
 .pc-prod-card-foot{
     padding:8px 14px; border-top:1px solid #eee7db; background:#fffefb;
-    display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;
+    display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.pc-btn-ensamblaje{
+    margin-left:auto; padding:7px 12px; font-size:.8em; display:inline-flex;
+    align-items:center; gap:6px; border-radius:8px;
 }
 .pc-prod-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
 </style>
@@ -176,7 +182,7 @@ include("header.php");
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
         <input type="text" id="fprod_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por código de orden, molde u observaciones...">
+               placeholder="Buscar por molde u observaciones...">
         <select id="fprod_operario" class="form-select" style="max-width:200px">
             <option value="">Todos los operarios</option>
         </select>
@@ -191,11 +197,6 @@ include("header.php");
         </select>
         <input type="date" id="fprod_desde" class="form-control" style="max-width:160px" title="Desde">
         <input type="date" id="fprod_hasta" class="form-control" style="max-width:160px" title="Hasta">
-        <select id="fprod_emergencia" class="form-select" style="max-width:170px">
-            <option value="">Todos (con/sin emergencia)</option>
-            <option value="si">⚡ Solo emergencias</option>
-            <option value="no">Sin emergencia</option>
-        </select>
         <select id="fprod_estado" class="form-select" style="max-width:160px">
             <option value="">Todos</option>
             <option value="activa" selected>Activos</option>
@@ -219,33 +220,14 @@ include("header.php");
         </div>
         <div class="modal-body">
 
-          <div class="pc-emergencia-toggle mb-3" id="prod_emergencia_wrap">
-            <input class="form-check-input" type="checkbox" role="switch" id="prod_emergencia">
-            <div class="txt">
-                <b>⚡ Producción sin ORDEN</b>
-                Rompe el orden habitual de colores/molde.
-                La orden de producción pasa a ser opcional y cuéntanos el motivo en observaciones.
-            </div>
-          </div>
-
           <div class="row">
-            <div class="col-md-6 mb-2" id="prod_orden_wrap">
-                <label class="form-label">
-                    Orden de producción *
-                    <span class="badge bg-warning text-dark badge-opcional">opcional</span>
-                </label>
-                <select class="form-select" id="prod_orden_id" required>
-                    <option value="">Selecciona una orden...</option>
-                </select>
-                <div class="form-text" id="prod_orden_info"></div>
-            </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Operario</label>
                 <select class="form-select" id="prod_operario_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Máquina</label>
                 <select class="form-select" id="prod_maquina_id">
                     <option value="">Selecciona...</option>
@@ -282,7 +264,7 @@ include("header.php");
 
           <div class="row">
             <div class="col-12 mb-2">
-                <label class="form-label" id="prod_observaciones_label">Observaciones</label>
+                <label class="form-label">Observaciones</label>
                 <input type="text" class="form-control" id="prod_observaciones" placeholder="Opcional">
             </div>
           </div>
@@ -322,15 +304,15 @@ include("header.php");
                 <ul class="pc-tk-list" id="prod_ticket_list">
                     <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>
                 </ul>
-                <div class="pc-tk-footer" id="prod_ticket_footer" style="display:none;"></div>
-                
+                <div class="pc-tk-resumen" id="prod_ticket_footer" style="display:none;">
+                    <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                    <div class="pc-tk-resumen-texto">
+                        <span class="total"><b id="prod_ticket_total_kg">0</b> Kg en total</span>
+                        <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
+                    </div>
+                </div>
             </div>
           </div>
-          <br>
-            <div>
-                 <span id="total_material">0</span>
-            </div>
-
 
         </div>
         <div class="modal-footer">
@@ -373,12 +355,11 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarProducciones, 350);
     });
-    ['fprod_operario', 'fprod_maquina', 'fprod_molde', 'fprod_color', 'fprod_estado', 'fprod_emergencia', 'fprod_desde', 'fprod_hasta'].forEach(id => {
+    ['fprod_operario', 'fprod_maquina', 'fprod_molde', 'fprod_color', 'fprod_estado', 'fprod_desde', 'fprod_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarProducciones);
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
-    document.getElementById('prod_emergencia').addEventListener('change', aplicarEstadoEmergencia);
 });
 
 // ── Llamadas genéricas ────────────────────────────────────────────────────
@@ -482,20 +463,6 @@ function estiloMaterial(nombre) {
     };
 }
 
-// ── Emergencia: la orden pasa a ser opcional y se exige observaciones ────
-function aplicarEstadoEmergencia() {
-    const activa = document.getElementById('prod_emergencia').checked;
-    const wrapToggle = document.getElementById('prod_emergencia_wrap');
-    const wrapOrden = document.getElementById('prod_orden_wrap');
-    const ordenSelect = document.getElementById('prod_orden_id');
-    const obsLabel = document.getElementById('prod_observaciones_label');
-
-    wrapToggle.classList.toggle('activa', activa);
-    wrapOrden.classList.toggle('orden-no-aplica', activa);
-    ordenSelect.required = !activa;
-    obsLabel.textContent = activa ? 'Observaciones (cuéntanos el motivo de la emergencia) *' : 'Observaciones';
-}
-
 // ── Selects auxiliares ───────────────────────────────────────────────────────
 async function cargarSelectsFiltro() {
     const [operario, maquinas, moldes, colores] = await Promise.all([
@@ -530,27 +497,12 @@ async function obtenerMoldesProd() {
 }
 
 async function cargarSelectsModal(seleccion = {}) {
-    const [ordenes, operario, maquinas, moldes, colores] = await Promise.all([
-        llamarProduccion('BUSCARORDENES'),
+    const [operario, maquinas, moldes, colores] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
         obtenerMoldesProd(),
         llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
     ]);
-
-    const ordenSelect = document.getElementById('prod_orden_id');
-    ordenSelect.innerHTML = '<option value="">Selecciona una orden...</option>';
-    if (ordenes.success) {
-        ordenes.ordenes.forEach(o => {
-            const faltante = (o.cantidad_objetivo ?? 0) - (o.cantidad_avanzada ?? 0);
-            ordenSelect.insertAdjacentHTML('beforeend', `<option value="${o.id}"
-                    data-objetivo="${o.cantidad_objetivo}" data-avanzado="${o.cantidad_avanzada}">
-                    ${o.codigo} - ${o.producto_nombre ?? 'Sin producto'} (${o.cantidad_avanzada}/${o.cantidad_objetivo}, falta ${faltante})
-                </option>`);
-        });
-    }
-    if (seleccion.orden_id) ordenSelect.value = seleccion.orden_id;
-    actualizarInfoOrden();
 
     const operarioSelect = document.getElementById('prod_operario_id');
     operarioSelect.innerHTML = '<option value="">Selecciona...</option>';
@@ -576,17 +528,6 @@ async function cargarSelectsModal(seleccion = {}) {
     if (seleccion.color_id) colorSelect.value = seleccion.color_id;
 }
 
-function actualizarInfoOrden() {
-    const sel = document.getElementById('prod_orden_id');
-    const opt = sel.selectedOptions[0];
-    const info = document.getElementById('prod_orden_info');
-    if (!opt || !opt.value) { info.textContent = ''; return; }
-    const objetivo = parseFloat(opt.dataset.objetivo || 0);
-    const avanzado = parseFloat(opt.dataset.avanzado || 0);
-    info.textContent = `Avanzado: ${avanzado} de ${objetivo} (falta ${Math.max(objetivo - avanzado, 0)}).`;
-}
-document.getElementById('prod_orden_id').addEventListener('change', actualizarInfoOrden);
-
 async function obtenerOpcionesMaterialesProd() {
     if (materialesProdCache) return materialesProdCache;
     const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {});
@@ -603,7 +544,6 @@ async function cargarProducciones() {
         molde_id: document.getElementById('fprod_molde').value,
         color_id: document.getElementById('fprod_color').value,
         estado: document.getElementById('fprod_estado').value,
-        emergencia: document.getElementById('fprod_emergencia').value,
         fecha_desde: document.getElementById('fprod_desde').value,
         fecha_hasta: document.getElementById('fprod_hasta').value,
     };
@@ -623,34 +563,24 @@ async function cargarProducciones() {
     }
 
     grid.innerHTML = producciones.map(p => {
-        const ordenTexto = p.orden_codigo
-            ? `${p.orden_codigo}${p.es_emergencia ? ' <span class="badge bg-warning text-dark" title="Avance de emergencia">⚡</span>' : ''}`
-            : '<span class="text-muted fst-italic">⚡ Sin orden (emergencia)</span>';
         const colorTexto = p.color_nombre
             ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
             : '-';
 
         const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
         const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+        const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin;
 
         return `
-        <div class="pc-prod-card ${p.deleted_at ? 'inactiva' : ''} ${p.es_emergencia ? 'emergencia' : ''}" id="fila-produccion-${p.id}">
+        <div class="pc-prod-card ${p.deleted_at ? 'inactiva' : ''}" id="fila-produccion-${p.id}">
             <div class="pc-prod-card-head">
                 <div class="titulo">
                     <span class="id">#${p.id}</span>
-                    <span class="orden">${ordenTexto}</span>
+                    <span class="molde-titulo">${p.molde_nombre ?? '-'}</span>
                 </div>
                 ${badgeRegistroProd(p.deleted_at)}
             </div>
             <div class="pc-prod-card-body">
-                <div class="pc-prod-field span-2">
-                    <span class="lbl">Producto</span>
-                    <span class="val">${p.producto_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Molde</span>
-                    <span class="val">${p.molde_nombre ?? '-'}</span>
-                </div>
                 <div class="pc-prod-field">
                     <span class="lbl">Color</span>
                     <span class="val">${colorTexto}</span>
@@ -699,6 +629,11 @@ async function cargarProducciones() {
                            <i class="fa-solid fa-trash"></i></button>`
                     : `<button class="pc-icon-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                            <i class="fa-solid fa-rotate-left"></i></button>`
+                }
+                ${corridaFinalizada
+                    ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="pasarAEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
+                           <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
+                    : ''
                 }
             </div>
         </div>`;
@@ -848,7 +783,7 @@ function quitarLineaTicket(tempId) {
 function renderTicket() {
     const list = document.getElementById('prod_ticket_list');
     const footer = document.getElementById('prod_ticket_footer');
-    
+
 
     if (ticketLineas.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>`;
@@ -856,8 +791,8 @@ function renderTicket() {
         return;
     }
 
-    list.innerHTML = ticketLineas.map(l => 
-        
+    list.innerHTML = ticketLineas.map(l =>
+
         `
         <li class="pc-tk-item">
             <span class="pellet-sm" style="--card-color:${l.color};--card-bg:${l.bg};"><i class="fa-solid ${l.icono}"></i></span>
@@ -886,17 +821,12 @@ function renderTicket() {
         return suma + Number(linea.cantidad);
     }, 0);
 
-    footer.style.display = 'block';
-    footer.textContent = `${total} Kg. en Total |  ${ticketLineas.length} material(es) en este avance.`;
-    console.log(ticketLineas);
+    footer.style.display = 'flex';
+    document.getElementById('prod_ticket_total_kg').textContent = formatearCantidadProd(total);
+    document.getElementById('prod_ticket_total_detalle').textContent =
+        `${ticketLineas.length} material${ticketLineas.length === 1 ? '' : 'es'} en este avance`;
 
-    
-
-    console.log(total);
-    document.getElementById("total_material").innerText = total;
     document.getElementById("prod_cantidad").value = total;
-    
-
 }
 
 function obtenerDetalleJsonProd() {
@@ -911,13 +841,11 @@ function obtenerDetalleJsonProd() {
 // ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioProduccion() {
     document.getElementById('formProduccion').reset();
-    document.getElementById('prod_orden_info').textContent = '';
     document.getElementById('prod_mat_buscar').value = '';
     document.getElementById('prod_lote_panel').style.display = 'none';
     produccionIdActual = 0;
     materialSeleccionadoId = null;
     ticketLineas = [];
-    aplicarEstadoEmergencia();
     renderTicket();
 }
 
@@ -947,11 +875,9 @@ async function abrirModalEditarProduccion(id) {
     document.getElementById('prod_cantidad').value = p.cantidad;
     document.getElementById('prod_fecha').value = formatearFechaHoraLocal(p.fecha);
     document.getElementById('prod_observaciones').value = p.observaciones ?? '';
-    document.getElementById('prod_emergencia').checked = !!p.es_emergencia;
-    aplicarEstadoEmergencia();
 
     await cargarSelectsModal({
-        orden_id: p.orden_id, operario_id: p.operario_id, maquina_id: p.maquina_id,
+        operario_id: p.operario_id, maquina_id: p.maquina_id,
         molde_id: p.molde_id, color_id: p.color_id,
     });
     await renderGridMateriales();
@@ -986,18 +912,8 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    const esEmergencia = document.getElementById('prod_emergencia').checked;
-    /**
-    if (esEmergencia && !document.getElementById('prod_observaciones').value.trim()) {
-        Swal.fire('Falta el motivo', 'Cuéntanos brevemente el motivo de la emergencia en observaciones.', 'warning');
-        return;
-    }
-     */
-    
-
     const params = {
         id: produccionIdActual,
-        orden_id: document.getElementById('prod_orden_id').value,
         operario_id: document.getElementById('prod_operario_id').value,
         maquina_id: document.getElementById('prod_maquina_id').value,
         molde_id: document.getElementById('prod_molde_id').value,
@@ -1005,7 +921,6 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
-        es_emergencia: esEmergencia ? '1' : '0',
         detalle: obtenerDetalleJsonProd(),
     };
 
