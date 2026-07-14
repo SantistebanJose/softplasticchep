@@ -123,11 +123,46 @@ include("header.php");
 .pc-tk-empty i{ font-size:1.6em; display:block; margin-bottom:6px; opacity:.5; }
 .pc-tk-footer{ padding:8px 14px; border-top:1px solid #eee7db; font-size:.78em; color:#8a8578; background:#fffefb; }
 
-/* Estado de corrida en la columna de la tabla */
+/* Estado de corrida dentro de la card */
 .pc-corrida-sin{ color:#9a9585; font-size:.85em; }
 .pc-corrida-curso{ font-size:.8em; }
 .pc-corrida-curso small{ display:block; color:#8a8578; margin-top:2px; }
 .pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
+
+/* ===================================================================
+   Listado de producción en CARDS (reemplaza la tabla). Ordenado por
+   ID. Cada card resume un avance: encabezado con orden/estado, cuerpo
+   con los datos clave en pares etiqueta/valor, y pie con acciones.
+=================================================================== */
+.pc-prod-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
+    gap:14px; margin-top:4px;
+}
+.pc-prod-card{
+    border:1px solid #e7e4dd; border-radius:14px; background:#fff;
+    overflow:hidden; display:flex; flex-direction:column;
+    transition:box-shadow .12s ease, transform .12s ease;
+}
+.pc-prod-card:hover{ box-shadow:0 6px 16px rgba(0,0,0,.08); transform:translateY(-1px); }
+.pc-prod-card.inactiva{ opacity:.6; }
+.pc-prod-card.emergencia{ border-color:#e8a33d; }
+.pc-prod-card-head{
+    padding:10px 14px; background:#fdfcfa; border-bottom:1px solid #eee7db;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+}
+.pc-prod-card-head .titulo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.pc-prod-card-head .id{ font-size:.72em; color:#9a9585; font-weight:600; }
+.pc-prod-card-head .orden{ font-weight:700; font-size:.95em; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pc-prod-card-body{ padding:12px 14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; flex:1; }
+.pc-prod-field{ min-width:0; }
+.pc-prod-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
+.pc-prod-field .val{ font-size:.85em; color:#3a3730; font-weight:600; overflow-wrap:break-word; }
+.pc-prod-field.span-2{ grid-column:1/-1; }
+.pc-prod-card-foot{
+    padding:8px 14px; border-top:1px solid #eee7db; background:#fffefb;
+    display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;
+}
+.pc-prod-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
 </style>
 
 <div class="pc-card">
@@ -168,29 +203,8 @@ include("header.php");
         </select>
     </div>
 
-    <div class="pc-table-wrap pc-table-responsive-cards">
-    <table class="pc-table" id="tablaProducciones">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Orden</th>
-                <th>Producto</th>
-                <th>Molde</th>
-                <th>Color</th>
-                <th>Operario</th>
-                <th>Máquina</th>
-                <th>Fecha</th>
-                <th>Corrida</th>
-                <th>Kg insertados</th>
-                <th>Materiales</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody id="tbodyProducciones">
-            <tr><td colspan="13" style="text-align:center;">Cargando...</td></tr>
-        </tbody>
-    </table>
+    <div class="pc-prod-grid" id="gridProducciones">
+        <div class="pc-prod-empty">Cargando...</div>
     </div>
 </div>
 
@@ -208,8 +222,8 @@ include("header.php");
           <div class="pc-emergencia-toggle mb-3" id="prod_emergencia_wrap">
             <input class="form-check-input" type="checkbox" role="switch" id="prod_emergencia">
             <div class="txt">
-                <b>⚡ Avance de emergencia</b>
-                Rompe el orden habitual de colores/producto porque llegó un pedido urgente.
+                <b>⚡ Producción sin ORDEN</b>
+                Rompe el orden habitual de colores/molde.
                 La orden de producción pasa a ser opcional y cuéntanos el motivo en observaciones.
             </div>
           </div>
@@ -218,7 +232,7 @@ include("header.php");
             <div class="col-md-6 mb-2" id="prod_orden_wrap">
                 <label class="form-label">
                     Orden de producción *
-                    <span class="badge bg-warning text-dark badge-opcional">opcional (emergencia)</span>
+                    <span class="badge bg-warning text-dark badge-opcional">opcional</span>
                 </label>
                 <select class="form-select" id="prod_orden_id" required>
                     <option value="">Selecciona una orden...</option>
@@ -256,8 +270,8 @@ include("header.php");
 
           <div class="row">
             <div class="col-md-4 mb-2">
-                <label class="form-label">Kg insertados en máquina (este avance) *</label>
-                <input type="number" step="1" min="1" class="form-control" id="prod_cantidad" required>
+                <label class="form-label">Kg insertados en máquina (este avance)</label>
+                <input type="number" step="1" min="1" class="form-control" id="prod_cantidad">
             </div>
 
             <div class="col-md-4 mb-2">
@@ -309,8 +323,14 @@ include("header.php");
                     <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>
                 </ul>
                 <div class="pc-tk-footer" id="prod_ticket_footer" style="display:none;"></div>
+                
             </div>
           </div>
+          <br>
+            <div>
+                 <span id="total_material">0</span>
+            </div>
+
 
         </div>
         <div class="modal-footer">
@@ -325,6 +345,7 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+var total = 0;
 const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
 const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el <select> de molde
 const CONTROLADOR_COLOR      = 'controllers/clssColor.php';  // para el <select> de color
@@ -343,8 +364,8 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarSelectsFiltro();
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
-        document.getElementById('tbodyProducciones').innerHTML =
-            `<tr><td colspan="13" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+        document.getElementById('gridProducciones').innerHTML =
+            `<div class="pc-prod-empty" style="color:red;">Error de conexión con el servidor. Revisa la consola (F12).</div>`;
     });
 
     let debounceTimer = null;
@@ -422,7 +443,7 @@ function formatearFechaHoraLegible(fechaIso) {
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
 }
 
-// ── Estado de la corrida (columna "Corrida" en la tabla) ─────────────────
+// ── Estado de la corrida (dentro de la card) ─────────────────
 function estadoCorridaTexto(p) {
     if (!p.fecha_hora_inicio) {
         return '<span class="pc-corrida-sin">Sin iniciar</span>';
@@ -573,7 +594,7 @@ async function obtenerOpcionesMaterialesProd() {
     return materialesProdCache;
 }
 
-// ── Listado ──────────────────────────────────────────────────────────────────
+// ── Listado en CARDS (orden por ID) ───────────────────────────────────────
 async function cargarProducciones() {
     const params = {
         texto: document.getElementById('fprod_texto').value.trim(),
@@ -588,20 +609,20 @@ async function cargarProducciones() {
     };
 
     const json = await llamarProduccion('LISTARPRODUCCIONES', params);
-    const tbody = document.getElementById('tbodyProducciones');
+    const grid = document.getElementById('gridProducciones');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">${json.message}</td></tr>`;
+        grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
         return;
     }
 
     const producciones = json.producciones || [];
     if (producciones.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">No hay registros de producción.</td></tr>';
+        grid.innerHTML = '<div class="pc-prod-empty">No hay registros de producción.</div>';
         return;
     }
 
-    tbody.innerHTML = producciones.map(p => {
+    grid.innerHTML = producciones.map(p => {
         const ordenTexto = p.orden_codigo
             ? `${p.orden_codigo}${p.es_emergencia ? ' <span class="badge bg-warning text-dark" title="Avance de emergencia">⚡</span>' : ''}`
             : '<span class="text-muted fst-italic">⚡ Sin orden (emergencia)</span>';
@@ -613,20 +634,53 @@ async function cargarProducciones() {
         const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
 
         return `
-        <tr id="fila-produccion-${p.id}">
-            <td data-label="#">${p.id}</td>
-            <td data-label="Orden">${ordenTexto}</td>
-            <td data-label="Producto">${p.producto_nombre ?? '-'}</td>
-            <td data-label="Molde">${p.molde_nombre ?? '-'}</td>
-            <td data-label="Color">${colorTexto}</td>
-            <td data-label="Operario">${p.operario_nombre ?? '-'}</td>
-            <td data-label="Máquina">${p.maquina_nombre ?? '-'}</td>
-            <td data-label="Fecha">${p.fecha}</td>
-            <td data-label="Corrida">${estadoCorridaTexto(p)}</td>
-            <td data-label="Kg insertados">${formatearCantidadProd(p.cantidad)}</td>
-            <td data-label="Materiales">${p.items_count}</td>
-            <td data-label="Estado">${badgeRegistroProd(p.deleted_at)}</td>
-            <td data-label="Acciones" class="pc-td-acciones">
+        <div class="pc-prod-card ${p.deleted_at ? 'inactiva' : ''} ${p.es_emergencia ? 'emergencia' : ''}" id="fila-produccion-${p.id}">
+            <div class="pc-prod-card-head">
+                <div class="titulo">
+                    <span class="id">#${p.id}</span>
+                    <span class="orden">${ordenTexto}</span>
+                </div>
+                ${badgeRegistroProd(p.deleted_at)}
+            </div>
+            <div class="pc-prod-card-body">
+                <div class="pc-prod-field span-2">
+                    <span class="lbl">Producto</span>
+                    <span class="val">${p.producto_nombre ?? '-'}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Molde</span>
+                    <span class="val">${p.molde_nombre ?? '-'}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Color</span>
+                    <span class="val">${colorTexto}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Operario</span>
+                    <span class="val">${p.operario_nombre ?? '-'}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Máquina</span>
+                    <span class="val">${p.maquina_nombre ?? '-'}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Fecha</span>
+                    <span class="val">${p.fecha}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Kg insertados</span>
+                    <span class="val">${formatearCantidadProd(p.cantidad)}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Materiales</span>
+                    <span class="val">${p.items_count}</span>
+                </div>
+                <div class="pc-prod-field span-2">
+                    <span class="lbl">Corrida</span>
+                    <span class="val">${estadoCorridaTexto(p)}</span>
+                </div>
+            </div>
+            <div class="pc-prod-card-foot">
                 <button class="pc-icon-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
                 </button>
@@ -646,8 +700,8 @@ async function cargarProducciones() {
                     : `<button class="pc-icon-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                            <i class="fa-solid fa-rotate-left"></i></button>`
                 }
-            </td>
-        </tr>`;
+            </div>
+        </div>`;
     }).join('');
 }
 
@@ -794,6 +848,7 @@ function quitarLineaTicket(tempId) {
 function renderTicket() {
     const list = document.getElementById('prod_ticket_list');
     const footer = document.getElementById('prod_ticket_footer');
+    
 
     if (ticketLineas.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>`;
@@ -801,7 +856,9 @@ function renderTicket() {
         return;
     }
 
-    list.innerHTML = ticketLineas.map(l => `
+    list.innerHTML = ticketLineas.map(l => 
+        
+        `
         <li class="pc-tk-item">
             <span class="pellet-sm" style="--card-color:${l.color};--card-bg:${l.bg};"><i class="fa-solid ${l.icono}"></i></span>
             <div class="cuerpo">
@@ -824,8 +881,22 @@ function renderTicket() {
         </li>
     `).join('');
 
+
+    const total = ticketLineas.reduce((suma, linea) => {
+        return suma + Number(linea.cantidad);
+    }, 0);
+
     footer.style.display = 'block';
-    footer.textContent = `${ticketLineas.length} material(es) en este avance.`;
+    footer.textContent = `${total} Kg. en Total |  ${ticketLineas.length} material(es) en este avance.`;
+    console.log(ticketLineas);
+
+    
+
+    console.log(total);
+    document.getElementById("total_material").innerText = total;
+    document.getElementById("prod_cantidad").value = total;
+    
+
 }
 
 function obtenerDetalleJsonProd() {
@@ -916,10 +987,13 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     e.preventDefault();
 
     const esEmergencia = document.getElementById('prod_emergencia').checked;
+    /**
     if (esEmergencia && !document.getElementById('prod_observaciones').value.trim()) {
         Swal.fire('Falta el motivo', 'Cuéntanos brevemente el motivo de la emergencia en observaciones.', 'warning');
         return;
     }
+     */
+    
 
     const params = {
         id: produccionIdActual,
@@ -978,7 +1052,7 @@ function reactivarProduccion(id) {
     });
 }
 
-// ── Iniciar / Finalizar corrida (acciones directas desde la tabla) ───────────
+// ── Iniciar / Finalizar corrida (acciones directas desde la card) ───────────
 function iniciarProduccion(id) {
     Swal.fire({
         title: '¿Iniciar la corrida ahora?',
