@@ -337,8 +337,9 @@ async function inicializarPagina() {
     // ensamblaje.php?produccion_id=123
     const params = new URLSearchParams(window.location.search);
     const produccionId = parseInt(params.get('produccion_id') || '0', 10);
+    const cantidadProducida = parseFloat(params.get('cantidad_producida') || '');
     if (produccionId > 0) {
-        await abrirModalCrearEnsamblajeDesdeProduccion(produccionId);
+        await abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadProducida);
     }
 }
 
@@ -731,7 +732,7 @@ async function abrirModalCrearEnsamblaje() {
 
 // Entrada desde produccion.php (?produccion_id=X): prellenar producto y
 // dejar esa producción ya agregada en el ticket.
-async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId) {
+async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadProducida) {
     const json = await llamarEnsamblaje('OBTENERDATOSPRODUCCIONPARAENSAMBLAJE', { produccion_id: produccionId });
     if (!json.success) {
         Swal.fire('Aviso', json.message, 'warning');
@@ -751,10 +752,13 @@ async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId) {
         fecha_hora_fin: p.fecha_hora_fin,
     });
 
+    if (!isNaN(cantidadProducida) && cantidadProducida > 0) {
+        document.getElementById('ens_cantidad_peso_kg').value = cantidadProducida;
+    }
+
     await renderGridDetalle();
     modalEnsamblaje.show();
 }
-
 async function abrirModalEditarEnsamblaje(id) {
     const json = await llamarEnsamblaje('OBTENERENSAMBLAJE', { id });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }

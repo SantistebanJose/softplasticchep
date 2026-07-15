@@ -390,6 +390,28 @@ include("header.php");
     </div>
   </div>
 </div>
+<!-- Modal previo: Cantidad producida (antes de pasar a ensamblaje) -->
+<div class="modal fade" id="modalCantidadEnsamblaje" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formCantidadEnsamblaje">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="fa-solid fa-weight-hanging"></i> Cantidad producida</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label">Cantidad producida (kg) *</label>
+          <input type="number" step="0.0001" min="0.0001" class="form-control"
+                 id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Continuar <i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -814,8 +836,8 @@ async function cargarProducciones(silencioso = false) {
                            <i class="fa-solid fa-rotate-left"></i></button>`
                 }
                 ${corridaFinalizada
-                    ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="pasarAEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
-                           <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
+                    ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
+                        <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
                     : ''
                 }
             </div>
@@ -1184,9 +1206,24 @@ function finalizarProduccion(id) {
     });
 }
 
-function pasarAEnsamblaje(produccionId) {
-    window.location.href = `ensamblaje.php?produccion_id=${produccionId}`;
+const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
+let produccionIdParaEnsamblaje = null;
+
+function abrirModalCantidadParaEnsamblaje(produccionId) {
+    produccionIdParaEnsamblaje = produccionId;
+    document.getElementById('formCantidadEnsamblaje').reset();
+    modalCantidadEnsamblaje.show();
 }
+
+document.getElementById('formCantidadEnsamblaje').addEventListener('submit', function (e) {
+    e.preventDefault();
+    const valor = parseFloat(document.getElementById('cantidad_producida_ensamblaje').value);
+    if (isNaN(valor) || valor <= 0) {
+        Swal.fire('Dato inválido', 'Ingresa una cantidad producida mayor a 0.', 'warning');
+        return;
+    }
+    window.location.href = `ensamblaje.php?produccion_id=${produccionIdParaEnsamblaje}&cantidad_producida=${valor}`;
+});
 </script>
 
 <?php require __DIR__ . '/footer.php'; ?>
