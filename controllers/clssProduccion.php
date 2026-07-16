@@ -106,6 +106,9 @@ function controladorProduccion($accion)
         case 'BUSCARMATERIALESPRODUCCION':
             buscarMaterialesProduccion();
             break;
+        case 'ENVIARAENSAMBLAJE':
+            enviarAEnsamblaje();
+            break;
         case 'INICIARCORRIDA':
             iniciarCorrida(intval($_POST['id'] ?? 0));
             break;
@@ -700,7 +703,55 @@ function reactivarProduccion()
         responder(false, 'No se pudo reactivar la producción: ' . $e->getMessage());
     }
 }
+// Marca el avance como enviado a ensamblaje: guarda la cantidad producida
+// (kg reales de salida, distinto de `cantidad` que son los kg insertados
+// en máquina) y sella fecha_envio_ensamblaje/enviado_ensamblaje.
+function enviarAEnsamblaje()
+{
+    $conectar = conectar_oll_BD();
+    $id = intval($_POST['id'] ?? 0);
+    $cantidadProducida = floatval($_POST['cantidad_producida'] ?? 0);
 
+    if (!$id) responder(false, 'ID inválido.');
+    if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
+
+    $existe = executeQuery(
+        $conectar,
+        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje FROM produccion WHERE id = :id",
+        ['id' => $id]
+    );
+    if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
+    if (!empty($existe[0]['deleted_at'])) responder(false, 'No puedes enviar a ensamblaje un registro inactivo.');
+    if (empty($existe[0]['fecha_hora_fin'])) responder(false, 'Primero debes finalizar la corrida.');
+    if (!empty($existe[0]['enviado_ensamblaje'])) responder(false, 'Este avance ya fue enviado a ensamblaje.');
+
+    $cambios = [[
+        'campo' => 'Envío a ensamblaje',
+        'valor_antes' => '(no enviado)',
+        'valor_despues' => "Enviado, {$cantidadProducida} kg producidos",
+    ]];
+    $movimiento   = obtenerMovimientoSesion('enviar_ensamblaje', $cambios);
+    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+    executeNonQuery($conectar, "
+        UPDATE produccion SET
+            cantidad_producida_kg   = :cantidad_producida,
+            fecha_envio_ensamblaje  = NOW(),
+            enviado_ensamblaje      = true,
+            updated_at              = NOW(),
+            js_session              = :js_session,
+            js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id
+    ", [
+        'id'                  => $id,
+        'cantidad_producida'  => $cantidadProducida,
+        'js_session'          => $js_session,
+        'js_historial'        => $js_historial,
+    ]);
+
+    responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id]);
+}
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
 function iniciarCorrida(int $id)

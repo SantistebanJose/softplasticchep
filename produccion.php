@@ -1215,13 +1215,25 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     modalCantidadEnsamblaje.show();
 }
 
-document.getElementById('formCantidadEnsamblaje').addEventListener('submit', function (e) {
+document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
     const valor = parseFloat(document.getElementById('cantidad_producida_ensamblaje').value);
     if (isNaN(valor) || valor <= 0) {
         Swal.fire('Dato inválido', 'Ingresa una cantidad producida mayor a 0.', 'warning');
         return;
     }
+
+    const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
+        id: produccionIdParaEnsamblaje,
+        cantidad_producida: valor,
+    });
+
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+
+    modalCantidadEnsamblaje.hide();
     window.location.href = `ensamblaje.php?produccion_id=${produccionIdParaEnsamblaje}&cantidad_producida=${valor}`;
 });
 </script>
