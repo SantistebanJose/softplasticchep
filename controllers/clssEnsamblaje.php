@@ -315,9 +315,6 @@ function guardarEnsamblaje()
     $id                  = intval($_POST['id'] ?? 0);
     $producto_id         = intval($_POST['producto_id'] ?? 0);
     $operario_ortorgado  = !empty($_POST['operario_ortorgado']) ? intval($_POST['operario_ortorgado']) : null;
-    $inicio              = trim($_POST['inicio'] ?? '');
-    $fin                 = trim($_POST['fin'] ?? '');
-    $cantidad_peso_kg    = $_POST['cantidad_peso_kg'] ?? null;
     $detalleJson         = trim($_POST['detalle'] ?? '[]');
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
@@ -329,20 +326,6 @@ function guardarEnsamblaje()
     if ($operario_ortorgado !== null) {
         $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operario_ortorgado]);
         if (empty($operario)) responder(false, 'El operario seleccionado no existe o está inactivo.');
-    }
-
-    if ($cantidad_peso_kg !== null && $cantidad_peso_kg !== '') {
-        $cantidad_peso_kg = floatval($cantidad_peso_kg);
-        if ($cantidad_peso_kg < 0) responder(false, 'El peso del ensamblaje no puede ser negativo.');
-    } else {
-        $cantidad_peso_kg = null;
-    }
-
-    if ($fin !== '' && $inicio === '') {
-        responder(false, 'No puedes registrar un fin sin un inicio.');
-    }
-    if ($inicio !== '' && $fin !== '' && strtotime($fin) < strtotime($inicio)) {
-        responder(false, 'La fecha de fin no puede ser anterior a la de inicio.');
     }
 
     $detalleEntrada = json_decode($detalleJson, true);
@@ -382,20 +365,17 @@ function guardarEnsamblaje()
 
             $nuevoEnsamblaje = executeQuery($conectar, "
                 INSERT INTO ensamblaje (
-                    producto_id, operario_ortorgado, inicio, fin, cantidad_peso_kg,
+                    producto_id, operario_ortorgado,
                     js_derivados_utilizados, js_moldes_utilizados,
                     created_at, js_usuario, js_historial
                 ) VALUES (
-                    :producto_id, :operario_ortorgado, :inicio, :fin, :cantidad_peso_kg,
+                    :producto_id, :operario_ortorgado,
                     '[]'::jsonb, '[]'::jsonb,
                     NOW(), :js_usuario, :js_historial
                 ) RETURNING id
             ", [
                 'producto_id'        => $producto_id,
                 'operario_ortorgado' => $operario_ortorgado,
-                'inicio'             => $inicio ?: null,
-                'fin'                => $fin ?: null,
-                'cantidad_peso_kg'   => $cantidad_peso_kg,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
             ]);
@@ -475,9 +455,6 @@ function guardarEnsamblaje()
                 UPDATE ensamblaje SET
                     producto_id         = :producto_id,
                     operario_ortorgado  = :operario_ortorgado,
-                    inicio              = :inicio,
-                    fin                 = :fin,
-                    cantidad_peso_kg    = :cantidad_peso_kg,
                     update_at           = NOW(),
                     js_usuario          = :js_usuario,
                     js_historial        = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -485,9 +462,6 @@ function guardarEnsamblaje()
             ", [
                 'producto_id'        => $producto_id,
                 'operario_ortorgado' => $operario_ortorgado,
-                'inicio'             => $inicio ?: null,
-                'fin'                => $fin ?: null,
-                'cantidad_peso_kg'   => $cantidad_peso_kg,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
                 'id'                 => $id,
@@ -506,7 +480,6 @@ function guardarEnsamblaje()
         responder(false, 'No se pudo guardar el ensamblaje: ' . $e->getMessage());
     }
 }
-
 /**
  * Valida cada línea nueva (que la producción exista, esté finalizada y
  * libre; o que el derivado exista) e inserta en rel_ensamblaje_producto.
@@ -599,7 +572,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
     $moldes = executeQuery($conectar, "
         SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
-               pd.cantidad AS cantidad_kg, pd.fecha
+               pd.cantidad_producida_kg AS cantidad_kg, pd.fecha
         FROM rel_ensamblaje_producto rep
         JOIN produccion pd ON pd.id = rep.molde_produccion_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -624,7 +597,6 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
         'derivados' => json_encode($derivados, JSON_UNESCAPED_UNICODE),
     ]);
 }
-
 // Soft delete: desactiva el ensamblaje y sus líneas activas (libera las
 // producciones vinculadas para que puedan usarse en otro ensamblaje).
 function eliminarEnsamblaje()
@@ -790,7 +762,7 @@ function finalizarEnsamblaje(int $id)
     ]];
     $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial = json_encode([$movimiento], JSON_UNESCABED_UNICODE ?? JSON_UNESCAPED_UNICODE);
+    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
     executeNonQuery($conectar, "
         UPDATE ensamblaje SET

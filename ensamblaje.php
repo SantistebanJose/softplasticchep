@@ -207,36 +207,20 @@ include("header.php");
         </div>
         <div class="modal-body">
 
-          <div class="row">
-            <div class="col-md-5 mb-2">
+        <div class="row">
+            <div class="col-md-7 mb-2">
                 <label class="form-label">Producto a ensamblar *</label>
                 <select class="form-select" id="ens_producto_id" required onchange="cambioProductoEnsamblaje()">
                     <option value="">Selecciona un producto...</option>
                 </select>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-5 mb-2">
                 <label class="form-label">Operario</label>
                 <select class="form-select" id="ens_operario_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
-            <div class="col-md-3 mb-2">
-                <label class="form-label">Peso total (kg)</label>
-                <input type="number" step="0.0001" min="0" class="form-control" id="ens_cantidad_peso_kg" placeholder="Opcional">
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="col-md-6 mb-2">
-                <label class="form-label">Inicio</label>
-                <input type="datetime-local" class="form-control" id="ens_inicio">
-                <span class="form-text">También puedes iniciarlo después con el botón "Iniciar" de la card.</span>
-            </div>
-            <div class="col-md-6 mb-2">
-                <label class="form-label">Fin</label>
-                <input type="datetime-local" class="form-control" id="ens_fin">
-            </div>
-          </div>
+        </div>
 
           <hr>
 
@@ -278,7 +262,11 @@ include("header.php");
                     <div class="pc-tk-resumen-texto">
                         <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
                         <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s)</span>
+                        <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
                     </div>
+                </div>
+                <div class="form-text" style="padding:0 14px 10px 14px;">
+                    El peso real de salida de este armado se registrará más adelante, al pasar a empaquetado.
                 </div>
             </div>
           </div>
@@ -492,10 +480,8 @@ async function cargarEnsamblajes() {
     }
 
     grid.innerHTML = ensamblajes.map(e => {
-        const moldes    = parseJsonColumna(e.js_moldes_utilizados);
-        const derivados = parseJsonColumna(e.js_derivados_utilizados);
-        const itemsCount = e.items_count ?? (moldes.length + derivados.length);
-
+        const producciones = e.producciones_count ?? 0;
+        const derivadosCount = e.derivados_count ?? 0;
         const puedeIniciar   = !e.deleted_at && !e.inicio;
         const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
 
@@ -519,11 +505,11 @@ async function cargarEnsamblajes() {
                 </div>
                 <div class="pc-ens-field">
                     <span class="lbl">Producciones vinculadas</span>
-                    <span class="val">${moldes.length}</span>
+                    <span class="val">${producciones}</span>
                 </div>
                 <div class="pc-ens-field">
                     <span class="lbl">Derivados vinculados</span>
-                    <span class="val">${derivados.length}</span>
+                    <span class="val">${derivadosCount}</span>
                 </div>
                 <div class="pc-ens-field span-2">
                     <span class="lbl">Armado</span>
@@ -644,6 +630,7 @@ function agregarLineaDetalle(tipo, datos) {
             meta: `#${datos.produccion_id} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
+            cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
         });
     } else {
         ticketDetalleEns.push({
@@ -671,6 +658,7 @@ function renderTicketDetalle() {
     const list = document.getElementById('ens_ticket_list');
     const total = document.getElementById('ens_ticket_total');
     const detalle = document.getElementById('ens_ticket_detalle');
+    const pesoEl = document.getElementById('ens_ticket_peso_producido');
 
     if (ticketDetalleEns.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de la izquierda para empezar.</li>`;
@@ -693,6 +681,11 @@ function renderTicketDetalle() {
     const nDer  = ticketDetalleEns.filter(l => l.tipo === 'derivado').length;
     total.textContent = ticketDetalleEns.length;
     detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s)`;
+
+    const pesoProducido = ticketDetalleEns
+        .filter(l => l.tipo === 'produccion')
+        .reduce((s, l) => s + Number(l.cantidad_kg || 0), 0);
+    pesoEl.textContent = formatearCantidadEns(pesoProducido);
 }
 
 function obtenerDetalleJsonEns() {
@@ -752,10 +745,6 @@ async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadPr
         fecha_hora_fin: p.fecha_hora_fin,
     });
 
-    if (!isNaN(cantidadProducida) && cantidadProducida > 0) {
-        document.getElementById('ens_cantidad_peso_kg').value = cantidadProducida;
-    }
-
     await renderGridDetalle();
     modalEnsamblaje.show();
 }
@@ -769,10 +758,6 @@ async function abrirModalEditarEnsamblaje(id) {
 
     const e = json.ensamblaje;
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Editar ensamblaje #' + id;
-    document.getElementById('ens_cantidad_peso_kg').value = e.cantidad_peso_kg ?? '';
-    document.getElementById('ens_inicio').value = formatearFechaHoraLocalEns(e.inicio);
-    document.getElementById('ens_fin').value = formatearFechaHoraLocalEns(e.fin);
-
     await cargarSelectsModalEns({
         producto_id: e.producto_id,
         operario_id: e.operario_id,
@@ -781,34 +766,37 @@ async function abrirModalEditarEnsamblaje(id) {
     // Prellenar el ticket a partir de los resúmenes jsonb (fuente de
     // verdad real = rel_ensamblaje_producto, pero estos resúmenes ya
     // traen justo lo necesario para reconstruir el ticket visualmente).
-    const moldes    = parseJsonColumna(e.js_moldes_utilizados);
-    const derivados = parseJsonColumna(e.js_derivados_utilizados);
+    // Prellenar el ticket a partir de `detalle` (array único con ambos tipos,
+// diferenciados por el campo `tipo`; fuente = rel_ensamblaje_producto).
+    const detalle = parseJsonColumna(e.detalle);
 
-    moldes.forEach(m => {
-        const est = estiloPorNombre(m.molde_nombre || '');
-        ticketDetalleEns.push({
-            tempId: ++contadorLineaTicketEns,
-            tipo: 'produccion',
-            molde_produccion_id: m.produccion_id,
-            derivado_id: null,
-            nombre: m.molde_nombre ?? ('Producción #' + m.produccion_id),
-            meta: `#${m.produccion_id} · ${formatearCantidadEns(m.cantidad_kg)} kg · ${m.fecha ?? ''}`,
-            icono: 'fa-industry',
-            color: est.color, bg: est.bg,
-        });
-    });
-    derivados.forEach(d => {
-        const est = estiloPorNombre(d.derivado_nombre || '');
-        ticketDetalleEns.push({
-            tempId: ++contadorLineaTicketEns,
-            tipo: 'derivado',
-            molde_produccion_id: null,
-            derivado_id: d.derivado_id,
-            nombre: d.derivado_nombre ?? ('Derivado #' + d.derivado_id),
-            meta: `Derivado #${d.derivado_id}`,
-            icono: 'fa-flask',
-            color: est.color, bg: est.bg,
-        });
+    detalle.forEach(item => {
+        if (item.tipo === 'produccion') {
+            const est = estiloPorNombre(item.molde_nombre || '');
+            ticketDetalleEns.push({
+                tempId: ++contadorLineaTicketEns,
+                tipo: 'produccion',
+                molde_produccion_id: item.molde_produccion_id,
+                derivado_id: null,
+                nombre: item.molde_nombre ?? ('Producción #' + item.molde_produccion_id),
+                meta: `#${item.molde_produccion_id} · ${formatearCantidadEns(item.produccion_cantidad_kg)} kg · ${item.produccion_fecha ?? ''}`,
+                icono: 'fa-industry',
+                color: est.color, bg: est.bg,
+                cantidad_kg: parseFloat(item.produccion_cantidad_kg) || 0,
+            });
+        } else {
+            const est = estiloPorNombre(item.derivado_nombre || '');
+            ticketDetalleEns.push({
+                tempId: ++contadorLineaTicketEns,
+                tipo: 'derivado',
+                molde_produccion_id: null,
+                derivado_id: item.derivado_id,
+                nombre: item.derivado_nombre ?? ('Derivado #' + item.derivado_id),
+                meta: `Derivado #${item.derivado_id}`,
+                icono: 'fa-flask',
+                color: est.color, bg: est.bg,
+            });
+        }
     });
     renderTicketDetalle();
 
@@ -828,9 +816,6 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         id: ensamblajeIdActual,
         producto_id: document.getElementById('ens_producto_id').value,
         operario_ortorgado: document.getElementById('ens_operario_id').value,
-        inicio: document.getElementById('ens_inicio').value.replace('T', ' '),
-        fin: document.getElementById('ens_fin').value.replace('T', ' '),
-        cantidad_peso_kg: document.getElementById('ens_cantidad_peso_kg').value,
         detalle: obtenerDetalleJsonEns(),
     };
 
