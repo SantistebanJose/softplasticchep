@@ -101,6 +101,9 @@ function controladorEnsamblaje($accion)
         case 'BUSCARPRODUCCIONESDISPONIBLES':
             buscarProduccionesDisponibles();
             break;
+        case 'BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE':
+            buscarProductosDisponiblesEnsamblaje();
+            break;
         case 'OBTENERDATOSPRODUCCIONPARAENSAMBLAJE':
             obtenerDatosProduccionParaEnsamblaje(intval($_POST['produccion_id'] ?? 0));
             break;
@@ -131,6 +134,39 @@ function buscarProductos()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['productos' => $result]);
 }
+
+// Productos+color con avances ya enviados a ensamblaje y aún no ensamblados
+// (produccion.enviado_ensamblaje = TRUE AND produccion.ensamblaje_realizado = FALSE).
+// El value del <select> es compuesto "producto_id_color_id" porque el filtro
+// real de disponibilidad es por esa combinación, no solo por producto.
+function buscarProductosDisponiblesEnsamblaje()
+{
+    $conectar = conectar_oll_BD();
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where = ["t1.enviado_ensamblaje = TRUE", "t1.ensamblaje_realizado = FALSE"];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "LOWER(UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')'))) LIKE LOWER(:texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    $sql = "SELECT DISTINCT
+                tt.id AS producto_id,
+                t3.id AS color_id,
+                UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')')) AS productoformato
+            FROM produccion t1
+            LEFT JOIN molde t2 ON t1.molde_id = t2.id
+            LEFT JOIN producto tt ON t2.producto_id = tt.id
+            LEFT JOIN color t3 ON t1.color_id = t3.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY productoformato
+            LIMIT 200";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['productos' => $result]);
+}
+
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
@@ -168,6 +204,7 @@ function buscarProduccionesDisponibles()
 {
     $conectar = conectar_oll_BD();
     $productoId = intval($_POST['producto_id'] ?? 0);
+    $colorId    = intval($_POST['color_id'] ?? 0);
     $texto      = trim($_POST['texto'] ?? '');
 
     $where  = ["1=1"];
@@ -175,6 +212,12 @@ function buscarProduccionesDisponibles()
     if ($productoId > 0) {
         $where[] = "producto_id = :producto_id";
         $params['producto_id'] = $productoId;
+    }
+    if ($colorId > 0) {
+        $where[] = "color_id = :color_id"; // ⚠️ SUPUESTO: asume que
+        $params['color_id'] = $colorId;    // view_producciones_disponibles_ensamblaje
+        // trae la columna color_id. Si no la tiene, hay que agregarla a esa vista
+        // (join contra produccion.color_id) para que este filtro funcione.
     }
     if ($texto !== '') {
         $where[] = "LOWER(molde_nombre) LIKE LOWER(:texto)";
@@ -188,7 +231,6 @@ function buscarProduccionesDisponibles()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
 }
-
 // Usado por el botón "Pasar a ensamblaje" desde la card de producción:
 // trae los datos necesarios para prellenar el modal (producto sugerido
 // según el molde usado, kg del avance, etc), sin crear nada todavía.

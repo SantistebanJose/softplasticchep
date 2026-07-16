@@ -223,6 +223,8 @@ include("header.php");
 .pc-prod-card.estado-sin{ border-left-color:#c8c3b4; }
 .pc-prod-card.estado-curso{ border-left-color:#0B4DA6; }
 .pc-prod-card.estado-fin{ border-left-color:#16A34A; }
+.pc-prod-card.estado-ensamblaje{ border-left-color:#8a8578; }
+.pc-prod-card.estado-ensamblaje{ opacity:.75; }
 
 .pc-prod-card.pc-flash{ animation:pc-flash-bg 1.8s ease; }
 @keyframes pc-flash-bg{
@@ -480,6 +482,7 @@ function iniciarAutoRefresh() {
 }
 
 function estadoCorto(p) {
+    if (p.enviado_ensamblaje) return 'ensamblaje';
     if (!p.fecha_hora_inicio) return 'sin';
     if (!p.fecha_hora_fin) return 'curso';
     return 'fin';
@@ -622,6 +625,12 @@ function formatearFechaHoraLegible(fechaIso) {
 
 // ── Estado de la corrida (dentro de la card) ─────────────────
 function estadoCorridaTexto(p) {
+    if (p.enviado_ensamblaje) {
+        return `<span class="pc-corrida-fin">
+                    <span class="badge bg-secondary">Finalizado</span>
+                    <small>Enviado a ensamblaje: ${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</small>
+                </span>`;
+    }
     if (!p.fecha_hora_inicio) {
         return '<span class="pc-corrida-sin">Sin iniciar</span>';
     }
@@ -770,8 +779,7 @@ async function cargarProducciones(silencioso = false) {
 
         const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
         const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-        const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin;
-
+        const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
         const estado = estadoCorto(p);
         nuevosEstados[p.id] = estado;
         const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;

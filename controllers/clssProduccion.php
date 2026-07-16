@@ -260,7 +260,7 @@ function listarProducciones()
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         WHERE " . implode(' AND ', $where) . "
-        ORDER BY pd.id DESC
+        ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
 
     $result = executeQuery($conectar, $sql, $params);

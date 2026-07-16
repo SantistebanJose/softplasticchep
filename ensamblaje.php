@@ -293,6 +293,7 @@ let productosEnsCache = null;   // cache de productos para selects/filtro
 let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado'
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, nombre, meta, color, bg, icono}]
+let productosDisponiblesEnsCache = null; // cache para el select del modal (producto+color pendientes)
 
 document.addEventListener('DOMContentLoaded', () => {
     inicializarPagina();
@@ -435,17 +436,24 @@ async function cargarSelectsFiltroEns() {
             `<option value="${o.id}">${o.nombre_completo}</option>`));
     }
 }
-
+async function obtenerProductosDisponiblesEns() {
+    if (productosDisponiblesEnsCache && productosDisponiblesEnsCache.length > 0) return productosDisponiblesEnsCache;
+    const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '' });
+    productosDisponiblesEnsCache = json.success ? json.productos : [];
+    return productosDisponiblesEnsCache;
+}
 async function cargarSelectsModalEns(seleccion = {}) {
     const [productos, operario] = await Promise.all([
-        obtenerProductosEns(),
+        obtenerProductosDisponiblesEns(),
         llamarEnsamblaje('BUSCAROPERARIOS'),
     ]);
 
     const sProd = document.getElementById('ens_producto_id');
     sProd.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.id}">${p.codigo} - ${p.descripcion}</option>`).join('');
-    if (seleccion.producto_id) sProd.value = seleccion.producto_id;
+        productos.map(p => `<option value="${p.producto_id}_${p.color_id}">${p.productoformato}</option>`).join('');
+    if (seleccion.producto_id && seleccion.color_id) {
+        sProd.value = `${seleccion.producto_id}_${seleccion.color_id}`;
+    }
 
     const sOp = document.getElementById('ens_operario_id');
     sOp.innerHTML = '<option value="">Selecciona...</option>';
@@ -453,7 +461,6 @@ async function cargarSelectsModalEns(seleccion = {}) {
         sOp.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}${o.cargo ? ' - ' + o.cargo : ''}</option>`));
     if (seleccion.operario_id) sOp.value = seleccion.operario_id;
 }
-
 // ── Listado en CARDS ──────────────────────────────────────────────────────
 async function cargarEnsamblajes() {
     const params = {
@@ -556,7 +563,8 @@ function cambiarTabDetalle(tipo) {
 async function renderGridDetalle() {
     const grid = document.getElementById('ens_detalle_grid');
     const texto = document.getElementById('ens_buscar_detalle').value.trim();
-    const productoId = document.getElementById('ens_producto_id').value;
+    const valorSelect = document.getElementById('ens_producto_id').value; // "producto_id_color_id"
+    const [productoId, colorId] = valorSelect ? valorSelect.split('_') : ['', ''];
 
     if (tabDetalleActiva === 'produccion') {
         if (!productoId) {
@@ -564,7 +572,7 @@ async function renderGridDetalle() {
             return;
         }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, texto });
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId, texto });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
@@ -697,8 +705,6 @@ function obtenerDetalleJsonEns() {
 }
 
 function cambioProductoEnsamblaje() {
-    // Al cambiar de producto, las producciones disponibles filtradas por
-    // producto_id cambian; si estamos en esa pestaña, refresca la grilla.
     if (tabDetalleActiva === 'produccion') renderGridDetalle();
 }
 
@@ -812,9 +818,12 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         return;
     }
 
+    const valorSelect = document.getElementById('ens_producto_id').value;
+    const productoId = valorSelect ? valorSelect.split('_')[0] : '';
+
     const params = {
         id: ensamblajeIdActual,
-        producto_id: document.getElementById('ens_producto_id').value,
+        producto_id: productoId,
         operario_ortorgado: document.getElementById('ens_operario_id').value,
         detalle: obtenerDetalleJsonEns(),
     };
