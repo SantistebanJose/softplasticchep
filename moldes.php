@@ -31,7 +31,7 @@ include("header.php");
             <tr>
                 <th>Nombre</th>
                 <th>Forma</th>
-                <th>Producto</th>
+                <th>Productos</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
@@ -68,10 +68,9 @@ include("header.php");
           </div>
 
           <div class="mb-2">
-            <label class="form-label">Producto *</label>
-            <select class="form-select" name="producto_id" id="molde_producto_id" required>
-              <option value="">Selecciona un producto...</option>
-            </select>
+            <label class="form-label">Productos *</label>
+            <div id="molde_producto_checks" class="pc-checklist"></div>
+            <div class="form-text">Toca todos los productos que usan este molde.</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -87,7 +86,7 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_MOLDES    = 'controllers/clssMoldes.php';    // clssMoldes.php vive en su propia carpeta
-const CONTROLADOR_PRODUCTOS = 'controllers/clssProductos.php'; // para llenar el <select> de producto
+const CONTROLADOR_PRODUCTOS = 'controllers/clssProductos.php'; // para llenar el <select> de productos
 const modalMolde = new bootstrap.Modal(document.getElementById('modalMolde'));
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -145,10 +144,9 @@ async function llamarProductos(accion, params = {}) {
     }
 }
 
-// ── Select de productos ──────────────────────────────────────────────────────
 async function cargarProductosSelect() {
     const json = await llamarProductos('LISTARPRODUCTOS', { texto: '', estado: 'activo' });
-    const select = document.getElementById('molde_producto_id');
+    const cont = document.getElementById('molde_producto_checks');
 
     if (!json.success) {
         console.error('No se pudo cargar la lista de productos:', json.message);
@@ -156,8 +154,36 @@ async function cargarProductosSelect() {
     }
 
     const productos = json.productos || [];
-    select.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.id}">${p.codigo} - ${p.descripcion}</option>`).join('');
+    cont.innerHTML = productos.map(p => `
+        <div class="pc-check-item" onclick="toggleProductoCheck(${p.id})">
+            <input type="checkbox" id="prodchk_${p.id}" value="${p.id}"
+                   onclick="event.stopPropagation()" onchange="marcarCheckItem(${p.id})">
+            <label for="prodchk_${p.id}" onclick="event.stopPropagation()">${p.codigo} - ${p.descripcion}</label>
+        </div>
+    `).join('');
+}
+
+function toggleProductoCheck(id) {
+    const chk = document.getElementById(`prodchk_${id}`);
+    chk.checked = !chk.checked;
+    marcarCheckItem(id);
+}
+
+function marcarCheckItem(id) {
+    const chk = document.getElementById(`prodchk_${id}`);
+    chk.closest('.pc-check-item').classList.toggle('checked', chk.checked);
+}
+
+function obtenerProductoIdsSeleccionados() {
+    return [...document.querySelectorAll('#molde_producto_checks input[type="checkbox"]:checked')]
+        .map(chk => chk.value);
+}
+
+function marcarProductosSeleccionados(idsSeleccionados) {
+    document.querySelectorAll('#molde_producto_checks input[type="checkbox"]').forEach(chk => {
+        chk.checked = idsSeleccionados.includes(chk.value);
+        marcarCheckItem(chk.value);
+    });
 }
 
 // ── Listado ──────────────────────────────────────────────────────────────────
@@ -179,11 +205,17 @@ async function cargarMoldes() {
         return;
     }
 
-    tbody.innerHTML = moldes.map(m => `
+    tbody.innerHTML = moldes.map(m => {
+        const productos = m.js_producto || [];
+        const badgesProductos = productos.length
+            ? productos.map(p => `<span class="badge bg-light text-dark border me-1 mb-1">${p.codigo} - ${p.descripcion}</span>`).join('')
+            : '-';
+
+        return `
     <tr id="fila-molde-${m.id}">
         <td data-label="Nombre">${m.nombre}</td>
         <td data-label="Forma">${m.forma ?? '-'}</td>
-        <td data-label="Producto">${m.producto_codigo ? `${m.producto_codigo} - ${m.producto_descripcion}` : '-'}</td>
+        <td data-label="Productos">${badgesProductos}</td>
         <td data-label="Estado">${!m.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
             : '<span class="badge bg-secondary">Inactivo</span>'}
@@ -199,14 +231,15 @@ async function cargarMoldes() {
                        <i class="fa-solid fa-rotate-left"></i></button>`
             }
         </td>
-    </tr>
-`).join('');
+    </tr>`;
+    }).join('');
 }
 
 // ── Crear / Editar ───────────────────────────────────────────────────────────
 function abrirModalCrearMolde() {
     document.getElementById('formMolde').reset();
     document.getElementById('molde_id').value = '';
+    marcarProductosSeleccionados([]);
     document.getElementById('modalMoldeTitulo').textContent = 'Nuevo molde';
     modalMolde.show();
 }
@@ -220,15 +253,25 @@ async function abrirModalEditarMolde(id) {
     document.getElementById('molde_id').value = m.id;
     document.getElementById('molde_nombre').value = m.nombre ?? '';
     document.getElementById('molde_forma').value = m.forma ?? '';
-    document.getElementById('molde_producto_id').value = m.producto_id ?? '';
+
+    const idsSeleccionados = (m.js_producto || []).map(p => String(p.producto_id));
+    marcarProductosSeleccionados(idsSeleccionados);
 
     modalMolde.show();
 }
 
 document.getElementById('formMolde').addEventListener('submit', async function (e) {
     e.preventDefault();
+
+    const productoIds = obtenerProductoIdsSeleccionados();
+    if (productoIds.length === 0) {
+        Swal.fire('Falta información', 'Selecciona al menos un producto asociado.', 'warning');
+        return;
+    }
+
     const formData = new FormData(this);
     formData.append('accion', 'GUARDARMOLDE');
+    productoIds.forEach(pid => formData.append('producto_ids[]', pid));
 
     const resp = await fetch(CONTROLADOR_MOLDES, { method: 'POST', body: formData });
     const json = await resp.json();

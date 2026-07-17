@@ -1242,7 +1242,8 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     modalCantidadEnsamblaje.hide();
-    window.location.href = `ensamblaje.php?produccion_id=${produccionIdParaEnsamblaje}&cantidad_producida=${valor}`;
+    Swal.fire('Listo', 'Avance enviado a ensamblaje correctamente.', 'success');
+    cargarProducciones(); // se queda en Producción, la card pasa a "Finalizado"
 });
 </script>
 

@@ -135,10 +135,11 @@ function buscarProductos()
     responder(true, 'OK', ['productos' => $result]);
 }
 
-// Productos+color con avances ya enviados a ensamblaje y aún no ensamblados
-// (produccion.enviado_ensamblaje = TRUE AND produccion.ensamblaje_realizado = FALSE).
-// El value del <select> es compuesto "producto_id_color_id" porque el filtro
-// real de disponibilidad es por esa combinación, no solo por producto.
+// Combinaciones producto+color con avances ya enviados a ensamblaje y aún
+// libres. El <select> del modal usa como value "producto_id_color_id":
+// el usuario elige primero QUÉ producto+color quiere armar, y en el panel
+// de la derecha ve TODAS las producciones sueltas disponibles de esa
+// combinación (con su color) para poder verificarlas antes de vincular.
 function buscarProductosDisponiblesEnsamblaje()
 {
     $conectar = conectar_oll_BD();
@@ -147,15 +148,15 @@ function buscarProductosDisponiblesEnsamblaje()
     $where = ["t1.enviado_ensamblaje = TRUE", "t1.ensamblaje_realizado = FALSE"];
     $params = [];
     if ($texto !== '') {
-        $where[] = "LOWER(UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')', ' | Produccion_id ', t1.id))) LIKE LOWER(:texto)";
+        $where[] = "LOWER(UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')'))) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
     $sql = "SELECT DISTINCT
                 tt.id AS producto_id,
                 t3.id AS color_id,
-                t1.id AS produccion_id,
-                UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')', ' | Produccion_id ', t1.id)) AS productoformato
+                UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')')) AS productoformato,
+                COUNT(*) OVER (PARTITION BY tt.id, t3.id) AS disponibles
             FROM produccion t1
             LEFT JOIN molde t2 ON t1.molde_id = t2.id
             LEFT JOIN producto tt ON t2.producto_id = tt.id
@@ -206,34 +207,38 @@ function buscarProduccionesDisponibles()
     $conectar = conectar_oll_BD();
     $productoId    = intval($_POST['producto_id'] ?? 0);
     $colorId       = intval($_POST['color_id'] ?? 0);
-    $produccionId  = intval($_POST['produccion_id'] ?? 0); // NUEVO
+    $produccionId  = intval($_POST['produccion_id'] ?? 0);
     $texto         = trim($_POST['texto'] ?? '');
 
     $where  = ["1=1"];
     $params = [];
 
     if ($produccionId > 0) {
-        // Filtro exacto: solo esa producción puntual, ignora producto_id/color_id
-        $where[] = "produccion_id = :produccion_id";
+        $where[] = "v.produccion_id = :produccion_id";
         $params['produccion_id'] = $produccionId;
     } else {
         if ($productoId > 0) {
-            $where[] = "producto_id = :producto_id";
+            $where[] = "v.producto_id = :producto_id";
             $params['producto_id'] = $productoId;
         }
         if ($colorId > 0) {
-            $where[] = "color_id = :color_id";
+            $where[] = "v.color_id = :color_id";
             $params['color_id'] = $colorId;
         }
     }
     if ($texto !== '') {
-        $where[] = "LOWER(molde_nombre) LIKE LOWER(:texto)";
+        $where[] = "LOWER(v.molde_nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT * FROM view_producciones_disponibles_ensamblaje
+    // JOIN directo a color, para garantizar el nombre de color en la
+    // respuesta sin depender de cómo esté armada la vista.
+    $sql = "SELECT v.*, co.nombre AS color_nombre_verif
+            FROM view_producciones_disponibles_ensamblaje v
+            LEFT JOIN produccion pd ON pd.id = v.produccion_id
+            LEFT JOIN color co ON co.id = pd.color_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY fecha_hora_fin DESC";
+            ORDER BY v.fecha_hora_fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);

@@ -450,11 +450,13 @@ async function cargarSelectsModalEns(seleccion = {}) {
 
     const sProd = document.getElementById('ens_producto_id');
     sProd.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.produccion_id}"
+        productos.map(p => `<option value="${p.producto_id}_${p.color_id}"
                 data-producto-id="${p.producto_id}"
-                data-color-id="${p.color_id}">${p.productoformato}</option>`).join('');
-    if (seleccion.produccion_id) {
-        sProd.value = seleccion.produccion_id;
+                data-color-id="${p.color_id}">${p.productoformato} — ${p.disponibles} disponible(s)</option>`).join('');
+    if (seleccion.producto_id) {
+        const valorBuscado = `${seleccion.producto_id}_${seleccion.color_id ?? ''}`;
+        const coincide = Array.from(sProd.options).find(o => o.value === valorBuscado);
+        if (coincide) sProd.value = valorBuscado;
     }
 
     const sOp = document.getElementById('ens_operario_id');
@@ -565,24 +567,25 @@ function cambiarTabDetalle(tipo) {
 async function renderGridDetalle() {
     const grid = document.getElementById('ens_detalle_grid');
     const texto = document.getElementById('ens_buscar_detalle').value.trim();
-    const opt = document.getElementById('ens_producto_id').selectedOptions[0];
-    const produccionIdSel = opt ? opt.value : ''; // ahora el value ES el produccion_id
+    const sel = document.getElementById('ens_producto_id');
+    const [productoId, colorId] = (sel.value || '').split('_');
 
     if (tabDetalleActiva === 'produccion') {
-        if (!produccionIdSel) {
-            grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver la producción disponible.</div>';
+        if (!productoId) {
+            grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus producciones disponibles.</div>';
             return;
         }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { produccion_id: produccionIdSel, texto });
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId, texto });
         const producciones = json.success ? (json.producciones || []) : [];
-        
+
         if (producciones.length === 0) {
             grid.innerHTML = '<div class="pc-mat-empty">No hay producciones finalizadas y libres para este producto.</div>';
             return;
         }
 
         grid.innerHTML = producciones.map(p => {
+            const colorNombre = p.color_nombre_verif ?? p.color_nombre ?? '';
             const est = estiloPorNombre(p.molde_nombre || 'producción');
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.molde_produccion_id == p.produccion_id);
             return `
@@ -591,16 +594,19 @@ async function renderGridDetalle() {
                     onclick='agregarLineaDetalle("produccion", ${JSON.stringify({
                         produccion_id: p.produccion_id,
                         molde_nombre: p.molde_nombre,
+                        color_nombre: colorNombre,
                         cantidad_kg: p.cantidad_kg ?? p.cantidad,
                         fecha_hora_fin: p.fecha_hora_fin,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
                 <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> kg</span>
+                <span class="meta">Color: <b>${colorNombre || '-'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
         }).join('');
     } else {
+        // Rama de derivados: sin cambios respecto a la versión anterior.
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const json = await llamarEnsamblaje('BUSCARDERIVADOS', { texto });
         const derivados = json.success ? (json.derivados || []) : [];
@@ -637,7 +643,7 @@ function agregarLineaDetalle(tipo, datos) {
             molde_produccion_id: datos.produccion_id,
             derivado_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
-            meta: `#${datos.produccion_id} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
@@ -706,31 +712,10 @@ function obtenerDetalleJsonEns() {
     })));
 }
 
-async function cambioProductoEnsamblaje() {
-    const sel = document.getElementById('ens_producto_id');
-    const opt = sel.selectedOptions[0];
-    if (!opt || !opt.value) {
-        if (tabDetalleActiva === 'produccion') renderGridDetalle();
-        return;
-    }
-
-    const produccionId = parseInt(opt.value, 10);
-
-    const yaEsta = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.molde_produccion_id === produccionId);
-    if (!yaEsta) {
-        const json = await llamarEnsamblaje('OBTENERDATOSPRODUCCIONPARAENSAMBLAJE', { produccion_id: produccionId });
-        if (json.success) {
-            agregarLineaDetalle('produccion', {
-                produccion_id: json.produccion.produccion_id,
-                molde_nombre: json.produccion.molde_nombre,
-                cantidad_kg: json.produccion.cantidad_kg ?? json.produccion.cantidad,
-                fecha_hora_fin: json.produccion.fecha_hora_fin,
-            });
-        } else {
-            Swal.fire('Aviso', json.message, 'warning');
-        }
-    }
-
+function cambioProductoEnsamblaje() {
+    // Ya no autoagrega una producción: solo cambia el contexto producto+color
+    // para que el panel de "Producciones" muestre las disponibles de esa
+    // combinación, con su color visible, y el usuario elija manualmente.
     if (tabDetalleActiva === 'produccion') renderGridDetalle();
 }
 
@@ -768,11 +753,12 @@ async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadPr
     limpiarFormularioEnsamblaje();
     modoEdicionEnsamblaje = false;
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Registrar ensamblaje';
-    await cargarSelectsModalEns({ producto_id: p.producto_id });
+    await cargarSelectsModalEns({ producto_id: p.producto_id, color_id: p.color_id });
 
     agregarLineaDetalle('produccion', {
         produccion_id: p.produccion_id,
         molde_nombre: p.molde_nombre,
+        color_nombre: p.color_nombre_verif ?? p.color_nombre,
         cantidad_kg: p.cantidad_kg ?? p.cantidad,
         fecha_hora_fin: p.fecha_hora_fin,
     });

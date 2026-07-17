@@ -1,12 +1,9 @@
 <?php
 
 /**
- * controllers/clssMoldes.php
- * Controlador del módulo de Moldes
- * Tabla real: molde (id, nombre, forma, js_producto, js_session, js_historial, created_at, update_at, deleted_at)
- * js_producto: jsonb array de objetos [{producto_id, codigo, descripcion}, ...]
- *   -> Un molde puede ser usado por varios productos (ej: molde ovalado sirve para
- *      "Colgador ovalado" y "Colgador osito"). Ya no existe una FK única producto_id.
+ * controllers/clssCategoriaMaterial.php
+ * Controlador del módulo de Categorías de Material
+ * Tabla real: categoria_material (id, nombre, descripcion, created_at, update_at, deleted_at)
  * Soft delete vía deleted_at (no existe columna 'activo').
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -16,26 +13,26 @@ require_once __DIR__ . '/executeQuery.php';
 session_start();
 
 if (isset($_POST["accion"])) {
-    controladorMoldes($_POST["accion"]);
+    controladorCategoriaMaterial($_POST["accion"]);
 }
 
-function controladorMoldes($accion)
+function controladorCategoriaMaterial($accion)
 {
     switch ($accion) {
-        case 'LISTARMOLDES':
-            listarMoldes();
+        case 'LISTARCATEGORIASMATERIAL':
+            listarCategoriasMaterial();
             break;
-        case 'OBTENERMOLDE':
-            obtenerMolde(intval($_POST['id'] ?? 0));
+        case 'OBTENERCATEGORIAMATERIAL':
+            obtenerCategoriaMaterial(intval($_POST['id'] ?? 0));
             break;
-        case 'GUARDARMOLDE':
-            guardarMolde();
+        case 'GUARDARCATEGORIAMATERIAL':
+            guardarCategoriaMaterial();
             break;
-        case 'ELIMINARMOLDE':
-            eliminarMolde();
+        case 'ELIMINARCATEGORIAMATERIAL':
+            eliminarCategoriaMaterial();
             break;
-        case 'REACTIVARMOLDE':
-            reactivarMolde();
+        case 'REACTIVARCATEGORIAMATERIAL':
+            reactivarCategoriaMaterial();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -43,10 +40,10 @@ function controladorMoldes($accion)
 }
 
 // =============================================================================
-// MOLDES
+// CATEGORÍAS DE MATERIAL
 // =============================================================================
 
-function listarMoldes()
+function listarCategoriasMaterial()
 {
     $conectar = conectar_oll_BD();
 
@@ -57,58 +54,38 @@ function listarMoldes()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(m.nombre) LIKE LOWER(:texto) OR LOWER(m.forma) LIKE LOWER(:texto) OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(m.js_producto) AS elem
-            WHERE LOWER(elem->>'codigo') LIKE LOWER(:texto)
-               OR LOWER(elem->>'descripcion') LIKE LOWER(:texto)
-        ))";
+        $where[] = "(LOWER(nombre) LIKE LOWER(:texto) OR LOWER(COALESCE(descripcion, '')) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
-        $where[] = "m.deleted_at IS NULL";
+        $where[] = "deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "m.deleted_at IS NOT NULL";
+        $where[] = "deleted_at IS NOT NULL";
     }
 
     $sql = "
-        SELECT m.*
-        FROM molde m
+        SELECT *
+        FROM categoria_material
         WHERE " . implode(' AND ', $where) . "
-        ORDER BY m.nombre
+        ORDER BY nombre
     ";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['moldes' => decodificarProductosLista($result)]);
+    responder(true, 'OK', ['categorias' => $result]);
 }
 
-function obtenerMolde($id)
+function obtenerCategoriaMaterial($id)
 {
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
     $result = executeQuery(
         $conectar,
-        "SELECT * FROM molde WHERE id = :id",
+        "SELECT * FROM categoria_material WHERE id = :id",
         ['id' => $id]
     );
-    if (empty($result)) responder(false, 'Molde no encontrado.');
-
-    $molde = $result[0];
-    $molde['js_producto'] = json_decode($molde['js_producto'] ?? '[]', true) ?: [];
-    responder(true, 'OK', ['molde' => $molde]);
-}
-
-/**
- * Convierte el js_producto (texto jsonb) de cada fila en un array PHP real,
- * para que el JSON de salida no venga como string escapado.
- */
-function decodificarProductosLista(array $filas): array
-{
-    foreach ($filas as &$fila) {
-        $fila['js_producto'] = json_decode($fila['js_producto'] ?? '[]', true) ?: [];
-    }
-    unset($fila);
-    return $filas;
+    if (empty($result)) responder(false, 'Categoría de material no encontrada.');
+    responder(true, 'OK', ['categoria' => $result[0]]);
 }
 
 /**
@@ -169,162 +146,105 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
     return $cambios;
 }
 
-/**
- * Texto legible "COD - Descripcion, COD - Descripcion" a partir de un
- * array de productos [{producto_id, codigo, descripcion}, ...].
- */
-function etiquetaListaProductos(array $productos): string
-{
-    if (empty($productos)) return '(vacío)';
-    return implode(', ', array_map(
-        fn($p) => ($p['codigo'] ?? '') . ' - ' . ($p['descripcion'] ?? ''),
-        $productos
-    ));
-}
-
-function guardarMolde()
+function guardarCategoriaMaterial()
 {
     $conectar = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
     $nombre      = trim($_POST['nombre'] ?? '');
-    $forma       = trim($_POST['forma'] ?? '');
-    $productoIds = $_POST['producto_ids'] ?? []; // array del multi-select
-
-    if (!is_array($productoIds)) $productoIds = [$productoIds];
-    $productoIds = array_values(array_unique(array_filter(array_map('intval', $productoIds))));
+    $descripcion = trim($_POST['descripcion'] ?? '');
 
     // ── Validaciones ──────────────────────────────────────────────────────────
-    if (empty($nombre))      responder(false, 'El nombre es obligatorio.');
-    if (empty($forma))       responder(false, 'La forma es obligatoria.');
-    if (empty($productoIds)) responder(false, 'Selecciona al menos un producto asociado.');
+    if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
 
     // Nombre único (excluyendo el propio registro si es edición)
     $chk = executeQuery(
         $conectar,
-        "SELECT id FROM molde WHERE LOWER(nombre) = LOWER(:nombre) AND id <> :id",
+        "SELECT id FROM categoria_material WHERE LOWER(nombre) = LOWER(:nombre) AND id <> :id",
         ['nombre' => $nombre, 'id' => $id]
     );
-    if (!empty($chk)) responder(false, 'Ya existe un molde con ese nombre.');
+    if (!empty($chk)) responder(false, 'Ya existe una categoría de material con ese nombre.');
 
-    // Traemos codigo/descripcion frescos de los productos seleccionados
-    $placeholders = [];
-    $params = [];
-    foreach ($productoIds as $i => $pid) {
-        $key = "pid$i";
-        $placeholders[] = ":$key";
-        $params[$key] = $pid;
-    }
-    $productos = executeQuery(
-        $conectar,
-        "SELECT id, codigo, descripcion FROM producto WHERE id IN (" . implode(',', $placeholders) . ")",
-        $params
-    );
-
-    if (count($productos) !== count($productoIds)) {
-        responder(false, 'Uno o más productos seleccionados no existen.');
-    }
-
-    $jsProducto = array_map(fn($p) => [
-        'producto_id' => (int) $p['id'],
-        'codigo'      => $p['codigo'],
-        'descripcion' => $p['descripcion'],
-    ], $productos);
-    $jsProductoJson = json_encode($jsProducto, JSON_UNESCAPED_UNICODE);
-
-    $mapaCampos  = ['nombre' => 'Nombre', 'forma' => 'Forma'];
-    $datosNuevos = ['nombre' => $nombre, 'forma' => $forma];
+    $mapaCampos = [
+        'nombre'      => 'Nombre',
+        'descripcion' => 'Descripción',
+    ];
+    $datosNuevos = [
+        'nombre'      => $nombre,
+        'descripcion' => $descripcion,
+    ];
 
     if ($id === 0) {
         // Creación
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
-        $cambios[] = [
-            'campo'         => 'Productos',
-            'valor_antes'   => '(vacío)',
-            'valor_despues' => etiquetaListaProductos($jsProducto),
-        ];
 
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO molde (nombre, forma, js_producto, created_at, js_session, js_historial)
-            VALUES (:nombre, :forma, :js_producto, NOW(), :js_session, :js_historial)
+            INSERT INTO categoria_material (nombre, descripcion, created_at, js_session, js_historial)
+            VALUES (:nombre, :descripcion, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'       => $nombre,
-            'forma'        => $forma,
-            'js_producto'  => $jsProductoJson,
+            'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
-        responder(true, 'Molde creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
+        responder(true, 'Categoría de material creada correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
         // Edición: traemos el registro actual para comparar campo por campo
-        $actual = executeQuery($conectar, "SELECT * FROM molde WHERE id = :id", ['id' => $id]);
-        if (empty($actual)) responder(false, 'Molde no encontrado.');
+        $actual = executeQuery($conectar, "SELECT * FROM categoria_material WHERE id = :id", ['id' => $id]);
+        if (empty($actual)) responder(false, 'Categoría de material no encontrada.');
         $registroAnterior = $actual[0];
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
-
-        $productosAntes  = json_decode($registroAnterior['js_producto'] ?? '[]', true) ?: [];
-        $etiquetaAntes   = etiquetaListaProductos($productosAntes);
-        $etiquetaDespues = etiquetaListaProductos($jsProducto);
-        if ($etiquetaAntes !== $etiquetaDespues) {
-            $cambios[] = [
-                'campo'         => 'Productos',
-                'valor_antes'   => $etiquetaAntes,
-                'valor_despues' => $etiquetaDespues,
-            ];
-        }
 
         $movimiento          = obtenerMovimientoSesion('editar', $cambios);
         $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         executeQuery($conectar, "
-            UPDATE molde SET
+            UPDATE categoria_material SET
                 nombre       = :nombre,
-                forma        = :forma,
-                js_producto  = :js_producto,
+                descripcion  = :descripcion,
                 update_at    = NOW(),
                 js_session   = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
             'nombre'       => $nombre,
-            'forma'        => $forma,
-            'js_producto'  => $jsProductoJson,
+            'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
-        responder(true, 'Molde actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
+        responder(true, 'Categoría de material actualizada correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
 }
 
 // Soft delete: se marca deleted_at, no se borra físicamente.
-function eliminarMolde()
+function eliminarCategoriaMaterial()
 {
     $conectar = conectar_oll_BD();
     $id       = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM molde WHERE id = :id", ['id' => $id]);
-    if (empty($existe)) responder(false, 'Molde no encontrado.');
+    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM categoria_material WHERE id = :id", ['id' => $id]);
+    if (empty($existe)) responder(false, 'Categoría de material no encontrada.');
     if (!empty($existe[0]['deleted_at'])) {
-        responder(false, 'Este molde ya estaba inactivo.');
+        responder(false, 'Esta categoría ya estaba inactiva.');
     }
 
-    // No permitir desactivar un molde que está puesto ahora mismo en una máquina
+    // No permitir desactivar una categoría que está en uso por alguna producción
     $enUso = executeQuery(
         $conectar,
-        "SELECT maquina_id FROM maquina_moldes WHERE molde_id = :id AND fecha_fin IS NULL",
+        "SELECT id FROM produccion WHERE categoria_material_id = :id AND deleted_at IS NULL LIMIT 1",
         ['id' => $id]
     );
     if (!empty($enUso)) {
-        responder(false, 'No puedes desactivar este molde: actualmente está puesto en una máquina.');
+        responder(false, 'No puedes desactivar esta categoría: está siendo usada en producciones registradas.');
     }
 
     $cambios = [[
@@ -339,7 +259,7 @@ function eliminarMolde()
 
     executeQuery(
         $conectar,
-        "UPDATE molde SET
+        "UPDATE categoria_material SET
             deleted_at   = NOW(),
             update_at    = NOW(),
             js_session   = :js_session,
@@ -351,10 +271,10 @@ function eliminarMolde()
             'js_historial' => $js_historial_nuevo,
         ]
     );
-    responder(true, 'Molde desactivado correctamente.');
+    responder(true, 'Categoría de material desactivada correctamente.');
 }
 
-function reactivarMolde()
+function reactivarCategoriaMaterial()
 {
     $conectar = conectar_oll_BD();
     $id       = intval($_POST['id'] ?? 0);
@@ -372,7 +292,7 @@ function reactivarMolde()
 
     executeQuery(
         $conectar,
-        "UPDATE molde SET
+        "UPDATE categoria_material SET
             deleted_at   = NULL,
             update_at    = NOW(),
             js_session   = :js_session,
@@ -384,7 +304,7 @@ function reactivarMolde()
             'js_historial' => $js_historial_nuevo,
         ]
     );
-    responder(true, 'Molde reactivado correctamente.');
+    responder(true, 'Categoría de material reactivada correctamente.');
 }
 
 // =============================================================================
