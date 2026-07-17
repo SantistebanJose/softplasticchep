@@ -15,7 +15,7 @@ function pc_sub_class($page, $active)
 }
 
 $produccionPages     = ['productos', 'categorias', 'modelos', 'ordenes_produccion', 'operarios','produccion'];
-$mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidad_medida'];
+$mantenimientoPages  = ['moldes', 'materiales', 'maquinas', 'colores', 'unidad_medida','categoria_material'];
 $administracionPages = ['usuarios', 'proveedores','compras','configuracion'];
 $analisisPages       = ['reportes'];
 
@@ -87,6 +87,9 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             </a>
             <a href="unidad_medida.php" class="<?= pc_sub_class('unidad_medida', $activePage) ?>">
                 <span class="dot"></span> Unidad de Medida
+            </a>
+            <a href="categoria_material.php" class="<?= pc_sub_class('categoria_material', $activePage) ?>">
+                <span class="dot"></span> Categorías de Materiales
             </a>
         </div>
     </details>

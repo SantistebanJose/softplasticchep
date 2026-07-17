@@ -308,6 +308,12 @@ include("header.php");
                     <option value="">Selecciona...</option>
                 </select>
             </div>
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Categoría de material</label>
+                <select class="form-select" id="prod_categoria_material_id">
+                    <option value="">Selecciona...</option>
+                </select>
+            </div>
           </div>
 
           <div class="row">
@@ -428,6 +434,7 @@ let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let materialesProdCache = null; // cache de materiales para las cards
 let moldesProdCache = null;     // cache de moldes para selects
+let categoriasMaterialProdCache = null; // cache de categorías de material para el select
 let materialSeleccionadoId = null; // material activo en el panel de lotes
 let contadorLineaTicket = 0;
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
@@ -481,6 +488,17 @@ function iniciarAutoRefresh() {
     });
 }
 
+function actualizarTextoUltimaActualizacion() {
+    const el = document.getElementById('lastUpdateTxt');
+    if (!el || !ultimaActualizacion) return;
+    const segs = Math.floor((Date.now() - ultimaActualizacion) / 1000);
+    let texto;
+    if (segs < 3) texto = 'Actualizado justo ahora';
+    else if (segs < 60) texto = `Actualizado hace <b>${segs}s</b>`;
+    else texto = `Actualizado hace <b>${Math.floor(segs / 60)} min</b>`;
+    el.innerHTML = texto;
+}
+
 function estadoCorto(p) {
     if (p.enviado_ensamblaje) return 'ensamblaje';
     if (!p.fecha_hora_inicio) return 'sin';
@@ -516,51 +534,7 @@ function renderStatRow(producciones) {
         </div>
     `;
 }
-function actualizarTextoUltimaActualizacion() {
-    const el = document.getElementById('lastUpdateTxt');
-    if (!el || !ultimaActualizacion) return;
-    const segs = Math.floor((Date.now() - ultimaActualizacion) / 1000);
-    let texto;
-    if (segs < 3) texto = 'Actualizado justo ahora';
-    else if (segs < 60) texto = `Actualizado hace <b>${segs}s</b>`;
-    else texto = `Actualizado hace <b>${Math.floor(segs / 60)} min</b>`;
-    el.innerHTML = texto;
-}
 
-function estadoCorto(p) {
-    if (!p.fecha_hora_inicio) return 'sin';
-    if (!p.fecha_hora_fin) return 'curso';
-    return 'fin';
-}
-
-function renderStatRow(producciones) {
-    const activas = producciones.filter(p => !p.deleted_at);
-    const sinIniciar = activas.filter(p => estadoCorto(p) === 'sin').length;
-    const enCurso = activas.filter(p => estadoCorto(p) === 'curso').length;
-    const finalizadas = activas.filter(p => estadoCorto(p) === 'fin').length;
-    const kgHoy = activas
-        .filter(p => p.fecha && p.fecha.substring(0, 10) === new Date().toISOString().substring(0, 10))
-        .reduce((s, p) => s + Number(p.cantidad || 0), 0);
-
-    document.getElementById('statRowProduccion').innerHTML = `
-        <div class="pc-stat-chip s-gray">
-            <div class="ico"><i class="fa-solid fa-hourglass-half"></i></div>
-            <div class="txt"><div class="n">${sinIniciar}</div><div class="l">Sin iniciar</div></div>
-        </div>
-        <div class="pc-stat-chip s-info">
-            <div class="ico"><i class="fa-solid fa-gear"></i></div>
-            <div class="txt"><div class="n">${enCurso}</div><div class="l">En curso</div></div>
-        </div>
-        <div class="pc-stat-chip s-success">
-            <div class="ico"><i class="fa-solid fa-flag-checkered"></i></div>
-            <div class="txt"><div class="n">${finalizadas}</div><div class="l">Finalizadas</div></div>
-        </div>
-        <div class="pc-stat-chip s-warning">
-            <div class="ico"><i class="fa-solid fa-weight-hanging"></i></div>
-            <div class="txt"><div class="n">${formatearCantidadProd(kgHoy)}</div><div class="l">Kg registrados hoy</div></div>
-        </div>
-    `;
-}
 // ── Llamadas genéricas ────────────────────────────────────────────────────
 async function llamarProduccion(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -701,12 +675,22 @@ async function obtenerMoldesProd() {
     return moldesProdCache;
 }
 
+// Categorías de material: mismo patrón de cache que moldes, se piden una
+// sola vez por carga de página y se reutilizan cada vez que se abre el modal.
+async function obtenerCategoriasMaterialProd() {
+    if (categoriasMaterialProdCache) return categoriasMaterialProdCache;
+    const json = await llamarProduccion('BUSCARCATEGORIASMATERIAL');
+    categoriasMaterialProdCache = json.success ? json.categorias : [];
+    return categoriasMaterialProdCache;
+}
+
 async function cargarSelectsModal(seleccion = {}) {
-    const [operario, maquinas, moldes, colores] = await Promise.all([
+    const [operario, maquinas, moldes, colores, categorias] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
         obtenerMoldesProd(),
         llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
+        obtenerCategoriasMaterialProd(),
     ]);
 
     const operarioSelect = document.getElementById('prod_operario_id');
@@ -720,6 +704,11 @@ async function cargarSelectsModal(seleccion = {}) {
     if (maquinas.success) maquinas.maquinas.forEach(m =>
         maquinaSelect.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
     if (seleccion.maquina_id) maquinaSelect.value = seleccion.maquina_id;
+
+    const categoriaSelect = document.getElementById('prod_categoria_material_id');
+    categoriaSelect.innerHTML = '<option value="">Selecciona...</option>' +
+        (categorias || []).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    if (seleccion.categoria_material_id) categoriaSelect.value = seleccion.categoria_material_id;
 
     const moldeSelect = document.getElementById('prod_molde_id');
     moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
@@ -817,6 +806,10 @@ async function cargarProducciones(silencioso = false) {
                 <div class="pc-prod-field">
                     <span class="lbl">Materiales</span>
                     <span class="val">${p.items_count}</span>
+                </div>
+                <div class="pc-prod-field">
+                    <span class="lbl">Categoría material</span>
+                    <span class="val">${p.categoria_material_nombre ?? '-'}</span>
                 </div>
                 <div class="pc-prod-field span-2">
                     <span class="lbl">Corrida</span>
@@ -1085,6 +1078,7 @@ async function abrirModalEditarProduccion(id) {
     await cargarSelectsModal({
         operario_id: p.operario_id, maquina_id: p.maquina_id,
         molde_id: p.molde_id, color_id: p.color_id,
+        categoria_material_id: p.categoria_material_id,
     });
     await renderGridMateriales();
 
@@ -1122,6 +1116,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         id: produccionIdActual,
         operario_id: document.getElementById('prod_operario_id').value,
         maquina_id: document.getElementById('prod_maquina_id').value,
+        categoria_material_id: document.getElementById('prod_categoria_material_id').value,
         molde_id: document.getElementById('prod_molde_id').value,
         color_id: document.getElementById('prod_color_id').value,
         cantidad: document.getElementById('prod_cantidad').value,

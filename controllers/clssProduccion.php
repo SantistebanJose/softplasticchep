@@ -14,10 +14,13 @@
  *               molde_id -> molde, color_id -> color,
  *               cantidad, fecha, fecha_hora_inicio, fecha_hora_fin,
  *               observaciones, es_emergencia [ya no se usa, siempre false],
+ *               categoria_material_id -> categoria_material,
  *               created_at, updated_at, deleted_at, js_session, js_historial)
  *   rel_produccion_material (id, produccion_id, material_id,
  *               rel_compra_material_id, cantidad, comentario,
  *               created_at, updated_at, deleted_at, js_session, js_historial)
+ *   categoria_material (id, nombre, descripcion, created_at, update_at,
+ *               deleted_at, js_session, js_historial)
  *   view_lotes_material_disponible (ver produccion_ddl_ajustado.sql)
  *
  * MODELO:
@@ -32,6 +35,10 @@
  *   KILOGRAMOS de material insertados en la máquina en este avance. El
  *   número real de piezas se deriva después a partir de esos kg (por
  *   ahora fuera del alcance de este controlador).
+ *
+ *   CATEGORÍA DE MATERIAL: `categoria_material_id` es opcional y clasifica
+ *   el avance (ej. "virgen", "reciclado", "mezcla"), independientemente de
+ *   los materiales/lotes puntuales que se consuman en el detalle.
  *
  *   MERMA: se descartó por ahora — el campo `merma_total` ya no se pide
  *   ni se guarda desde este formulario.
@@ -54,9 +61,9 @@
  *   - Reactivar avance   -> restaura las líneas y vuelve a RESTAR su
  *                           cantidad del stock.
  *
- * Este controlador NO crea/edita molde, color ni producto (cada uno tiene
- * su propio CRUD en su respectivo clss*.php); aquí solo se listan/consultan
- * para elegir contra qué avance se registra.
+ * Este controlador NO crea/edita molde, color, producto ni categoria_material
+ * (cada uno tiene su propio CRUD en su respectivo clss*.php); aquí solo se
+ * listan/consultan para elegir contra qué avance se registra.
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -105,6 +112,9 @@ function controladorProduccion($accion)
             break;
         case 'BUSCARMATERIALESPRODUCCION':
             buscarMaterialesProduccion();
+            break;
+        case 'BUSCARCATEGORIASMATERIAL':
+            buscarCategoriasMaterial();
             break;
         case 'ENVIARAENSAMBLAJE':
             enviarAEnsamblaje();
@@ -250,6 +260,7 @@ function listarProducciones()
             mo.nombre AS molde_nombre,
             co.nombre AS color_nombre,
             co.rgb AS color_rgb,
+            cm.nombre AS categoria_material_nombre,
             COALESCE((
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
@@ -259,12 +270,20 @@ function listarProducciones()
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
+        LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
+}
+function buscarCategoriasMaterial()
+{
+    $conectar = conectar_oll_BD();
+    $sql = "SELECT id, nombre FROM categoria_material WHERE deleted_at IS NULL ORDER BY nombre";
+    $result = executeQuery($conectar, $sql, []);
+    responder(true, 'OK', ['categorias' => $result]);
 }
 
 function obtenerProduccion($id)
@@ -277,12 +296,14 @@ function obtenerProduccion($id)
         "SELECT pd.*,
                 op.nombre_completo AS operario_nombre, ma.nombre AS maquina_nombre,
                 mo.nombre AS molde_nombre,
-                co.nombre AS color_nombre, co.rgb AS color_rgb
+                co.nombre AS color_nombre, co.rgb AS color_rgb,
+                cm.nombre AS categoria_material_nombre
          FROM produccion pd
          LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
          LEFT JOIN molde mo ON mo.id = pd.molde_id
          LEFT JOIN color co ON co.id = pd.color_id
+         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
          WHERE pd.id = :id",
         ['id' => $id]
     );
@@ -347,6 +368,7 @@ function guardarProduccion()
     $id                 = intval($_POST['id'] ?? 0);
     $operario_id        = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
     $maquina_id         = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
+    $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
     $cantidad           = intval($_POST['cantidad'] ?? 0); // kg insertados en máquina en este avance
@@ -362,6 +384,10 @@ function guardarProduccion()
     $esEmergencia = false;
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
+    if ($categoria_material_id !== null) {
+    $cat = executeQuery($conectar, "SELECT id FROM categoria_material WHERE id = :id AND deleted_at IS NULL", ['id' => $categoria_material_id]);
+    if (empty($cat)) responder(false, 'La categoría de material seleccionada no existe o está inactiva.');
+}
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
@@ -414,23 +440,26 @@ function guardarProduccion()
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
                     operario_id, maquina_id, molde_id, color_id, cantidad,
+                    categoria_material_id,
                     fecha, observaciones,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
+                    :categoria_material_id,
                     :fecha, :observaciones,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
-                'operario_id'       => $operario_id,
-                'maquina_id'        => $maquina_id,
-                'molde_id'          => $molde_id,
-                'color_id'          => $color_id,
-                'cantidad'          => $cantidad,
-                'fecha'             => $fecha,
-                'observaciones'     => $observaciones ?: null,
-                'js_session'        => $js_session,
-                'js_historial'      => $js_historial,
+                'operario_id'            => $operario_id,
+                'maquina_id'             => $maquina_id,
+                'molde_id'               => $molde_id,
+                'color_id'               => $color_id,
+                'cantidad'               => $cantidad,
+                'categoria_material_id'  => $categoria_material_id,
+                'fecha'                  => $fecha,
+                'observaciones'          => $observaciones ?: null,
+                'js_session'             => $js_session,
+                'js_historial'           => $js_historial,
             ]);
             $produccionId = $nuevaProduccion[0]['id'] ?? null;
             if (!$produccionId) throw new Exception('No se pudo crear el registro de producción.');
@@ -485,28 +514,30 @@ function guardarProduccion()
             // DESPUÉS
             executeNonQuery($conectar, "
                 UPDATE produccion SET
-                    operario_id        = :operario_id,
-                    maquina_id         = :maquina_id,
-                    molde_id           = :molde_id,
-                    color_id           = :color_id,
-                    cantidad           = :cantidad,
-                    fecha              = :fecha,
-                    observaciones      = :observaciones,
-                    updated_at         = NOW(),
-                    js_session         = :js_session,
-                    js_historial       = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                    operario_id            = :operario_id,
+                    maquina_id             = :maquina_id,
+                    molde_id               = :molde_id,
+                    color_id               = :color_id,
+                    cantidad               = :cantidad,
+                    categoria_material_id  = :categoria_material_id,
+                    fecha                  = :fecha,
+                    observaciones          = :observaciones,
+                    updated_at             = NOW(),
+                    js_session             = :js_session,
+                    js_historial           = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
                 WHERE id = :id
             ", [
-                'operario_id'       => $operario_id,
-                'maquina_id'        => $maquina_id,
-                'molde_id'          => $molde_id,
-                'color_id'          => $color_id,
-                'cantidad'          => $cantidad,
-                'fecha'             => $fecha,
-                'observaciones'     => $observaciones ?: null,
-                'js_session'        => $js_session,
-                'js_historial'      => $js_historial,
-                'id'                => $id,
+                'operario_id'            => $operario_id,
+                'maquina_id'             => $maquina_id,
+                'molde_id'               => $molde_id,
+                'color_id'               => $color_id,
+                'cantidad'               => $cantidad,
+                'categoria_material_id'  => $categoria_material_id,
+                'fecha'                  => $fecha,
+                'observaciones'          => $observaciones ?: null,
+                'js_session'             => $js_session,
+                'js_historial'           => $js_historial,
+                'id'                     => $id,
             ]);
             $conectar->commit();
             responder(true, 'Producción actualizada correctamente.', [

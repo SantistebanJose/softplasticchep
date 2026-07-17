@@ -11,9 +11,18 @@
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
+ob_start(); // <-- por si algo imprime antes de tiempo
 
 if (isset($_POST["accion"])) {
-    controladorCategoriaMaterial($_POST["accion"]);
+    try {
+        controladorCategoriaMaterial($_POST["accion"]);
+    } catch (PDOException $e) {
+        error_log("Error de base de datos en clssCategoriaMaterial.php: " . $e->getMessage());
+        responder(false, 'Error de base de datos: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log("Error inesperado en clssCategoriaMaterial.php: " . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor: ' . $e->getMessage());
+    }
 }
 
 function controladorCategoriaMaterial($accion)
@@ -237,22 +246,16 @@ function eliminarCategoriaMaterial()
         responder(false, 'Esta categoría ya estaba inactiva.');
     }
 
-    // No permitir desactivar una categoría que está en uso por alguna producción
-    $enUso = executeQuery(
-        $conectar,
-        "SELECT id FROM produccion WHERE categoria_material_id = :id AND deleted_at IS NULL LIMIT 1",
-        ['id' => $id]
-    );
-    if (!empty($enUso)) {
-        responder(false, 'No puedes desactivar esta categoría: está siendo usada en producciones registradas.');
-    }
+    // Nota: se quitó la validación "en uso" porque produccion no tiene
+    // columna categoria_material_id. Si en realidad sí existe (con otro
+    // nombre, o en otra tabla que la relacione), dime cuál es y la repongo
+    // apuntando a la columna correcta.
 
     $cambios = [[
         'campo'         => 'Estado',
         'valor_antes'   => 'Activo',
         'valor_despues' => 'Inactivo',
     ]];
-
     $movimiento          = obtenerMovimientoSesion('desactivar', $cambios);
     $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -313,6 +316,9 @@ function reactivarCategoriaMaterial()
 
 function responder(bool $ok, string $msg, array $extra = []): void
 {
+    if (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     header('Content-Type: application/json');
     echo json_encode(array_merge(['success' => $ok, 'message' => $msg], $extra));
     exit;

@@ -491,8 +491,12 @@ async function cargarEnsamblajes() {
     }
 
     grid.innerHTML = ensamblajes.map(e => {
-        const producciones = e.producciones_count ?? 0;
-        const derivadosCount = e.derivados_count ?? 0;
+        // producciones_count/derivados_count son columnas asumidas de la
+        // vista (ver comentario superior). Si la vista no las trae, se
+        // calculan igual a partir de los resúmenes reales que sí garantiza
+        // el controlador (js_moldes_utilizados / js_derivados_utilizados).
+        const producciones = e.producciones_count ?? parseJsonColumna(e.js_moldes_utilizados).length;
+        const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
         const puedeIniciar   = !e.deleted_at && !e.inicio;
         const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
 
@@ -781,40 +785,43 @@ async function abrirModalEditarEnsamblaje(id) {
         operario_id: e.operario_id,
     });
 
-    // Prellenar el ticket a partir de los resúmenes jsonb (fuente de
-    // verdad real = rel_ensamblaje_producto, pero estos resúmenes ya
-    // traen justo lo necesario para reconstruir el ticket visualmente).
-    // Prellenar el ticket a partir de `detalle` (array único con ambos tipos,
-// diferenciados por el campo `tipo`; fuente = rel_ensamblaje_producto).
-    const detalle = parseJsonColumna(e.detalle);
+    // Prellenar el ticket a partir de los DOS resúmenes reales que arma
+    // recalcularResumenesEnsamblaje() en el controlador (NO existe un
+    // campo unificado "detalle" con "tipo"; hay dos jsonb separados):
+    //   js_moldes_utilizados:    {produccion_id, molde_nombre, cantidad_kg, fecha, categoria_material_nombre}
+    //   js_derivados_utilizados: {derivado_id, derivado_nombre}
+    const moldes = parseJsonColumna(e.js_moldes_utilizados);
+    const derivados = parseJsonColumna(e.js_derivados_utilizados);
 
-    detalle.forEach(item => {
-        if (item.tipo === 'produccion') {
-            const est = estiloPorNombre(item.molde_nombre || '');
-            ticketDetalleEns.push({
-                tempId: ++contadorLineaTicketEns,
-                tipo: 'produccion',
-                molde_produccion_id: item.molde_produccion_id,
-                derivado_id: null,
-                nombre: item.molde_nombre ?? ('Producción #' + item.molde_produccion_id),
-                meta: `#${item.molde_produccion_id} · ${formatearCantidadEns(item.produccion_cantidad_kg)} kg · ${item.produccion_fecha ?? ''}`,
-                icono: 'fa-industry',
-                color: est.color, bg: est.bg,
-                cantidad_kg: parseFloat(item.produccion_cantidad_kg) || 0,
-            });
-        } else {
-            const est = estiloPorNombre(item.derivado_nombre || '');
-            ticketDetalleEns.push({
-                tempId: ++contadorLineaTicketEns,
-                tipo: 'derivado',
-                molde_produccion_id: null,
-                derivado_id: item.derivado_id,
-                nombre: item.derivado_nombre ?? ('Derivado #' + item.derivado_id),
-                meta: `Derivado #${item.derivado_id}`,
-                icono: 'fa-flask',
-                color: est.color, bg: est.bg,
-            });
-        }
+    moldes.forEach(item => {
+        const est = estiloPorNombre(item.molde_nombre || '');
+        ticketDetalleEns.push({
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'produccion',
+            molde_produccion_id: item.produccion_id,
+            derivado_id: null,
+            nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
+            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} kg`
+                + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
+                + (item.fecha ? ` · ${formatearFechaHoraLegibleEns(item.fecha)}` : ''),
+            icono: 'fa-industry',
+            color: est.color, bg: est.bg,
+            cantidad_kg: parseFloat(item.cantidad_kg) || 0,
+        });
+    });
+
+    derivados.forEach(item => {
+        const est = estiloPorNombre(item.derivado_nombre || '');
+        ticketDetalleEns.push({
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'derivado',
+            molde_produccion_id: null,
+            derivado_id: item.derivado_id,
+            nombre: item.derivado_nombre ?? ('Derivado #' + item.derivado_id),
+            meta: `Derivado #${item.derivado_id}`,
+            icono: 'fa-flask',
+            color: est.color, bg: est.bg,
+        });
     });
     renderTicketDetalle();
 
