@@ -147,14 +147,15 @@ function buscarProductosDisponiblesEnsamblaje()
     $where = ["t1.enviado_ensamblaje = TRUE", "t1.ensamblaje_realizado = FALSE"];
     $params = [];
     if ($texto !== '') {
-        $where[] = "LOWER(UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')'))) LIKE LOWER(:texto)";
+        $where[] = "LOWER(UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')', ' | Produccion_id ', t1.id))) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
     $sql = "SELECT DISTINCT
                 tt.id AS producto_id,
                 t3.id AS color_id,
-                UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')')) AS productoformato
+                t1.id AS produccion_id,
+                UPPER(CONCAT(tt.descripcion, ' (', t3.nombre, ')', ' | Produccion_id ', t1.id)) AS productoformato
             FROM produccion t1
             LEFT JOIN molde t2 ON t1.molde_id = t2.id
             LEFT JOIN producto tt ON t2.producto_id = tt.id
@@ -203,21 +204,27 @@ function buscarDerivados()
 function buscarProduccionesDisponibles()
 {
     $conectar = conectar_oll_BD();
-    $productoId = intval($_POST['producto_id'] ?? 0);
-    $colorId    = intval($_POST['color_id'] ?? 0);
-    $texto      = trim($_POST['texto'] ?? '');
+    $productoId    = intval($_POST['producto_id'] ?? 0);
+    $colorId       = intval($_POST['color_id'] ?? 0);
+    $produccionId  = intval($_POST['produccion_id'] ?? 0); // NUEVO
+    $texto         = trim($_POST['texto'] ?? '');
 
     $where  = ["1=1"];
     $params = [];
-    if ($productoId > 0) {
-        $where[] = "producto_id = :producto_id";
-        $params['producto_id'] = $productoId;
-    }
-    if ($colorId > 0) {
-        $where[] = "color_id = :color_id"; // ⚠️ SUPUESTO: asume que
-        $params['color_id'] = $colorId;    // view_producciones_disponibles_ensamblaje
-        // trae la columna color_id. Si no la tiene, hay que agregarla a esa vista
-        // (join contra produccion.color_id) para que este filtro funcione.
+
+    if ($produccionId > 0) {
+        // Filtro exacto: solo esa producción puntual, ignora producto_id/color_id
+        $where[] = "produccion_id = :produccion_id";
+        $params['produccion_id'] = $produccionId;
+    } else {
+        if ($productoId > 0) {
+            $where[] = "producto_id = :producto_id";
+            $params['producto_id'] = $productoId;
+        }
+        if ($colorId > 0) {
+            $where[] = "color_id = :color_id";
+            $params['color_id'] = $colorId;
+        }
     }
     if ($texto !== '') {
         $where[] = "LOWER(molde_nombre) LIKE LOWER(:texto)";
