@@ -4,11 +4,15 @@
  * controllers/clssMaterial.php
  * Controlador del módulo de Materia Prima
  * Tabla real: material (id, nombre, unidad_medida_id, stock_minimo, stock_actual,
- *             js_session, js_historial, created_at, update_at, deleted_at)
+ *             derivado, js_session, js_historial, created_at, update_at, deleted_at)
  * unidad_medida_id es OPCIONAL y, si se envía, DEBE ser una unidad RAÍZ
  * (unidad_base_id IS NULL) — el stock de un material siempre se maneja en su
  * unidad base; las unidades compuestas (sacos, bolsas, rollos) solo se eligen
  * al momento de comprar, y se convierten con `equivalencia` hacia esta unidad.
+ * `derivado` (boolean, default false) distingue:
+ *   - false => material COMPUESTO (materia prima que se compra a proveedores)
+ *   - true  => material DERIVADO (sale como subproducto/derivado de un proceso
+ *              interno, ej. "CLICK DE GANCHO", y no se compra directamente)
  * Soft delete vía deleted_at.
  */
 
@@ -53,6 +57,7 @@ function listarMateriales()
 
     $texto  = trim($_POST['texto'] ?? '');
     $estado = trim($_POST['estado'] ?? ''); // '', 'activa', 'inactiva'
+    $tipo   = trim($_POST['tipo'] ?? '');   // '', 'derivado', 'compuesto'
 
     $where  = ["1=1"];
     $params = [];
@@ -66,12 +71,21 @@ function listarMateriales()
     } elseif ($estado === 'inactiva') {
         $where[] = "m.deleted_at IS NOT NULL";
     }
+    if ($tipo === 'derivado') {
+        $where[] = "m.derivado IS TRUE";
+    } elseif ($tipo === 'compuesto') {
+        $where[] = "COALESCE(m.derivado, FALSE) IS FALSE";
+    }
 
     $sql = "
         SELECT
             m.*,
             u.nombre       AS unidad_nombre,
-            u.nombre_corto AS unidad_corto
+            u.nombre_corto AS unidad_corto,
+            CASE
+                WHEN m.derivado IS TRUE THEN 'DERIVADO'
+                ELSE 'COMPUESTO'
+            END AS derivado_formato
         FROM material m
         LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
         WHERE " . implode(' AND ', $where) . "
@@ -172,6 +186,15 @@ function obtenerNombreUnidad($conectar, $unidadMedidaId): string
     return $result[0]['nombre'] . ' (' . $result[0]['nombre_corto'] . ')';
 }
 
+/**
+ * Convierte cualquier representación de checkbox/select ('on','1','true',etc.)
+ * a un boolean real de PHP.
+ */
+function obtenerDerivadoPost(): bool
+{
+    return filter_var($_POST['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN);
+}
+
 function guardarMaterial()
 {
     $conectar    = conectar_oll_BD();
@@ -179,6 +202,7 @@ function guardarMaterial()
     $nombre      = trim($_POST['nombre'] ?? '');
     $stockMinimo = $_POST['stock_minimo'] !== '' ? floatval($_POST['stock_minimo'] ?? 0) : 0;
     $stockActual = $_POST['stock_actual'] !== '' ? floatval($_POST['stock_actual'] ?? 0) : 0;
+    $derivado    = obtenerDerivadoPost();
 
     // La unidad de medida es OPCIONAL: si no viene o viene vacía, queda en NULL.
     $unidadMedidaId = !empty($_POST['unidad_medida_id']) ? intval($_POST['unidad_medida_id']) : null;
@@ -212,10 +236,11 @@ function guardarMaterial()
     if (!empty($chk)) responder(false, 'Ya existe un material con ese nombre.');
 
     $mapaCampos = [
-        'nombre'         => 'Nombre',
-        'nombre_unidad'  => 'Unidad de medida',
-        'stock_minimo'   => 'Stock mínimo',
-        'stock_actual'   => 'Stock actual',
+        'nombre'          => 'Nombre',
+        'nombre_unidad'   => 'Unidad de medida',
+        'stock_minimo'    => 'Stock mínimo',
+        'stock_actual'    => 'Stock actual',
+        'derivado_texto'  => 'Tipo',
     ];
 
     $datosNuevos = [
@@ -223,6 +248,7 @@ function guardarMaterial()
         'nombre_unidad'  => obtenerNombreUnidad($conectar, $unidadMedidaId),
         'stock_minimo'   => $stockMinimo,
         'stock_actual'   => $stockActual,
+        'derivado_texto' => $derivado ? 'DERIVADO' : 'COMPUESTO',
     ];
 
     if ($id === 0) {
@@ -233,14 +259,15 @@ function guardarMaterial()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, created_at, js_session, js_historial)
-            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, NOW(), :js_session, :js_historial)
+            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, derivado, created_at, js_session, js_historial)
+            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, :derivado, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'           => $nombre,
             'unidad_medida_id' => $unidadMedidaId,
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
+            'derivado'         => $derivado ? 'true' : 'false',
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,
         ]);
@@ -250,7 +277,8 @@ function guardarMaterial()
         $actual = executeQuery($conectar, "SELECT * FROM material WHERE id = :id", ['id' => $id]);
         if (empty($actual)) responder(false, 'Material no encontrado.');
         $registroAnterior = $actual[0];
-        $registroAnterior['nombre_unidad'] = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
+        $registroAnterior['nombre_unidad']  = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
+        $registroAnterior['derivado_texto'] = filter_var($registroAnterior['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'DERIVADO' : 'COMPUESTO';
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -264,6 +292,7 @@ function guardarMaterial()
                 unidad_medida_id = :unidad_medida_id,
                 stock_minimo     = :stock_minimo,
                 stock_actual     = :stock_actual,
+                derivado         = :derivado,
                 update_at        = NOW(),
                 js_session       = :js_session,
                 js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -273,6 +302,7 @@ function guardarMaterial()
             'unidad_medida_id' => $unidadMedidaId,
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
+            'derivado'         => $derivado ? 'true' : 'false',
             'id'               => $id,
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,

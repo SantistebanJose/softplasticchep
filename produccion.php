@@ -433,7 +433,7 @@ const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduc
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let materialesProdCache = null; // cache de materiales para las cards
-let moldesProdCache = null;     // cache de moldes para selects
+let moldesProductoProdCache = null; // cache de combinaciones molde-producto para el select
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
 let materialSeleccionadoId = null; // material activo en el panel de lotes
 let contadorLineaTicket = 0;
@@ -675,6 +675,13 @@ async function obtenerMoldesProd() {
     return moldesProdCache;
 }
 
+async function obtenerMoldesProductoProd() {
+    if (moldesProductoProdCache) return moldesProductoProdCache;
+    const json = await llamarMoldes('LISTARMOLDESPRODUCTO', {});
+    moldesProductoProdCache = json.success ? json.moldes_producto : [];
+    return moldesProductoProdCache;
+}
+
 // Categorías de material: mismo patrón de cache que moldes, se piden una
 // sola vez por carga de página y se reutilizan cada vez que se abre el modal.
 async function obtenerCategoriasMaterialProd() {
@@ -688,7 +695,7 @@ async function cargarSelectsModal(seleccion = {}) {
     const [operario, maquinas, moldes, colores, categorias] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
-        obtenerMoldesProd(),
+        obtenerMoldesProductoProd(),
         llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
         obtenerCategoriasMaterialProd(),
     ]);
@@ -711,10 +718,17 @@ async function cargarSelectsModal(seleccion = {}) {
     if (seleccion.categoria_material_id) categoriaSelect.value = seleccion.categoria_material_id;
 
     const moldeSelect = document.getElementById('prod_molde_id');
-    moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
-        (moldes || []).map(m => `<option value="${m.id}">${m.nombre} (${m.forma})</option>`).join('');
-    if (seleccion.molde_id) moldeSelect.value = seleccion.molde_id;
-
+        const moldesProducto = await obtenerMoldesProductoProd();
+        moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
+            moldesProducto.map(m =>
+                `<option value="${m.unico}" data-molde-id="${m.molde_id}">${m.etiqueta}</option>`
+            ).join('');
+        if (seleccion.unico_molde) {
+            moldeSelect.value = seleccion.unico_molde;
+        } else if (seleccion.molde_id) {
+            const opt = [...moldeSelect.options].find(o => o.dataset.moldeId == seleccion.molde_id);
+            if (opt) moldeSelect.value = opt.value;
+        }
     const colorSelect = document.getElementById('prod_color_id');
     colorSelect.innerHTML = '<option value="">Selecciona un color...</option>';
     if (colores.success) colores.colores.forEach(c =>
@@ -1077,7 +1091,7 @@ async function abrirModalEditarProduccion(id) {
 
     await cargarSelectsModal({
         operario_id: p.operario_id, maquina_id: p.maquina_id,
-        molde_id: p.molde_id, color_id: p.color_id,
+        molde_id: p.molde_id, unico_molde: p.unico_molde, color_id: p.color_id,
         categoria_material_id: p.categoria_material_id,
     });
     await renderGridMateriales();
@@ -1112,12 +1126,20 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    const moldeSelect = document.getElementById('prod_molde_id');
+    const opcionMolde  = moldeSelect.selectedOptions[0];
+    const moldeIdReal  = opcionMolde?.dataset.moldeId || '';
+    const uniqueMolde  = moldeSelect.value;                 // ej: "7-2"
+    const moldeProducto = opcionMolde?.textContent || '';   // ej: "MOLDE BASTON OVALADO — COLGADOR OVALADO MULTIUSO"
+
     const params = {
         id: produccionIdActual,
         operario_id: document.getElementById('prod_operario_id').value,
         maquina_id: document.getElementById('prod_maquina_id').value,
         categoria_material_id: document.getElementById('prod_categoria_material_id').value,
-        molde_id: document.getElementById('prod_molde_id').value,
+        molde_id: moldeIdReal,
+        unico_molde: uniqueMolde,
+        molde_producto: moldeProducto,
         color_id: document.getElementById('prod_color_id').value,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),

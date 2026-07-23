@@ -35,6 +35,16 @@
  *     Se valida en el backend además del frontend, para que nadie
  *     pueda colar una unidad incompatible manipulando el request.
  *
+ * MATERIALES DERIVADOS (material.derivado):
+ *   - `derivado` (boolean) distingue materiales COMPUESTOS (se compran
+ *     normalmente a proveedores) de materiales DERIVADOS (suelen salir
+ *     como subproducto de un proceso interno, ej. "CLICK DE GANCHO").
+ *   - Esta distinción es SOLO informativa en Compras: un material
+ *     derivado (ej. clips de gancho) puede comprarse a un proveedor con
+ *     total normalidad, así que NO se filtra ni se bloquea en
+ *     BUSCARMATERIALES ni en guardarCompra(). Se expone el campo para
+ *     que el frontend lo muestre como referencia visual, nada más.
+ *
  * total_img_cargado:
  *   - Campo opcional (nullable) en `compra`. Guarda el monto REAL que
  *     figura en el comprobante subido (img_comprobante), que puede no
@@ -172,7 +182,11 @@ function buscarMateriales()
 
     // Se agrega m.unidad_medida_id y u.equivalencia para que el frontend pueda
     // preseleccionar la unidad base del material y mostrar la conversión.
-    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id,
+    // m.derivado viaja también, pero SOLO como dato informativo para el
+    // frontend (ver nota "MATERIALES DERIVADOS" al inicio del archivo):
+    // un material derivado (ej. clips de gancho) sí puede comprarse a
+    // proveedores con normalidad, así que aquí no se filtra ni se excluye.
+    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.derivado,
                    u.nombre_corto AS unidad_corto, u.equivalencia AS unidad_equivalencia
             FROM material m
             LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
@@ -277,6 +291,7 @@ function obtenerCompra($id)
     $detalle = executeQuery(
         $conectar,
         "SELECT rcm.*, m.nombre AS material_nombre, m.unidad_medida_id AS material_unidad_base_id,
+                m.derivado AS material_derivado,
                 um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto, um.equivalencia AS unidad_equivalencia,
                 ub.nombre_corto AS material_unidad_base_corto,
                 EXISTS (
@@ -432,6 +447,8 @@ function guardarCompra()
     // Traemos los materiales usados junto con su unidad_medida_id (la unidad
     // RAÍZ del material, en la que se lleva el stock). La necesitamos para
     // el snapshot y para validar que la unidad elegida sea de su misma familia.
+    // NOTA: aquí NO se filtra ni se rechaza nada por m.derivado — un material
+    // derivado (ej. clips de gancho) se compra igual que cualquier otro.
     $materialesIds = array_column($detalle, 'material_id');
     $placeholders  = [];
     $paramsIn      = [];

@@ -25,6 +25,9 @@ function controladorMoldes($accion)
         case 'LISTARMOLDES':
             listarMoldes();
             break;
+        case 'LISTARMOLDESPRODUCTO':
+            listarMoldesProducto();
+            break;
         case 'OBTENERMOLDE':
             obtenerMolde(intval($_POST['id'] ?? 0));
             break;
@@ -80,7 +83,34 @@ function listarMoldes()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['moldes' => decodificarProductosLista($result)]);
 }
+/**
+ * Lista una fila por cada combinación molde-producto (un molde puede
+ * servir para varios productos). 'unico' = "moldeId-productoId", útil
+ * como value del <select> cuando se necesita saber a qué producto
+ * específico corresponde el avance, no solo qué molde se usó.
+ */
+function listarMoldesProducto()
+{
+    $conectar = conectar_oll_BD();
 
+    $sql = "
+        SELECT
+            m.id AS molde_id,
+            m.nombre,
+            (elem->>'producto_id')::int AS producto_id,
+            elem->>'codigo'       AS codigo_producto,
+            elem->>'descripcion'  AS producto,
+            CONCAT(m.id,'-',(elem->>'producto_id')) AS unico,
+            CONCAT(m.nombre,' — ',elem->>'descripcion') AS etiqueta
+        FROM molde m
+        LEFT JOIN LATERAL jsonb_array_elements(m.js_producto) AS elem ON true
+        WHERE m.deleted_at IS NULL
+        ORDER BY m.nombre, elem->>'descripcion'
+    ";
+
+    $result = executeQuery($conectar, $sql, []);
+    responder(true, 'OK', ['moldes_producto' => $result]);
+}
 function obtenerMolde($id)
 {
     $conectar = conectar_oll_BD();

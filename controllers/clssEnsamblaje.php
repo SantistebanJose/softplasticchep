@@ -21,17 +21,27 @@
  * las columnas reales son distintas, ajustar buscarDerivados() y los JOIN
  * de la vista view_ensamblaje_detalle.
  *
- * IMPORTANTE (confirmado por el usuario): `molde` NO tiene una columna
- * producto_id. La relación molde -> producto es MANY-TO-MANY, guardada en
- * `molde.js_producto` (jsonb con un array de {codigo, descripcion,
- * producto_id}), porque un mismo molde puede fabricar varios productos
- * distintos (ej. MOLDE BASTON OVALADO -> COV y COS). Por eso, en TODO este
- * controlador, para saber a qué producto pertenece un avance de producción
- * concreto, NUNCA se debe hacer JOIN directo molde->producto; hay que
- * resolverlo vía `view_producciones_disponibles_ensamblaje` (que ya expone
- * producto_id/color_id correctamente para cada fila de `produccion`, según
- * el resto de este mismo controlador). `molde` solo se usa para su nombre
- * (mo.nombre), que sí es una columna escalar normal.
+ * IMPORTANTE (actualizado 2026-07-22, confirmado por el usuario): `molde`
+ * sigue sin tener columna producto_id (molde -> producto sigue siendo
+ * MANY-TO-MANY vía `molde.js_producto`, porque un mismo molde puede
+ * fabricar varios productos distintos, ej. MOLDE BASTON OVALADO -> COV y
+ * COS). PERO cada fila de `produccion` (cada avance/corrida concreta) SÍ
+ * fija a qué producto pertenece ESE avance puntual, en la columna
+ * `produccion.unico_molde_producto` (formato "molde_id-producto_id", ej.
+ * "9-9"). Por eso, para resolver el producto_id de un avance de producción
+ * concreto, este controlador YA NO depende de
+ * `view_producciones_disponibles_ensamblaje`: se resuelve directo con
+ * `split_part(produccion.unico_molde_producto, '-', 2)::bigint`. `molde`
+ * sigue usándose solo para su nombre (mo.nombre, vía produccion.molde_id
+ * -> molde.id), que sí es una columna escalar normal.
+ *
+ * "Disponible para ensamblaje" ahora se calcula directo sobre `produccion`:
+ * enviado_ensamblaje = TRUE, deleted_at IS NULL, fecha_hora_fin IS NOT NULL,
+ * y que no exista ninguna línea activa en rel_ensamblaje_producto que ya
+ * la haya consumido (NOT EXISTS ... deleted_at IS NULL). La vista
+ * view_producciones_disponibles_ensamblaje ya no se usa en ningún punto de
+ * este controlador (ni en los listados ni en el snapshot que se guarda en
+ * rel_ensamblaje_producto.js_query_consulta_produccion).
  *
  * MODELO:
  *   Cada fila de `ensamblaje` es un armado de un `producto` final. Ese
@@ -42,9 +52,11 @@
  *
  * REGLA DE UNICIDAD:
  *   Un mismo avance de producción (molde_produccion_id) solo puede estar
- *   vinculado a UN ensamblaje activo a la vez (ver
- *   view_producciones_disponibles_ensamblaje, que ya filtra los que siguen
- *   libres). Esto evita "gastar" el mismo avance en dos armados distintos.
+ *   vinculado a UN ensamblaje activo a la vez. Se valida con NOT EXISTS
+ *   sobre rel_ensamblaje_producto (deleted_at IS NULL) tanto en las
+ *   funciones de listado ("disponibles") como al insertar
+ *   (insertarLineasEnsamblaje). Esto evita "gastar" el mismo avance en dos
+ *   armados distintos.
  *
  * REGLA DE PRODUCTO ÚNICO POR ARMADO:
  *   Un ensamblaje se arma para UN solo producto+color a la vez (columna
@@ -54,15 +66,12 @@
  *   controlador no lo re-valida server-side porque `producto_id` ya viene
  *   fijo desde el formulario.
  *
- * CATEGORÍA DE MATERIAL (nuevo): `produccion.categoria_material_id` ya se
- * guarda desde el módulo de Producción. Aquí se expone como
+ * CATEGORÍA DE MATERIAL: `produccion.categoria_material_id` ya se guarda
+ * desde el módulo de Producción. Aquí se expone como
  * `categoria_material_nombre_verif` en buscarProduccionesDisponibles() y
- * obtenerDatosProduccionParaEnsamblaje() (vía JOIN directo a `produccion`,
- * igual que ya se hacía con `color_nombre_verif`), y también se incluye en
- * el resumen `js_moldes_utilizados` que arma recalcularResumenesEnsamblaje().
- * Se resuelve por JOIN directo en el controlador (no depende de que la vista
- * view_producciones_disponibles_ensamblaje ya tenga la columna); si más
- * adelante se actualiza esa vista para incluirla también, no hay conflicto.
+ * obtenerDatosProduccionParaEnsamblaje() (JOIN directo a `categoria_material`
+ * sobre `produccion`), y también se incluye en el resumen
+ * `js_moldes_utilizados` que arma recalcularResumenesEnsamblaje().
  *
  * EDICIÓN (diff-based, NO borrar-y-reinsertar):
  *   Se compara el detalle activo actual contra el nuevo: las líneas que se
@@ -171,41 +180,40 @@ function buscarProductos()
 // de la derecha ve TODAS las producciones sueltas disponibles de esa
 // combinación (con su color) para poder verificarlas antes de vincular.
 //
-// CORREGIDO: `molde` NO tiene columna producto_id. La relación
-// molde -> producto es many-to-many vía `molde.js_producto` (un molde
-// puede fabricar varios productos distintos, ej. MOLDE BASTON OVALADO
-// -> COV y COS). Por eso NO se puede resolver el producto de un avance
-// de producción haciendo JOIN directo molde->producto: ese join siempre
-// devolvía NULL y el <select> del modal quedaba vacío.
-//
-// En su lugar, se resuelve producto_id/color_id a través de
-// view_producciones_disponibles_ensamblaje, que ya los expone
-// correctamente (misma vista que usa buscarProduccionesDisponibles()).
-// Se mantiene el filtro original por t1.enviado_ensamblaje /
-// t1.ensamblaje_realizado, que es la cola explícita de "enviado a
-// ensamblaje" (un concepto distinto y más restrictivo que "disponible
-// según la vista").
+// RESUELTO SIN VISTA (2026-07-22): el producto_id de cada avance se saca
+// directo de produccion.unico_molde_producto ("molde_id-producto_id") con
+// split_part, tal como lo confirmó el usuario con su query de verificación.
+// "Disponible" = enviado_ensamblaje TRUE, finalizada, activa, y sin ninguna
+// línea activa en rel_ensamblaje_producto que ya la haya consumido.
 function buscarProductosDisponiblesEnsamblaje()
 {
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    $where = ["t1.enviado_ensamblaje = TRUE", "t1.ensamblaje_realizado = FALSE"];
+    $where = [
+        "t1.enviado_ensamblaje = TRUE",
+        "t1.deleted_at IS NULL",
+        "t1.fecha_hora_fin IS NOT NULL",
+        "NOT EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep
+            WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+        )",
+    ];
     $params = [];
     if ($texto !== '') {
-        $where[] = "LOWER(UPPER(CONCAT(pr.descripcion, ' (', co.nombre, ')'))) LIKE LOWER(:texto)";
+        $where[] = "LOWER(UPPER(CONCAT(t4.descripcion, ' (', t3.nombre, ')'))) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
     $sql = "SELECT DISTINCT
-                v.producto_id,
-                v.color_id,
-                UPPER(CONCAT(pr.descripcion, ' (', co.nombre, ')')) AS productoformato,
-                COUNT(*) OVER (PARTITION BY v.producto_id, v.color_id) AS disponibles
+                t4.id AS producto_id,
+                t1.color_id,
+                UPPER(CONCAT(t4.descripcion, ' (', t3.nombre, ')')) AS productoformato,
+                COUNT(*) OVER (PARTITION BY t4.id, t1.color_id) AS disponibles
             FROM produccion t1
-            JOIN view_producciones_disponibles_ensamblaje v ON v.produccion_id = t1.id
-            LEFT JOIN producto pr ON pr.id = v.producto_id
-            LEFT JOIN color co ON co.id = v.color_id
+            LEFT JOIN molde t2 ON t2.id = t1.molde_id
+            LEFT JOIN color t3 ON t3.id = t1.color_id
+            INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
             WHERE " . implode(' AND ', $where) . "
             ORDER BY productoformato
             LIMIT 200";
@@ -244,13 +252,16 @@ function buscarDerivados()
 }
 
 // Avances de producción finalizados y aún no consumidos por ningún
-// ensamblaje activo (ver view_producciones_disponibles_ensamblaje).
-// Si se pasa producto_id, se filtra solo a los avances cuyo molde
-// pertenece a ese producto. Si NO se pasa producto_id (ej. al abrir el
-// modal de "Registrar ensamblaje" antes de elegir producto), devuelve
-// TODA la cola de producciones pendientes por vincular, sin importar el
-// producto — esto es lo que alimenta el "listado" que Orlando pidió ver
-// apenas se abre el modal.
+// ensamblaje activo. Resuelto 100% directo sobre `produccion` (sin vista):
+// producto_id sale de unico_molde_producto vía split_part, molde_nombre
+// vía produccion.molde_id -> molde, color_nombre_verif vía
+// produccion.color_id -> color, categoria_material_nombre_verif vía
+// produccion.categoria_material_id -> categoria_material.
+//
+// Si se pasa producto_id, se filtra solo a los avances de ese producto
+// (+ color si se pasa). Si NO se pasa producto_id (ej. al abrir el modal
+// de "Registrar ensamblaje" antes de elegir producto), devuelve TODA la
+// cola de producciones pendientes por vincular, sin importar el producto.
 function buscarProduccionesDisponibles()
 {
     $conectar = conectar_oll_BD();
@@ -259,38 +270,51 @@ function buscarProduccionesDisponibles()
     $produccionId  = intval($_POST['produccion_id'] ?? 0);
     $texto         = trim($_POST['texto'] ?? '');
 
-    $where  = ["1=1"];
+    $where  = [
+        "t1.deleted_at IS NULL",
+        "t1.fecha_hora_fin IS NOT NULL",
+        "NOT EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep
+            WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+        )",
+    ];
     $params = [];
 
     if ($produccionId > 0) {
-        $where[] = "v.produccion_id = :produccion_id";
+        $where[] = "t1.id = :produccion_id";
         $params['produccion_id'] = $produccionId;
     } else {
         if ($productoId > 0) {
-            $where[] = "v.producto_id = :producto_id";
+            $where[] = "t4.id = :producto_id";
             $params['producto_id'] = $productoId;
         }
         if ($colorId > 0) {
-            $where[] = "v.color_id = :color_id";
+            $where[] = "t1.color_id = :color_id";
             $params['color_id'] = $colorId;
         }
     }
     if ($texto !== '') {
-        $where[] = "LOWER(v.molde_nombre) LIKE LOWER(:texto)";
+        $where[] = "LOWER(t2.nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
-    // JOIN directo a color y a categoria_material (vía produccion), para
-    // garantizar ambos nombres en la respuesta sin depender de cómo esté
-    // armada la vista view_producciones_disponibles_ensamblaje.
-    $sql = "SELECT v.*, co.nombre AS color_nombre_verif,
-                   cm.nombre AS categoria_material_nombre_verif
-            FROM view_producciones_disponibles_ensamblaje v
-            LEFT JOIN produccion pd ON pd.id = v.produccion_id
-            LEFT JOIN color co ON co.id = pd.color_id
-            LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
+    $sql = "SELECT
+                t1.id AS produccion_id,
+                t1.fecha_envio_ensamblaje,
+                t2.nombre AS molde_nombre,
+                t1.cantidad_producida_kg AS cantidad_kg,
+                t1.fecha_hora_fin,
+                t4.id AS producto_id,
+                t1.color_id,
+                t3.nombre AS color_nombre_verif,
+                cm.nombre AS categoria_material_nombre_verif
+            FROM produccion t1
+            LEFT JOIN molde t2 ON t2.id = t1.molde_id
+            LEFT JOIN color t3 ON t3.id = t1.color_id
+            INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
+            LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY v.fecha_hora_fin DESC";
+            ORDER BY t1.fecha_hora_fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
@@ -298,6 +322,8 @@ function buscarProduccionesDisponibles()
 // Usado por el botón "Pasar a ensamblaje" desde la card de producción:
 // trae los datos necesarios para prellenar el modal (producto sugerido
 // según el molde usado, kg del avance, etc), sin crear nada todavía.
+// Igual que buscarProduccionesDisponibles(), resuelto directo sobre
+// `produccion`, sin vista.
 function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 {
     $conectar = conectar_oll_BD();
@@ -305,21 +331,37 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 
     $data = executeQuery(
         $conectar,
-        "SELECT v.*, cm.nombre AS categoria_material_nombre_verif
-         FROM view_producciones_disponibles_ensamblaje v
-         LEFT JOIN produccion pd ON pd.id = v.produccion_id
-         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
-         WHERE v.produccion_id = :id",
+        "SELECT
+             t1.id AS produccion_id,
+             t1.fecha_envio_ensamblaje,
+             t2.nombre AS molde_nombre,
+             t1.cantidad_producida_kg AS cantidad_kg,
+             t1.fecha_hora_fin,
+             t4.id AS producto_id,
+             t1.color_id,
+             t3.nombre AS color_nombre_verif,
+             cm.nombre AS categoria_material_nombre_verif
+         FROM produccion t1
+         LEFT JOIN molde t2 ON t2.id = t1.molde_id
+         LEFT JOIN color t3 ON t3.id = t1.color_id
+         INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
+         LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+         WHERE t1.id = :id
+           AND t1.deleted_at IS NULL
+           AND t1.fecha_hora_fin IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM rel_ensamblaje_producto rep
+               WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+           )",
         ['id' => $produccionId]
     );
 
     if (empty($data)) {
-        responder(false, 'Esta producción no está disponible para ensamblaje (no existe, no está finalizada, o ya fue usada en otro ensamblaje).');
+        responder(false, 'Esta producción no está disponible para ensamblaje (no existe, no está finalizada, no tiene producto vinculado, o ya fue usada en otro ensamblaje).');
     }
 
     responder(true, 'OK', ['produccion' => $data[0]]);
 }
-
 // =============================================================================
 // AUDITORÍA (idéntico patrón al resto de controladores)
 // =============================================================================
@@ -590,11 +632,16 @@ function guardarEnsamblaje()
         responder(false, 'No se pudo guardar el ensamblaje: ' . $e->getMessage());
     }
 }
+
 /**
  * Valida cada línea nueva (que la producción exista, esté finalizada y
  * libre; o que el derivado exista) e inserta en rel_ensamblaje_producto.
  * $excluirEnsamblajeId permite, en edición, no chocar contra las propias
  * líneas del ensamblaje que se está editando al chequear unicidad.
+ *
+ * El snapshot que se guarda en js_query_consulta_produccion se arma con
+ * una consulta directa sobre `produccion` (mismo criterio de
+ * buscarProduccionesDisponibles), sin depender de ninguna vista.
  */
 function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle, ?int $excluirEnsamblajeId = null): void
 {
@@ -629,10 +676,24 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle, 
                 throw new Exception("La producción #$produccionId ya está vinculada a otro ensamblaje activo.");
             }
 
-            // Snapshot completo de la fila de producción al momento de vincularla.
+            // Snapshot completo (resuelto directo sobre produccion, sin vista)
+            // de la fila al momento de vincularla.
             $snapshotRows = executeQuery(
                 $conectar,
-                "SELECT * FROM view_producciones_disponibles_ensamblaje WHERE produccion_id = :id",
+                "SELECT
+                     t1.id AS produccion_id,
+                     mo.nombre AS molde_nombre,
+                     t1.cantidad_producida_kg AS cantidad_kg,
+                     t1.fecha_hora_fin,
+                     split_part(t1.unico_molde_producto, '-', 2)::bigint AS producto_id,
+                     t1.color_id,
+                     co.nombre AS color_nombre_verif,
+                     cm.nombre AS categoria_material_nombre_verif
+                 FROM produccion t1
+                 LEFT JOIN molde mo ON mo.id = t1.molde_id
+                 LEFT JOIN color co ON co.id = t1.color_id
+                 LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+                 WHERE t1.id = :id",
                 ['id' => $produccionId]
             );
             $snapshot = json_encode($snapshotRows[0] ?? ['produccion_id' => $produccionId], JSON_UNESCAPED_UNICODE);
@@ -676,7 +737,9 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle, 
  * Recalcula js_moldes_utilizados / js_derivados_utilizados como resúmenes
  * de conveniencia a partir del detalle activo real (fuente de verdad =
  * rel_ensamblaje_producto). Se llama después de cualquier cambio en el
- * detalle para que ambos queden siempre sincronizados.
+ * detalle para que ambos queden siempre sincronizados. Ya resolvía todo
+ * directo sobre produccion/molde/categoria_material (sin vista), no
+ * cambió nada acá.
  */
 function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
@@ -709,6 +772,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
         'derivados' => json_encode($derivados, JSON_UNESCAPED_UNICODE),
     ]);
 }
+
 // Soft delete: desactiva el ensamblaje y sus líneas activas (libera las
 // producciones vinculadas para que puedan usarse en otro ensamblaje).
 function eliminarEnsamblaje()

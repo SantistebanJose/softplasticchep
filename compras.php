@@ -367,14 +367,20 @@ async function agregarFilaMaterial(datos = null) {
     const filaId = 'fila-mat-' + (++contadorFilaMaterial);
     const wrap = document.getElementById('compra_detalle_wrap');
 
-    const opcionesMaterialHtml = materiales.map(m =>
-        `<option value="${m.id}"
+    // El indicador "Derivado" es solo informativo: un material derivado (ej.
+    // clips de gancho) SÍ puede comprarse a proveedores con normalidad, así
+    // que no se bloquea ni se filtra del selector, solo se marca visualmente.
+    const opcionesMaterialHtml = materiales.map(m => {
+        const esDerivado = m.derivado === true || m.derivado === 't' || m.derivado === 'true';
+        const etiquetaTipo = esDerivado ? ' · derivado' : '';
+        return `<option value="${m.id}"
                  data-unidad-id="${m.unidad_medida_id ?? ''}"
                  data-unidad-corto="${m.unidad_corto ?? ''}"
+                 data-derivado="${esDerivado ? '1' : '0'}"
                  ${datos && datos.material_id == m.id ? 'selected' : ''}>
-            ${m.nombre} (stock: ${m.stock_actual ?? 0} ${m.unidad_corto ?? ''})
-         </option>`
-    ).join('');
+            ${m.nombre} (stock: ${m.stock_actual ?? 0} ${m.unidad_corto ?? ''}${etiquetaTipo})
+         </option>`;
+    }).join('');
 
     const tr = document.createElement('tr');
     tr.id = filaId;
@@ -382,7 +388,11 @@ async function agregarFilaMaterial(datos = null) {
     tr.innerHTML = `
         <td data-label="Material"><select class="form-select mat-select" required>
                 <option value="">Selecciona...</option>${opcionesMaterialHtml}
-            </select></td>
+            </select>
+            <span class="pc-derivado-badge mat-derivado-badge" style="display:none;">
+                <i class="fa-solid fa-circle-info"></i> Material derivado
+            </span>
+        </td>
         <td data-label="Unidad">
             <select class="form-select mat-unidad" required disabled>
                 <option value="">Elige un material primero...</option>
@@ -417,6 +427,13 @@ async function agregarFilaMaterial(datos = null) {
     const conversionBadge = tr.querySelector('.mat-conversion');
     const conversionTexto = tr.querySelector('.mat-conversion-texto');
     const unidadAlerta    = tr.querySelector('.mat-unidad-alerta');
+    const derivadoBadge   = tr.querySelector('.mat-derivado-badge');
+
+    function actualizarBadgeDerivado() {
+        const matOpt = matSelect.selectedOptions[0];
+        const esDerivado = matOpt && matOpt.dataset.derivado === '1';
+        derivadoBadge.style.display = esDerivado ? 'inline-flex' : 'none';
+    }
 
     function actualizarConversion() {
         const unidadOpt = unidadSelect.selectedOptions[0];
@@ -477,7 +494,10 @@ async function agregarFilaMaterial(datos = null) {
         actualizarConversion();
     }
 
-    matSelect.addEventListener('change', () => cargarUnidadesDeLaFila());
+    matSelect.addEventListener('change', () => {
+        actualizarBadgeDerivado();
+        cargarUnidadesDeLaFila();
+    });
     unidadSelect.addEventListener('change', actualizarConversion);
 
     cantidadInput.addEventListener('input', () => {
@@ -493,6 +513,7 @@ async function agregarFilaMaterial(datos = null) {
     // Precarga inicial: si venimos de edición (o ya hay material elegido),
     // cargamos de una vez las unidades compatibles con la unidad ya guardada.
     if (datos && datos.material_id) {
+        actualizarBadgeDerivado();
         await cargarUnidadesDeLaFila(datos.unidad_medida_id ?? '');
     }
 

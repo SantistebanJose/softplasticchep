@@ -371,6 +371,8 @@ function guardarProduccion()
     $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
+    $unico_molde        = trim($_POST['unico_molde'] ?? '');    // 7-2
+    $molde_producto     = trim($_POST['molde_producto'] ?? '');
     $cantidad           = intval($_POST['cantidad'] ?? 0); // kg insertados en máquina en este avance
     $fecha              = trim($_POST['fecha'] ?? '');
     $observaciones      = trim($_POST['observaciones'] ?? '');
@@ -391,6 +393,9 @@ function guardarProduccion()
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
+    if (empty($unico_molde) || empty($molde_producto)) {
+        responder(false, 'Debes seleccionar un molde con su producto asociado.');
+    }
     if (empty($fecha)) $fecha = date('Y-m-d H:i:s');
 
     $molde = executeQuery($conectar, "SELECT id FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
@@ -440,12 +445,12 @@ function guardarProduccion()
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
                     operario_id, maquina_id, molde_id, color_id, cantidad,
-                    categoria_material_id,
+                    categoria_material_id, unico_molde_producto, molde_producto,
                     fecha, observaciones,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
-                    :categoria_material_id,
+                    :categoria_material_id, :unico_molde, :molde_producto,
                     :fecha, :observaciones,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
@@ -456,6 +461,8 @@ function guardarProduccion()
                 'color_id'               => $color_id,
                 'cantidad'               => $cantidad,
                 'categoria_material_id'  => $categoria_material_id,
+                'unico_molde'            => $unico_molde,
+                'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
                 'js_session'             => $js_session,
@@ -520,6 +527,8 @@ function guardarProduccion()
                     color_id               = :color_id,
                     cantidad               = :cantidad,
                     categoria_material_id  = :categoria_material_id,
+                    unico_molde_producto   = :unico_molde,
+                    molde_producto         = :molde_producto,
                     fecha                  = :fecha,
                     observaciones          = :observaciones,
                     updated_at             = NOW(),
@@ -533,6 +542,8 @@ function guardarProduccion()
                 'color_id'               => $color_id,
                 'cantidad'               => $cantidad,
                 'categoria_material_id'  => $categoria_material_id,
+                'unico_molde'            => $unico_molde,
+                'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
                 'js_session'             => $js_session,

@@ -23,6 +23,11 @@ include("header.php");
             <option value="activa" selected>Activos</option>
             <option value="inactiva">Inactivos</option>
         </select>
+        <select id="fmat_tipo" class="form-select" style="max-width:160px">
+            <option value="">Todos los tipos</option>
+            <option value="compuesto">Compuesto</option>
+            <option value="derivado">Derivado</option>
+        </select>
     </div>
 
     <div class="pc-table-wrap pc-table-responsive-cards">
@@ -30,6 +35,7 @@ include("header.php");
         <thead>
             <tr>
                 <th>Nombre</th>
+                <th>Tipo</th>
                 <th>Unidad</th>
                 <th>Stock actual</th>
                 <th>Stock mínimo</th>
@@ -38,7 +44,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyMateriales">
-            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -70,6 +76,18 @@ include("header.php");
                 Solo se muestran unidades <strong>raíz</strong> (ej: Kilogramo, Unidad, Litro).
                 Las unidades compuestas (ej: Saco 25kg, Rollo 50m) se eligen únicamente al registrar
                 una compra, y el sistema convierte automáticamente a esta unidad para actualizar el stock.
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="derivado" id="material_derivado" value="1">
+                <label class="form-check-label" for="material_derivado">Es un material derivado</label>
+            </div>
+            <div class="form-text">
+                Actívalo si este material no se compra a proveedores, sino que sale como
+                subproducto de un proceso interno (ej: "Click de gancho"). Si no se marca,
+                el material se trata como <strong>compuesto</strong> (materia prima comprada).
             </div>
           </div>
 
@@ -105,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarMateriales().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyMateriales').innerHTML =
-            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     let debounceTimer = null;
@@ -115,6 +133,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('fmat_estado').addEventListener('change', () => {
+        cargarMateriales();
+    });
+
+    document.getElementById('fmat_tipo').addEventListener('change', () => {
         cargarMateriales();
     });
 });
@@ -160,26 +182,32 @@ async function cargarUnidadesSelect() {
 async function cargarMateriales() {
     const texto  = document.getElementById('fmat_texto').value.trim();
     const estado = document.getElementById('fmat_estado').value;
+    const tipo   = document.getElementById('fmat_tipo').value;
 
-    const json = await llamarMateriales('LISTARMATERIALES', { texto, estado });
+    const json = await llamarMateriales('LISTARMATERIALES', { texto, estado, tipo });
     const tbody = document.getElementById('tbodyMateriales');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const materiales = json.materiales || [];
     if (materiales.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay materiales registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay materiales registrados.</td></tr>';
         return;
     }
 
     tbody.innerHTML = materiales.map(m => {
     const stockBajo = parseFloat(m.stock_actual) < parseFloat(m.stock_minimo);
+    const esDerivado = m.derivado_formato === 'DERIVADO';
     return `
     <tr id="fila-material-${m.id}">
         <td data-label="Nombre">${m.nombre}</td>
+        <td data-label="Tipo">${esDerivado
+            ? '<span class="badge bg-info text-dark">DERIVADO</span>'
+            : '<span class="badge bg-secondary">COMPUESTO</span>'}
+        </td>
         <td data-label="Unidad">${m.unidad_nombre ? `${m.unidad_nombre} (${m.unidad_corto})` : '-'}</td>
         <td data-label="Stock actual">${stockBajo
             ? `<span class="badge bg-danger" title="Por debajo del stock mínimo">${m.stock_actual}</span>`
@@ -209,6 +237,7 @@ async function cargarMateriales() {
 function abrirModalCrearMaterial() {
     document.getElementById('formMaterial').reset();
     document.getElementById('material_id').value = '';
+    document.getElementById('material_derivado').checked = false;
     document.getElementById('modalMaterialTitulo').textContent = 'Nuevo material';
     modalMaterial.show();
 }
@@ -224,6 +253,7 @@ async function abrirModalEditarMaterial(id) {
     document.getElementById('material_unidad_medida_id').value = m.unidad_medida_id ?? '';
     document.getElementById('material_stock_minimo').value = m.stock_minimo ?? 0;
     document.getElementById('material_stock_actual').value = m.stock_actual ?? 0;
+    document.getElementById('material_derivado').checked = (m.derivado === true || m.derivado === 't' || m.derivado === 'true');
 
     modalMaterial.show();
 }
@@ -232,6 +262,8 @@ document.getElementById('formMaterial').addEventListener('submit', async functio
     e.preventDefault();
     const formData = new FormData(this);
     formData.append('accion', 'GUARDARMATERIAL');
+    // Los checkboxes no marcados no se envían en un FormData; forzamos el valor.
+    formData.set('derivado', document.getElementById('material_derivado').checked ? '1' : '0');
 
     const resp = await fetch(CONTROLADOR_MATERIALES, { method: 'POST', body: formData });
     const json = await resp.json();
