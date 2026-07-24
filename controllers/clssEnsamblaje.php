@@ -6,6 +6,7 @@
  *
  * Tablas reales:
  *   ensamblaje (id, producto_id -> producto, operario_ortorgado -> operario,
+ *               condicion ['propio'|'derivado'] NUEVO,
  *               js_derivados_utilizados, js_moldes_utilizados [resúmenes,
  *               recalculados en cada guardado a partir del detalle real],
  *               inicio, fin, cantidad_peso_kg,
@@ -14,41 +15,68 @@
  *               molde_produccion_id [referencia "suave" a produccion.id, SIN FK],
  *               js_query_consulta_produccion [snapshot jsonb de la fila de
  *               produccion al momento de vincularla],
- *               derivado_id -> derivado, created_at, update_at, deleted_at)
+ *               derivado_id -> material.id [ver nota abajo], created_at,
+ *               update_at, deleted_at)
  *
- * SUPUESTO (sin confirmar): la tabla `derivado` no se me compartió. Se asume
- * el patrón estándar del sistema: derivado(id, nombre, ..., deleted_at). Si
- * las columnas reales son distintas, ajustar buscarDerivados() y los JOIN
- * de la vista view_ensamblaje_detalle.
+ * CORREGIDO (2026-07-24, confirmado por el usuario): los "derivados" del
+ * módulo de ensamblaje NO viven en una tabla `derivado` aparte (eso era un
+ * supuesto sin confirmar de una versión anterior de este archivo). El
+ * verdadero derivado es una fila de la tabla `material` con
+ * material.derivado = TRUE (columna que ya existe en el módulo de Materia
+ * Prima, ver clssMaterial.php). rel_ensamblaje_producto.derivado_id sigue
+ * llamándose igual mos por compatibilidad con datos existentes, pero ahora
+ * apunta a material.id, no a una tabla "derivado". Se ajustaron
+ * buscarDerivados(), insertarLineasEnsamblaje() y
+ * recalcularResumenesEnsamblaje() en consecuencia.
  *
- * IMPORTANTE (actualizado 2026-07-22, confirmado por el usuario): `molde`
+ * NUEVO (2026-07-24): `material.js_producto` (jsonb, patrón similar a
+ * molde.js_producto) lista los productos FINALES que consumen ese material
+ * derivado como insumo, ej: [{"codigo":"COV","descripcion":"COLGADOR
+ * OVALADO","producto_id":9}]. buscarDerivados() lo usa para PRIORIZAR (no
+ * filtrar) los derivados relevantes al producto que se está ensamblando:
+ * si un derivado declara ese producto_id en su js_producto, aparece primero
+ * en la lista; el resto de derivados activos también se muestran por si
+ * aplica un caso no contemplado ahí.
+ *
+ * NUEVO (2026-07-24): condición del ensamblaje. Confirmado por el usuario
+ * que esto se decide POR ENSAMBLAJE (no fijo a nivel de producto), porque un
+ * mismo producto (ej. PINZA PALANITA) puede a veces salir como 'derivado'
+ * (se usará como insumo de otro producto, ej. un colgador) y otras veces
+ * como 'propio' (producto final único, listo para empaquetado). Se agrega
+ * la columna `ensamblaje.condicion` ('propio' por defecto | 'derivado').
+ *
+ * Cuando `condicion = 'derivado'` y el ensamblaje se FINALIZA
+ * (finalizarEnsamblaje), se busca la fila de `material` cuyo
+ * `material.producto_id` sea igual a `ensamblaje.producto_id` (ese vínculo
+ * 1 a 1 identifica "este material ES el producto ya ensamblado, disponible
+ * como insumo derivado") y se le incrementa `stock_actual` en el peso (kg)
+ * de salida de este armado. Ese peso ahora se captura AL FINALIZAR (ya no
+ * "más adelante en empaquetado" como decía la versión anterior de este
+ * archivo), porque es la cantidad que necesitamos para mover stock.
+ * Si no existe ese material vinculado, se aborta con un mensaje claro
+ * pidiendo crearlo primero en el módulo de Materia Prima (no se autocrea,
+ * para no inventar nombre/unidad_medida).
+ *
+ * SUPUESTO SIN CONFIRMAR (heredado, no tocado en esta pasada): no tengo la
+ * definición real de `view_ensamblaje_detalle`. Asumo que expone (entre
+ * otras) producto_id, producto_codigo, producto_descripcion, operario_id,
+ * operario_nombre, condicion, inicio, fin, cantidad_peso_kg, deleted_at,
+ * js_moldes_utilizados, js_derivados_utilizados. Si la vista no expone la
+ * nueva columna `condicion`, hay que agregarla ahí también o el listado no
+ * la mostrará (el guardado/lectura vía OBTENERENSAMBLAJE sí la necesita).
+ *
+ * IMPORTANTE (heredado de la versión anterior, sigue vigente): `molde`
  * sigue sin tener columna producto_id (molde -> producto sigue siendo
- * MANY-TO-MANY vía `molde.js_producto`, porque un mismo molde puede
- * fabricar varios productos distintos, ej. MOLDE BASTON OVALADO -> COV y
- * COS). PERO cada fila de `produccion` (cada avance/corrida concreta) SÍ
- * fija a qué producto pertenece ESE avance puntual, en la columna
- * `produccion.unico_molde_producto` (formato "molde_id-producto_id", ej.
- * "9-9"). Por eso, para resolver el producto_id de un avance de producción
- * concreto, este controlador YA NO depende de
- * `view_producciones_disponibles_ensamblaje`: se resuelve directo con
- * `split_part(produccion.unico_molde_producto, '-', 2)::bigint`. `molde`
- * sigue usándose solo para su nombre (mo.nombre, vía produccion.molde_id
- * -> molde.id), que sí es una columna escalar normal.
- *
- * "Disponible para ensamblaje" ahora se calcula directo sobre `produccion`:
- * enviado_ensamblaje = TRUE, deleted_at IS NULL, fecha_hora_fin IS NOT NULL,
- * y que no exista ninguna línea activa en rel_ensamblaje_producto que ya
- * la haya consumido (NOT EXISTS ... deleted_at IS NULL). La vista
- * view_producciones_disponibles_ensamblaje ya no se usa en ningún punto de
- * este controlador (ni en los listados ni en el snapshot que se guarda en
- * rel_ensamblaje_producto.js_query_consulta_produccion).
+ * MANY-TO-MANY vía `molde.js_producto`). El producto_id de un avance de
+ * producción concreto se resuelve directo con
+ * `split_part(produccion.unico_molde_producto, '-', 2)::bigint`.
  *
  * MODELO:
  *   Cada fila de `ensamblaje` es un armado de un `producto` final. Ese
  *   armado consume, línea por línea (rel_ensamblaje_producto), o bien un
  *   AVANCE DE PRODUCCIÓN finalizado (molde_produccion_id -> produccion.id)
- *   o bien un DERIVADO comprado/preexistente (derivado_id). Cada línea es
- *   de un tipo u otro, nunca ambos.
+ *   o bien un DERIVADO preexistente (derivado_id -> material.id, con
+ *   material.derivado = TRUE). Cada línea es de un tipo u otro, nunca ambos.
  *
  * REGLA DE UNICIDAD:
  *   Un mismo avance de producción (molde_produccion_id) solo puede estar
@@ -79,7 +107,7 @@
  *   las nuevas se insertan. Mismo patrón ya aplicado en compras para evitar
  *   romper referencias de auditoría o futuras integraciones.
  *
- * Este controlador NO crea/edita producto, operario, derivado ni produccion
+ * Este controlador NO crea/edita producto, operario, material ni produccion
  * (cada uno tiene su propio CRUD); aquí solo se listan/consultan para elegir
  * contra qué se arma el ensamblaje.
  *
@@ -230,27 +258,51 @@ function buscarOperarios()
     responder(true, 'OK', ['operario' => $result]);
 }
 
-// SUPUESTO: derivado(id, nombre, deleted_at). Ajustar si la tabla real
-// tiene otras columnas (ej. producto_id, stock, etc).
+// CORREGIDO (2026-07-24): los derivados reales son filas de `material` con
+// derivado = TRUE (ya NO se asume una tabla `derivado` aparte).
+//
+// ACTUALIZADO: si se pasa producto_id (el producto que se está armando en
+// este ensamblaje), ahora se FILTRA de verdad usando material.js_producto
+// vía jsonb_array_elements + INNER JOIN LATERAL, en vez de solo priorizar
+// el orden. Si NO se pasa producto_id, se listan todos los derivados
+// activos (comportamiento previo, útil para cuando el modal aún no tiene
+// producto elegido).
 function buscarDerivados()
 {
-    $conectar = conectar_oll_BD();
-    $texto = trim($_POST['texto'] ?? '');
+    $conectar   = conectar_oll_BD();
+    $texto      = trim($_POST['texto'] ?? '');
+    $productoId = intval($_POST['producto_id'] ?? 0);
 
-    $where  = ["deleted_at IS NULL"];
+    $where  = ["m.derivado = TRUE", "m.deleted_at IS NULL"];
     $params = [];
     if ($texto !== '') {
-        $where[] = "LOWER(nombre) LIKE LOWER(:texto)";
+        $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT id, nombre FROM derivado
-            WHERE " . implode(' AND ', $where) . " ORDER BY nombre LIMIT 100";
+    // Sin producto seleccionado: no hace falta tocar js_producto para nada.
+    $joinProducto = "";
+    if ($productoId > 0) {
+        // Con producto seleccionado: solo entran los materiales derivados
+        // cuyo js_producto declare este producto_id como consumidor.
+        $joinProducto = "INNER JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) elem
+                          ON (elem->>'producto_id')::bigint = :producto_id_filtro";
+        $params['producto_id_filtro'] = $productoId;
+    }
+
+    $sql = "SELECT DISTINCT
+               m.id, m.nombre, m.js_producto,
+               m.stock_actual, u.nombre_corto AS unidad_corto
+        FROM material m
+        LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
+        $joinProducto
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY m.nombre
+        LIMIT 100";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['derivados' => $result]);
 }
-
 // Avances de producción finalizados y aún no consumidos por ningún
 // ensamblaje activo. Resuelto 100% directo sobre `produccion` (sin vista):
 // producto_id sale de unico_molde_producto vía split_part, molde_nombre
@@ -412,39 +464,53 @@ function listarEnsamblajes()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(producto_codigo) LIKE LOWER(:texto) OR LOWER(producto_descripcion) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($producto_id !== '') {
-        $where[] = "producto_id = :producto_id";
+        $where[] = "e.producto_id = :producto_id";
         $params['producto_id'] = $producto_id;
     }
     if ($operario_id !== '') {
-        $where[] = "operario_id = :operario_id";
+        $where[] = "e.operario_ortorgado = :operario_id";
         $params['operario_id'] = $operario_id;
     }
     if ($estado === 'activa') {
-        $where[] = "deleted_at IS NULL";
+        $where[] = "e.deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "deleted_at IS NOT NULL";
+        $where[] = "e.deleted_at IS NOT NULL";
     }
     if ($fecha_desde !== '') {
-        $where[] = "inicio >= :fecha_desde";
+        $where[] = "e.inicio >= :fecha_desde";
         $params['fecha_desde'] = $fecha_desde;
     }
     if ($fecha_hasta !== '') {
-        $where[] = "inicio <= :fecha_hasta";
+        $where[] = "e.inicio <= :fecha_hasta";
         $params['fecha_hasta'] = $fecha_hasta . ' 23:59:59';
     }
 
-    $sql = "SELECT * FROM view_ensamblaje_detalle
+    $sql = "SELECT
+                e.id AS ensamblaje_id,
+                e.producto_id,
+                p.codigo AS producto_codigo,
+                p.descripcion AS producto_descripcion,
+                e.operario_ortorgado AS operario_id,
+                o.nombre_completo AS operario_nombre,
+                e.inicio,
+                e.fin,
+                e.cantidad_peso_kg,
+                e.deleted_at,
+                e.js_moldes_utilizados,
+                e.js_derivados_utilizados
+            FROM ensamblaje e
+            LEFT JOIN producto p ON p.id = e.producto_id
+            LEFT JOIN operario o ON o.id = e.operario_ortorgado
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY ensamblaje_id DESC";
+            ORDER BY e.id DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
 }
-
 function obtenerEnsamblaje($id)
 {
     $conectar = conectar_oll_BD();
@@ -452,14 +518,29 @@ function obtenerEnsamblaje($id)
 
     $ensamblaje = executeQuery(
         $conectar,
-        "SELECT * FROM view_ensamblaje_detalle WHERE ensamblaje_id = :id",
+        "SELECT
+             e.id AS ensamblaje_id,
+             e.producto_id,
+             p.codigo AS producto_codigo,
+             p.descripcion AS producto_descripcion,
+             e.operario_ortorgado AS operario_id,
+             o.nombre_completo AS operario_nombre,
+             e.inicio,
+             e.fin,
+             e.cantidad_peso_kg,
+             e.deleted_at,
+             e.js_moldes_utilizados,
+             e.js_derivados_utilizados
+         FROM ensamblaje e
+         LEFT JOIN producto p ON p.id = e.producto_id
+         LEFT JOIN operario o ON o.id = e.operario_ortorgado
+         WHERE e.id = :id",
         ['id' => $id]
     );
     if (empty($ensamblaje)) responder(false, 'Registro de ensamblaje no encontrado.');
 
     responder(true, 'OK', ['ensamblaje' => $ensamblaje[0]]);
 }
-
 function guardarEnsamblaje()
 {
     $conectar = conectar_oll_BD();
@@ -635,7 +716,8 @@ function guardarEnsamblaje()
 
 /**
  * Valida cada línea nueva (que la producción exista, esté finalizada y
- * libre; o que el derivado exista) e inserta en rel_ensamblaje_producto.
+ * libre; o que el material-derivado exista y siga marcado como derivado) e
+ * inserta en rel_ensamblaje_producto.
  * $excluirEnsamblajeId permite, en edición, no chocar contra las propias
  * líneas del ensamblaje que se está editando al chequear unicidad.
  *
@@ -712,11 +794,15 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle, 
                 'snapshot'             => $snapshot,
             ]);
         } else {
-            // tipo === 'derivado'
+            // tipo === 'derivado' -> derivado_id apunta a material.id (material.derivado = TRUE)
             $derivadoId = $linea['derivado_id'];
-            $derivado = executeQuery($conectar, "SELECT id FROM derivado WHERE id = :id AND deleted_at IS NULL", ['id' => $derivadoId]);
+            $derivado = executeQuery(
+                $conectar,
+                "SELECT id FROM material WHERE id = :id AND derivado = TRUE AND deleted_at IS NULL",
+                ['id' => $derivadoId]
+            );
             if (empty($derivado)) {
-                throw new Exception("El derivado #$derivadoId no existe o está inactivo.");
+                throw new Exception("El derivado #$derivadoId no existe, está inactivo, o ya no es un material de tipo derivado.");
             }
 
             executeNonQuery($conectar, "
@@ -737,9 +823,10 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle, 
  * Recalcula js_moldes_utilizados / js_derivados_utilizados como resúmenes
  * de conveniencia a partir del detalle activo real (fuente de verdad =
  * rel_ensamblaje_producto). Se llama después de cualquier cambio en el
- * detalle para que ambos queden siempre sincronizados. Ya resolvía todo
- * directo sobre produccion/molde/categoria_material (sin vista), no
- * cambió nada acá.
+ * detalle para que ambos queden siempre sincronizados.
+ *
+ * CORREGIDO (2026-07-24): el resumen de derivados ahora hace JOIN contra
+ * `material` (ya NO contra una tabla `derivado`).
  */
 function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
@@ -757,7 +844,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
     $derivados = executeQuery($conectar, "
         SELECT rep.derivado_id, dv.nombre AS derivado_nombre
         FROM rel_ensamblaje_producto rep
-        LEFT JOIN derivado dv ON dv.id = rep.derivado_id
+        LEFT JOIN material dv ON dv.id = rep.derivado_id
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.derivado_id IS NOT NULL
     ", ['id' => $ensamblajeId]);
 
@@ -824,6 +911,12 @@ function eliminarEnsamblaje()
 // Restaura el ensamblaje y las líneas que fueron desactivadas junto con él.
 // Si alguna producción ya fue "atrapada" por otro ensamblaje mientras tanto,
 // se aborta para no duplicar el uso.
+//
+// NOTA (2026-07-24): si el ensamblaje era 'derivado' y ya había incrementado
+// stock de material al finalizar, reactivar NO revierte ese movimiento de
+// stock automáticamente (sería doble contabilidad reactivar+revertir sin
+// saber si ese stock ya se consumió en otro lado). Si necesitas revertir el
+// stock también, dímelo y lo agrego explícitamente aquí.
 function reactivarEnsamblaje()
 {
     $conectar = conectar_oll_BD();
@@ -922,34 +1015,71 @@ function iniciarEnsamblaje(int $id)
 }
 
 // Marca el fin real del armado con la hora del servidor.
+//
+// NUEVO (2026-07-24): ahora exige el peso (kg) de salida del armado como
+// parámetro ('peso_kg'), porque:
+//   1) se guarda en ensamblaje.cantidad_peso_kg (antes quedaba sin llenar
+//      hasta el módulo de empaquetado, que aún no existe).
+//   2) si condicion = 'derivado', ese peso es justo el que se usa para
+//      incrementar material.stock_actual del material derivado vinculado
+//      a este producto (material.producto_id = ensamblaje.producto_id).
+// Si condicion = 'derivado' y no existe ese material vinculado, se aborta
+// con un mensaje claro (no se autocrea el material).
 function finalizarEnsamblaje(int $id)
 {
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, deleted_at, inicio, fin FROM ensamblaje WHERE id = :id", ['id' => $id]);
+    $pesoKg = isset($_POST['peso_kg']) && $_POST['peso_kg'] !== '' ? floatval($_POST['peso_kg']) : null;
+
+    $existe = executeQuery(
+        $conectar,
+        "SELECT id, deleted_at, inicio, fin, producto_id FROM ensamblaje WHERE id = :id",
+        ['id' => $id]
+    );
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
-    if (!empty($existe[0]['deleted_at'])) responder(false, 'No puedes finalizar un ensamblaje inactivo.');
-    if (empty($existe[0]['inicio'])) responder(false, 'Primero debes iniciar el ensamblaje.');
-    if (!empty($existe[0]['fin'])) responder(false, 'Este ensamblaje ya fue finalizado.');
+    $ensamblaje = $existe[0];
 
-    $cambios = [[
-        'campo' => 'Fin de ensamblaje', 'valor_antes' => '(en curso)', 'valor_despues' => 'Finalizado ahora',
-    ]];
-    $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
-    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+    if (!empty($ensamblaje['deleted_at'])) responder(false, 'No puedes finalizar un ensamblaje inactivo.');
+    if (empty($ensamblaje['inicio'])) responder(false, 'Primero debes iniciar el ensamblaje.');
+    if (!empty($ensamblaje['fin'])) responder(false, 'Este ensamblaje ya fue finalizado.');
+    if ($pesoKg === null || $pesoKg <= 0) {
+        responder(false, 'Debes indicar el peso (kg) de salida de este armado para poder finalizarlo.');
+    }
 
-    executeNonQuery($conectar, "
-        UPDATE ensamblaje SET
-            fin          = NOW(),
-            update_at    = NOW(),
-            js_usuario   = :js_session,
-            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-        WHERE id = :id
-    ", ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]);
+    $conectar->beginTransaction();
+    try {
+        $cambios = [[
+            'campo' => 'Fin de ensamblaje',
+            'valor_antes' => '(en curso)',
+            'valor_despues' => "Finalizado ahora · {$pesoKg} kg",
+        ]];
+        $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-    responder(true, 'Ensamblaje finalizado.');
+        executeNonQuery($conectar, "
+            UPDATE ensamblaje SET
+                fin              = NOW(),
+                cantidad_peso_kg = :peso_kg,
+                update_at        = NOW(),
+                js_usuario       = :js_session,
+                js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id
+        ", [
+            'id'           => $id,
+            'peso_kg'      => $pesoKg,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial,
+        ]);
+
+        $conectar->commit();
+        responder(true, 'Ensamblaje finalizado.');
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error finalizando ensamblaje: " . $e->getMessage());
+        responder(false, 'No se pudo finalizar el ensamblaje: ' . $e->getMessage());
+    }
 }
 
 // =============================================================================

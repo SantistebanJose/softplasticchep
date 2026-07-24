@@ -90,6 +90,14 @@ include("header.php");
                 el material se trata como <strong>compuesto</strong> (materia prima comprada).
             </div>
           </div>
+          <div class="mb-2">
+                <label class="form-label mb-1">Productos que usan este material</label>
+                <input type="text" id="material_buscar_producto" class="form-control form-control-sm mb-2" placeholder="Buscar producto...">
+                <div id="material_productos_checklist" style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:8px;padding:8px;">
+                    <div class="text-muted small">Cargando productos...</div>
+                </div>
+                <div class="form-text">Marca todos los productos que usarán este material como insumo.</div>
+            </div>
 
           <div class="row">
             <div class="col-6 mb-2">
@@ -139,7 +147,63 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('fmat_tipo').addEventListener('change', () => {
         cargarMateriales();
     });
+    let debounceProdMat = null;
+    document.getElementById('material_buscar_producto').addEventListener('input', (e) => {
+        clearTimeout(debounceProdMat);
+        debounceProdMat = setTimeout(() => renderChecklistProductosMaterial(e.target.value), 250);
+    });
 });
+let productosMaterialCache = null;
+let productosSeleccionadosMaterial = new Set();
+
+function parseJsonColumnaMat(v) {
+    if (!v) return [];
+    if (typeof v === 'string') {
+        try { return JSON.parse(v) || []; } catch (e) { return []; }
+    }
+    return Array.isArray(v) ? v : [];
+}
+
+async function obtenerProductosMaterial() {
+    if (productosMaterialCache) return productosMaterialCache;
+    const json = await llamarMateriales('BUSCARPRODUCTOS', { texto: '' });
+    productosMaterialCache = json.success ? json.productos : [];
+    return productosMaterialCache;
+}
+
+function renderChecklistProductosMaterial(filtro = '') {
+    const cont = document.getElementById('material_productos_checklist');
+    const productos = productosMaterialCache || [];
+    const f = filtro.trim().toLowerCase();
+    const filtrados = f
+        ? productos.filter(p => (p.codigo + ' ' + p.descripcion).toLowerCase().includes(f))
+        : productos;
+
+    if (filtrados.length === 0) {
+        cont.innerHTML = '<div class="text-muted small">No se encontraron productos.</div>';
+        return;
+    }
+    cont.innerHTML = filtrados.map(p => `
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="${p.id}" id="chk_prod_mat_${p.id}"
+                ${productosSeleccionadosMaterial.has(String(p.id)) ? 'checked' : ''}
+                onchange="toggleProductoMaterial(${p.id}, this.checked)">
+            <label class="form-check-label" for="chk_prod_mat_${p.id}">${p.codigo} - ${p.descripcion}</label>
+        </div>
+    `).join('');
+}
+
+function toggleProductoMaterial(id, checked) {
+    if (checked) productosSeleccionadosMaterial.add(String(id));
+    else productosSeleccionadosMaterial.delete(String(id));
+}
+
+async function cargarChecklistProductosMaterial(seleccionados = []) {
+    productosSeleccionadosMaterial = new Set(seleccionados.map(String));
+    await obtenerProductosMaterial();
+    document.getElementById('material_buscar_producto').value = '';
+    renderChecklistProductosMaterial();
+}
 
 // ── Llamadas genéricas ───────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
@@ -234,11 +298,12 @@ async function cargarMateriales() {
 }
 
 // ── Crear / Editar ───────────────────────────────────────────────────────────
-function abrirModalCrearMaterial() {
+async function abrirModalCrearMaterial() {
     document.getElementById('formMaterial').reset();
     document.getElementById('material_id').value = '';
     document.getElementById('material_derivado').checked = false;
     document.getElementById('modalMaterialTitulo').textContent = 'Nuevo material';
+    await cargarChecklistProductosMaterial([]);
     modalMaterial.show();
 }
 
@@ -254,15 +319,16 @@ async function abrirModalEditarMaterial(id) {
     document.getElementById('material_stock_minimo').value = m.stock_minimo ?? 0;
     document.getElementById('material_stock_actual').value = m.stock_actual ?? 0;
     document.getElementById('material_derivado').checked = (m.derivado === true || m.derivado === 't' || m.derivado === 'true');
-
+    const idsSeleccionados = parseJsonColumnaMat(m.js_producto).map(x => x.producto_id);
+    await cargarChecklistProductosMaterial(idsSeleccionados);
     modalMaterial.show();
 }
 
 document.getElementById('formMaterial').addEventListener('submit', async function (e) {
     e.preventDefault();
     const formData = new FormData(this);
-    formData.append('accion', 'GUARDARMATERIAL');
-    // Los checkboxes no marcados no se envían en un FormData; forzamos el valor.
+    formData.append('accion', 'GUARDARMATERIAL'); 
+    formData.append('productos_ids', JSON.stringify(Array.from(productosSeleccionadosMaterial)));
     formData.set('derivado', document.getElementById('material_derivado').checked ? '1' : '0');
 
     const resp = await fetch(CONTROLADOR_MATERIALES, { method: 'POST', body: formData });

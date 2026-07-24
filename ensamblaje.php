@@ -14,8 +14,9 @@ include("header.php");
     siguiendo el mismo patrón de nombres que ya usa listarEnsamblajes() en
     su WHERE:
         ensamblaje_id, producto_id, producto_codigo, producto_descripcion,
-        operario_id, operario_nombre, inicio, fin, cantidad_peso_kg,
-        deleted_at, js_moldes_utilizados, js_derivados_utilizados
+        operario_id, operario_nombre, condicion, inicio, fin,
+        cantidad_peso_kg, deleted_at, js_moldes_utilizados,
+        js_derivados_utilizados
     Si los nombres reales difieren, ajustar solo las funciones
     renderGridEnsamblajes() y el prellenado en abrirModalEditarEnsamblaje().
 
@@ -28,6 +29,22 @@ include("header.php");
     página se abre con ?produccion_id=123, se abre el modal de creación
     y se precarga esa producción como primera línea del ticket, vía
     OBTENERDATOSPRODUCCIONPARAENSAMBLAJE.
+
+    ACTUALIZADO (2026-07-24) para reflejar los cambios del controlador:
+      1) CONDICIÓN POR ARMADO: se agrega un selector "Propio / Derivado" en
+         el modal (ya no es un atributo fijo del producto). Se envía en
+         GUARDARENSAMBLAJE como 'condicion' y se prellena en edición desde
+         ensamblaje.condicion (vía la vista).
+      2) DERIVADOS = MATERIAL: BUSCARDERIVADOS ahora vive sobre `material`
+         (derivado = TRUE) y acepta producto_id para PRIORIZAR (no filtrar)
+         los derivados relevantes al producto que se está armando, usando
+         material.js_producto. Se pasa el producto_id seleccionado en cada
+         llamada a la pestaña "Derivados".
+      3) PESO AL FINALIZAR: FINALIZARENSAMBLAJE ahora exige 'peso_kg' (>0).
+         Ese peso ya no se completa "más adelante en empaquetado": se pide
+         con un prompt al finalizar, porque si condicion = 'derivado' es
+         justo el valor que incrementa el stock del material derivado
+         vinculado a este producto.
 -->
 
 <style>
@@ -59,6 +76,7 @@ include("header.php");
 .pc-ens-card-head .titulo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
 .pc-ens-card-head .id{ font-size:.72em; color:#9a9585; font-weight:600; }
 .pc-ens-card-head .producto-titulo{ font-weight:700; font-size:.95em; }
+.pc-ens-card-head .badges{ display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
 .pc-ens-card-body{ padding:12px 14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; flex:1; }
 .pc-ens-field{ min-width:0; }
 .pc-ens-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
@@ -87,6 +105,22 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-finalizar:hover{ background:#D97706; color:#fff; }
+
+.badge-condicion-propio{ background:#EAF0FE; color:#2F6FED; border:1px solid #cddafc; }
+.badge-condicion-derivado{ background:#F1EAFD; color:#7C3AED; border:1px solid #dccdfa; }
+
+/* ── Selector de condición (propio / derivado) ── */
+.pc-condicion-group{ display:flex; gap:8px; }
+.pc-condicion-opt{ flex:1; }
+.pc-condicion-opt input{ position:absolute; opacity:0; pointer-events:none; }
+.pc-condicion-opt label{
+    display:flex; flex-direction:column; gap:2px; border:1.5px solid #e2ddcd; border-radius:10px;
+    padding:9px 12px; cursor:pointer; transition:.12s ease; margin:0;
+}
+.pc-condicion-opt label .t{ font-weight:700; font-size:.85em; color:#3a3730; }
+.pc-condicion-opt label .d{ font-size:.72em; color:#8a8578; }
+.pc-condicion-opt input:checked + label{ border-color:#2F6FED; background:#EAF0FE; }
+.pc-condicion-opt input:checked + label .t{ color:#2F6FED; }
 
 /* ── Panel de detalle: menú de tabs (producciones/derivados) + ticket ── */
 .pc-mat-layout{
@@ -131,6 +165,7 @@ include("header.php");
 .pc-mat-card .nombre{ font-weight:600; font-size:.85em; line-height:1.2; display:block; min-height:2.2em; }
 .pc-mat-card .meta{ font-size:.72em; color:#8a8578; margin-top:4px; display:block; }
 .pc-mat-card .meta b{ color:#4a4636; }
+.pc-mat-card .meta .prioridad{ color:#16A34A; font-weight:700; }
 .pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.85em; padding:20px 6px; }
 
 .pc-tk-list{ list-style:none; margin:0; padding:0; max-height:340px; overflow-y:auto; }
@@ -266,7 +301,7 @@ include("header.php");
                     </div>
                 </div>
                 <div class="form-text" style="padding:0 14px 10px 14px;">
-                    El peso real de salida de este armado se registrará más adelante, al pasar a empaquetado.
+                    El peso real de salida de este armado se registrará al pulsar <b>Finalizar</b> desde la card del listado.
                 </div>
             </div>
           </div>
@@ -354,6 +389,8 @@ function badgeRegistroEns(deletedAt) {
         ? '<span class="badge bg-success">Activo</span>'
         : '<span class="badge bg-secondary">Inactivo</span>';
 }
+
+
 
 function formatearCantidadEns(n) {
     if (n === null || n === undefined || n === '') return '-';
@@ -465,6 +502,13 @@ async function cargarSelectsModalEns(seleccion = {}) {
         sOp.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}${o.cargo ? ' - ' + o.cargo : ''}</option>`));
     if (seleccion.operario_id) sOp.value = seleccion.operario_id;
 }
+
+
+function obtenerProductoIdSeleccionadoEns() {
+    const valorSelect = document.getElementById('ens_producto_id').value;
+    return valorSelect ? valorSelect.split('_')[0] : '';
+}
+
 // ── Listado en CARDS ──────────────────────────────────────────────────────
 async function cargarEnsamblajes() {
     const params = {
@@ -507,7 +551,9 @@ async function cargarEnsamblajes() {
                     <span class="id">#${e.ensamblaje_id}</span>
                     <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</span>
                 </div>
-                ${badgeRegistroEns(e.deleted_at)}
+                <div class="badges">
+                    ${badgeRegistroEns(e.deleted_at)}
+                </div>
             </div>
             <div class="pc-ens-card-body">
                 <div class="pc-ens-field">
@@ -610,13 +656,23 @@ async function renderGridDetalle() {
             </button>`;
         }).join('');
     } else {
-        // Rama de derivados: sin cambios respecto a la versión anterior.
+        // Derivados = filas de `material` con derivado = TRUE, filtradas por
+        // el producto seleccionado (material.js_producto contiene ese
+        // producto_id). Requiere producto elegido, igual que producciones.
+        if (!productoId) {
+            grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus derivados relacionados.</div>';
+            return;
+        }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARDERIVADOS', { texto });
-        const derivados = json.success ? (json.derivados || []) : [];
+        const json = await llamarEnsamblaje('BUSCARDERIVADOS', { texto, producto_id: productoId });
+        if (!json.success) {
+            grid.innerHTML = `<div class="pc-mat-empty" style="color:#c94a4a;">${json.message}</div>`;
+            return;
+        }
+        const derivados = json.derivados || [];
 
         if (derivados.length === 0) {
-            grid.innerHTML = '<div class="pc-mat-empty">No se encontró ningún derivado con ese nombre.</div>';
+            grid.innerHTML = '<div class="pc-mat-empty">No hay derivados relacionados con este producto.</div>';
             return;
         }
 
@@ -633,6 +689,7 @@ async function renderGridDetalle() {
                 <span class="pellet"><i class="fa-solid fa-flask"></i></span>
                 <span class="nombre">${d.nombre}</span>
                 <span class="meta">Derivado #${d.id}</span>
+                <span class="meta">Stock: <b>${formatearCantidadEns(d.stock_actual)} ${d.unidad_corto ?? ''}</b></span>
             </button>`;
         }).join('');
     }
@@ -719,8 +776,9 @@ function obtenerDetalleJsonEns() {
 function cambioProductoEnsamblaje() {
     // Ya no autoagrega una producción: solo cambia el contexto producto+color
     // para que el panel de "Producciones" muestre las disponibles de esa
-    // combinación, con su color visible, y el usuario elija manualmente.
-    if (tabDetalleActiva === 'produccion') renderGridDetalle();
+    // combinación (con su color visible), y para que la pestaña "Derivados"
+    // reordene sus sugerencias según material.js_producto de este producto.
+    renderGridDetalle();
 }
 
 // ── Crear / Editar ────────────────────────────────────────────────────────
@@ -837,12 +895,9 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         return;
     }
 
-    const valorSelect = document.getElementById('ens_producto_id').value;
-    const productoId = valorSelect ? valorSelect.split('_')[0] : '';
-
     const params = {
         id: ensamblajeIdActual,
-        producto_id: productoId,
+        producto_id: obtenerProductoIdSeleccionadoEns(),
         operario_ortorgado: document.getElementById('ens_operario_id').value,
         detalle: obtenerDetalleJsonEns(),
     };
@@ -911,17 +966,29 @@ function iniciarEnsamblajeAccion(id) {
     });
 }
 
+// El controlador ahora exige 'peso_kg' (>0) para finalizar: se pide con un
+// input numérico en el mismo diálogo de confirmación. Si condicion ===
+// 'derivado', se avisa que ese peso incrementará el stock del material
+// derivado vinculado a este producto.
 function finalizarEnsamblajeAccion(id) {
     Swal.fire({
-        title: '¿Finalizar el armado ahora?',
-        text: 'Se registrará la hora actual del servidor como fin.',
+        title: '¿Finalizar el armado?',
+        html: 'Indica el peso (kg) de salida de este armado.',
         icon: 'question',
+        input: 'number',
+        inputAttributes: { min: 0, step: '0.01' },
+        inputPlaceholder: 'Peso en kg',
         showCancelButton: true,
         confirmButtonText: 'Sí, finalizar',
-        cancelButtonText: 'Cancelar'
+        cancelButtonText: 'Cancelar',
+        inputValidator: (value) => {
+            if (!value || parseFloat(value) <= 0) {
+                return 'Ingresa un peso válido mayor a 0.';
+            }
+        }
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const json = await llamarEnsamblaje('FINALIZARENSAMBLAJE', { id });
+        const json = await llamarEnsamblaje('FINALIZARENSAMBLAJE', { id, peso_kg: result.value });
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
             cargarEnsamblajes();

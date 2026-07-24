@@ -30,6 +30,9 @@ function controladorMaterial($accion)
         case 'LISTARMATERIALES':
             listarMateriales();
             break;
+        case 'BUSCARPRODUCTOS':
+            buscarProductosMaterial();
+            break;
         case 'OBTENERMATERIAL':
             obtenerMaterial(intval($_POST['id'] ?? 0));
             break;
@@ -108,6 +111,25 @@ function obtenerMaterial($id)
     );
     if (empty($result)) responder(false, 'Material no encontrado.');
     responder(true, 'OK', ['material' => $result[0]]);
+}
+
+function buscarProductosMaterial()
+{
+    $conectar = conectar_oll_BD();
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where  = ["activo = true"];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "(LOWER(codigo) LIKE LOWER(:texto) OR LOWER(descripcion) LIKE LOWER(:texto))";
+        $params['texto'] = "%$texto%";
+    }
+
+    $sql = "SELECT id, codigo, descripcion FROM producto
+            WHERE " . implode(' AND ', $where) . " ORDER BY descripcion LIMIT 200";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['productos' => $result]);
 }
 
 /**
@@ -203,6 +225,31 @@ function guardarMaterial()
     $stockMinimo = $_POST['stock_minimo'] !== '' ? floatval($_POST['stock_minimo'] ?? 0) : 0;
     $stockActual = $_POST['stock_actual'] !== '' ? floatval($_POST['stock_actual'] ?? 0) : 0;
     $derivado    = obtenerDerivadoPost();
+    $productosIdsJson = trim($_POST['productos_ids'] ?? '[]');
+    $productosIds = json_decode($productosIdsJson, true);
+    if (!is_array($productosIds)) $productosIds = [];
+    $productosIds = array_values(array_unique(array_map('intval', $productosIds)));
+
+    $jsProducto = [];
+    if (!empty($productosIds)) {
+        $placeholders = [];
+        $paramsProd = [];
+        foreach ($productosIds as $i => $pid) {
+            $key = "pid$i";
+            $placeholders[] = ":$key";
+            $paramsProd[$key] = $pid;
+        }
+        $sqlProd = "SELECT id, codigo, descripcion FROM producto WHERE id IN (" . implode(',', $placeholders) . ")";
+        $filas = executeQuery($conectar, $sqlProd, $paramsProd);
+        foreach ($filas as $f) {
+            $jsProducto[] = [
+                'codigo'      => $f['codigo'],
+                'descripcion' => $f['descripcion'],
+                'producto_id' => (int)$f['id'],
+            ];
+        }
+    }
+    $jsProductoJson = json_encode($jsProducto, JSON_UNESCAPED_UNICODE);
 
     // La unidad de medida es OPCIONAL: si no viene o viene vacía, queda en NULL.
     $unidadMedidaId = !empty($_POST['unidad_medida_id']) ? intval($_POST['unidad_medida_id']) : null;
@@ -259,8 +306,9 @@ function guardarMaterial()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, derivado, created_at, js_session, js_historial)
-            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, :derivado, NOW(), :js_session, :js_historial)
+            
+            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, derivado, js_producto, created_at, js_session, js_historial)
+            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, :derivado, :js_producto, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'           => $nombre,
@@ -270,6 +318,7 @@ function guardarMaterial()
             'derivado'         => $derivado ? 'true' : 'false',
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,
+            'js_producto'      => $jsProductoJson,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Material creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
@@ -287,12 +336,14 @@ function guardarMaterial()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         executeQuery($conectar, "
+            
             UPDATE material SET
                 nombre           = :nombre,
                 unidad_medida_id = :unidad_medida_id,
                 stock_minimo     = :stock_minimo,
                 stock_actual     = :stock_actual,
                 derivado         = :derivado,
+                js_producto      = :js_producto,
                 update_at        = NOW(),
                 js_session       = :js_session,
                 js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -306,6 +357,7 @@ function guardarMaterial()
             'id'               => $id,
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,
+            'js_producto'      => $jsProductoJson,
         ]);
         responder(true, 'Material actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
