@@ -6,47 +6,6 @@ $activePage = 'ensamblaje';
 include("header.php");
 ?>
 
-<!--
-    ensamblaje.php
-
-    SUPUESTO (sin confirmar, igual que en clssEnsamblaje.php): no tengo la
-    definición real de view_ensamblaje_detalle. Asumo estas columnas,
-    siguiendo el mismo patrón de nombres que ya usa listarEnsamblajes() en
-    su WHERE:
-        ensamblaje_id, producto_id, producto_codigo, producto_descripcion,
-        operario_id, operario_nombre, condicion, inicio, fin,
-        cantidad_peso_kg, deleted_at, js_moldes_utilizados,
-        js_derivados_utilizados
-    Si los nombres reales difieren, ajustar solo las funciones
-    renderGridEnsamblajes() y el prellenado en abrirModalEditarEnsamblaje().
-
-    MODELO DE UI: mismo patrón "menú de cards + ticket" que produccion.php,
-    pero simplificado: cada línea del ticket es una producción finalizada
-    (view_producciones_disponibles_ensamblaje) o un derivado, sin cantidad
-    por línea -> el peso total del armado va aparte en cantidad_peso_kg.
-
-    INTEGRACIÓN CON "Pasar a ensamblaje" (botón en produccion.php): si esta
-    página se abre con ?produccion_id=123, se abre el modal de creación
-    y se precarga esa producción como primera línea del ticket, vía
-    OBTENERDATOSPRODUCCIONPARAENSAMBLAJE.
-
-    ACTUALIZADO (2026-07-24) para reflejar los cambios del controlador:
-      1) CONDICIÓN POR ARMADO: se agrega un selector "Propio / Derivado" en
-         el modal (ya no es un atributo fijo del producto). Se envía en
-         GUARDARENSAMBLAJE como 'condicion' y se prellena en edición desde
-         ensamblaje.condicion (vía la vista).
-      2) DERIVADOS = MATERIAL: BUSCARDERIVADOS ahora vive sobre `material`
-         (derivado = TRUE) y acepta producto_id para PRIORIZAR (no filtrar)
-         los derivados relevantes al producto que se está armando, usando
-         material.js_producto. Se pasa el producto_id seleccionado en cada
-         llamada a la pestaña "Derivados".
-      3) PESO AL FINALIZAR: FINALIZARENSAMBLAJE ahora exige 'peso_kg' (>0).
-         Ese peso ya no se completa "más adelante en empaquetado": se pide
-         con un prompt al finalizar, porque si condicion = 'derivado' es
-         justo el valor que incrementa el stock del material derivado
-         vinculado a este producto.
--->
-
 <style>
 :root{
     --resina-1:#2F6FED; --resina-1-bg:#EAF0FE;
@@ -57,7 +16,6 @@ include("header.php");
     --resina-6:#0E9488; --resina-6-bg:#E2F5F3;
 }
 
-/* ── Listado de ensamblajes en cards (mismo patrón que produccion.php) ── */
 .pc-ens-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
     gap:14px; margin-top:4px;
@@ -105,11 +63,26 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-finalizar:hover{ background:#D97706; color:#fff; }
+.pc-btn-complementar{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #7C3AED;
+    background:#F1EAFD; color:#7C3AED; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-complementar:hover{ background:#7C3AED; color:#fff; }
 
 .badge-condicion-propio{ background:#EAF0FE; color:#2F6FED; border:1px solid #cddafc; }
 .badge-condicion-derivado{ background:#F1EAFD; color:#7C3AED; border:1px solid #dccdfa; }
+.badge-complemento{
+    display:inline-flex; align-items:center; gap:5px; background:#F1EAFD; color:#7C3AED;
+    border:1px solid #dccdfa; border-radius:8px; padding:3px 9px; font-size:.85em; font-weight:700;
+}
+.badge-complemento-estado{
+    display:inline-flex; align-items:center; gap:5px; border-radius:8px; padding:2px 8px;
+    font-size:.75em; font-weight:700; margin-top:4px;
+}
+.badge-complemento-estado.disponible{ background:#E8F7EE; color:#16A34A; border:1px solid #bfe8cf; }
+.badge-complemento-estado.usado{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; }
 
-/* ── Selector de condición (propio / derivado) ── */
 .pc-condicion-group{ display:flex; gap:8px; }
 .pc-condicion-opt{ flex:1; }
 .pc-condicion-opt input{ position:absolute; opacity:0; pointer-events:none; }
@@ -122,7 +95,6 @@ include("header.php");
 .pc-condicion-opt input:checked + label{ border-color:#2F6FED; background:#EAF0FE; }
 .pc-condicion-opt input:checked + label .t{ color:#2F6FED; }
 
-/* ── Panel de detalle: menú de tabs (producciones/derivados) + ticket ── */
 .pc-mat-layout{
     display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start;
 }
@@ -261,7 +233,7 @@ include("header.php");
 
           <div class="mb-1 d-flex justify-content-between align-items-center">
             <label class="form-label mb-0">Vinculados a este armado *</label>
-            <span class="form-text mb-0">Al menos una producción finalizada o un derivado.</span>
+            <span class="form-text mb-0">Al menos una producción finalizada, un derivado o un complemento.</span>
           </div>
 
           <div class="pc-mat-layout">
@@ -275,6 +247,9 @@ include("header.php");
                     </div>
                     <div class="pc-tab-detalle" id="tab_derivados" onclick="cambiarTabDetalle('derivado')">
                         <i class="fa-solid fa-flask"></i> Derivados
+                    </div>
+                    <div class="pc-tab-detalle" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
+                        <i class="fa-solid fa-puzzle-piece"></i> Complemento
                     </div>
                 </div>
                 <div class="pc-mat-search">
@@ -296,7 +271,7 @@ include("header.php");
                     <div class="pc-tk-resumen-icon"><i class="fa-solid fa-layer-group"></i></div>
                     <div class="pc-tk-resumen-texto">
                         <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
-                        <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s)</span>
+                        <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
                         <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
                     </div>
                 </div>
@@ -325,9 +300,9 @@ const modalEnsamblaje = new bootstrap.Modal(document.getElementById('modalEnsamb
 let modoEdicionEnsamblaje = false;
 let ensamblajeIdActual = 0;
 let productosEnsCache = null;   // cache de productos para selects/filtro
-let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado'
+let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento'
 let contadorLineaTicketEns = 0;
-let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, nombre, meta, color, bg, icono}]
+let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, ensamblaje_complemento_id, nombre, meta, color, bg, icono}]
 let productosDisponiblesEnsCache = null; // cache para el select del modal (producto+color pendientes)
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -440,7 +415,7 @@ function estiloPorNombre(nombre) {
     return PALETA_RESINA[hash % PALETA_RESINA.length];
 }
 
-// Convierte columnas jsonb (pueden llegar como string o ya decodificadas
+// Convierte columnas jsonb ARRAY (pueden llegar como string o ya decodificadas
 // según el driver) a array de JS de forma segura.
 function parseJsonColumna(v) {
     if (!v) return [];
@@ -448,6 +423,16 @@ function parseJsonColumna(v) {
         try { return JSON.parse(v) || []; } catch (e) { return []; }
     }
     return Array.isArray(v) ? v : [];
+}
+
+// Convierte columnas jsonb OBJETO (ej. js_producto_emsamblado) a objeto JS,
+// o null si no hay nada / no se puede parsear.
+function parseJsonObjetoColumna(v) {
+    if (!v) return null;
+    if (typeof v === 'string') {
+        try { return JSON.parse(v) || null; } catch (e) { return null; }
+    }
+    return (typeof v === 'object' && !Array.isArray(v)) ? v : null;
 }
 
 // ── Selects auxiliares ────────────────────────────────────────────────────
@@ -535,14 +520,14 @@ async function cargarEnsamblajes() {
     }
 
     grid.innerHTML = ensamblajes.map(e => {
-        // producciones_count/derivados_count son columnas asumidas de la
-        // vista (ver comentario superior). Si la vista no las trae, se
-        // calculan igual a partir de los resúmenes reales que sí garantiza
-        // el controlador (js_moldes_utilizados / js_derivados_utilizados).
         const producciones = e.producciones_count ?? parseJsonColumna(e.js_moldes_utilizados).length;
         const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
+        const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
         const puedeIniciar   = !e.deleted_at && !e.inicio;
         const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
+        const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
+        const puedeComplementar  = !e.deleted_at && e.fin && !productoEmsamblado;
+        const complementoUsado = !!e.ensamblaje_id_referido;
 
         return `
         <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
@@ -572,6 +557,22 @@ async function cargarEnsamblajes() {
                     <span class="lbl">Derivados vinculados</span>
                     <span class="val">${derivadosCount}</span>
                 </div>
+                <div class="pc-ens-field">
+                    <span class="lbl">Complementos vinculados</span>
+                    <span class="val">${complementosCount}</span>
+                </div>
+                ${productoEmsamblado ? `
+                <div class="pc-ens-field">
+                    <span class="lbl">Complementa a</span>
+                    <span class="val">
+                        <span class="badge-complemento"><i class="fa-solid fa-puzzle-piece"></i> ${productoEmsamblado.codigo ?? ''} - ${productoEmsamblado.descripcion ?? ''}</span>
+                        <br>
+                        <span class="badge-complemento-estado ${complementoUsado ? 'usado' : 'disponible'}">
+                            <i class="fa-solid ${complementoUsado ? 'fa-lock' : 'fa-circle-check'}"></i>
+                            ${complementoUsado ? `Usado en armado #${e.ensamblaje_id_referido}` : 'Disponible para vincular'}
+                        </span>
+                    </span>
+                </div>` : ''}
                 <div class="pc-ens-field span-2">
                     <span class="lbl">Armado</span>
                     <span class="val">${estadoArmadoTexto(e)}</span>
@@ -591,6 +592,11 @@ async function cargarEnsamblajes() {
                         <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
                     : ''
                 }
+                ${puedeComplementar
+                    ? `<button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
+                        <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>`
+                    : ''
+                }
                 ${!e.deleted_at
                     ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
                            <i class="fa-solid fa-trash"></i></button>`
@@ -603,13 +609,67 @@ async function cargarEnsamblajes() {
 }
 
 // =============================================================================
-// PANEL DE DETALLE: tabs (producciones / derivados) + ticket
+// COMPLEMENTAR: marcar un armado finalizado como complemento de otro producto
+// =============================================================================
+
+// Trae SOLO los productos que aún siguen "vivos" dentro del módulo de
+// ensamblaje (tienen un ensamblaje propio finalizado y todavía libre) --
+// NO el catálogo completo de producto. Se excluye el propio ensamblaje
+// que se está marcando para que no pueda elegirse a sí mismo como objetivo.
+async function obtenerProductosParaComplementar(excluirId) {
+    const json = await llamarEnsamblaje('BUSCARPRODUCTOSPARACOMPLEMENTAR', { excluir_id: excluirId, texto: '' });
+    return json.success ? (json.productos || []) : [];
+}
+
+async function marcarComplementoAccion(id) {
+    const productos = await obtenerProductosParaComplementar(id);
+    if (!productos || productos.length === 0) {
+        Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre).', 'warning');
+        return;
+    }
+    const opciones = productos.map(p => `<option value="${p.producto_id}">${p.codigo} - ${p.producto}</option>`).join('');
+
+    const { value: productoObjetivoId } = await Swal.fire({
+        title: 'Marcar como complemento',
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto final al que este armado ya finalizado va a complementar (ej: PINZA PALANITA complementando a COLGADOR OSITO MULTIUSO).</p>
+               <select id="swal-complemento-producto" class="form-select">
+                   <option value="">Selecciona un producto...</option>
+                   ${opciones}
+               </select>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Marcar',
+        cancelButtonText: 'Cancelar',
+        preConfirm: () => {
+            const val = document.getElementById('swal-complemento-producto').value;
+            if (!val) {
+                Swal.showValidationMessage('Debes elegir un producto.');
+                return false;
+            }
+            return val;
+        }
+    });
+
+    if (!productoObjetivoId) return;
+
+    const json = await llamarEnsamblaje('COMPLEMENTAR', { id, producto_objetivo_id: productoObjetivoId });
+    if (json.success) {
+        Swal.fire('Listo', json.message, 'success');
+        cargarEnsamblajes();
+    } else {
+        Swal.fire('Error', json.message, 'error');
+    }
+}
+
+// =============================================================================
+// PANEL DE DETALLE: tabs (producciones / derivados / complemento) + ticket
 // =============================================================================
 
 function cambiarTabDetalle(tipo) {
     tabDetalleActiva = tipo;
     document.getElementById('tab_producciones').classList.toggle('activa', tipo === 'produccion');
     document.getElementById('tab_derivados').classList.toggle('activa', tipo === 'derivado');
+    document.getElementById('tab_complementos').classList.toggle('activa', tipo === 'complemento');
     document.getElementById('ens_buscar_detalle').value = '';
     renderGridDetalle();
 }
@@ -655,10 +715,7 @@ async function renderGridDetalle() {
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
         }).join('');
-    } else {
-        // Derivados = filas de `material` con derivado = TRUE, filtradas por
-        // el producto seleccionado (material.js_producto contiene ese
-        // producto_id). Requiere producto elegido, igual que producciones.
+    } else if (tabDetalleActiva === 'derivado') {
         if (!productoId) {
             grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus derivados relacionados.</div>';
             return;
@@ -692,32 +749,83 @@ async function renderGridDetalle() {
                 <span class="meta">Stock: <b>${formatearCantidadEns(d.stock_actual)} ${d.unidad_corto ?? ''}</b></span>
             </button>`;
         }).join('');
+    } else {
+        if (!productoId) {
+            grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver complementos disponibles.</div>';
+            return;
+        }
+        grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, texto });
+        const complementos = json.success ? (json.complementos || []) : [];
+
+        if (complementos.length === 0) {
+            grid.innerHTML = '<div class="pc-mat-empty">No hay armados finalizados marcados como complemento de este producto.</div>';
+            return;
+        }
+
+        grid.innerHTML = complementos.map(c => {
+            const est = estiloPorNombre(c.producto_codigo || '');
+            const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'complemento' && l.ensamblaje_complemento_id == c.ensamblaje_id);
+            return `
+            <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
+                    style="--card-color:${est.color};--card-bg:${est.bg};"
+                    onclick='agregarLineaDetalle("complemento", ${JSON.stringify({
+                        ensamblaje_id: c.ensamblaje_id,
+                        producto_codigo: c.producto_codigo,
+                        producto_descripcion: c.producto_descripcion,
+                        cantidad_peso_kg: c.cantidad_peso_kg,
+                        fin: c.fin,
+                    })})'>
+                <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
+                <span class="nombre">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
+                <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> kg</span>
+                <span class="meta">${formatearFechaHoraLegibleEns(c.fin)}</span>
+            </button>`;
+        }).join('');
     }
 }
 
 function agregarLineaDetalle(tipo, datos) {
-    const est = estiloPorNombre(tipo === 'produccion' ? (datos.molde_nombre || '') : datos.nombre);
+    const nombreParaEstilo = tipo === 'produccion' ? (datos.molde_nombre || '')
+        : tipo === 'derivado' ? (datos.nombre || '')
+        : (datos.producto_codigo || '');
+    const est = estiloPorNombre(nombreParaEstilo);
+
     if (tipo === 'produccion') {
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'produccion',
             molde_produccion_id: datos.produccion_id,
             derivado_id: null,
+            ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
             meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
         });
-    } else {
+    } else if (tipo === 'derivado') {
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'derivado',
             molde_produccion_id: null,
             derivado_id: datos.derivado_id,
+            ensamblaje_complemento_id: null,
             nombre: datos.nombre,
             meta: `Derivado #${datos.derivado_id}`,
             icono: 'fa-flask',
+            color: est.color, bg: est.bg,
+        });
+    } else {
+        ticketDetalleEns.push({
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'complemento',
+            molde_produccion_id: null,
+            derivado_id: null,
+            ensamblaje_complemento_id: datos.ensamblaje_id,
+            nombre: `${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''}`,
+            meta: `Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} kg`,
+            icono: 'fa-puzzle-piece',
             color: est.color, bg: est.bg,
         });
     }
@@ -756,8 +864,9 @@ function renderTicketDetalle() {
 
     const nProd = ticketDetalleEns.filter(l => l.tipo === 'produccion').length;
     const nDer  = ticketDetalleEns.filter(l => l.tipo === 'derivado').length;
+    const nComp = ticketDetalleEns.filter(l => l.tipo === 'complemento').length;
     total.textContent = ticketDetalleEns.length;
-    detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s)`;
+    detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s) · ${nComp} complemento(s)`;
 
     const pesoProducido = ticketDetalleEns
         .filter(l => l.tipo === 'produccion')
@@ -770,14 +879,11 @@ function obtenerDetalleJsonEns() {
         tipo: l.tipo,
         molde_produccion_id: l.molde_produccion_id,
         derivado_id: l.derivado_id,
+        ensamblaje_complemento_id: l.ensamblaje_complemento_id ?? null,
     })));
 }
 
 function cambioProductoEnsamblaje() {
-    // Ya no autoagrega una producción: solo cambia el contexto producto+color
-    // para que el panel de "Producciones" muestre las disponibles de esa
-    // combinación (con su color visible), y para que la pestaña "Derivados"
-    // reordene sus sugerencias según material.js_producto de este producto.
     renderGridDetalle();
 }
 
@@ -790,6 +896,7 @@ function limpiarFormularioEnsamblaje() {
     tabDetalleActiva = 'produccion';
     document.getElementById('tab_producciones').classList.add('activa');
     document.getElementById('tab_derivados').classList.remove('activa');
+    document.getElementById('tab_complementos').classList.remove('activa');
     renderTicketDetalle();
 }
 
@@ -802,8 +909,6 @@ async function abrirModalCrearEnsamblaje() {
     modalEnsamblaje.show();
 }
 
-// Entrada desde produccion.php (?produccion_id=X): prellenar producto y
-// dejar esa producción ya agregada en el ticket.
 async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadProducida) {
     const json = await llamarEnsamblaje('OBTENERDATOSPRODUCCIONPARAENSAMBLAJE', { produccion_id: produccionId });
     if (!json.success) {
@@ -843,13 +948,9 @@ async function abrirModalEditarEnsamblaje(id) {
         operario_id: e.operario_id,
     });
 
-    // Prellenar el ticket a partir de los DOS resúmenes reales que arma
-    // recalcularResumenesEnsamblaje() en el controlador (NO existe un
-    // campo unificado "detalle" con "tipo"; hay dos jsonb separados):
-    //   js_moldes_utilizados:    {produccion_id, molde_nombre, cantidad_kg, fecha, categoria_material_nombre}
-    //   js_derivados_utilizados: {derivado_id, derivado_nombre}
     const moldes = parseJsonColumna(e.js_moldes_utilizados);
     const derivados = parseJsonColumna(e.js_derivados_utilizados);
+    const complementos = parseJsonColumna(e.js_complementos_utilizados);
 
     moldes.forEach(item => {
         const est = estiloPorNombre(item.molde_nombre || '');
@@ -858,6 +959,7 @@ async function abrirModalEditarEnsamblaje(id) {
             tipo: 'produccion',
             molde_produccion_id: item.produccion_id,
             derivado_id: null,
+            ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
             meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} kg`
                 + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
@@ -875,12 +977,29 @@ async function abrirModalEditarEnsamblaje(id) {
             tipo: 'derivado',
             molde_produccion_id: null,
             derivado_id: item.derivado_id,
+            ensamblaje_complemento_id: null,
             nombre: item.derivado_nombre ?? ('Derivado #' + item.derivado_id),
             meta: `Derivado #${item.derivado_id}`,
             icono: 'fa-flask',
             color: est.color, bg: est.bg,
         });
     });
+
+    complementos.forEach(item => {
+        const est = estiloPorNombre(item.producto_codigo || '');
+        ticketDetalleEns.push({
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'complemento',
+            molde_produccion_id: null,
+            derivado_id: null,
+            ensamblaje_complemento_id: item.ensamblaje_complemento_id,
+            nombre: `${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''}`,
+            meta: `Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} kg`,
+            icono: 'fa-puzzle-piece',
+            color: est.color, bg: est.bg,
+        });
+    });
+
     renderTicketDetalle();
 
     await renderGridDetalle();
@@ -891,7 +1010,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     e.preventDefault();
 
     if (ticketDetalleEns.length === 0) {
-        Swal.fire('Falta vincular', 'Debes vincular al menos una producción finalizada o un derivado.', 'warning');
+        Swal.fire('Falta vincular', 'Debes vincular al menos una producción finalizada, un derivado o un complemento.', 'warning');
         return;
     }
 
@@ -917,7 +1036,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
 function eliminarEnsamblaje(id) {
     Swal.fire({
         title: '¿Desactivar este ensamblaje?',
-        text: 'Las producciones vinculadas quedarán libres para usarse en otro ensamblaje. Podrás reactivarlo luego.',
+        text: 'Las producciones y complementos vinculados quedarán libres para usarse en otro ensamblaje. Podrás reactivarlo luego.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'Sí, desactivar',
@@ -966,10 +1085,8 @@ function iniciarEnsamblajeAccion(id) {
     });
 }
 
-// El controlador ahora exige 'peso_kg' (>0) para finalizar: se pide con un
-// input numérico en el mismo diálogo de confirmación. Si condicion ===
-// 'derivado', se avisa que ese peso incrementará el stock del material
-// derivado vinculado a este producto.
+// El controlador exige 'peso_kg' (>0) para finalizar: se pide con un
+// input numérico en el mismo diálogo de confirmación.
 function finalizarEnsamblajeAccion(id) {
     Swal.fire({
         title: '¿Finalizar el armado?',
