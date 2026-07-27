@@ -1,46 +1,28 @@
 <?php
 $pageTitle    = 'Empaquetado';
-$pageSubtitle = 'Embolsado y agrupado de productos terminados';
+$pageSubtitle = 'Registro de empaquetado de ensamblajes finalizados';
 $activePage = 'empaquetado';
 
 include("header.php");
 ?>
 
 <!--
-    empaquetado.php
+    empaquetado.php (REESCRITO 2026-07-27 v2 para el modelo plano)
 
     MODELO DE UI:
-    1) Grid de "Ensamblajes pendientes de empaquetar" (ensamblajes finalizados
-       con saldo por embolsar), igual patrón de cards que produccion.php /
-       ensamblaje.php.
-    2) Al tocar "Empaquetar" se abre un WORKSPACE (modal xl) para ESE
-       ensamblaje: tabs por cada nivel configurado del producto (Bolsa,
-       Gruesa, ...). El nivel 1 tiene un formulario simple (cantidad+color).
-       Los niveles > 1 muestran un grid seleccionable de las unidades sueltas
-       del nivel anterior para agruparlas.
-    3) Panel derecho: árbol de TODAS las unidades del ensamblaje (sueltas y
-       ya consumidas), agrupado por nivel, con acciones Eliminar/Desagrupar.
-    4) Modal aparte "Configurar niveles" para dar de alta Bolsa/Gruesa/etc.
-       por producto (producto_empaquetado_nivel), accesible desde el botón
-       superior. Es infrecuente (se configura una vez por producto).
-
-    SUPUESTO (igual que en el controlador): la vista view_ensamblajes_
-    pendientes_empaquetado expone producto_id, producto_codigo,
-    producto_descripcion, cantidad_peso_kg, cantidad_piezas_estimada,
-    cantidad_ya_embolsada_nivel1, cantidad_sugerida_pendiente, fin.
+    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
+       con conteo y suma informativa de lo ya empaquetado.
+    2) Al tocar "Empaquetar" se abre un modal para ESE ensamblaje:
+       - Lista de registros de empaquetado ya hechos (tabla), con
+         Editar/Eliminar/Reactivar según corresponda.
+       - Formulario de alta/edición: unidad de medida, operario, y una
+         lista dinámica de "bultos" (cada uno con su cantidad); el total
+         se calcula solo. Un registro = una operación de empaquetado que
+         puede incluir varios bultos (ver SUPUESTO de js_cantidades en el
+         controlador).
 -->
 
 <style>
-:root{
-    --emp-1:#2F6FED; --emp-1-bg:#EAF0FE;
-    --emp-2:#E23744; --emp-2-bg:#FCEAEC;
-    --emp-3:#16A34A; --emp-3-bg:#E8F7EE;
-    --emp-4:#D97706; --emp-4-bg:#FDF1E0;
-    --emp-5:#7C3AED; --emp-5-bg:#F1EAFD;
-    --emp-6:#0E9488; --emp-6-bg:#E2F5F3;
-}
-
-/* ── Grid de pendientes ── */
 .pc-emp-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
     gap:14px; margin-top:4px;
@@ -63,8 +45,6 @@ include("header.php");
 .pc-emp-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
 .pc-emp-field .val{ font-size:.85em; color:#3a3730; font-weight:600; overflow-wrap:break-word; }
 .pc-emp-field.span-2{ grid-column:1/-1; }
-.pc-emp-field .val.pendiente-alta{ color:#D97706; }
-.pc-emp-field .val.pendiente-cero{ color:#16A34A; }
 .pc-emp-card-foot{
     padding:8px 14px; border-top:1px solid #eee7db; background:#fffefb;
     display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;
@@ -78,106 +58,31 @@ include("header.php");
 }
 .pc-btn-empaquetar:hover{ background:#2F6FED; color:#fff; }
 
-/* ── Workspace: tabs de nivel + panel de acción + árbol ── */
-.pc-emp-layout{
-    display:grid; grid-template-columns:1.2fr 1fr; gap:16px; align-items:start;
-}
-@media (max-width: 960px){ .pc-emp-layout{ grid-template-columns:1fr; } }
+/* ── Tabla de registros dentro del modal ── */
+.pc-emp-tabla-wrap{ max-height:260px; overflow-y:auto; border:1px solid #eee7db; border-radius:10px; margin-bottom:16px; }
+.pc-emp-tabla{ width:100%; font-size:.85em; border-collapse:collapse; }
+.pc-emp-tabla th{ position:sticky; top:0; background:#fdfcfa; text-align:left; padding:8px 10px; border-bottom:1px solid #eee7db; font-size:.78em; color:#8a8578; text-transform:uppercase; }
+.pc-emp-tabla td{ padding:8px 10px; border-bottom:1px dashed #eee2c8; vertical-align:top; }
+.pc-emp-tabla tr:last-child td{ border-bottom:none; }
+.pc-emp-tabla .bultos-detalle{ font-size:.85em; color:#8a8578; }
+.pc-emp-tabla .acciones{ display:flex; gap:6px; white-space:nowrap; }
+.badge-vendido{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; border-radius:8px; padding:2px 8px; font-size:.75em; font-weight:700; }
 
-.pc-emp-panel, .pc-emp-arbol-panel{
-    border:1px solid #e7e4dd; border-radius:14px; background:#fdfcfa; overflow:hidden;
+/* ── Bultos dinámicos ── */
+.pc-bulto-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.pc-bulto-row input{ flex:1; }
+.pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1em; flex:0 0 auto; }
+.pc-bultos-total{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 12px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:10px;
+    font-size:.9em; margin-top:6px;
 }
-.pc-emp-panel-head, .pc-emp-arbol-panel-head{
-    padding:10px 14px; border-bottom:1px solid #eee7db; display:flex;
-    justify-content:space-between; align-items:center; background:#fffefb;
-}
-.pc-emp-panel-head h6, .pc-emp-arbol-panel-head h6{ margin:0; font-weight:700; font-size:.95em; }
-
-.pc-emp-sugerido-bar{
-    padding:10px 14px; background:linear-gradient(0deg,#fffaf0,#fffefb);
-    border-bottom:1px solid #eee7db; font-size:.82em; color:#5c5947;
-}
-.pc-emp-sugerido-bar b{ color:#3a3730; }
-
-.pc-tabs-nivel{ display:flex; gap:6px; padding:10px 12px 0 12px; flex-wrap:wrap; }
-.pc-tab-nivel{
-    flex:1; min-width:90px; text-align:center; padding:7px 10px; font-size:.82em; font-weight:700;
-    border:1px solid #e2ddcd; border-radius:8px; background:#fff; color:#8a8578; cursor:pointer;
-    transition:.12s ease;
-}
-.pc-tab-nivel.activa{ background:#2F6FED; border-color:#2F6FED; color:#fff; }
-
-.pc-emp-panel-body{ padding:12px 14px; }
-
-/* Form nivel 1 */
-.pc-form-nivel1 .row > div{ margin-bottom:10px; }
-
-/* Grid seleccionable niveles > 1 */
-.pc-mat-grid{
-    display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr));
-    gap:10px; max-height:300px; overflow-y:auto; padding-bottom:4px;
-}
-.pc-mat-card{
-    position:relative; border:2px solid #eae6da; border-radius:12px; background:#fff;
-    padding:10px 10px 8px 10px; cursor:pointer; text-align:left;
-    transition:transform .1s ease, box-shadow .1s ease, border-color .1s ease;
-}
-.pc-mat-card:hover{ transform:translateY(-2px); box-shadow:0 6px 14px rgba(0,0,0,.07); }
-.pc-mat-card.seleccionada{ border-color:#2F6FED; background:#EAF0FE; }
-.pc-mat-card .pellet{
-    width:28px; height:28px; border-radius:9px; display:flex; align-items:center; justify-content:center;
-    background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:.9em; margin-bottom:6px;
-}
-.pc-mat-card .nombre{ font-weight:600; font-size:.82em; line-height:1.2; }
-.pc-mat-card .meta{ font-size:.7em; color:#8a8578; margin-top:3px; display:block; }
-.pc-mat-card .check-ok{ position:absolute; top:8px; right:8px; color:#2F6FED; display:none; }
-.pc-mat-card.seleccionada .check-ok{ display:block; }
-.pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.85em; padding:20px 6px; }
-
-.pc-emp-panel-footer{
-    padding:10px 14px; border-top:1px solid #eee7db; background:#fffefb;
-    display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;
-}
-
-/* Árbol de unidades */
-.pc-arbol-nivel{ padding:10px 14px; border-bottom:1px dashed #eee2c8; }
-.pc-arbol-nivel:last-child{ border-bottom:none; }
-.pc-arbol-nivel-titulo{ font-size:.75em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; font-weight:700; margin-bottom:6px; }
-.pc-arbol-item{
-    display:flex; gap:8px; align-items:flex-start; padding:6px 0;
-}
-.pc-arbol-item.consumida{ opacity:.45; }
-.pc-arbol-item .pellet-sm{
-    width:24px; height:24px; border-radius:7px; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
-    background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:.75em; margin-top:2px;
-}
-.pc-arbol-item .cuerpo{ flex:1; min-width:0; }
-.pc-arbol-item .nombre{ font-weight:600; font-size:.82em; }
-.pc-arbol-item .meta{ font-size:.7em; color:#8a8578; margin-top:1px; }
-.pc-arbol-item .acciones{ display:flex; gap:4px; }
-.pc-arbol-item .acciones button{ border:none; background:none; font-size:.78em; }
-.pc-arbol-empty{ text-align:center; color:#9a9585; font-size:.85em; padding:26px 12px; }
-
-/* Modal configurar niveles */
-.pc-nivel-row{
-    display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid #eae6da;
-    border-radius:10px; margin-bottom:8px; background:#fff;
-}
-.pc-nivel-row .num{
-    width:26px; height:26px; border-radius:50%; background:#EAF0FE; color:#2F6FED; font-weight:700;
-    font-size:.78em; display:flex; align-items:center; justify-content:center; flex:0 0 auto;
-}
-.pc-nivel-row .info{ flex:1; min-width:0; }
-.pc-nivel-row .info .nom{ font-weight:600; font-size:.85em; }
-.pc-nivel-row .info .meta{ font-size:.72em; color:#8a8578; }
+.pc-bultos-total b{ color:#2F6FED; font-size:1.05em; }
 </style>
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Empaquetado</h2>
-        <button class="pc-btn pc-btn-secondary" onclick="abrirModalConfigNiveles()">
-            <i class="fa-solid fa-sliders"></i> Configurar niveles por producto
-        </button>
     </div>
 
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
@@ -185,8 +90,8 @@ include("header.php");
         <input type="text" id="femp_texto" class="form-control" style="max-width:260px"
                placeholder="Buscar por producto...">
         <div class="form-check d-flex align-items-center gap-2" style="margin-left:4px;">
-            <input class="form-check-input" type="checkbox" id="femp_solo_saldo" checked>
-            <label class="form-check-label" for="femp_solo_saldo" style="font-size:.85em;">Solo con saldo pendiente</label>
+            <input class="form-check-input" type="checkbox" id="femp_solo_sin">
+            <label class="form-check-label" for="femp_solo_sin" style="font-size:.85em;">Solo sin empaquetar aún</label>
         </div>
     </div>
 
@@ -195,97 +100,70 @@ include("header.php");
     </div>
 </div>
 
-<!-- Workspace de empaquetado (por ensamblaje) -->
-<div class="modal fade" id="modalWorkspaceEmp" tabindex="-1">
-  <div class="modal-dialog modal-xl">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="workspaceEmpTitulo">Empaquetar</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-
-        <div class="pc-emp-layout">
-            <div class="pc-emp-panel">
-                <div class="pc-emp-panel-head">
-                    <h6><i class="fa-solid fa-box-open"></i> Registrar</h6>
-                </div>
-                <div class="pc-emp-sugerido-bar" id="workspaceSugeridoBar">Cargando sugerido...</div>
-                <div class="pc-tabs-nivel" id="workspaceTabsNiveles"></div>
-                <div class="pc-emp-panel-body" id="workspacePanelBody">
-                    <div class="pc-mat-empty">Cargando niveles del producto...</div>
-                </div>
-                <div class="pc-emp-panel-footer" id="workspacePanelFooter" style="display:none;"></div>
-            </div>
-
-            <div class="pc-emp-arbol-panel">
-                <div class="pc-emp-arbol-panel-head">
-                    <h6><i class="fa-solid fa-diagram-project"></i> Unidades de este armado</h6>
-                    <button type="button" class="pc-icon-btn" onclick="refrescarWorkspace()" title="Actualizar">
-                        <i class="fa-solid fa-rotate"></i>
-                    </button>
-                </div>
-                <div id="workspaceArbol">
-                    <div class="pc-arbol-empty">Aún no hay unidades registradas.</div>
-                </div>
-            </div>
-        </div>
-
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Modal configurar niveles por producto -->
-<div class="modal fade" id="modalConfigNiveles" tabindex="-1">
+<!-- Modal por ensamblaje: lista de registros + alta/edición -->
+<div class="modal fade" id="modalEmpaquetado" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Configurar niveles de empaquetado</h5>
+        <h5 class="modal-title" id="modalEmpaquetadoTitulo">Empaquetar</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
 
-        <label class="form-label">Producto</label>
-        <select class="form-select mb-3" id="cfg_producto_id" onchange="cargarNivelesConfig()">
-            <option value="">Selecciona un producto...</option>
-        </select>
-
-        <div id="cfg_niveles_lista">
-            <div class="pc-mat-empty">Selecciona un producto para ver sus niveles.</div>
+        <h6 class="mb-2"><i class="fa-solid fa-list"></i> Registros de empaquetado</h6>
+        <div class="pc-emp-tabla-wrap">
+            <table class="pc-emp-tabla">
+                <thead>
+                    <tr>
+                        <th>Bultos</th>
+                        <th>Total</th>
+                        <th>Operario</th>
+                        <th>Fecha</th>
+                        <th>Estado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="tablaRegistrosEmp">
+                    <tr><td colspan="6" class="text-center text-muted">Cargando...</td></tr>
+                </tbody>
+            </table>
         </div>
 
         <hr>
 
-        <h6 class="mb-2">Agregar / editar nivel</h6>
-        <form id="formNivelConfig">
-            <input type="hidden" id="cfg_nivel_id" value="0">
+        <h6 class="mb-2" id="formEmpTitulo"><i class="fa-solid fa-plus"></i> Nuevo registro de empaquetado</h6>
+        <form id="formEmpaquetado">
+            <input type="hidden" id="emp_id" value="0">
+            <input type="hidden" id="emp_ensamblaje_id" value="0">
             <div class="row">
-                <div class="col-md-3 mb-2">
-                    <label class="form-label">Nivel (orden) *</label>
-                    <input type="number" min="1" class="form-control" id="cfg_nivel_numero" required>
+                <div class="col-md-6 mb-2">
+                    <label class="form-label">Unidad de medida *</label>
+                    <select class="form-select" id="emp_unidad_medida" required></select>
                 </div>
-                <div class="col-md-5 mb-2">
-                    <label class="form-label">Nombre *</label>
-                    <input type="text" class="form-control" id="cfg_nivel_nombre" placeholder="Bolsa, Gruesa..." required>
-                </div>
-                <div class="col-md-4 mb-2">
-                    <label class="form-label">Cantidad por unidad *</label>
-                    <input type="number" min="0.0001" step="0.0001" class="form-control" id="cfg_nivel_cantidad" required>
+                <div class="col-md-6 mb-2">
+                    <label class="form-label">Operario *</label>
+                    <select class="form-select" id="emp_operario_id" required></select>
                 </div>
             </div>
-            <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="cfg_nivel_variado" checked>
-                <label class="form-check-label" for="cfg_nivel_variado">
-                    Admite variado (mezcla de colores) en este nivel
-                </label>
+
+            <label class="form-label">Bultos *</label>
+            <div id="listaBultos"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarFilaBulto()">
+                <i class="fa-solid fa-plus"></i> Agregar bulto
+            </button>
+
+            <div class="pc-bultos-total">
+                <span><span id="bultosCount">0</span> bulto(s)</span>
+                <span>Total: <b id="bultosTotal">0</b></span>
             </div>
-            <div class="d-flex gap-2">
-                <button type="submit" class="btn btn-primary btn-sm">Guardar nivel</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="limpiarFormNivelConfig()">Cancelar edición</button>
+
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelarEdicionEmp" style="display:none;" onclick="cancelarEdicionEmp()">
+                    Cancelar edición
+                </button>
             </div>
         </form>
 
@@ -298,20 +176,14 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
-const modalWorkspaceEmp = new bootstrap.Modal(document.getElementById('modalWorkspaceEmp'));
-const modalConfigNiveles = new bootstrap.Modal(document.getElementById('modalConfigNiveles'));
+const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
 
-// ── Estado del workspace ──────────────────────────────────────────────────
-let wkEnsamblajeId = 0;
-let wkProductoId = 0;
-let wkNiveles = [];              // niveles configurados del producto, ordenados
-let wkTabActiva = null;          // nivel_config_id activo
-let wkUnidadesArbol = [];        // todas las unidades del ensamblaje (LISTARUNIDADESENSAMBLAJE)
-let wkPendienteInfo = null;      // fila de view_ensamblajes_pendientes_empaquetado
-let wkSeleccionHijas = new Set();
-let wkColoresCache = null;
-let wkOperariosCache = null;
-let productosConfigCache = null;
+let empEnsamblajeIdActual = 0;
+let empIdEnEdicion = 0;
+let empUnidadesCache = null;
+let empOperariosCache = null;
+let bultosState = []; // [{tempId, valor}]
+let contadorBulto = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
@@ -321,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarPendientesEmpaquetado, 350);
     });
-    document.getElementById('femp_solo_saldo').addEventListener('change', cargarPendientesEmpaquetado);
+    document.getElementById('femp_solo_sin').addEventListener('change', cargarPendientesEmpaquetado);
 });
 
 // ── Llamada genérica al controlador ─────────────────────────────────────────
@@ -354,31 +226,25 @@ function formatearFechaHoraLegibleEmp(fechaIso) {
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
 }
 
-const PALETA_EMP = [
-    { color: '#2F6FED', bg: '#EAF0FE' },
-    { color: '#E23744', bg: '#FCEAEC' },
-    { color: '#16A34A', bg: '#E8F7EE' },
-    { color: '#D97706', bg: '#FDF1E0' },
-    { color: '#7C3AED', bg: '#F1EAFD' },
-    { color: '#0E9488', bg: '#E2F5F3' },
-];
-function estiloPorNombreEmp(nombre) {
-    let hash = 0;
-    const str = nombre || '';
-    for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-    return PALETA_EMP[hash % PALETA_EMP.length];
+// Columnas jsonb pueden llegar como string o ya decodificadas según el driver.
+function parseJsonColumnaEmp(v) {
+    if (!v) return [];
+    if (typeof v === 'string') {
+        try { return JSON.parse(v) || []; } catch (e) { return []; }
+    }
+    return Array.isArray(v) ? v : [];
 }
 
 // =============================================================================
-// GRID DE PENDIENTES
+// GRID DE ENSAMBLAJES FINALIZADOS
 // =============================================================================
 
 async function cargarPendientesEmpaquetado() {
     const params = {
         texto: document.getElementById('femp_texto').value.trim(),
-        solo_con_saldo: document.getElementById('femp_solo_saldo').checked ? '1' : '0',
+        solo_sin_empaquetar: document.getElementById('femp_solo_sin').checked ? '1' : '0',
     };
-    const json = await llamarEmpaquetado('LISTARENSAMBLAJESPENDIENTESEMPAQUETADO', params);
+    const json = await llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', params);
     const grid = document.getElementById('gridEmpaquetado');
 
     if (!json.success) {
@@ -388,15 +254,11 @@ async function cargarPendientesEmpaquetado() {
 
     const filas = json.ensamblajes || [];
     if (filas.length === 0) {
-        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes pendientes de empaquetar.</div>';
+        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados todavía.</div>';
         return;
     }
 
-    grid.innerHTML = filas.map(e => {
-        const pendiente = e.cantidad_sugerida_pendiente;
-        const pendienteTxt = pendiente === null ? 'Sin peso unitario configurado' : `${formatearCantidadEmp(pendiente)} piezas`;
-        const claseAlerta = pendiente === null ? '' : (Number(pendiente) > 0 ? 'pendiente-alta' : 'pendiente-cero');
-        return `
+    grid.innerHTML = filas.map(e => `
         <div class="pc-emp-card">
             <div class="pc-emp-card-head">
                 <div class="titulo">
@@ -410,16 +272,12 @@ async function cargarPendientesEmpaquetado() {
                     <span class="val">${formatearCantidadEmp(e.cantidad_peso_kg)} kg</span>
                 </div>
                 <div class="pc-emp-field">
-                    <span class="lbl">Piezas estimadas</span>
-                    <span class="val">${formatearCantidadEmp(e.cantidad_piezas_estimada)}</span>
+                    <span class="lbl">Registros de empaquetado</span>
+                    <span class="val">${e.empaquetados_count ?? 0}</span>
                 </div>
-                <div class="pc-emp-field">
-                    <span class="lbl">Ya embolsado</span>
-                    <span class="val">${formatearCantidadEmp(e.cantidad_ya_embolsada_nivel1)}</span>
-                </div>
-                <div class="pc-emp-field">
-                    <span class="lbl">Pendiente sugerido</span>
-                    <span class="val ${claseAlerta}">${pendienteTxt}</span>
+                <div class="pc-emp-field span-2">
+                    <span class="lbl">Total ya empaquetado</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_total_empaquetada)}</span>
                 </div>
                 <div class="pc-emp-field span-2">
                     <span class="lbl">Finalizado</span>
@@ -428,489 +286,217 @@ async function cargarPendientesEmpaquetado() {
             </div>
             <div class="pc-emp-card-foot">
                 <button type="button" class="pc-btn-empaquetar"
-                        onclick="abrirWorkspace(${e.ensamblaje_id}, ${e.producto_id}, '${(e.producto_codigo ?? '').replace(/'/g, "\\'")} - ${(e.producto_descripcion ?? '').replace(/'/g, "\\'")}')">
+                        onclick="abrirModalEmpaquetado(${e.ensamblaje_id}, '${(e.producto_codigo ?? '').replace(/'/g, "\\'")} - ${(e.producto_descripcion ?? '').replace(/'/g, "\\'")}')">
                     <i class="fa-solid fa-box"></i> Empaquetar
                 </button>
             </div>
-        </div>`;
-    }).join('');
+        </div>
+    `).join('');
 }
 
 // =============================================================================
-// WORKSPACE DE EMPAQUETADO
+// SELECTS AUXILIARES
 // =============================================================================
 
-async function obtenerColoresEmp() {
-    if (wkColoresCache) return wkColoresCache;
-    const json = await llamarEmpaquetado('BUSCARCOLORES', { texto: '' });
-    wkColoresCache = json.success ? json.colores : [];
-    return wkColoresCache;
+async function obtenerUnidadesEmp() {
+    if (empUnidadesCache) return empUnidadesCache;
+    const json = await llamarEmpaquetado('BUSCARUNIDADESMEDIDA', { texto: '' });
+    empUnidadesCache = json.success ? json.unidades : [];
+    return empUnidadesCache;
 }
 async function obtenerOperariosEmp() {
-    if (wkOperariosCache) return wkOperariosCache;
+    if (empOperariosCache) return empOperariosCache;
     const json = await llamarEmpaquetado('BUSCAROPERARIOS');
-    wkOperariosCache = json.success ? json.operario : [];
-    return wkOperariosCache;
+    empOperariosCache = json.success ? json.operario : [];
+    return empOperariosCache;
 }
 
-async function abrirWorkspace(ensamblajeId, productoId, productoLabel) {
-    wkEnsamblajeId = ensamblajeId;
-    wkProductoId = productoId;
-    wkSeleccionHijas = new Set();
+async function cargarSelectsFormEmp() {
+    const [unidades, operarios] = await Promise.all([obtenerUnidadesEmp(), obtenerOperariosEmp()]);
 
-    document.getElementById('workspaceEmpTitulo').textContent = `Empaquetar #${ensamblajeId} — ${productoLabel}`;
-    document.getElementById('workspaceTabsNiveles').innerHTML = '';
-    document.getElementById('workspacePanelBody').innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</div>';
-    document.getElementById('workspacePanelFooter').style.display = 'none';
-    document.getElementById('workspaceArbol').innerHTML = '<div class="pc-arbol-empty">Cargando...</div>';
-    document.getElementById('workspaceSugeridoBar').textContent = 'Cargando sugerido...';
+    const sUnidad = document.getElementById('emp_unidad_medida');
+    sUnidad.innerHTML = '<option value="">Selecciona...</option>' +
+        unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
 
-    modalWorkspaceEmp.show();
-
-    const [nivelesJson] = await Promise.all([
-        llamarEmpaquetado('OBTENERNIVELESPRODUCTO', { producto_id: productoId }),
-    ]);
-
-    wkNiveles = nivelesJson.success ? (nivelesJson.niveles || []) : [];
-
-    if (wkNiveles.length === 0) {
-        document.getElementById('workspacePanelBody').innerHTML =
-            `<div class="pc-mat-empty">Este producto no tiene niveles de empaquetado configurados.
-             <br><br><button type="button" class="btn btn-sm btn-outline-primary" onclick="modalWorkspaceEmp.hide(); abrirModalConfigNiveles(${productoId});">
-             Configurar ahora</button></div>`;
-        return;
-    }
-
-    renderTabsNiveles();
-    wkTabActiva = wkNiveles[0].id;
-    await Promise.all([cambiarTabNivel(wkTabActiva), refrescarSugerido(), cargarArbolUnidades()]);
-}
-
-function renderTabsNiveles() {
-    const cont = document.getElementById('workspaceTabsNiveles');
-    cont.innerHTML = wkNiveles.map(n => `
-        <div class="pc-tab-nivel ${n.id == wkTabActiva ? 'activa' : ''}" id="tab_nivel_${n.id}"
-             onclick="cambiarTabNivel(${n.id})">
-            ${n.nombre_nivel}
-        </div>
-    `).join('');
-}
-
-async function refrescarSugerido() {
-    const json = await llamarEmpaquetado('LISTARENSAMBLAJESPENDIENTESEMPAQUETADO', { texto: '', solo_con_saldo: '0' });
-    const bar = document.getElementById('workspaceSugeridoBar');
-    if (!json.success) { bar.textContent = ''; return; }
-    const fila = (json.ensamblajes || []).find(e => e.ensamblaje_id == wkEnsamblajeId);
-    wkPendienteInfo = fila || null;
-    if (!fila) { bar.textContent = ''; return; }
-    if (fila.cantidad_sugerida_pendiente === null) {
-        bar.innerHTML = `Peso ensamblado: <b>${formatearCantidadEmp(fila.cantidad_peso_kg)} kg</b> — este producto no tiene peso unitario configurado, no hay sugerido automático.`;
-    } else {
-        bar.innerHTML = `Peso ensamblado: <b>${formatearCantidadEmp(fila.cantidad_peso_kg)} kg</b> ·
-            Piezas estimadas: <b>${formatearCantidadEmp(fila.cantidad_piezas_estimada)}</b> ·
-            Ya embolsado: <b>${formatearCantidadEmp(fila.cantidad_ya_embolsada_nivel1)}</b> ·
-            Pendiente sugerido: <b>${formatearCantidadEmp(fila.cantidad_sugerida_pendiente)}</b>`;
-    }
-}
-
-async function cambiarTabNivel(nivelConfigId) {
-    wkTabActiva = nivelConfigId;
-    wkSeleccionHijas = new Set();
-    document.querySelectorAll('.pc-tab-nivel').forEach(el => el.classList.remove('activa'));
-    const tabEl = document.getElementById('tab_nivel_' + nivelConfigId);
-    if (tabEl) tabEl.classList.add('activa');
-
-    const nivel = wkNiveles.find(n => n.id == nivelConfigId);
-    if (!nivel) return;
-
-    if (Number(nivel.nivel) === 1) {
-        await renderPanelNivel1(nivel);
-    } else {
-        await renderPanelNivelSuperior(nivel);
-    }
-}
-
-// ── Nivel 1: formulario directo (cantidad sugerida editable + color) ──────
-async function renderPanelNivel1(nivel) {
-    const body = document.getElementById('workspacePanelBody');
-    const footer = document.getElementById('workspacePanelFooter');
-    footer.style.display = 'none';
-
-    const [colores, operarios] = await Promise.all([obtenerColoresEmp(), obtenerOperariosEmp()]);
-    const sugerido = wkPendienteInfo && wkPendienteInfo.cantidad_sugerida_pendiente !== null
-        ? wkPendienteInfo.cantidad_sugerida_pendiente
-        : (nivel.cantidad_por_unidad ?? '');
-
-    body.innerHTML = `
-        <div class="pc-form-nivel1">
-            <div class="row">
-                <div class="col-md-6">
-                    <label class="form-label">Cantidad de piezas *</label>
-                    <input type="number" min="0.0001" step="0.0001" class="form-control" id="n1_cantidad" value="${sugerido}">
-                    <div class="form-text">Sugerido según lo pendiente por embolsar. Puedes corregirlo.</div>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Color ${nivel.permite_variado ? '(opcional = variado)' : '*'}</label>
-                    <select class="form-select" id="n1_color">
-                        <option value="">${nivel.permite_variado ? 'Variado / mezclado' : 'Selecciona un color...'}</option>
-                        ${colores.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
-                    </select>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-6">
-                    <label class="form-label">Operario</label>
-                    <select class="form-select" id="n1_operario">
-                        <option value="">Selecciona...</option>
-                        ${operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('')}
-                    </select>
-                </div>
-            </div>
-        </div>
-    `;
-
-    footer.style.display = 'flex';
-    footer.innerHTML = `
-        <span class="form-text mb-0">Se registra como "${nivel.nombre_nivel}" suelta, disponible para agrupar en el siguiente nivel.</span>
-        <button type="button" class="btn btn-primary btn-sm" onclick="registrarUnidadNivel1(${nivel.id})">
-            <i class="fa-solid fa-plus"></i> Registrar ${nivel.nombre_nivel}
-        </button>
-    `;
-}
-
-async function registrarUnidadNivel1(nivelConfigId) {
-    const cantidad = document.getElementById('n1_cantidad').value;
-    const colorId = document.getElementById('n1_color').value;
-    const operarioId = document.getElementById('n1_operario').value;
-
-    const json = await llamarEmpaquetado('CREARUNIDADEMPAQUETADO', {
-        ensamblaje_id: wkEnsamblajeId,
-        nivel_config_id: nivelConfigId,
-        cantidad_contenida: cantidad,
-        color_id: colorId,
-        operario_id: operarioId,
-    });
-
-    if (json.success) {
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
-        await Promise.all([refrescarSugerido(), cargarArbolUnidades()]);
-        const nivel = wkNiveles.find(n => n.id == nivelConfigId);
-        await renderPanelNivel1(nivel);
-        cargarPendientesEmpaquetado();
-    } else {
-        Swal.fire('Error', json.message, 'error');
-    }
-}
-
-// ── Nivel > 1: grid seleccionable del nivel anterior + agrupar ────────────
-async function renderPanelNivelSuperior(nivel) {
-    const body = document.getElementById('workspacePanelBody');
-    const footer = document.getElementById('workspacePanelFooter');
-
-    const nivelAnterior = wkNiveles.find(n => Number(n.nivel) === Number(nivel.nivel) - 1);
-    if (!nivelAnterior) {
-        body.innerHTML = `<div class="pc-mat-empty">No existe el nivel anterior configurado para este producto.</div>`;
-        footer.style.display = 'none';
-        return;
-    }
-
-    body.innerHTML = `
-        <div class="form-text mb-2">Selecciona las unidades de "${nivelAnterior.nombre_nivel}" que quieres agrupar en "${nivel.nombre_nivel}" (sugerido: ${formatearCantidadEmp(nivel.cantidad_por_unidad)}). Deben ser todas del mismo color.</div>
-        <div class="pc-mat-grid" id="grid_nivel_superior"><div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</div></div>
-    `;
-    footer.style.display = 'flex';
-    footer.innerHTML = `
-        <span id="txt_seleccion_hijas">0 seleccionada(s)</span>
-        <button type="button" class="btn btn-primary btn-sm" id="btn_agrupar" disabled onclick="agruparSeleccion(${nivel.id})">
-            <i class="fa-solid fa-layer-group"></i> Agrupar en ${nivel.nombre_nivel}
-        </button>
-    `;
-
-    const json = await llamarEmpaquetado('BUSCARUNIDADESDISPONIBLES', {
-        ensamblaje_id: wkEnsamblajeId,
-        nivel_config_id: nivelAnterior.id,
-    });
-    const disponibles = json.success ? (json.unidades || []) : [];
-    const grid = document.getElementById('grid_nivel_superior');
-
-    if (disponibles.length === 0) {
-        grid.innerHTML = `<div class="pc-mat-empty">No hay unidades de "${nivelAnterior.nombre_nivel}" disponibles todavía.</div>`;
-        return;
-    }
-
-    grid.innerHTML = disponibles.map(u => {
-        const est = estiloPorNombreEmp(u.color_nombre || 'variado');
-        const seleccionada = wkSeleccionHijas.has(u.unidad_id);
-        return `
-        <button type="button" class="pc-mat-card ${seleccionada ? 'seleccionada' : ''}" id="card_unidad_${u.unidad_id}"
-                style="--card-color:${est.color};--card-bg:${est.bg};"
-                onclick="toggleSeleccionHija(${u.unidad_id})">
-            <i class="fa-solid fa-check check-ok"></i>
-            <span class="pellet"><i class="fa-solid fa-box"></i></span>
-            <span class="nombre">#${u.unidad_id} · ${formatearCantidadEmp(u.cantidad_contenida)} pzs</span>
-            <span class="meta">Color: <b>${u.color_nombre || 'Variado'}</b></span>
-            <span class="meta">${formatearFechaHoraLegibleEmp(u.created_at)}</span>
-        </button>`;
-    }).join('');
-}
-
-function toggleSeleccionHija(unidadId) {
-    if (wkSeleccionHijas.has(unidadId)) {
-        wkSeleccionHijas.delete(unidadId);
-    } else {
-        wkSeleccionHijas.add(unidadId);
-    }
-    const card = document.getElementById('card_unidad_' + unidadId);
-    if (card) card.classList.toggle('seleccionada', wkSeleccionHijas.has(unidadId));
-
-    const txt = document.getElementById('txt_seleccion_hijas');
-    const btn = document.getElementById('btn_agrupar');
-    if (txt) txt.textContent = `${wkSeleccionHijas.size} seleccionada(s)`;
-    if (btn) btn.disabled = wkSeleccionHijas.size === 0;
-}
-
-async function agruparSeleccion(nivelConfigId) {
-    if (wkSeleccionHijas.size === 0) return;
-    const operarios = await obtenerOperariosEmp();
-
-    const { value: operarioId, isConfirmed } = await Swal.fire({
-        title: 'Operario (opcional)',
-        input: 'select',
-        inputOptions: Object.fromEntries([['', 'Sin especificar'], ...operarios.map(o => [o.id, o.nombre_completo])]),
-        showCancelButton: true,
-        confirmButtonText: 'Agrupar',
-        cancelButtonText: 'Cancelar',
-    });
-    if (!isConfirmed) return;
-
-    const json = await llamarEmpaquetado('CREARUNIDADEMPAQUETADO', {
-        ensamblaje_id: wkEnsamblajeId,
-        nivel_config_id: nivelConfigId,
-        hijas: JSON.stringify(Array.from(wkSeleccionHijas)),
-        operario_id: operarioId || '',
-    });
-
-    if (json.success) {
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
-        wkSeleccionHijas = new Set();
-        const nivel = wkNiveles.find(n => n.id == nivelConfigId);
-        await Promise.all([renderPanelNivelSuperior(nivel), cargarArbolUnidades(), refrescarSugerido()]);
-    } else {
-        Swal.fire('Error', json.message, 'error');
-    }
-}
-
-// ── Árbol de unidades del ensamblaje ───────────────────────────────────────
-async function cargarArbolUnidades() {
-    const json = await llamarEmpaquetado('LISTARUNIDADESENSAMBLAJE', { ensamblaje_id: wkEnsamblajeId });
-    wkUnidadesArbol = json.success ? (json.unidades || []) : [];
-    renderArbolUnidades();
-}
-
-function renderArbolUnidades() {
-    const cont = document.getElementById('workspaceArbol');
-    if (wkUnidadesArbol.length === 0) {
-        cont.innerHTML = '<div class="pc-arbol-empty">Aún no hay unidades registradas.</div>';
-        return;
-    }
-
-    const porNivel = {};
-    wkUnidadesArbol.forEach(u => {
-        const k = u.nivel;
-        if (!porNivel[k]) porNivel[k] = { nombre: u.nombre_nivel, items: [] };
-        porNivel[k].items.push(u);
-    });
-
-    const nivelesOrdenados = Object.keys(porNivel).sort((a, b) => a - b);
-
-    cont.innerHTML = nivelesOrdenados.map(nivelNum => {
-        const grupo = porNivel[nivelNum];
-        const items = grupo.items.map(u => {
-            const est = estiloPorNombreEmp(u.color_nombre || 'variado');
-            const consumida = !!u.unidad_padre_id;
-            const iconoAccion = consumida
-                ? ''
-                : `<div class="acciones">
-                       <button type="button" class="text-danger" title="Eliminar" onclick="eliminarUnidadAccion(${u.id})"><i class="fa-solid fa-trash"></i></button>
-                       ${wkUnidadesArbol.some(h => h.unidad_padre_id == u.id) ? `<button type="button" class="text-warning" title="Desagrupar" onclick="desagruparUnidadAccion(${u.id})"><i class="fa-solid fa-rotate-left"></i></button>` : ''}
-                   </div>`;
-            return `
-            <div class="pc-arbol-item ${consumida ? 'consumida' : ''}">
-                <span class="pellet-sm" style="--card-color:${est.color};--card-bg:${est.bg};"><i class="fa-solid fa-box"></i></span>
-                <div class="cuerpo">
-                    <span class="nombre">#${u.id} · ${formatearCantidadEmp(u.cantidad_contenida)} ${nivelNum == 1 ? 'pzs' : 'unid.'}</span>
-                    <div class="meta">Color: ${u.color_nombre || 'Variado'} ${u.operario_nombre ? '· ' + u.operario_nombre : ''} · ${formatearFechaHoraLegibleEmp(u.created_at)} ${consumida ? '· (agrupada)' : ''}</div>
-                </div>
-                ${iconoAccion}
-            </div>`;
-        }).join('');
-
-        return `
-        <div class="pc-arbol-nivel">
-            <div class="pc-arbol-nivel-titulo">${grupo.nombre} (nivel ${nivelNum})</div>
-            ${items}
-        </div>`;
-    }).join('');
-}
-
-function eliminarUnidadAccion(id) {
-    Swal.fire({
-        title: '¿Eliminar esta unidad?',
-        text: 'Esta acción no se puede deshacer desde aquí.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-        if (!result.isConfirmed) return;
-        const json = await llamarEmpaquetado('ELIMINARUNIDAD', { id });
-        if (json.success) {
-            await Promise.all([cargarArbolUnidades(), refrescarSugerido()]);
-            const nivel = wkNiveles.find(n => n.id == wkTabActiva);
-            if (nivel) (Number(nivel.nivel) === 1 ? renderPanelNivel1(nivel) : renderPanelNivelSuperior(nivel));
-            cargarPendientesEmpaquetado();
-        } else {
-            Swal.fire('Error', json.message, 'error');
-        }
-    });
-}
-
-function desagruparUnidadAccion(id) {
-    Swal.fire({
-        title: '¿Desagrupar esta unidad?',
-        text: 'Las unidades que agrupa quedarán disponibles de nuevo.',
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, desagrupar',
-        cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-        if (!result.isConfirmed) return;
-        const json = await llamarEmpaquetado('DESAGRUPARUNIDAD', { id });
-        if (json.success) {
-            await Promise.all([cargarArbolUnidades(), refrescarSugerido()]);
-            const nivel = wkNiveles.find(n => n.id == wkTabActiva);
-            if (nivel) (Number(nivel.nivel) === 1 ? renderPanelNivel1(nivel) : renderPanelNivelSuperior(nivel));
-        } else {
-            Swal.fire('Error', json.message, 'error');
-        }
-    });
-}
-
-function refrescarWorkspace() {
-    Promise.all([refrescarSugerido(), cargarArbolUnidades()]);
-    const nivel = wkNiveles.find(n => n.id == wkTabActiva);
-    if (nivel) (Number(nivel.nivel) === 1 ? renderPanelNivel1(nivel) : renderPanelNivelSuperior(nivel));
+    const sOp = document.getElementById('emp_operario_id');
+    sOp.innerHTML = '<option value="">Selecciona...</option>' +
+        operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('');
 }
 
 // =============================================================================
-// CONFIGURAR NIVELES POR PRODUCTO
+// MODAL: lista de registros + formulario
 // =============================================================================
 
-async function obtenerProductosConfig() {
-    if (productosConfigCache) return productosConfigCache;
-    const json = await llamarEmpaquetado('BUSCARPRODUCTOS', { texto: '' });
-    productosConfigCache = json.success ? json.productos : [];
-    return productosConfigCache;
+async function abrirModalEmpaquetado(ensamblajeId, productoLabel) {
+    empEnsamblajeIdActual = ensamblajeId;
+    document.getElementById('modalEmpaquetadoTitulo').textContent = `Empaquetar #${ensamblajeId} — ${productoLabel}`;
+    document.getElementById('emp_ensamblaje_id').value = ensamblajeId;
+
+    cancelarEdicionEmp(); // resetea el formulario a modo "nuevo"
+    await cargarSelectsFormEmp();
+    await cargarRegistrosEmp();
+
+    modalEmpaquetado.show();
 }
 
-async function abrirModalConfigNiveles(productoIdPreseleccionado = null) {
-    const sel = document.getElementById('cfg_producto_id');
-    const productos = await obtenerProductosConfig();
-    sel.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.id}">${p.codigo} - ${p.descripcion}</option>`).join('');
+async function cargarRegistrosEmp() {
+    const tbody = document.getElementById('tablaRegistrosEmp');
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
-    limpiarFormNivelConfig();
-    document.getElementById('cfg_niveles_lista').innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus niveles.</div>';
-
-    if (productoIdPreseleccionado) {
-        sel.value = productoIdPreseleccionado;
-        await cargarNivelesConfig();
-    }
-
-    modalConfigNiveles.show();
-}
-
-async function cargarNivelesConfig() {
-    const productoId = document.getElementById('cfg_producto_id').value;
-    const cont = document.getElementById('cfg_niveles_lista');
-    if (!productoId) {
-        cont.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus niveles.</div>';
-        return;
-    }
-    cont.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</div>';
-
-    const json = await llamarEmpaquetado('OBTENERNIVELESPRODUCTO', { producto_id: productoId });
-    const niveles = json.success ? (json.niveles || []) : [];
-
-    if (niveles.length === 0) {
-        cont.innerHTML = '<div class="pc-mat-empty">Este producto aún no tiene niveles configurados. Agrega el primero abajo.</div>';
+    const json = await llamarEmpaquetado('LISTAREMPAQUETADOS', { ensamblaje_id: empEnsamblajeIdActual });
+    if (!json.success) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${json.message}</td></tr>`;
         return;
     }
 
-    cont.innerHTML = niveles.map(n => `
-        <div class="pc-nivel-row">
-            <div class="num">${n.nivel}</div>
-            <div class="info">
-                <div class="nom">${n.nombre_nivel}</div>
-                <div class="meta">x${formatearCantidadEmp(n.cantidad_por_unidad)} ${n.permite_variado === true || n.permite_variado === 't' ? '· admite variado' : '· color obligatorio'}</div>
+    const registros = json.empaquetados || [];
+    if (registros.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay registros de empaquetado para este ensamblaje.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = registros.map(r => {
+    const bultos = parseJsonColumnaEmp(r.js_cantidades);
+    const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
+    const vendido = !!r.pasado_venta;
+    const equivalenteTexto = (r.unidad_base_id && r.cantidad_tota_en_base != null)
+        ? ` <span class="text-muted" style="font-size:.85em;">(= ${formatearCantidadEmp(r.cantidad_tota_en_base)} ${r.unidad_base_corto ?? ''})</span>`
+        : '';
+    return `
+    <tr>
+        <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
+        <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${equivalenteTexto}</td>
+        <td>${r.operario_nombre ?? '-'}</td>
+        <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
+        <td>${vendido
+            ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
+            : '<span class="badge bg-success">Disponible</span>'}</td>
+        <td>
+            <div class="acciones">
+                ${!vendido ? `
+                    <button type="button" class="pc-icon-btn" title="Editar" onclick="editarRegistroEmp(${r.id})"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" class="pc-icon-btn" title="Eliminar" onclick="eliminarRegistroEmp(${r.id})"><i class="fa-solid fa-trash"></i></button>
+                ` : ''}
             </div>
-            <button type="button" class="pc-icon-btn" title="Editar" onclick='editarNivelConfig(${JSON.stringify(n)})'><i class="fa-solid fa-pen"></i></button>
-            <button type="button" class="pc-icon-btn" title="Eliminar" onclick="eliminarNivelConfigAccion(${n.id})"><i class="fa-solid fa-trash"></i></button>
+        </td>
+    </tr>`;
+}).join('');
+
+// ── Bultos dinámicos ───────────────────────────────────────────────────────
+function renderBultos() {
+    const cont = document.getElementById('listaBultos');
+    cont.innerHTML = bultosState.map(b => `
+        <div class="pc-bulto-row" id="bulto_${b.tempId}">
+            <input type="number" min="0.0001" step="0.0001" class="form-control form-control-sm"
+                   value="${b.valor}" oninput="actualizarBulto(${b.tempId}, this.value)" placeholder="Cantidad">
+            <button type="button" class="pc-bulto-remove" onclick="quitarFilaBulto(${b.tempId})" title="Quitar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
     `).join('');
+    actualizarResumenBultos();
 }
 
-function limpiarFormNivelConfig() {
-    document.getElementById('formNivelConfig').reset();
-    document.getElementById('cfg_nivel_id').value = '0';
-    document.getElementById('cfg_nivel_variado').checked = true;
+function agregarFilaBulto(valorInicial = '') {
+    bultosState.push({ tempId: ++contadorBulto, valor: valorInicial });
+    renderBultos();
 }
 
-function editarNivelConfig(n) {
-    document.getElementById('cfg_nivel_id').value = n.id;
-    document.getElementById('cfg_nivel_numero').value = n.nivel;
-    document.getElementById('cfg_nivel_nombre').value = n.nombre_nivel;
-    document.getElementById('cfg_nivel_cantidad').value = n.cantidad_por_unidad;
-    document.getElementById('cfg_nivel_variado').checked = (n.permite_variado === true || n.permite_variado === 't');
+function quitarFilaBulto(tempId) {
+    bultosState = bultosState.filter(b => b.tempId !== tempId);
+    renderBultos();
 }
 
-document.getElementById('formNivelConfig').addEventListener('submit', async function (e) {
+function actualizarBulto(tempId, valor) {
+    const b = bultosState.find(x => x.tempId === tempId);
+    if (b) b.valor = valor;
+    actualizarResumenBultos();
+}
+
+function actualizarResumenBultos() {
+    const total = bultosState.reduce((s, b) => s + (parseFloat(b.valor) || 0), 0);
+    document.getElementById('bultosCount').textContent = bultosState.length;
+    document.getElementById('bultosTotal').textContent = formatearCantidadEmp(total);
+}
+
+function obtenerBultosJsonEmp() {
+    return JSON.stringify(bultosState.map(b => parseFloat(b.valor) || 0).filter(v => v > 0));
+}
+
+// ── Alta / edición ─────────────────────────────────────────────────────────
+function cancelarEdicionEmp() {
+    document.getElementById('formEmpaquetado').reset();
+    document.getElementById('emp_id').value = '0';
+    document.getElementById('formEmpTitulo').innerHTML = '<i class="fa-solid fa-plus"></i> Nuevo registro de empaquetado';
+    document.getElementById('btnCancelarEdicionEmp').style.display = 'none';
+    empIdEnEdicion = 0;
+    bultosState = [];
+    agregarFilaBulto();
+}
+
+async function editarRegistroEmp(id) {
+    const json = await llamarEmpaquetado('OBTENEREMPAQUETADO', { id });
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+
+    const r = json.empaquetado;
+    empIdEnEdicion = id;
+    document.getElementById('emp_id').value = id;
+    document.getElementById('emp_unidad_medida').value = r.unidad_medida;
+    document.getElementById('emp_operario_id').value = r.operario_id;
+    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id}`;
+    document.getElementById('btnCancelarEdicionEmp').style.display = 'inline-block';
+
+    const bultos = parseJsonColumnaEmp(r.js_cantidades);
+    bultosState = bultos.map(b => ({ tempId: ++contadorBulto, valor: b.cantidad }));
+    if (bultosState.length === 0) agregarFilaBulto();
+    renderBultos();
+
+    document.getElementById('formEmpaquetado').scrollIntoView({ behavior: 'smooth' });
+}
+
+document.getElementById('formEmpaquetado').addEventListener('submit', async function (e) {
     e.preventDefault();
-    const productoId = document.getElementById('cfg_producto_id').value;
-    if (!productoId) { Swal.fire('Falta producto', 'Selecciona un producto primero.', 'warning'); return; }
+
+    const bultosJson = obtenerBultosJsonEmp();
+    if (JSON.parse(bultosJson).length === 0) {
+        Swal.fire('Falta información', 'Agrega al menos un bulto con cantidad mayor a 0.', 'warning');
+        return;
+    }
 
     const params = {
-        id: document.getElementById('cfg_nivel_id').value,
-        producto_id: productoId,
-        nivel: document.getElementById('cfg_nivel_numero').value,
-        nombre_nivel: document.getElementById('cfg_nivel_nombre').value,
-        cantidad_por_unidad: document.getElementById('cfg_nivel_cantidad').value,
-        permite_variado: document.getElementById('cfg_nivel_variado').checked ? 'true' : 'false',
+        id: empIdEnEdicion,
+        ensamblaje_id: empEnsamblajeIdActual,
+        unidad_medida: document.getElementById('emp_unidad_medida').value,
+        operario_id: document.getElementById('emp_operario_id').value,
+        bultos: bultosJson,
     };
 
-    const json = await llamarEmpaquetado('GUARDARNIVELPRODUCTO', params);
+    const accion = empIdEnEdicion > 0 ? 'EDITAREMPAQUETADO' : 'CREAREMPAQUETADO';
+    const json = await llamarEmpaquetado(accion, params);
+
     if (json.success) {
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
-        limpiarFormNivelConfig();
-        cargarNivelesConfig();
+        cancelarEdicionEmp();
+        await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado()]);
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
 
-function eliminarNivelConfigAccion(id) {
+function eliminarRegistroEmp(id) {
     Swal.fire({
-        title: '¿Eliminar este nivel?',
+        title: '¿Eliminar este registro de empaquetado?',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'Sí, eliminar',
         cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const json = await llamarEmpaquetado('ELIMINARNIVELPRODUCTO', { id });
+        const json = await llamarEmpaquetado('ELIMINAREMPAQUETADO', { id });
         if (json.success) {
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
-            cargarNivelesConfig();
+            if (empIdEnEdicion === id) cancelarEdicionEmp();
+            await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado()]);
         } else {
             Swal.fire('Error', json.message, 'error');
         }

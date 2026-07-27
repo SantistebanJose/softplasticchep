@@ -129,7 +129,7 @@ window.addEventListener('load', function () {
             <a href="ensamblaje.php" class="pc-quick-btn q-navy">
                 <i class="fa-solid fa-puzzle-piece"></i> Ensamblaje
             </a>
-            <a href="ordenes_produccion.php" class="pc-quick-btn q-warning">
+            <a href="empaquetado.php" class="pc-quick-btn q-warning">
                 <i class="fa-solid fa-box-open"></i> Empaquetado
             </a>
             <a href="operarios.php" class="pc-quick-btn q-success">
