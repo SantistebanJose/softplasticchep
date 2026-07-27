@@ -380,7 +380,7 @@ async function cargarRegistrosEmp() {
             </div>
         </td>
     </tr>`;
-}).join('');
+}).join(''); }
 
 // ── Bultos dinámicos ───────────────────────────────────────────────────────
 function renderBultos() {
