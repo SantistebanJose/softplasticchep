@@ -7,19 +7,24 @@ include("header.php");
 ?>
 
 <!--
-    empaquetado.php (REESCRITO 2026-07-27 v2 para el modelo plano)
+    empaquetado.php (REESCRITO 2026-07-27 v3)
 
     MODELO DE UI:
     1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
-       con conteo y suma informativa de lo ya empaquetado.
-    2) Al tocar "Empaquetar" se abre un modal para ESE ensamblaje:
+       con conteo y suma normalizada (a unidad base) de lo ya empaquetado.
+       Excluye ensamblajes ya absorbidos como complemento de otro armado.
+       El botón cambia de "Empaquetar" a "Ver empaquetado" (outline) en
+       cuanto el ensamblaje ya tiene al menos 1 registro.
+    2) Al tocar el botón se abre un modal para ESE ensamblaje:
        - Lista de registros de empaquetado ya hechos (tabla), con
          Editar/Eliminar/Reactivar según corresponda.
        - Formulario de alta/edición: unidad de medida, operario, y una
-         lista dinámica de "bultos" (cada uno con su cantidad); el total
-         se calcula solo. Un registro = una operación de empaquetado que
-         puede incluir varios bultos (ver SUPUESTO de js_cantidades en el
-         controlador).
+         lista dinámica de "bultos". Al guardar con éxito, el modal se
+         CIERRA solo (antes se quedaba abierto sin feedback visual claro).
+    3) Tabla de "Registros de empaquetado" debajo del grid, con TODOS los
+       registros de todos los ensamblajes (historial general), con sus
+       propios filtros de estado (disponible/vendido) y rango de fechas,
+       además de reusar el buscador de producto de arriba.
 -->
 
 <style>
@@ -57,8 +62,12 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-empaquetar:hover{ background:#2F6FED; color:#fff; }
+.pc-btn-empaquetar--hecho{
+    background:#fff; color:#2F6FED; border:1px solid #2F6FED;
+}
+.pc-btn-empaquetar--hecho:hover{ background:#2F6FED; color:#fff; }
 
-/* ── Tabla de registros dentro del modal ── */
+/* ── Tabla de registros (dentro del modal y en el listado general) ── */
 .pc-emp-tabla-wrap{ max-height:260px; overflow-y:auto; border:1px solid #eee7db; border-radius:10px; margin-bottom:16px; }
 .pc-emp-tabla{ width:100%; font-size:.85em; border-collapse:collapse; }
 .pc-emp-tabla th{ position:sticky; top:0; background:#fdfcfa; text-align:left; padding:8px 10px; border-bottom:1px solid #eee7db; font-size:.78em; color:#8a8578; text-transform:uppercase; }
@@ -67,6 +76,8 @@ include("header.php");
 .pc-emp-tabla .bultos-detalle{ font-size:.85em; color:#8a8578; }
 .pc-emp-tabla .acciones{ display:flex; gap:6px; white-space:nowrap; }
 .badge-vendido{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; border-radius:8px; padding:2px 8px; font-size:.75em; font-weight:700; }
+.pc-icon-btn{ border:1px solid #eee2c8; background:#fff; border-radius:8px; padding:5px 8px; color:#6b6656; }
+.pc-icon-btn:hover{ background:#fdfcfa; }
 
 /* ── Bultos dinámicos ── */
 .pc-bulto-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
@@ -78,6 +89,10 @@ include("header.php");
     font-size:.9em; margin-top:6px;
 }
 .pc-bultos-total b{ color:#2F6FED; font-size:1.05em; }
+
+/* ── Listado general ── */
+.pc-listado-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+.pc-listado-filtros select, .pc-listado-filtros input[type="date"]{ max-width:180px; }
 </style>
 
 <div class="pc-card">
@@ -97,6 +112,45 @@ include("header.php");
 
     <div class="pc-emp-grid" id="gridEmpaquetado">
         <div class="pc-emp-empty">Cargando...</div>
+    </div>
+</div>
+
+<div class="pc-card mt-3">
+    <div class="pc-card-header">
+        <h2>Registros de empaquetado</h2>
+    </div>
+
+    <div class="pc-listado-filtros">
+        <select class="form-select form-select-sm" id="flist_estado" style="max-width:160px">
+            <option value="">Todos los estados</option>
+            <option value="disponible">Disponible</option>
+            <option value="vendido">Vendido</option>
+        </select>
+        <input type="date" class="form-control form-control-sm" id="flist_fecha_desde" title="Desde">
+        <input type="date" class="form-control form-control-sm" id="flist_fecha_hasta" title="Hasta">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="limpiarFiltrosListado()">
+            <i class="fa-solid fa-eraser"></i> Limpiar filtros
+        </button>
+    </div>
+
+    <div class="pc-emp-tabla-wrap" style="max-height:420px;">
+        <table class="pc-emp-tabla">
+            <thead>
+                <tr>
+                    <th>Ensamblaje</th>
+                    <th>Producto</th>
+                    <th>Bultos</th>
+                    <th>Total</th>
+                    <th>Operario</th>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tablaListadoGeneralEmp">
+                <tr><td colspan="8" class="text-center text-muted">Cargando...</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -187,14 +241,29 @@ let contadorBulto = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
+    cargarListadoGeneralEmp();
 
     let debounceTimer = null;
     document.getElementById('femp_texto').addEventListener('input', () => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(cargarPendientesEmpaquetado, 350);
+        debounceTimer = setTimeout(() => {
+            cargarPendientesEmpaquetado();
+            cargarListadoGeneralEmp();
+        }, 350);
     });
     document.getElementById('femp_solo_sin').addEventListener('change', cargarPendientesEmpaquetado);
+
+    ['flist_estado', 'flist_fecha_desde', 'flist_fecha_hasta'].forEach(id => {
+        document.getElementById(id).addEventListener('change', cargarListadoGeneralEmp);
+    });
 });
+
+function limpiarFiltrosListado() {
+    document.getElementById('flist_estado').value = '';
+    document.getElementById('flist_fecha_desde').value = '';
+    document.getElementById('flist_fecha_hasta').value = '';
+    cargarListadoGeneralEmp();
+}
 
 // ── Llamada genérica al controlador ─────────────────────────────────────────
 async function llamarEmpaquetado(accion, params = {}) {
@@ -235,6 +304,14 @@ function parseJsonColumnaEmp(v) {
     return Array.isArray(v) ? v : [];
 }
 
+// Texto "(= 96 UND)" cuando la unidad tiene conversión a base; vacío si no.
+function textoEquivalenteEmp(r) {
+    if (r.unidad_base_id && r.cantidad_tota_en_base != null) {
+        return ` <span class="text-muted" style="font-size:.85em;">(= ${formatearCantidadEmp(r.cantidad_tota_en_base)} ${r.unidad_base_corto ?? ''})</span>`;
+    }
+    return '';
+}
+
 // =============================================================================
 // GRID DE ENSAMBLAJES FINALIZADOS
 // =============================================================================
@@ -258,7 +335,13 @@ async function cargarPendientesEmpaquetado() {
         return;
     }
 
-    grid.innerHTML = filas.map(e => `
+    grid.innerHTML = filas.map(e => {
+        const yaEmpaquetado = (e.empaquetados_count ?? 0) > 0;
+        const btnClase  = yaEmpaquetado ? 'pc-btn-empaquetar pc-btn-empaquetar--hecho' : 'pc-btn-empaquetar';
+        const btnIcono  = yaEmpaquetado ? 'fa-solid fa-eye' : 'fa-solid fa-box';
+        const btnTexto  = yaEmpaquetado ? 'Ver empaquetado' : 'Empaquetar';
+        const productoLabel = `${(e.producto_codigo ?? '')} - ${(e.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
+        return `
         <div class="pc-emp-card">
             <div class="pc-emp-card-head">
                 <div class="titulo">
@@ -285,13 +368,66 @@ async function cargarPendientesEmpaquetado() {
                 </div>
             </div>
             <div class="pc-emp-card-foot">
-                <button type="button" class="pc-btn-empaquetar"
-                        onclick="abrirModalEmpaquetado(${e.ensamblaje_id}, '${(e.producto_codigo ?? '').replace(/'/g, "\\'")} - ${(e.producto_descripcion ?? '').replace(/'/g, "\\'")}')">
-                    <i class="fa-solid fa-box"></i> Empaquetar
+                <button type="button" class="${btnClase}"
+                        onclick="abrirModalEmpaquetado(${e.ensamblaje_id}, '${productoLabel}')">
+                    <i class="${btnIcono}"></i> ${btnTexto}
                 </button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
+}
+
+// =============================================================================
+// LISTADO GENERAL (debajo del grid)
+// =============================================================================
+
+async function cargarListadoGeneralEmp() {
+    const tbody = document.getElementById('tablaListadoGeneralEmp');
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
+
+    const params = {
+        texto: document.getElementById('femp_texto').value.trim(),
+        estado: document.getElementById('flist_estado').value,
+        fecha_desde: document.getElementById('flist_fecha_desde').value,
+        fecha_hasta: document.getElementById('flist_fecha_hasta').value,
+    };
+    const json = await llamarEmpaquetado('LISTARTODOSEMPAQUETADOS', params);
+    if (!json.success) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">${json.message}</td></tr>`;
+        return;
+    }
+
+    const registros = json.empaquetados || [];
+    if (registros.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No hay registros de empaquetado con estos filtros.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = registros.map(r => {
+        const bultos = parseJsonColumnaEmp(r.js_cantidades);
+        const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
+        const vendido = !!r.pasado_venta;
+        const productoLabel = `${(r.producto_codigo ?? '')} - ${(r.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
+        return `
+        <tr>
+            <td>#${r.emsamblaje_id}</td>
+            <td>${r.producto_codigo ?? ''} - ${r.producto_descripcion ?? '-'}</td>
+            <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
+            <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
+            <td>${r.operario_nombre ?? '-'}</td>
+            <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
+            <td>${vendido
+                ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
+                : '<span class="badge bg-success">Disponible</span>'}</td>
+            <td>
+                <button type="button" class="pc-icon-btn" title="Abrir ensamblaje"
+                        onclick="abrirModalEmpaquetado(${r.emsamblaje_id}, '${productoLabel}')">
+                    <i class="fa-solid fa-box-open"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
 }
 
 // =============================================================================
@@ -301,12 +437,14 @@ async function cargarPendientesEmpaquetado() {
 async function obtenerUnidadesEmp() {
     if (empUnidadesCache) return empUnidadesCache;
     const json = await llamarEmpaquetado('BUSCARUNIDADESMEDIDA', { texto: '' });
+    if (!json.success) console.error('Error BUSCARUNIDADESMEDIDA:', json.message);
     empUnidadesCache = json.success ? json.unidades : [];
     return empUnidadesCache;
 }
 async function obtenerOperariosEmp() {
     if (empOperariosCache) return empOperariosCache;
     const json = await llamarEmpaquetado('BUSCAROPERARIOS');
+    if (!json.success) console.error('Error BUSCAROPERARIOS:', json.message);
     empOperariosCache = json.success ? json.operario : [];
     return empOperariosCache;
 }
@@ -315,12 +453,21 @@ async function cargarSelectsFormEmp() {
     const [unidades, operarios] = await Promise.all([obtenerUnidadesEmp(), obtenerOperariosEmp()]);
 
     const sUnidad = document.getElementById('emp_unidad_medida');
-    sUnidad.innerHTML = '<option value="">Selecciona...</option>' +
-        unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+    if (unidades.length === 0) {
+        sUnidad.innerHTML = '<option value="">(sin unidades disponibles - revisar consola)</option>';
+        console.error('BUSCARUNIDADESMEDIDA no devolvió unidades. Revisa la respuesta del servidor.');
+    } else {
+        sUnidad.innerHTML = '<option value="">Selecciona...</option>' +
+            unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+    }
 
     const sOp = document.getElementById('emp_operario_id');
-    sOp.innerHTML = '<option value="">Selecciona...</option>' +
-        operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('');
+    if (operarios.length === 0) {
+        sOp.innerHTML = '<option value="">(sin operarios disponibles - revisar consola)</option>';
+    } else {
+        sOp.innerHTML = '<option value="">Selecciona...</option>' +
+            operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('');
+    }
 }
 
 // =============================================================================
@@ -356,31 +503,29 @@ async function cargarRegistrosEmp() {
     }
 
     tbody.innerHTML = registros.map(r => {
-    const bultos = parseJsonColumnaEmp(r.js_cantidades);
-    const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
-    const vendido = !!r.pasado_venta;
-    const equivalenteTexto = (r.unidad_base_id && r.cantidad_tota_en_base != null)
-        ? ` <span class="text-muted" style="font-size:.85em;">(= ${formatearCantidadEmp(r.cantidad_tota_en_base)} ${r.unidad_base_corto ?? ''})</span>`
-        : '';
-    return `
-    <tr>
-        <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
-        <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${equivalenteTexto}</td>
-        <td>${r.operario_nombre ?? '-'}</td>
-        <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
-        <td>${vendido
-            ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
-            : '<span class="badge bg-success">Disponible</span>'}</td>
-        <td>
-            <div class="acciones">
-                ${!vendido ? `
-                    <button type="button" class="pc-icon-btn" title="Editar" onclick="editarRegistroEmp(${r.id})"><i class="fa-solid fa-pen"></i></button>
-                    <button type="button" class="pc-icon-btn" title="Eliminar" onclick="eliminarRegistroEmp(${r.id})"><i class="fa-solid fa-trash"></i></button>
-                ` : ''}
-            </div>
-        </td>
-    </tr>`;
-}).join(''); }
+        const bultos = parseJsonColumnaEmp(r.js_cantidades);
+        const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
+        const vendido = !!r.pasado_venta;
+        return `
+        <tr>
+            <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
+            <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
+            <td>${r.operario_nombre ?? '-'}</td>
+            <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
+            <td>${vendido
+                ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
+                : '<span class="badge bg-success">Disponible</span>'}</td>
+            <td>
+                <div class="acciones">
+                    ${!vendido ? `
+                        <button type="button" class="pc-icon-btn" title="Editar" onclick="editarRegistroEmp(${r.id})"><i class="fa-solid fa-pen"></i></button>
+                        <button type="button" class="pc-icon-btn" title="Eliminar" onclick="eliminarRegistroEmp(${r.id})"><i class="fa-solid fa-trash"></i></button>
+                    ` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
 
 // ── Bultos dinámicos ───────────────────────────────────────────────────────
 function renderBultos() {
@@ -477,7 +622,8 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
     if (json.success) {
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
         cancelarEdicionEmp();
-        await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado()]);
+        await Promise.all([cargarPendientesEmpaquetado(), cargarListadoGeneralEmp()]);
+        modalEmpaquetado.hide();
     } else {
         Swal.fire('Error', json.message, 'error');
     }
@@ -496,7 +642,7 @@ function eliminarRegistroEmp(id) {
         if (json.success) {
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
             if (empIdEnEdicion === id) cancelarEdicionEmp();
-            await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado()]);
+            await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado(), cargarListadoGeneralEmp()]);
         } else {
             Swal.fire('Error', json.message, 'error');
         }

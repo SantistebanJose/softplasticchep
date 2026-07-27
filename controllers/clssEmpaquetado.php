@@ -4,25 +4,32 @@
  * controllers/clssEmpaquetado.php
  * Controlador del módulo de Empaquetado
  *
- * ACTUALIZADO (2026-07-27 v2): se adapta a la tabla `empaquetado` definitiva
- * creada por el usuario, que reemplaza la columna `cantidad` (numeric) por:
+ * ACTUALIZADO (2026-07-27 v3): sesión de correcciones y mejoras:
  *
- *   cantidad_tota numeric  -- total, según la unidad de medida seleccionada
- *   js_cantidades jsonb    -- detalle de los "bultos" individuales de ESTA
- *                              operación de empaquetado
+ *   1) BUG: unidad_medida NO tiene columna `activo` (se confirmó con
+ *      information_schema.columns), tiene `deleted_at` como el resto del
+ *      sistema. Se corrigió en buscarUnidadesMedida(), crearEmpaquetado()
+ *      y editarEmpaquetado(), que hacían `WHERE activo = true` y tronaban
+ *      con SQLSTATE[42703] (columna inexistente).
  *
- * SUPUESTO (sin confirmar): js_cantidades es un arreglo de objetos, uno por
- * cada bulto registrado en la misma operación, con la forma:
- *     [{"cantidad": 25}, {"cantidad": 25}, {"cantidad": 18.5}]
- * cantidad_tota = suma de todos los "cantidad" del arreglo. Esto permite
- * registrar, por ejemplo, 3 sacos de una sola vez (misma unidad de medida,
- * mismo operario) sin crear 3 filas separadas, conservando el detalle de
- * cuánto pesó cada saco. Si la idea era otra estructura, avísame y ajusto
- * tanto este controlador como el parseo en el frontend.
+ *   2) BUG: listarEnsamblajesParaEmpaquetado() no filtraba ensamblajes que
+ *      ya fueron ABSORBIDOS como complemento de otro ensamblaje (columna
+ *      ensamblaje.ensamblaje_id_referido con valor). Un ensamblaje así ya
+ *      no es una unidad independiente empaquetable por separado: su peso
+ *      ahora vive dentro del ensamblaje padre. Se agregó el filtro
+ *      "e.ensamblaje_id_referido IS NULL".
  *
- * Se elimina la acción BUSCARPRODUCTOS: producto_id siempre se deriva del
- * ensamblaje, nunca se elige aparte en ningún formulario, así que no hace
- * falta un buscador de productos en este módulo.
+ *   3) MEJORA: unidad_medida tiene unidad_base_id + equivalencia (patrón
+ *      de conversión, ej. 1 GRUESA = 24 UNIDAD). Se agregó el cálculo
+ *      normalizado (cantidad_tota * equivalencia) tanto en el detalle de
+ *      un ensamblaje (listarEmpaquetados) como en el total agregado del
+ *      grid principal (listarEnsamblajesParaEmpaquetado), para que sumar
+ *      registros en distintas unidades no mezcle peras con manzanas.
+ *
+ *   4) NUEVO: acción LISTARTODOSEMPAQUETADOS, listado general (no filtrado
+ *      por un solo ensamblaje) para la tabla que vive debajo del grid en
+ *      empaquetado.php. Soporta filtros de texto, estado (disponible /
+ *      vendido) y rango de fechas.
  *
  * Tabla real:
  *   empaquetado (id, producto_id -> producto, emsamblaje_id -> ensamblaje,
@@ -32,6 +39,13 @@
  *                ventas; por ahora esta columna no se toca desde aquí],
  *                cantidad_tota, js_cantidades,
  *                js_session, js_historial, created_at, update_at, deleted_at)
+ *
+ *   unidad_medida (id, nombre, nombre_corto, unidad_base_id, equivalencia,
+ *                  js_session, js_historial, created_at, update_at,
+ *                  deleted_at)
+ *   Semántica de equivalencia (confirmada por el usuario con datos reales):
+ *   1 <esta unidad> = equivalencia <unidad_base_id>. Ej. GRUESA:
+ *   equivalencia = 24, unidad_base_id -> UNIDAD => 1 GRU = 24 UND.
  *
  * MODELO (igual que antes, sin cambios):
  *   producto_id se DERIVA siempre de emsamblaje_id (producto_id del
@@ -47,9 +61,6 @@
  *   listado; este controlador no las modifica. No se permite eliminar ni
  *   editar una fila que ya tenga pasado_venta con valor (se considera
  *   "cerrada" una vez que salió a venta).
- *
- * SUPUESTO (sin confirmar): unidad_medida(id, nombre, nombre_corto, activo),
- * mismo patrón usado en clssEnsamblaje.php (u.nombre_corto).
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -80,6 +91,9 @@ function controladorEmpaquetado($accion)
             break;
         case 'LISTAREMPAQUETADOS':
             listarEmpaquetados(intval($_POST['ensamblaje_id'] ?? 0));
+            break;
+        case 'LISTARTODOSEMPAQUETADOS':
+            listarTodosEmpaquetados();
             break;
         case 'OBTENEREMPAQUETADO':
             obtenerEmpaquetado(intval($_POST['id'] ?? 0));
@@ -119,8 +133,9 @@ function buscarOperarios()
     responder(true, 'OK', ['operario' => $result]);
 }
 
-// SUPUESTO: unidad_medida(id, nombre, nombre_corto, activo). Ajustar si la
-// tabla real tiene otras columnas (mismo patrón usado en clssEnsamblaje.php).
+// unidad_medida NO tiene columna `activo` (confirmado): usa deleted_at
+// como el resto del sistema. Se incluyen unidad_base_id y equivalencia
+// por si el frontend los necesita más adelante.
 function buscarUnidadesMedida()
 {
     $conectar = conectar_oll_BD();
@@ -139,10 +154,12 @@ function buscarUnidadesMedida()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['unidades' => $result]);
 }
+
 // Ensamblajes finalizados disponibles para empaquetar (grid principal).
-// Incluye conteo Y suma de cantidad_tota ya empaquetada, solo informativo
-// (ya no hay "saldo pendiente" que calcular: un ensamblaje puede tener
-// cuantas filas de empaquetado se necesiten).
+// Incluye conteo y suma NORMALIZADA (a unidad base) de lo ya empaquetado.
+// Excluye ensamblajes que ya fueron absorbidos como complemento de otro
+// ensamblaje (ensamblaje_id_referido IS NOT NULL): esos ya no son una
+// unidad empaquetable independiente.
 function listarEnsamblajesParaEmpaquetado()
 {
     $conectar          = conectar_oll_BD();
@@ -150,7 +167,11 @@ function listarEnsamblajesParaEmpaquetado()
     $productoId        = trim($_POST['producto_id'] ?? '');
     $soloSinEmpaquetar = ($_POST['solo_sin_empaquetar'] ?? '0') === '1';
 
-    $where  = ["e.deleted_at IS NULL", "e.fin IS NOT NULL", "e.ensamblaje_id_referido IS NULL"];
+    $where  = [
+        "e.deleted_at IS NULL",
+        "e.fin IS NOT NULL",
+        "e.ensamblaje_id_referido IS NULL",
+    ];
     $params = [];
 
     if ($texto !== '') {
@@ -181,7 +202,11 @@ function listarEnsamblajesParaEmpaquetado()
                     WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
                 ) AS empaquetados_count,
                 (
-                    SELECT COALESCE(SUM(emp.cantidad_tota), 0) FROM empaquetado emp
+                    SELECT COALESCE(SUM(
+                        emp.cantidad_tota * COALESCE(um.equivalencia, 1)
+                    ), 0)
+                    FROM empaquetado emp
+                    LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
                     WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
                 ) AS cantidad_total_empaquetada
             FROM ensamblaje e
@@ -198,6 +223,8 @@ function listarEnsamblajesParaEmpaquetado()
 // EMPAQUETADO (registro plano, con bultos internos en js_cantidades)
 // =============================================================================
 
+// Detalle de registros de UN ensamblaje (para el modal). Incluye
+// equivalencia/unidad base para poder mostrar la conversión en pantalla.
 function listarEmpaquetados(int $ensamblajeId)
 {
     if (!$ensamblajeId) responder(false, 'ID de ensamblaje inválido.');
@@ -226,6 +253,65 @@ function listarEmpaquetados(int $ensamblajeId)
 
     responder(true, 'OK', ['empaquetados' => $result]);
 }
+
+// Listado GENERAL (todos los ensamblajes) para la tabla que vive debajo
+// del grid principal en empaquetado.php. Soporta filtro de texto
+// (producto), estado (disponible / vendido) y rango de fechas
+// (sobre empaquetado.created_at).
+function listarTodosEmpaquetados()
+{
+    $conectar   = conectar_oll_BD();
+    $texto      = trim($_POST['texto'] ?? '');
+    $estado     = trim($_POST['estado'] ?? ''); // '', 'disponible', 'vendido'
+    $fechaDesde = trim($_POST['fecha_desde'] ?? '');
+    $fechaHasta = trim($_POST['fecha_hasta'] ?? '');
+
+    $where  = ["emp.deleted_at IS NULL"];
+    $params = [];
+
+    if ($texto !== '') {
+        $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
+        $params['texto'] = "%$texto%";
+    }
+    if ($estado === 'disponible') {
+        $where[] = "emp.pasado_venta IS NULL";
+    } elseif ($estado === 'vendido') {
+        $where[] = "emp.pasado_venta IS NOT NULL";
+    }
+    if ($fechaDesde !== '') {
+        $where[] = "emp.created_at >= :fecha_desde";
+        $params['fecha_desde'] = $fechaDesde;
+    }
+    if ($fechaHasta !== '') {
+        $where[] = "emp.created_at <= :fecha_hasta";
+        $params['fecha_hasta'] = $fechaHasta . ' 23:59:59';
+    }
+
+    $sql = "SELECT
+                emp.id, emp.emsamblaje_id, emp.producto_id,
+                p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
+                emp.cantidad_tota, emp.js_cantidades,
+                emp.operario_id, op.nombre_completo AS operario_nombre,
+                emp.pasado_venta, emp.venta_id_ref,
+                emp.created_at, emp.update_at,
+                um.nombre_corto AS unidad_corto, um.equivalencia, um.unidad_base_id,
+                ub.nombre_corto AS unidad_base_corto,
+                CASE WHEN um.unidad_base_id IS NOT NULL
+                     THEN emp.cantidad_tota * um.equivalencia
+                     ELSE NULL END AS cantidad_tota_en_base
+            FROM empaquetado emp
+            LEFT JOIN producto p ON p.id = emp.producto_id
+            LEFT JOIN operario op ON op.id = emp.operario_id
+            LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+            LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY emp.created_at DESC
+            LIMIT 300";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['empaquetados' => $result]);
+}
+
 function obtenerEmpaquetado(int $id)
 {
     if (!$id) responder(false, 'ID inválido.');
@@ -286,7 +372,8 @@ function crearEmpaquetado()
     if (empty($ensamblaje[0]['fin'])) responder(false, 'Este ensamblaje aún no ha finalizado; no se puede empaquetar todavía.');
     $productoId = intval($ensamblaje[0]['producto_id']);
 
-    $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedida]);    if (empty($unidad)) responder(false, 'La unidad de medida indicada no existe o está inactiva.');
+    $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedida]);
+    if (empty($unidad)) responder(false, 'La unidad de medida indicada no existe o está inactiva.');
 
     $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operarioId]);
     if (empty($operario)) responder(false, 'El operario indicado no existe o está inactivo.');
