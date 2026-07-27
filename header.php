@@ -41,9 +41,25 @@ if (empty($_SESSION['usuario_id'])) {
     <header class="pc-topbar">
         <div style="display:flex;align-items:center;gap:14px;">
             <i class="fa-solid fa-bars pc-menu-toggle" onclick="pcToggleSidebar()"></i>
-            <div class="pc-search">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" placeholder="Buscar producto, orden, operario...">
+            <div class="pc-topbar-info">
+                <div class="pc-info-pill">
+                    <i class="fa-regular fa-clock"></i>
+                    <span>7:00 A.M. – 9:00 P.M.</span>
+                </div>
+                <div class="pc-info-pill">
+                    <i class="fa-solid fa-location-dot"></i>
+                    <span>Dirección de la planta</span>
+                </div>
+                <div class="pc-info-pill pc-info-whatsapp">
+                    <i class="fa-brands fa-whatsapp"></i>
+                    <span>+51 929 441 260</span>
+                </div>
+                <div class="pc-social-icons">
+                    <a href="https://www.facebook.com/profile.php?id=100066605900510" class="pc-social-btn fb" title="Facebook"><i class="fa-brands fa-facebook-f"></i></a>
+                    <a href="https://www.instagram.com/plasticoschepito/" class="pc-social-btn ig" title="Instagram"><i class="fa-brands fa-instagram"></i></a>
+                    <a href="https://www.tiktok.com/@chepitoplastic" class="pc-social-btn tt" title="TikTok"><i class="fa-brands fa-tiktok"></i></a>
+
+                </div>
             </div>
         </div>
         <div class="pc-topbar-right">
