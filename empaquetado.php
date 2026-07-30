@@ -139,7 +139,7 @@ include("header.php");
                 <tr>
                     <th>Ensamblaje</th>
                     <th>Producto</th>
-                    <th>Bultos</th>
+                    <th>Unidades Paquetes</th>
                     <th>Total</th>
                     <th>Operario</th>
                     <th>Fecha</th>
@@ -169,7 +169,7 @@ include("header.php");
             <table class="pc-emp-tabla">
                 <thead>
                     <tr>
-                        <th>Bultos</th>
+                        <th>Unidades Paquetes</th>
                         <th>Total</th>
                         <th>Operario</th>
                         <th>Fecha</th>
@@ -200,14 +200,14 @@ include("header.php");
                 </div>
             </div>
 
-            <label class="form-label">Bultos *</label>
+            <label class="form-label">Unidades Paquetes *</label>
             <div id="listaBultos"></div>
             <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarFilaBulto()">
-                <i class="fa-solid fa-plus"></i> Agregar bulto
+                <i class="fa-solid fa-plus"></i> Agregar Paquete
             </button>
 
             <div class="pc-bultos-total">
-                <span><span id="bultosCount">0</span> bulto(s)</span>
+                <span><span id="bultosCount">0</span> paquete(s)</span>
                 <span>Total: <b id="bultosTotal">0</b></span>
             </div>
 

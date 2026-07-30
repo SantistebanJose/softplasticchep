@@ -190,30 +190,34 @@ function listarEnsamblajesParaEmpaquetado()
     }
 
     $sql = "SELECT
-                e.id AS ensamblaje_id,
-                e.producto_id,
-                p.codigo AS producto_codigo,
-                p.descripcion AS producto_descripcion,
-                e.cantidad_peso_kg,
-                e.fin,
-                o.nombre_completo AS operario_ensamblaje_nombre,
-                (
-                    SELECT COUNT(*) FROM empaquetado emp
-                    WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
-                ) AS empaquetados_count,
-                (
-                    SELECT COALESCE(SUM(
-                        emp.cantidad_tota * COALESCE(um.equivalencia, 1)
-                    ), 0)
-                    FROM empaquetado emp
-                    LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
-                    WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
-                ) AS cantidad_total_empaquetada
-            FROM ensamblaje e
-            LEFT JOIN producto p ON p.id = e.producto_id
-            LEFT JOIN operario o ON o.id = e.operario_ortorgado
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY e.fin DESC";
+        e.id AS ensamblaje_id,
+        e.producto_id,
+        p.codigo AS producto_codigo,
+        p.descripcion AS producto_descripcion,
+        e.cantidad_peso_kg,
+        e.fin,
+        o.nombre_completo AS operario_ensamblaje_nombre,
+        (
+            SELECT COUNT(*) FROM empaquetado emp
+            WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
+        ) AS empaquetados_count,
+        (
+            SELECT COALESCE(SUM(
+                emp.cantidad_tota * COALESCE(um.equivalencia, 1)
+            ), 0)
+            FROM empaquetado emp
+            LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+            WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
+        ) AS cantidad_total_empaquetada
+        FROM ensamblaje e
+        LEFT JOIN empaquetado ee ON e.id = ee.emsamblaje_id
+        LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN operario o ON o.id = e.operario_ortorgado
+        WHERE e.deleted_at IS NULL
+        AND e.fin IS NOT NULL
+        AND e.ensamblaje_id_referido IS NULL
+        AND ee.emsamblaje_id IS NULL
+        ORDER BY e.fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
