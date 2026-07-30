@@ -13,8 +13,15 @@ include("header.php");
     1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
        con conteo y suma normalizada (a unidad base) de lo ya empaquetado.
        Excluye ensamblajes ya absorbidos como complemento de otro armado.
-       El botón cambia de "Empaquetar" a "Ver empaquetado" (outline) en
-       cuanto el ensamblaje ya tiene al menos 1 registro.
+
+       NOTA (2026-07-30): el controlador ahora también excluye del grid
+       cualquier ensamblaje que YA TENGA al menos un registro de
+       empaquetado (ver clssEmpaquetado.php). Como consecuencia, la rama
+       de este archivo que pinta el botón como "Ver empaquetado" (outline)
+       para ensamblajes con empaquetados_count > 0 queda como código
+       muerto: esas filas ya no llegan del backend, así que el botón
+       siempre se renderiza como "Empaquetar". Se deja el código tal cual
+       por si en el futuro se decide volver a mostrar esos ensamblajes.
     2) Al tocar el botón se abre un modal para ESE ensamblaje:
        - Lista de registros de empaquetado ya hechos (tabla), con
          Editar/Eliminar/Reactivar según corresponda.
@@ -24,7 +31,9 @@ include("header.php");
     3) Tabla de "Registros de empaquetado" debajo del grid, con TODOS los
        registros de todos los ensamblajes (historial general), con sus
        propios filtros de estado (disponible/vendido) y rango de fechas,
-       además de reusar el buscador de producto de arriba.
+       además de reusar el buscador de producto de arriba. Esta tabla
+       sigue mostrando ensamblajes ya empaquetados (no se ve afectada por
+       el cambio de la nota anterior).
 -->
 
 <style>

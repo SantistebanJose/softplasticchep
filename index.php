@@ -141,6 +141,10 @@ window.addEventListener('load', function () {
             <a href="moldes.php" class="pc-quick-btn q-dark">
                 <i class="fa-solid fa-shapes"></i> Moldes
             </a>
+
+            <a href="disponibilidad_venta.php" class="pc-quick-btn q-dark">
+                <i class="fa-solid fa-chart-column"></i> REPORTES
+            </a>
         </div>
     </div>
 </div>

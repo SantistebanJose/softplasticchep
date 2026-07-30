@@ -4,6 +4,14 @@
  * controllers/clssEmpaquetado.php
  * Controlador del módulo de Empaquetado
  *
+ * ACTUALIZADO (2026-07-30): listarEnsamblajesParaEmpaquetado() ahora
+ * excluye del grid CUALQUIER ensamblaje que ya tenga al menos un
+ * registro en `empaquetado` (LEFT JOIN empaquetado ee ... WHERE
+ * ee.emsamblaje_id IS NULL). Antes esos ensamblajes seguían apareciendo
+ * con el botón "Ver empaquetado"; con este cambio desaparecen del grid
+ * en cuanto tienen su primer registro. Esos registros siguen visibles
+ * en el listado general (LISTARTODOSEMPAQUETADOS) más abajo.
+ *
  * ACTUALIZADO (2026-07-27 v3): sesión de correcciones y mejoras:
  *
  *   1) BUG: unidad_medida NO tiene columna `activo` (se confirmó con
@@ -157,9 +165,15 @@ function buscarUnidadesMedida()
 
 // Ensamblajes finalizados disponibles para empaquetar (grid principal).
 // Incluye conteo y suma NORMALIZADA (a unidad base) de lo ya empaquetado.
-// Excluye ensamblajes que ya fueron absorbidos como complemento de otro
-// ensamblaje (ensamblaje_id_referido IS NOT NULL): esos ya no son una
-// unidad empaquetable independiente.
+// Excluye:
+//   - ensamblajes ya absorbidos como complemento de otro ensamblaje
+//     (ensamblaje_id_referido IS NOT NULL);
+//   - ensamblajes que YA TIENEN al menos un registro de empaquetado
+//     (LEFT JOIN empaquetado ee ... WHERE ee.emsamblaje_id IS NULL).
+//     Esto significa que, a diferencia de antes, un ensamblaje ya
+//     empaquetado desaparece del grid en cuanto tiene su primer
+//     registro; sigue visible únicamente en el listado general de abajo
+//     (LISTARTODOSEMPAQUETADOS).
 function listarEnsamblajesParaEmpaquetado()
 {
     $conectar          = conectar_oll_BD();
@@ -171,6 +185,7 @@ function listarEnsamblajesParaEmpaquetado()
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
+        "ee.emsamblaje_id IS NULL",
     ];
     $params = [];
 
@@ -190,34 +205,31 @@ function listarEnsamblajesParaEmpaquetado()
     }
 
     $sql = "SELECT
-        e.id AS ensamblaje_id,
-        e.producto_id,
-        p.codigo AS producto_codigo,
-        p.descripcion AS producto_descripcion,
-        e.cantidad_peso_kg,
-        e.fin,
-        o.nombre_completo AS operario_ensamblaje_nombre,
-        (
-            SELECT COUNT(*) FROM empaquetado emp
-            WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
-        ) AS empaquetados_count,
-        (
-            SELECT COALESCE(SUM(
-                emp.cantidad_tota * COALESCE(um.equivalencia, 1)
-            ), 0)
-            FROM empaquetado emp
-            LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
-            WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
-        ) AS cantidad_total_empaquetada
-        FROM ensamblaje e
-        LEFT JOIN empaquetado ee ON e.id = ee.emsamblaje_id
-        LEFT JOIN producto p ON p.id = e.producto_id
-        LEFT JOIN operario o ON o.id = e.operario_ortorgado
-        WHERE e.deleted_at IS NULL
-        AND e.fin IS NOT NULL
-        AND e.ensamblaje_id_referido IS NULL
-        AND ee.emsamblaje_id IS NULL
-        ORDER BY e.fin DESC";
+                e.id AS ensamblaje_id,
+                e.producto_id,
+                p.codigo AS producto_codigo,
+                p.descripcion AS producto_descripcion,
+                e.cantidad_peso_kg,
+                e.fin,
+                o.nombre_completo AS operario_ensamblaje_nombre,
+                (
+                    SELECT COUNT(*) FROM empaquetado emp
+                    WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
+                ) AS empaquetados_count,
+                (
+                    SELECT COALESCE(SUM(
+                        emp.cantidad_tota * COALESCE(um.equivalencia, 1)
+                    ), 0)
+                    FROM empaquetado emp
+                    LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+                    WHERE emp.emsamblaje_id = e.id AND emp.deleted_at IS NULL
+                ) AS cantidad_total_empaquetada
+            FROM ensamblaje e
+            LEFT JOIN empaquetado ee ON e.id = ee.emsamblaje_id
+            LEFT JOIN producto p ON p.id = e.producto_id
+            LEFT JOIN operario o ON o.id = e.operario_ortorgado
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY e.fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
