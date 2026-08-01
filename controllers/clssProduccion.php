@@ -6,7 +6,7 @@
  *
  * Tablas reales:
  *   operarios (id, nombre_completo, cargo, activo, created_at, updated_at)
- *   molde (id, nombre, forma, producto_id, deleted_at, ...)
+ *   molde (id, nombre, forma, producto_id, js_producto, deleted_at, ...)
  *   color (id, nombre, descripcion, rgb, deleted_at, ...)
  *   producto (id, codigo, descripcion, peso_unitario_g, ...)
  *   produccion (id, orden_id -> orden_produccion [ya no se usa, siempre NULL],
@@ -43,8 +43,25 @@
  *   MERMA: se descartó por ahora — el campo `merma_total` ya no se pide
  *   ni se guarda desde este formulario.
  *
- *   Cada avance puede consumir uno o varios materiales, y CADA línea de
- *   consumo apunta a un LOTE puntual (trazabilidad FIFO por compra).
+ *   Cada avance puede consumir uno o varios materiales. El USUARIO ya no
+ *   elige el lote de origen: solo indica material + cantidad total, y el
+ *   backend reparte esa cantidad automáticamente entre los lotes
+ *   disponibles de ese material siguiendo FIFO (más antiguo primero),
+ *   generando una o varias líneas en rel_produccion_material según haga
+ *   falta. La trazabilidad por lote se conserva en la base de datos, solo
+ *   se automatizó la elección para simplificar el formulario.
+ *
+ * PRODUCTO → MOLDE (selección en cascada):
+ *   Un mismo molde puede fabricar más de un producto (por eso existía el
+ *   identificador compuesto "unico_molde" tipo "{molde_id}-{producto_id}").
+ *   Para no obligar al usuario a leer una lista larga de combinaciones
+ *   "MOLDE — PRODUCTO" en un solo select, ahora se elige primero el
+ *   PRODUCTO y luego, filtrado por ese producto, el MOLDE. Esto se arma
+ *   leyendo `molde.js_producto` (jsonb), que ya lista los productos
+ *   asociados a cada molde con la forma:
+ *     [{"codigo":"CO","descripcion":"COLGADOR OSITO MULTIUSO","producto_id":3}, ...]
+ *   Si en tu base ese JSON usa otras llaves, ajusta buscarProductosMolde()
+ *   y buscarMoldesPorProducto() más abajo.
  *
  * DISPONIBILIDAD DE UN LOTE:
  *   disponible = lote.cantidad_base - SUM(cantidad consumida en avances
@@ -128,6 +145,12 @@ function controladorProduccion($accion)
         case 'BUSCARLOTESMATERIAL':
             buscarLotesMaterial();
             break;
+        case 'BUSCARPRODUCTOSMOLDE':
+            buscarProductosMolde();
+            break;
+        case 'BUSCARMOLDESPORPRODUCTO':
+            buscarMoldesPorProducto(intval($_POST['producto_id'] ?? 0));
+            break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
@@ -153,9 +176,55 @@ function buscarMaquinas()
     responder(true, 'OK', ['maquinas' => $result]);
 }
 
+// Primer selector de la cascada: lista los productos que tienen al menos
+// un molde activo capaz de fabricarlos (leído desde molde.js_producto).
+function buscarProductosMolde()
+{
+    $conectar = conectar_oll_BD();
+    $sql = "
+        SELECT DISTINCT
+            (elem->>'producto_id')::int AS producto_id,
+            elem->>'descripcion'        AS descripcion,
+            elem->>'codigo'             AS codigo
+        FROM molde m, jsonb_array_elements(m.js_producto) elem
+        WHERE m.deleted_at IS NULL
+          AND m.js_producto IS NOT NULL
+        ORDER BY descripcion
+    ";
+    $result = executeQuery($conectar, $sql, []);
+    responder(true, 'OK', ['productos' => $result]);
+}
+
+// Segundo selector de la cascada: dado un producto, lista los moldes
+// activos que lo pueden fabricar. Devuelve también "unico_molde" (el
+// identificador compuesto "{molde_id}-{producto_id}" que ya usa el resto
+// del sistema) y una "etiqueta" con el formato "MOLDE — PRODUCTO" para
+// guardarla tal cual en produccion.molde_producto.
+function buscarMoldesPorProducto(int $productoId)
+{
+    if (!$productoId) responder(false, 'Debes indicar un producto.');
+    $conectar = conectar_oll_BD();
+    $sql = "
+        SELECT
+            m.id AS molde_id,
+            m.nombre AS molde_nombre,
+            (elem->>'producto_id')::int AS producto_id,
+            elem->>'descripcion' AS producto_descripcion,
+            (m.id::text || '-' || (elem->>'producto_id')) AS unico_molde,
+            (m.nombre || ' — ' || (elem->>'descripcion')) AS etiqueta
+        FROM molde m, jsonb_array_elements(m.js_producto) elem
+        WHERE m.deleted_at IS NULL
+          AND m.js_producto IS NOT NULL
+          AND (elem->>'producto_id')::int = :producto_id
+        ORDER BY m.nombre
+    ";
+    $result = executeQuery($conectar, $sql, ['producto_id' => $productoId]);
+    responder(true, 'OK', ['moldes' => $result]);
+}
+
 // Catálogo de materiales para el "menú" de tarjetas del modal. Trae también
-// stock actual y unidad, para que cada card muestre de un vistazo cuánto
-// hay en total (la disponibilidad real por lote se pide aparte).
+// stock actual y unidad: es lo único que le importa al usuario ahora (ya
+// no se muestra el detalle por lote/proveedor en el formulario).
 function buscarMaterialesProduccion()
 {
     $conectar = conectar_oll_BD();
@@ -178,9 +247,10 @@ function buscarMaterialesProduccion()
     responder(true, 'OK', ['materiales' => $result]);
 }
 
-// El corazón del "¿de dónde saco el material?": lista los lotes (compras)
-// de un material específico con su disponible calculado en vivo. Ordenado
-// del más antiguo al más nuevo (sugerencia FIFO), el usuario elige libremente.
+// Ya no se usa desde el formulario (el usuario ya no elige lote), pero se
+// mantiene disponible por si algún otro módulo/reporte la necesita para
+// mostrar trazabilidad. El reparto FIFO automático al guardar consulta
+// esta misma vista directamente (ver insertarLineasYRestarStock).
 function buscarLotesMaterial()
 {
     $conectar = conectar_oll_BD();
@@ -309,8 +379,9 @@ function obtenerProduccion($id)
     );
     if (empty($produccion)) responder(false, 'Registro de producción no encontrado.');
 
-    // Detalle con toda la info del lote de origen, para ver de inmediato
-    // "de dónde" salió cada línea al editar.
+    // Detalle con toda la info del lote de origen (se conserva para
+    // trazabilidad interna, aunque el formulario ya no la muestre línea
+    // por línea: el frontend agrupa estas filas por material_id).
     $detalle = executeQuery(
         $conectar,
         "SELECT rpm.*, m.nombre AS material_nombre,
@@ -371,8 +442,8 @@ function guardarProduccion()
     $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
-    $unico_molde        = trim($_POST['unico_molde'] ?? '');    // 7-2
-    $molde_producto     = trim($_POST['molde_producto'] ?? '');
+    $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
+    $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
     $cantidad           = intval($_POST['cantidad'] ?? 0); // kg insertados en máquina en este avance
     $fecha              = trim($_POST['fecha'] ?? '');
     $observaciones      = trim($_POST['observaciones'] ?? '');
@@ -394,7 +465,7 @@ function guardarProduccion()
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
     if (empty($unico_molde) || empty($molde_producto)) {
-        responder(false, 'Debes seleccionar un molde con su producto asociado.');
+        responder(false, 'Debes seleccionar un producto y su molde asociado.');
     }
     if (empty($fecha)) $fecha = date('Y-m-d H:i:s');
 
@@ -407,27 +478,28 @@ function guardarProduccion()
     $detalleEntrada = json_decode($detalleJson, true);
     if (!is_array($detalleEntrada)) $detalleEntrada = [];
 
+    // El detalle que llega del formulario ahora es solo material + cantidad
+    // total + comentario (ya no trae rel_compra_material_id: el usuario no
+    // elige lote). El reparto FIFO se hace en insertarLineasYRestarStock().
     $detalle = [];
     foreach ($detalleEntrada as $linea) {
         $materialId = intval($linea['material_id'] ?? 0);
-        $loteId     = intval($linea['rel_compra_material_id'] ?? 0);
         $cant       = floatval($linea['cantidad'] ?? 0);
         $comentario = trim($linea['comentario'] ?? '');
 
-        if ($materialId <= 0 || $loteId <= 0 || $cant <= 0) continue; // fila incompleta, se ignora
+        if ($materialId <= 0 || $cant <= 0) continue; // fila incompleta, se ignora
 
         $detalle[] = [
-            'material_id'            => $materialId,
-            'rel_compra_material_id' => $loteId,
-            'cantidad'               => $cant,
-            'comentario'             => $comentario ?: null,
+            'material_id' => $materialId,
+            'cantidad'    => $cant,
+            'comentario'  => $comentario ?: null,
         ];
     }
 
     // El detalle de materiales es opcional: puede haber avances de producción
     // (ej. reproceso, control de calidad) que no consuman material nuevo.
     // Si quieres forzarlo obligatorio, descomenta la validación siguiente:
-    // if (empty($detalle)) responder(false, 'Debes agregar al menos un material con su lote de origen.');
+    // if (empty($detalle)) responder(false, 'Debes agregar al menos un material.');
 
     $conectar->beginTransaction();
     try {
@@ -504,7 +576,7 @@ function guardarProduccion()
             }
             executeNonQuery($conectar, "DELETE FROM rel_produccion_material WHERE produccion_id = :id", ['id' => $id]);
 
-            // Insertamos las líneas nuevas (valida disponible por lote y resta stock)
+            // Insertamos las líneas nuevas (reparte FIFO automáticamente y resta stock)
             if (!empty($detalle)) {
                 insertarLineasYRestarStock($conectar, $id, $detalle);
             }
@@ -563,64 +635,77 @@ function guardarProduccion()
 }
 
 /**
- * Valida (dentro de la transacción) que el lote elegido pertenezca al
- * material indicado y tenga disponible suficiente, luego inserta la línea
- * de rel_produccion_material y resta la cantidad del stock del material.
+ * Reparte la cantidad total pedida de cada material entre los lotes
+ * disponibles de ese material, del más antiguo al más nuevo (FIFO), e
+ * inserta una línea de rel_produccion_material por cada lote que participe
+ * (puede ser más de una si un solo lote no alcanza). Resta del stock del
+ * material en cada paso. El usuario ya no elige el lote: solo indicó
+ * material + cantidad, y aquí se decide automáticamente "de dónde sale".
  */
 function insertarLineasYRestarStock($conectar, int $produccionId, array $detalle): void
 {
     foreach ($detalle as $linea) {
-        $lote = executeQuery(
+        $materialId       = $linea['material_id'];
+        $cantidadRestante = round((float) $linea['cantidad'], 4);
+        $comentario       = $linea['comentario'];
+
+        $lotes = executeQuery(
             $conectar,
-            "SELECT lote_id, material_id, proveedor, fecha_compra, disponible, unidad_base_corto
+            "SELECT lote_id, disponible, proveedor, fecha_compra, unidad_base_corto
              FROM view_lotes_material_disponible
-             WHERE lote_id = :lote_id",
-            ['lote_id' => $linea['rel_compra_material_id']]
+             WHERE material_id = :material_id AND disponible > 0.0001
+             ORDER BY fecha_compra ASC, lote_id ASC",
+            ['material_id' => $materialId]
         );
 
-        if (empty($lote)) {
-            throw new Exception('El lote de material seleccionado ya no existe o fue desactivado.');
-        }
-        $lote = $lote[0];
+        $totalDisponible = 0.0;
+        foreach ($lotes as $l) $totalDisponible += (float) $l['disponible'];
 
-        if ((int) $lote['material_id'] !== (int) $linea['material_id']) {
-            throw new Exception('El lote seleccionado no corresponde al material indicado.');
-        }
-        if ($linea['cantidad'] > (float) $lote['disponible'] + 0.0001) {
+        if ($cantidadRestante > $totalDisponible + 0.0001) {
+            $mat = executeQuery($conectar, "SELECT nombre FROM material WHERE id = :id", ['id' => $materialId]);
+            $nombreMaterial = $mat[0]['nombre'] ?? "material #$materialId";
             throw new Exception(
-                'No hay suficiente disponible en el lote de "' . $lote['proveedor'] . '" (' . $lote['fecha_compra'] . '). '
-                . 'Disponible: ' . number_format((float) $lote['disponible'], 4) . ' ' . $lote['unidad_base_corto']
-                . ', solicitado: ' . number_format($linea['cantidad'], 4) . ' ' . $lote['unidad_base_corto'] . '.'
+                'No hay stock suficiente de "' . $nombreMaterial . '". '
+                . 'Disponible: ' . number_format($totalDisponible, 4)
+                . ', solicitado: ' . number_format($cantidadRestante, 4) . '.'
             );
         }
 
-        $movimiento   = obtenerMovimientoSesion('crear_linea');
-        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+        foreach ($lotes as $lote) {
+            if ($cantidadRestante <= 0.0001) break;
 
-        executeNonQuery($conectar, "
-            INSERT INTO rel_produccion_material (
-                produccion_id, material_id, rel_compra_material_id, cantidad, comentario,
-                created_at, updated_at, js_session, js_historial
-            ) VALUES (
-                :produccion_id, :material_id, :rel_compra_material_id, :cantidad, :comentario,
-                NOW(), NOW(), :js_session, :js_historial
-            )
-        ", [
-            'produccion_id'           => $produccionId,
-            'material_id'             => $linea['material_id'],
-            'rel_compra_material_id'  => $linea['rel_compra_material_id'],
-            'cantidad'                => $linea['cantidad'],
-            'comentario'              => $linea['comentario'],
-            'js_session'              => $js_session,
-            'js_historial'            => $js_historial,
-        ]);
+            $tomar = min($cantidadRestante, (float) $lote['disponible']);
 
-        executeNonQuery(
-            $conectar,
-            "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-            ['cantidad' => $linea['cantidad'], 'mid' => $linea['material_id']]
-        );
+            $movimiento   = obtenerMovimientoSesion('crear_linea');
+            $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+            $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+            executeNonQuery($conectar, "
+                INSERT INTO rel_produccion_material (
+                    produccion_id, material_id, rel_compra_material_id, cantidad, comentario,
+                    created_at, updated_at, js_session, js_historial
+                ) VALUES (
+                    :produccion_id, :material_id, :rel_compra_material_id, :cantidad, :comentario,
+                    NOW(), NOW(), :js_session, :js_historial
+                )
+            ", [
+                'produccion_id'           => $produccionId,
+                'material_id'             => $materialId,
+                'rel_compra_material_id'  => $lote['lote_id'],
+                'cantidad'                => $tomar,
+                'comentario'              => $comentario,
+                'js_session'              => $js_session,
+                'js_historial'            => $js_historial,
+            ]);
+
+            executeNonQuery(
+                $conectar,
+                "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
+                ['cantidad' => $tomar, 'mid' => $materialId]
+            );
+
+            $cantidadRestante = round($cantidadRestante - $tomar, 4);
+        }
     }
 }
 
