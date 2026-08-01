@@ -15,6 +15,10 @@ include("header.php");
    rubro (Plásticos Chepito). No decorativo porque sí — cada material
    recibe un color estable (hash de su nombre) para reconocerlo de un
    vistazo entre compras repetidas.
+
+   NOTA: ya no existe selección de lote/proveedor en este formulario.
+   El usuario solo elige material + cantidad; el backend reparte la
+   cantidad automáticamente entre los lotes disponibles (FIFO).
 =================================================================== */
 :root{
     --resina-1:#2F6FED; --resina-1-bg:#EAF0FE;
@@ -70,21 +74,6 @@ include("header.php");
 }
 .pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.85em; padding:20px 6px; }
 
-.pc-lote-panel{ border-top:1px dashed #e2ddcd; padding:10px 12px 12px 12px; background:#fbf9f3; }
-.pc-lote-panel .titulo{ font-size:.8em; color:#8a5a10; font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
-.pc-lote-strip{ display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
-.pc-lote-chip{
-    flex:0 0 auto; min-width:150px; border:1px solid #e8dfc7; background:#fff; border-radius:10px;
-    padding:8px 10px; cursor:pointer; transition:.12s ease;
-}
-.pc-lote-chip:hover{ border-color:#d97706; background:#fffaf0; }
-.pc-lote-chip .prov{ font-weight:600; font-size:.8em; display:block; }
-.pc-lote-chip .fecha{ font-size:.72em; color:#948d78; display:block; margin-bottom:5px; }
-.pc-lote-gauge{ height:5px; border-radius:3px; background:#eee7d6; overflow:hidden; margin-bottom:4px; }
-.pc-lote-gauge > span{ display:block; height:100%; background:#16A34A; }
-.pc-lote-chip .disp{ font-size:.72em; color:#5c7a3c; font-weight:600; }
-.pc-lote-vacio{ font-size:.78em; color:#b45309; }
-
 .pc-tk-list{ list-style:none; margin:0; padding:0; max-height:340px; overflow-y:auto; }
 .pc-tk-item{ border-bottom:1px dashed #eee2c8; padding:10px 12px; display:flex; gap:10px; }
 .pc-tk-item:last-child{ border-bottom:none; }
@@ -133,10 +122,24 @@ include("header.php");
 .pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
 
 /* ===================================================================
-   Listado de producción en CARDS (reemplaza la tabla). Ordenado por
-   ID. Cada card resume un avance: encabezado con ID/estado, cuerpo
-   con los datos clave en pares etiqueta/valor, y pie con acciones.
+   Listado de producción en CARDS, agrupado por PRODUCTO ("escalera").
+   Cada grupo tiene un encabezado con el nombre del producto y, debajo,
+   la cuadrícula de avances (moldes) que lo están fabricando.
 =================================================================== */
+.pc-prod-group{ margin-bottom:26px; }
+.pc-prod-group:last-child{ margin-bottom:4px; }
+.pc-prod-group-header{
+    display:flex; align-items:center; gap:10px; margin:4px 0 12px 0;
+}
+.pc-prod-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
+.pc-prod-group-header .texto{
+    font-size:.78em; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae; border-radius:999px;
+    padding:6px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px;
+}
+.pc-prod-group-header .texto i{ font-size:.85em; opacity:.8; }
+.pc-prod-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
+
 .pc-prod-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
     gap:14px; margin-top:4px;
@@ -279,7 +282,7 @@ include("header.php");
         </select>
     </div>
 
-    <div class="pc-prod-grid" id="gridProducciones">
+    <div id="gridProducciones">
         <div class="pc-prod-empty">Cargando...</div>
     </div>
 </div>
@@ -316,14 +319,24 @@ include("header.php");
             </div>
           </div>
 
+          <!-- Selección en cascada: primero el PRODUCTO, luego (filtrado por
+               ese producto) el MOLDE. Antes era un solo select con todas
+               las combinaciones "MOLDE — PRODUCTO" mezcladas, difícil de
+               ubicar. -->
           <div class="row">
-            <div class="col-md-6 mb-2">
-                <label class="form-label">Molde *</label>
-                <select class="form-select" id="prod_molde_id" required>
-                    <option value="">Selecciona un molde...</option>
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Producto *</label>
+                <select class="form-select" id="prod_producto_id" required>
+                    <option value="">Selecciona un producto...</option>
                 </select>
             </div>
-            <div class="col-md-6 mb-2">
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Molde *</label>
+                <select class="form-select" id="prod_molde_id" required disabled>
+                    <option value="">Primero selecciona un producto...</option>
+                </select>
+            </div>
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Color *</label>
                 <select class="form-select" id="prod_color_id" required>
                     <option value="">Selecciona un color...</option>
@@ -345,9 +358,10 @@ include("header.php");
           <hr>
 
           <!-- Materiales consumidos: menú de cards + ticket, al estilo de una
-               comanda. Cada card es un material; al tocarla aparece la tira
-               de lotes disponibles (proveedor / fecha / cuánto queda); al
-               tocar un lote se agrega como línea al ticket de la derecha. -->
+               comanda. Cada card es un material; al tocarla se agrega (o se
+               suma 1) directamente al ticket, usando el stock total del
+               material como límite. Ya no se elige lote/proveedor: eso lo
+               reparte el sistema automáticamente al guardar. -->
           <div class="mb-1 d-flex justify-content-between align-items-center">
             <label class="form-label mb-0">Materiales consumidos (opcional)</label>
             <span class="form-text mb-0">Si este avance no consume material nuevo (ej. reproceso), deja el ticket vacío.</span>
@@ -363,10 +377,6 @@ include("header.php");
                 </div>
                 <div class="pc-mat-grid" id="prod_materiales_grid">
                     <div class="pc-mat-empty">Cargando materiales...</div>
-                </div>
-                <div class="pc-lote-panel" id="prod_lote_panel" style="display:none;">
-                    <div class="titulo"><i class="fa-solid fa-layer-group"></i> <span id="prod_lote_panel_titulo">Elige el lote de origen</span></div>
-                    <div class="pc-lote-strip" id="prod_lote_strip"></div>
                 </div>
             </div>
 
@@ -426,19 +436,18 @@ include("header.php");
 <script>
 var total = 0;
 const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
-const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el <select> de molde
+const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el filtro de moldes y el <select> de color
 const CONTROLADOR_COLOR      = 'controllers/clssColor.php';  // para el <select> de color
 const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduccion'));
 
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let materialesProdCache = null; // cache de materiales para las cards
-let moldesProductoProdCache = null; // cache de combinaciones molde-producto para el select
+let productosMoldeProdCache = null; // cache de productos (para el 1er select en cascada)
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
-let materialSeleccionadoId = null; // material activo en el panel de lotes
 let contadorLineaTicket = 0;
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
-                        //   lote_id, lote_label, disponible, cantidad, comentario}]
+                        //   disponible, cantidad, comentario}]
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarSelectsFiltro();
@@ -458,6 +467,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
+
+    // Al cambiar el producto, se recarga el select de moldes filtrado por
+    // ese producto (segundo paso de la cascada).
+    document.getElementById('prod_producto_id').addEventListener('change', (e) => {
+        cargarMoldesDeProducto(e.target.value, null);
+    });
 
     iniciarAutoRefresh();
 });
@@ -668,21 +683,7 @@ async function cargarSelectsFiltro() {
     }
 }
 
-async function obtenerMoldesProd() {
-    if (moldesProdCache) return moldesProdCache;
-    const json = await llamarMoldes('LISTARMOLDES', { texto: '', estado: 'activa' });
-    moldesProdCache = json.success ? json.moldes : [];
-    return moldesProdCache;
-}
-
-async function obtenerMoldesProductoProd() {
-    if (moldesProductoProdCache) return moldesProductoProdCache;
-    const json = await llamarMoldes('LISTARMOLDESPRODUCTO', {});
-    moldesProductoProdCache = json.success ? json.moldes_producto : [];
-    return moldesProductoProdCache;
-}
-
-// Categorías de material: mismo patrón de cache que moldes, se piden una
+// Categorías de material: mismo patrón de cache que antes, se piden una
 // sola vez por carga de página y se reutilizan cada vez que se abre el modal.
 async function obtenerCategoriasMaterialProd() {
     if (categoriasMaterialProdCache) return categoriasMaterialProdCache;
@@ -691,13 +692,55 @@ async function obtenerCategoriasMaterialProd() {
     return categoriasMaterialProdCache;
 }
 
+// Productos disponibles para el primer select de la cascada (los que
+// tienen al menos un molde activo asociado).
+async function obtenerProductosMoldeProd() {
+    if (productosMoldeProdCache) return productosMoldeProdCache;
+    const json = await llamarProduccion('BUSCARPRODUCTOSMOLDE');
+    productosMoldeProdCache = json.success ? json.productos : [];
+    return productosMoldeProdCache;
+}
+
+// Carga el select de moldes filtrado por producto (2do paso de la cascada).
+// Si se pasa `seleccion`, intenta preseleccionar ese molde (acepta el valor
+// "unico_molde" tipo "7-2" o directamente un molde_id numérico).
+async function cargarMoldesDeProducto(productoId, seleccion) {
+    const moldeSelect = document.getElementById('prod_molde_id');
+
+    if (!productoId) {
+        moldeSelect.innerHTML = '<option value="">Primero selecciona un producto...</option>';
+        moldeSelect.disabled = true;
+        return;
+    }
+
+    moldeSelect.disabled = false;
+    moldeSelect.innerHTML = '<option value="">Cargando moldes...</option>';
+
+    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: productoId });
+    const moldes = json.success ? json.moldes : [];
+
+    if (moldes.length === 0) {
+        moldeSelect.innerHTML = '<option value="">Este producto no tiene moldes asociados</option>';
+        return;
+    }
+
+    moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
+        moldes.map(m => `<option value="${m.unico_molde}" data-molde-id="${m.molde_id}" data-etiqueta="${m.etiqueta}">${m.molde_nombre}</option>`).join('');
+
+    if (seleccion) {
+        const porUnico   = [...moldeSelect.options].find(o => o.value == seleccion);
+        const porMoldeId = [...moldeSelect.options].find(o => o.dataset.moldeId == seleccion);
+        moldeSelect.value = (porUnico || porMoldeId)?.value ?? '';
+    }
+}
+
 async function cargarSelectsModal(seleccion = {}) {
-    const [operario, maquinas, moldes, colores, categorias] = await Promise.all([
+    const [operario, maquinas, colores, categorias, productos] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
-        obtenerMoldesProductoProd(),
         llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
         obtenerCategoriasMaterialProd(),
+        obtenerProductosMoldeProd(),
     ]);
 
     const operarioSelect = document.getElementById('prod_operario_id');
@@ -717,18 +760,18 @@ async function cargarSelectsModal(seleccion = {}) {
         (categorias || []).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     if (seleccion.categoria_material_id) categoriaSelect.value = seleccion.categoria_material_id;
 
-    const moldeSelect = document.getElementById('prod_molde_id');
-        const moldesProducto = await obtenerMoldesProductoProd();
-        moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
-            moldesProducto.map(m =>
-                `<option value="${m.unico}" data-molde-id="${m.molde_id}">${m.etiqueta}</option>`
-            ).join('');
-        if (seleccion.unico_molde) {
-            moldeSelect.value = seleccion.unico_molde;
-        } else if (seleccion.molde_id) {
-            const opt = [...moldeSelect.options].find(o => o.dataset.moldeId == seleccion.molde_id);
-            if (opt) moldeSelect.value = opt.value;
-        }
+    const productoSelect = document.getElementById('prod_producto_id');
+    productoSelect.innerHTML = '<option value="">Selecciona un producto...</option>' +
+        (productos || []).map(p => `<option value="${p.producto_id}">${p.descripcion}</option>`).join('');
+
+    if (seleccion.producto_id) {
+        productoSelect.value = seleccion.producto_id;
+        await cargarMoldesDeProducto(seleccion.producto_id, seleccion.unico_molde || seleccion.molde_id);
+    } else {
+        document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
+        document.getElementById('prod_molde_id').disabled = true;
+    }
+
     const colorSelect = document.getElementById('prod_color_id');
     colorSelect.innerHTML = '<option value="">Selecciona un color...</option>';
     if (colores.success) colores.colores.forEach(c =>
@@ -743,7 +786,106 @@ async function obtenerOpcionesMaterialesProd() {
     return materialesProdCache;
 }
 
-// ── Listado en CARDS (orden por ID) ───────────────────────────────────────
+// ── Listado en CARDS, agrupado por producto ("escalera") ─────────────────
+// Agrupa las producciones por el nombre del producto, extraído del campo
+// molde_producto que ya guarda cada avance con el formato "MOLDE — PRODUCTO".
+// El orden de los grupos respeta el orden en que aparece cada producto en
+// la lista ya ordenada por el backend (enviado_ensamblaje asc, id desc).
+function agruparProduccionesPorProducto(producciones) {
+    const grupos = new Map();
+    producciones.forEach(p => {
+        const partes = (p.molde_producto || '').split(' — ');
+        const nombreProducto = partes.length > 1 ? partes[1].trim() : 'Sin producto asociado';
+        if (!grupos.has(nombreProducto)) grupos.set(nombreProducto, []);
+        grupos.get(nombreProducto).push(p);
+    });
+    return grupos;
+}
+
+function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
+    const colorTexto = p.color_nombre
+        ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
+        : '-';
+
+    const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
+    const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+    const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
+    const estado = estadoCorto(p);
+    nuevosEstados[p.id] = estado;
+    const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
+
+    return `
+    <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
+        <div class="pc-prod-card-head">
+            <div class="titulo">
+                <span class="id">#${p.id}</span>
+                <span class="molde-titulo">${p.molde_nombre ?? '-'}</span>
+            </div>
+            ${badgeRegistroProd(p.deleted_at)}
+        </div>
+        <div class="pc-prod-card-body">
+            <div class="pc-prod-field">
+                <span class="lbl">Color</span>
+                <span class="val">${colorTexto}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Operario</span>
+                <span class="val">${p.operario_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Máquina</span>
+                <span class="val">${p.maquina_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Fecha</span>
+                <span class="val">${p.fecha}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Kg insertados</span>
+                <span class="val">${formatearCantidadProd(p.cantidad)}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Materiales</span>
+                <span class="val">${p.items_count}</span>
+            </div>
+            <div class="pc-prod-field">
+                <span class="lbl">Categoría material</span>
+                <span class="val">${p.categoria_material_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-prod-field span-2">
+                <span class="lbl">Corrida</span>
+                <span class="val">${estadoCorridaTexto(p)}</span>
+            </div>
+        </div>
+        <div class="pc-prod-card-foot">
+            <button class="pc-icon-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+                <i class="fa-solid fa-pen"></i>
+            </button>
+            ${puedeIniciar
+                ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
+                    <i class="fa-solid fa-play"></i> Iniciar</button>`
+                : ''
+            }
+            ${puedeFinalizar
+                ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
+                    <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
+                : ''
+            }
+            ${!p.deleted_at
+                ? `<button class="pc-icon-btn" onclick="eliminarProduccion(${p.id})" title="Desactivar">
+                       <i class="fa-solid fa-trash"></i></button>`
+                : `<button class="pc-icon-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
+                       <i class="fa-solid fa-rotate-left"></i></button>`
+            }
+            ${corridaFinalizada
+                ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
+                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
+                : ''
+            }
+        </div>
+    </div>`;
+}
+
 async function cargarProducciones(silencioso = false) {
     const params = {
         texto: document.getElementById('fprod_texto').value.trim(),
@@ -775,94 +917,28 @@ async function cargarProducciones(silencioso = false) {
     }
 
     const nuevosEstados = {};
-    grid.innerHTML = producciones.map(p => {
-        const colorTexto = p.color_nombre
-            ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
-            : '-';
+    const grupos = agruparProduccionesPorProducto(producciones);
 
-        const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
-        const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-        const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
-        const estado = estadoCorto(p);
-        nuevosEstados[p.id] = estado;
-        const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
-
-        return `
-        <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
-            <div class="pc-prod-card-head">
-                <div class="titulo">
-                    <span class="id">#${p.id}</span>
-                    <span class="molde-titulo">${p.molde_nombre ?? '-'}</span>
+    let html = '';
+    for (const [nombreProducto, items] of grupos) {
+        html += `
+            <div class="pc-prod-group">
+                <div class="pc-prod-group-header">
+                    <span class="linea"></span>
+                    <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-prod-group-count">· ${items.length}</span></span>
+                    <span class="linea"></span>
                 </div>
-                ${badgeRegistroProd(p.deleted_at)}
-            </div>
-            <div class="pc-prod-card-body">
-                <div class="pc-prod-field">
-                    <span class="lbl">Color</span>
-                    <span class="val">${colorTexto}</span>
+                <div class="pc-prod-grid">
+                    ${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}
                 </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Operario</span>
-                    <span class="val">${p.operario_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Máquina</span>
-                    <span class="val">${p.maquina_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Fecha</span>
-                    <span class="val">${p.fecha}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Kg insertados</span>
-                    <span class="val">${formatearCantidadProd(p.cantidad)}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Materiales</span>
-                    <span class="val">${p.items_count}</span>
-                </div>
-                <div class="pc-prod-field">
-                    <span class="lbl">Categoría material</span>
-                    <span class="val">${p.categoria_material_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-prod-field span-2">
-                    <span class="lbl">Corrida</span>
-                    <span class="val">${estadoCorridaTexto(p)}</span>
-                </div>
-            </div>
-            <div class="pc-prod-card-foot">
-                <button class="pc-icon-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
-                    <i class="fa-solid fa-pen"></i>
-                </button>
-                ${puedeIniciar
-                    ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
-                        <i class="fa-solid fa-play"></i> Iniciar</button>`
-                    : ''
-                }
-                ${puedeFinalizar
-                    ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
-                        <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
-                    : ''
-                }
-                ${!p.deleted_at
-                    ? `<button class="pc-icon-btn" onclick="eliminarProduccion(${p.id})" title="Desactivar">
-                           <i class="fa-solid fa-trash"></i></button>`
-                    : `<button class="pc-icon-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
-                           <i class="fa-solid fa-rotate-left"></i></button>`
-                }
-                ${corridaFinalizada
-                    ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
-                        <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
-                    : ''
-                }
-            </div>
-        </div>`;
-    }).join('');
+            </div>`;
+    }
+    grid.innerHTML = html;
 
     snapshotEstados = nuevosEstados;
 }
 // =============================================================================
-// MENÚ DE MATERIALES + TICKET
+// MENÚ DE MATERIALES + TICKET (sin selección de lote)
 // =============================================================================
 
 async function renderGridMateriales() {
@@ -883,11 +959,10 @@ async function renderGridMateriales() {
         const est = estiloMaterial(m.nombre);
         const enTicket = ticketLineas.filter(l => l.material_id == m.id)
             .reduce((s, l) => s + Number(l.cantidad || 0), 0);
-        const activa = materialSeleccionadoId == m.id;
         return `
-        <button type="button" class="pc-mat-card ${activa ? 'activa' : ''}"
+        <button type="button" class="pc-mat-card ${enTicket > 0 ? 'activa' : ''}"
                 style="--card-color:${est.color};--card-bg:${est.bg};"
-                data-material-id="${m.id}" onclick="seleccionarMaterial(${m.id})">
+                data-material-id="${m.id}" onclick="seleccionarMaterial(${m.id})" title="Tocar para agregar al ticket">
             ${enTicket > 0 ? `<span class="badge-en-ticket">${formatearCantidadProd(enTicket)}</span>` : ''}
             <span class="pellet"><i class="fa-solid ${est.icono}"></i></span>
             <span class="nombre">${m.nombre}</span>
@@ -896,71 +971,30 @@ async function renderGridMateriales() {
     }).join('');
 }
 
+// Tocar una card de material la agrega al ticket con cantidad 1 (o, si ya
+// estaba en el ticket, le suma 1). No se pregunta por lote/proveedor: el
+// backend decide automáticamente de dónde sale el material al guardar.
 async function seleccionarMaterial(materialId) {
-    materialSeleccionadoId = materialId;
-    await renderGridMateriales(); // refresca el resaltado de la card activa
-
     const materiales = await obtenerOpcionesMaterialesProd();
     const material = materiales.find(m => m.id == materialId);
-    const panel = document.getElementById('prod_lote_panel');
-    const strip = document.getElementById('prod_lote_strip');
-    const titulo = document.getElementById('prod_lote_panel_titulo');
+    if (!material) return;
 
-    titulo.textContent = `Elige el lote de origen — ${material ? material.nombre : ''}`;
-    panel.style.display = 'block';
-    strip.innerHTML = '<div class="pc-lote-vacio"><i class="fa-solid fa-spinner fa-spin"></i> Buscando lotes disponibles...</div>';
-
-    const json = await llamarProduccion('BUSCARLOTESMATERIAL', { material_id: materialId });
-    const lotes = json.success ? json.lotes : [];
-
-    if (lotes.length === 0) {
-        strip.innerHTML = '<div class="pc-lote-vacio"><i class="fa-solid fa-triangle-exclamation"></i> Este material no tiene lotes con stock disponible.</div>';
-        return;
-    }
-
-    strip.innerHTML = lotes.map(l => {
-        const pct = l.cantidad_base > 0 ? Math.max(0, Math.min(100, (l.disponible / l.cantidad_base) * 100)) : 0;
-        return `
-        <div class="pc-lote-chip" onclick='agregarLineaTicket(${JSON.stringify({
-            material_id: material.id,
-            material_nombre: material.nombre,
-            unidad_corto: material.unidad_corto,
-            lote_id: l.lote_id,
-            proveedor: l.proveedor,
-            fecha_compra: l.fecha_compra,
-            disponible: l.disponible,
-        })})'>
-            <span class="prov">${l.proveedor}</span>
-            <span class="fecha">${l.fecha_compra}</span>
-            <div class="pc-lote-gauge"><span style="width:${pct}%"></span></div>
-            <span class="disp">disponible: ${formatearCantidadProd(l.disponible)} ${l.unidad_base_corto ?? ''}</span>
-        </div>`;
-    }).join('');
-}
-
-// Agrega una línea al ticket. Si ya existe una línea con el mismo lote,
-// suma 1 a su cantidad en vez de duplicar la línea (como pedir "uno más"
-// del mismo producto en una comanda).
-function agregarLineaTicket(datosLote) {
-    const existente = ticketLineas.find(l => l.lote_id == datosLote.lote_id);
+    const existente = ticketLineas.find(l => l.material_id == materialId);
     if (existente) {
         cambiarCantidadTicket(existente.tempId, 1);
         return;
     }
 
-    const est = estiloMaterial(datosLote.material_nombre);
+    const est = estiloMaterial(material.nombre);
     ticketLineas.push({
         tempId: ++contadorLineaTicket,
-        material_id: datosLote.material_id,
-        material_nombre: datosLote.material_nombre,
-        unidad_corto: datosLote.unidad_corto,
+        material_id: material.id,
+        material_nombre: material.nombre,
+        unidad_corto: material.unidad_corto,
         color: est.color,
         bg: est.bg,
         icono: est.icono,
-        lote_id: datosLote.lote_id,
-        proveedor: datosLote.proveedor,
-        fecha_compra: datosLote.fecha_compra,
-        disponible: parseFloat(datosLote.disponible),
+        disponible: parseFloat(material.stock_actual),
         cantidad: 1,
         comentario: '',
     });
@@ -1018,7 +1052,7 @@ function renderTicket() {
             <span class="pellet-sm" style="--card-color:${l.color};--card-bg:${l.bg};"><i class="fa-solid ${l.icono}"></i></span>
             <div class="cuerpo">
                 <span class="nombre">${l.material_nombre}</span>
-                <div class="lote-info"><b>${l.proveedor}</b> · ${l.fecha_compra} · disp: ${formatearCantidadProd(l.disponible)} ${l.unidad_corto ?? ''}</div>
+                <div class="lote-info">stock disponible: <b>${formatearCantidadProd(l.disponible)}</b> ${l.unidad_corto ?? ''}</div>
                 <input type="text" class="comentario" placeholder="Comentario opcional"
                        value="${l.comentario ?? ''}"
                        onchange="fijarComentarioTicket(${l.tempId}, this.value)">
@@ -1045,7 +1079,6 @@ function renderTicket() {
 function obtenerDetalleJsonProd() {
     return JSON.stringify(ticketLineas.map(l => ({
         material_id: l.material_id,
-        rel_compra_material_id: l.lote_id,
         cantidad: l.cantidad,
         comentario: l.comentario,
     })));
@@ -1055,9 +1088,9 @@ function obtenerDetalleJsonProd() {
 function limpiarFormularioProduccion() {
     document.getElementById('formProduccion').reset();
     document.getElementById('prod_mat_buscar').value = '';
-    document.getElementById('prod_lote_panel').style.display = 'none';
+    document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
+    document.getElementById('prod_molde_id').disabled = true;
     produccionIdActual = 0;
-    materialSeleccionadoId = null;
     ticketLineas = [];
     renderTicket();
 }
@@ -1089,32 +1122,57 @@ async function abrirModalEditarProduccion(id) {
     document.getElementById('prod_fecha').value = formatearFechaHoraLocal(p.fecha);
     document.getElementById('prod_observaciones').value = p.observaciones ?? '';
 
+    // "unico_molde_producto" tiene el formato "{molde_id}-{producto_id}":
+    // de ahí se saca qué producto tenía seleccionado este avance, para
+    // preseleccionar el primer paso de la cascada (Producto).
+    const partesUnico = (p.unico_molde_producto || '').split('-');
+    const productoIdDesdeUnico = partesUnico.length > 1 ? partesUnico[1] : null;
+
     await cargarSelectsModal({
         operario_id: p.operario_id, maquina_id: p.maquina_id,
-        molde_id: p.molde_id, unico_molde: p.unico_molde, color_id: p.color_id,
+        producto_id: productoIdDesdeUnico,
+        unico_molde: p.unico_molde_producto,
+        color_id: p.color_id,
         categoria_material_id: p.categoria_material_id,
     });
     await renderGridMateriales();
 
+    // El detalle guardado puede tener varias filas para un mismo material
+    // (una por lote, por el reparto FIFO). Se agrupan por material_id para
+    // mostrar UNA sola línea en el ticket, como el usuario la ve.
     const detalle = json.detalle || [];
-    ticketLineas = detalle.map(d => {
+    const agregadoPorMaterial = {};
+    detalle.forEach(d => {
+        if (!agregadoPorMaterial[d.material_id]) {
+            agregadoPorMaterial[d.material_id] = {
+                material_id: d.material_id,
+                material_nombre: d.material_nombre,
+                unidad_corto: d.unidad_base_corto,
+                cantidad: 0,
+                comentario: d.comentario ?? '',
+            };
+        }
+        agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
+    });
+
+    const materiales = await obtenerOpcionesMaterialesProd();
+    ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const est = estiloMaterial(d.material_nombre);
+        const materialActual = materiales.find(m => m.id == d.material_id);
+        // El stock_actual ya tiene restada esta producción; para no bloquear
+        // el stepper al editar, le sumamos de vuelta lo que esta línea consume.
+        const disponibleParaEditar = (materialActual ? parseFloat(materialActual.stock_actual) : 0) + d.cantidad;
         return {
             tempId: ++contadorLineaTicket,
             material_id: d.material_id,
             material_nombre: d.material_nombre,
-            unidad_corto: d.unidad_base_corto,
+            unidad_corto: d.unidad_corto,
             color: est.color,
             bg: est.bg,
             icono: est.icono,
-            lote_id: d.rel_compra_material_id,
-            proveedor: d.proveedor,
-            fecha_compra: d.fecha_compra,
-            // el disponible "visible" del lote no incluye esta misma línea,
-            // así que se lo sumamos de vuelta para no bloquear los steppers.
-            disponible: parseFloat(d.lote_cantidad_base ?? d.cantidad),
-            cantidad: parseFloat(d.cantidad),
-            comentario: d.comentario ?? '',
+            disponible: disponibleParaEditar,
+            cantidad: d.cantidad,
+            comentario: d.comentario,
         };
     });
     renderTicket();
@@ -1129,8 +1187,8 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     const moldeSelect = document.getElementById('prod_molde_id');
     const opcionMolde  = moldeSelect.selectedOptions[0];
     const moldeIdReal  = opcionMolde?.dataset.moldeId || '';
-    const uniqueMolde  = moldeSelect.value;                 // ej: "7-2"
-    const moldeProducto = opcionMolde?.textContent || '';   // ej: "MOLDE BASTON OVALADO — COLGADOR OVALADO MULTIUSO"
+    const uniqueMolde  = moldeSelect.value;                          // ej: "7-2"
+    const moldeProducto = opcionMolde?.dataset.etiqueta || '';       // ej: "MOLDE BASTON OVALADO — COLGADOR OVALADO MULTIUSO"
 
     const params = {
         id: produccionIdActual,
