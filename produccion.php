@@ -115,12 +115,6 @@ include("header.php");
 .pc-tk-resumen-texto .total b{ font-size:1.15em; color:var(--pc-blue,#2F6FED); }
 .pc-tk-resumen-texto .detalle{ font-size:.75em; color:#8a8578; }
 
-/* Estado de corrida dentro de la card */
-.pc-corrida-sin{ color:#9a9585; font-size:.85em; }
-.pc-corrida-curso{ font-size:.8em; }
-.pc-corrida-curso small{ display:block; color:#8a8578; margin-top:2px; }
-.pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
-
 /* ===================================================================
    Listado de producción en CARDS, agrupado por PRODUCTO ("escalera").
    Cada grupo tiene un encabezado con el nombre del producto y, debajo,
@@ -141,36 +135,74 @@ include("header.php");
 .pc-prod-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
 
 .pc-prod-grid{
-    display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
-    gap:14px; margin-top:4px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(266px,1fr));
+    gap:12px; margin-top:4px;
 }
+
+/* Card minimalista: sin bloques de color, un solo hairline, jerarquía por
+   tipografía y espaciado en vez de fondos/badges. El único acento de color
+   vivo es el punto de estado (arriba-izq) y el botón "Pasar a ensamblaje". */
 .pc-prod-card{
-    border:1px solid #e7e4dd; border-radius:14px; background:#fff;
-    overflow:hidden; display:flex; flex-direction:column;
-    transition:box-shadow .12s ease, transform .12s ease;
+    border:1px solid #ece9e1; border-radius:12px; background:#fff;
+    padding:16px 16px 14px 16px; display:flex; flex-direction:column; gap:10px;
+    transition:border-color .15s ease, box-shadow .15s ease;
 }
-.pc-prod-card:hover{ box-shadow:0 6px 16px rgba(0,0,0,.08); transform:translateY(-1px); }
-.pc-prod-card.inactiva{ opacity:.6; }
-.pc-prod-card-head{
-    padding:10px 14px; background:#fdfcfa; border-bottom:1px solid #eee7db;
-    display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+.pc-prod-card:hover{ border-color:#d8d4c8; box-shadow:0 2px 10px rgba(20,18,10,.05); }
+.pc-prod-card.inactiva{ opacity:.55; }
+
+.pc-prod-card-top{ display:flex; align-items:center; gap:8px; }
+.pc-prod-dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:#c8c3b4; }
+.pc-prod-card.estado-curso .pc-prod-dot{ background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite; }
+.pc-prod-card.estado-fin .pc-prod-dot{ background:#16A34A; }
+.pc-prod-card.estado-ensamblaje .pc-prod-dot{ background:#8a8578; }
+
+.pc-prod-id{ font-size:.72em; color:#a7a293; font-weight:600; }
+.pc-prod-estado-txt{ font-size:.72em; color:#8a8578; font-weight:600; }
+.pc-prod-card.estado-curso .pc-prod-estado-txt{ color:#0B4DA6; }
+.pc-prod-card.estado-fin .pc-prod-estado-txt{ color:#16A34A; }
+.pc-prod-card-spacer{ flex:1; }
+.pc-prod-edit-btn{
+    border:none; background:none; color:#c3beae; padding:3px 5px; font-size:.85em; cursor:pointer;
+    border-radius:6px; transition:.12s ease; line-height:1;
 }
-.pc-prod-card-head .titulo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-.pc-prod-card-head .id{ font-size:.72em; color:#9a9585; font-weight:600; }
-.pc-prod-card-head .molde-titulo{ font-weight:700; font-size:.95em; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.pc-prod-card-body{ padding:12px 14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; flex:1; }
-.pc-prod-field{ min-width:0; }
-.pc-prod-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
-.pc-prod-field .val{ font-size:.85em; color:#3a3730; font-weight:600; overflow-wrap:break-word; }
-.pc-prod-field.span-2{ grid-column:1/-1; }
+.pc-prod-edit-btn:hover{ color:#2F6FED; background:#EAF0FE; }
+
+.pc-prod-title{ font-size:1em; font-weight:700; color:#1f2430; line-height:1.25; }
+
+.pc-prod-meta{ font-size:.78em; color:#9a9585; line-height:1.4; }
+.pc-prod-meta span:not(:last-child)::after{ content:"·"; margin:0 6px; color:#d8d4c8; }
+
+.pc-prod-stats{ display:flex; gap:22px; }
+.pc-prod-stat .num{ font-size:1.2em; font-weight:700; color:#1f2430; line-height:1; }
+.pc-prod-stat .lbl{ font-size:.66em; color:#9a9585; margin-top:3px; text-transform:uppercase; letter-spacing:.03em; }
+
+.pc-prod-tags{ display:flex; flex-wrap:wrap; gap:6px; }
+.pc-prod-tag{ font-size:.7em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:3px 8px; font-weight:600; }
+
+.pc-prod-corrida-line{ font-size:.78em; color:#9a9585; display:flex; align-items:center; gap:6px; }
+.pc-prod-corrida-line b{ color:#5c5947; font-weight:600; }
+
 .pc-prod-card-foot{
-    padding:8px 14px; border-top:1px solid #eee7db; background:#fffefb;
-    display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;
+    display:flex; align-items:center; gap:2px; padding-top:10px; margin-top:2px;
+    border-top:1px solid #f1efe8; flex-wrap:wrap;
 }
+.pc-prod-ghost-btn{
+    border:none; background:none; color:#8a8578; font-size:.78em; font-weight:600;
+    padding:6px 8px; border-radius:7px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;
+    transition:.12s ease;
+}
+.pc-prod-ghost-btn:hover{ background:#f6f4ee; color:#1f2430; }
+.pc-prod-ghost-btn.danger:hover{ color:#c94a4a; background:#FCEAEC; }
+.pc-prod-ghost-btn.success:hover{ color:#16A34A; background:#E8F7EE; }
+.pc-prod-ghost-btn.warn:hover{ color:#D97706; background:#FDF1E0; }
+
 .pc-btn-ensamblaje{
-    margin-left:auto; padding:7px 12px; font-size:.8em; display:inline-flex;
-    align-items:center; gap:6px; border-radius:8px;
+    margin-left:auto; padding:7px 13px; font-size:.78em; border-radius:8px; border:none;
+    background:#1f2430; color:#fff; font-weight:600; display:inline-flex; align-items:center; gap:6px;
+    cursor:pointer; transition:background .12s ease;
 }
+.pc-btn-ensamblaje:hover{ background:#2F6FED; color:#fff; }
+
 .pc-prod-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
 
 
@@ -182,18 +214,6 @@ include("header.php");
 .pc-tk-total-input:not([readonly]){ border-bottom-color:#d97706; }
 .pc-tk-total-input:focus{ outline:none; }
 
-.pc-btn-iniciar{
-    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #16A34A;
-    background:#E8F7EE; color:#16A34A; font-weight:700; display:inline-flex; align-items:center; gap:6px;
-    transition:.12s ease;
-}
-.pc-btn-iniciar:hover{ background:#16A34A; color:#fff; }
-.pc-btn-finalizar{
-    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #D97706;
-    background:#FDF1E0; color:#D97706; font-weight:700; display:inline-flex; align-items:center; gap:6px;
-    transition:.12s ease;
-}
-.pc-btn-finalizar:hover{ background:#D97706; color:#fff; }
 /* ---------- Chips de estadísticas rápidas ---------- */
 .pc-stat-row{
     display:grid; grid-template-columns:repeat(4,1fr); gap:12px;
@@ -219,15 +239,7 @@ include("header.php");
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
 /* ---------- Estado visual en las cards de producción ---------- */
-.pc-prod-card{
-    border-left:4px solid #e2ddcd;
-    transition:border-color .2s ease, background .8s ease;
-}
-.pc-prod-card.estado-sin{ border-left-color:#c8c3b4; }
-.pc-prod-card.estado-curso{ border-left-color:#0B4DA6; }
-.pc-prod-card.estado-fin{ border-left-color:#16A34A; }
-.pc-prod-card.estado-ensamblaje{ border-left-color:#8a8578; }
-.pc-prod-card.estado-ensamblaje{ opacity:.75; }
+.pc-prod-card.estado-ensamblaje{ opacity:.7; }
 
 .pc-prod-card.pc-flash{ animation:pc-flash-bg 1.8s ease; }
 @keyframes pc-flash-bg{
@@ -235,11 +247,6 @@ include("header.php");
     100%{ background:#fff; box-shadow:none; }
 }
 
-.pc-corrida-curso .badge.bg-info{ display:inline-flex; align-items:center; gap:5px; }
-.pc-corrida-curso .badge.bg-info::before{
-    content:""; width:6px; height:6px; border-radius:50%;
-    background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite;
-}
 @keyframes pc-pulse-blue{
     0%{ box-shadow:0 0 0 0 rgba(11,77,166,.6); }
     70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); }
@@ -599,12 +606,6 @@ async function llamarColor(accion, params = {}) {
     return resp.json();
 }
 
-function badgeRegistroProd(deletedAt) {
-    return !deletedAt
-        ? '<span class="badge bg-success">Activo</span>'
-        : '<span class="badge bg-secondary">Inactivo</span>';
-}
-
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
@@ -624,25 +625,27 @@ function formatearFechaHoraLegible(fechaIso) {
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
 }
 
-// ── Estado de la corrida (dentro de la card) ─────────────────
+function formatearFechaCorta(fechaIso) {
+    // Convierte "2026-07-10 14:30:00" a "10/07", para la línea de metadatos
+    if (!fechaIso) return '';
+    const [fecha] = fechaIso.split(' ');
+    if (!fecha) return fechaIso;
+    const [, m, d] = fecha.split('-');
+    return `${d}/${m}`;
+}
+
+// ── Texto de una sola línea con el estado de la corrida (dentro de la card) ─
 function estadoCorridaTexto(p) {
     if (p.enviado_ensamblaje) {
-        return `<span class="pc-corrida-fin">
-                    <span class="badge bg-secondary">Finalizado</span>
-                    <small>Enviado a ensamblaje: ${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</small>
-                </span>`;
+        return `Enviado a ensamblaje · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
     }
     if (!p.fecha_hora_inicio) {
-        return '<span class="pc-corrida-sin">Sin iniciar</span>';
+        return 'Corrida sin iniciar';
     }
     if (!p.fecha_hora_fin) {
-        return `<span class="pc-corrida-curso"><span class="badge bg-info text-dark">En curso</span>
-                <small>Inicio: ${formatearFechaHoraLegible(p.fecha_hora_inicio)}</small></span>`;
+        return `Iniciada · <b>${formatearFechaHoraLegible(p.fecha_hora_inicio)}</b>`;
     }
-    return `<span class="pc-corrida-fin">
-                Inicio: ${formatearFechaHoraLegible(p.fecha_hora_inicio)}<br>
-                Fin: ${formatearFechaHoraLegible(p.fecha_hora_fin)}
-            </span>`;
+    return `Inicio <b>${formatearFechaHoraLegible(p.fecha_hora_inicio)}</b> — Fin <b>${formatearFechaHoraLegible(p.fecha_hora_fin)}</b>`;
 }
 
 // ── Estética de cada material: color y ícono estables por nombre, para
@@ -821,83 +824,80 @@ function seleccionarTabProducto(nombre) {
 }
 
 function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
-    const colorTexto = p.color_nombre
-        ? `${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`
-        : '-';
-
-    const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
-    const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
     const estado = estadoCorto(p);
     nuevosEstados[p.id] = estado;
     const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
 
+    const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
+    const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+    const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
+
+    const textoEstado = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: 'En ensamblaje' }[estado];
+
+    // Línea de metadatos: color · operario · máquina · fecha, separados por
+    // puntos medios (::after en CSS). Se omite lo que no venga con dato.
+    const metaPartes = [];
+    if (p.color_nombre) {
+        metaPartes.push(`${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`);
+    }
+    if (p.operario_nombre) metaPartes.push(p.operario_nombre);
+    if (p.maquina_nombre) metaPartes.push(p.maquina_nombre);
+    if (p.fecha) metaPartes.push(formatearFechaCorta(p.fecha));
+
+    const tags = [];
+    if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
+
     return `
     <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
-        <div class="pc-prod-card-head">
-            <div class="titulo">
-                <span class="id">#${p.id}</span>
-                <span class="molde-titulo">${p.molde_nombre ?? '-'}</span>
-            </div>
-            ${badgeRegistroProd(p.deleted_at)}
-        </div>
-        <div class="pc-prod-card-body">
-            <div class="pc-prod-field">
-                <span class="lbl">Color</span>
-                <span class="val">${colorTexto}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Operario</span>
-                <span class="val">${p.operario_nombre ?? '-'}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Máquina</span>
-                <span class="val">${p.maquina_nombre ?? '-'}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Fecha</span>
-                <span class="val">${p.fecha}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Kg insertados</span>
-                <span class="val">${formatearCantidadProd(p.cantidad)}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Materiales</span>
-                <span class="val">${p.items_count}</span>
-            </div>
-            <div class="pc-prod-field">
-                <span class="lbl">Categoría material</span>
-                <span class="val">${p.categoria_material_nombre ?? '-'}</span>
-            </div>
-            <div class="pc-prod-field span-2">
-                <span class="lbl">Corrida</span>
-                <span class="val">${estadoCorridaTexto(p)}</span>
-            </div>
-        </div>
-        <div class="pc-prod-card-foot">
-            <button class="pc-icon-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+        <div class="pc-prod-card-top">
+            <span class="pc-prod-dot"></span>
+            <span class="pc-prod-id">#${p.id}</span>
+            <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
+            <span class="pc-prod-card-spacer"></span>
+            <button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
             </button>
+        </div>
+
+        <div class="pc-prod-title">${p.molde_nombre ?? '-'}</div>
+
+        <div class="pc-prod-meta">${metaPartes.map(t => `<span>${t}</span>`).join('')}</div>
+
+        <div class="pc-prod-stats">
+            <div class="pc-prod-stat">
+                <div class="num">${formatearCantidadProd(p.cantidad)}</div>
+                <div class="lbl">Kg insertados</div>
+            </div>
+            <div class="pc-prod-stat">
+                <div class="num">${p.items_count}</div>
+                <div class="lbl">Material${p.items_count == 1 ? '' : 'es'}</div>
+            </div>
+        </div>
+
+        ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => `<span class="pc-prod-tag">${t}</span>`).join('')}</div>` : ''}
+
+        <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
+
+        <div class="pc-prod-card-foot">
             ${puedeIniciar
-                ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
+                ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
                     <i class="fa-solid fa-play"></i> Iniciar</button>`
                 : ''
             }
             ${puedeFinalizar
-                ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
+                ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
                     <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
                 : ''
             }
             ${!p.deleted_at
-                ? `<button class="pc-icon-btn" onclick="eliminarProduccion(${p.id})" title="Desactivar">
+                ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
-                : `<button class="pc-icon-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
+                : `<button type="button" class="pc-prod-ghost-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                        <i class="fa-solid fa-rotate-left"></i></button>`
             }
             ${corridaFinalizada
-                ? `<button type="button" class="pc-btn pc-btn-primary pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
-                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Pasar a ensamblaje</button>`
+                ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
+                    Pasar a ensamblaje <i class="fa-solid fa-arrow-right"></i></button>`
                 : ''
             }
         </div>
