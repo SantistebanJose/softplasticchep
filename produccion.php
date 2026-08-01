@@ -122,23 +122,28 @@ include("header.php");
 .pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
 
 /* ===================================================================
-   Listado de producción en CARDS, agrupado por PRODUCTO ("escalera").
-   Cada grupo tiene un encabezado con el nombre del producto y, debajo,
-   la cuadrícula de avances (moldes) que lo están fabricando.
+   Listado de producción en CARDS, filtrado por PRODUCTO mediante
+   pestañas tipo "segmented control" (una por producto, con su
+   contador). Al tocar una pestaña se muestran solo las cards de ese
+   producto — no se apilan todos los grupos a la vez.
 =================================================================== */
-.pc-prod-group{ margin-bottom:26px; }
-.pc-prod-group:last-child{ margin-bottom:4px; }
-.pc-prod-group-header{
-    display:flex; align-items:center; gap:10px; margin:4px 0 12px 0;
+.pc-prod-tabs{
+    display:flex; gap:24px; overflow-x:auto; border-bottom:1px solid #e7e4dd;
+    margin-bottom:20px; padding-bottom:0;
 }
-.pc-prod-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
-.pc-prod-group-header .texto{
-    font-size:.78em; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
-    color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae; border-radius:999px;
-    padding:6px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px;
+.pc-prod-tab{
+    display:flex; align-items:center; gap:8px; padding:10px 2px 12px 2px;
+    border:none; background:none; cursor:pointer; font-weight:700; font-size:.85em;
+    color:#8a8578; white-space:nowrap; border-bottom:2px solid transparent;
+    transition:color .12s ease, border-color .12s ease;
 }
-.pc-prod-group-header .texto i{ font-size:.85em; opacity:.8; }
-.pc-prod-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
+.pc-prod-tab:hover{ color:#3a3730; }
+.pc-prod-tab.activo{ color:#152238; border-bottom-color:#0B4DA6; }
+.pc-prod-tab .cnt{
+    background:#EEECE6; color:#5c5947; font-size:.72em; font-weight:700;
+    border-radius:999px; padding:2px 9px; min-width:20px; text-align:center;
+}
+.pc-prod-tab.activo .cnt{ background:#0B4DA6; color:#fff; }
 
 .pc-prod-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
