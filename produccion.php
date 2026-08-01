@@ -122,28 +122,23 @@ include("header.php");
 .pc-corrida-fin{ font-size:.78em; color:#5c5947; line-height:1.3; }
 
 /* ===================================================================
-   Listado de producción en CARDS, filtrado por PRODUCTO mediante
-   pestañas tipo "segmented control" (una por producto, con su
-   contador). Al tocar una pestaña se muestran solo las cards de ese
-   producto — no se apilan todos los grupos a la vez.
+   Listado de producción en CARDS, agrupado por PRODUCTO ("escalera").
+   Cada grupo tiene un encabezado con el nombre del producto y, debajo,
+   la cuadrícula de avances (moldes) que lo están fabricando.
 =================================================================== */
-.pc-prod-tabs{
-    display:flex; gap:24px; overflow-x:auto; border-bottom:1px solid #e7e4dd;
-    margin-bottom:20px; padding-bottom:0;
+.pc-prod-group{ margin-bottom:26px; }
+.pc-prod-group:last-child{ margin-bottom:4px; }
+.pc-prod-group-header{
+    display:flex; align-items:center; gap:10px; margin:4px 0 12px 0;
 }
-.pc-prod-tab{
-    display:flex; align-items:center; gap:8px; padding:10px 2px 12px 2px;
-    border:none; background:none; cursor:pointer; font-weight:700; font-size:.85em;
-    color:#8a8578; white-space:nowrap; border-bottom:2px solid transparent;
-    transition:color .12s ease, border-color .12s ease;
+.pc-prod-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
+.pc-prod-group-header .texto{
+    font-size:.78em; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae; border-radius:999px;
+    padding:6px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px;
 }
-.pc-prod-tab:hover{ color:#3a3730; }
-.pc-prod-tab.activo{ color:#152238; border-bottom-color:#0B4DA6; }
-.pc-prod-tab .cnt{
-    background:#EEECE6; color:#5c5947; font-size:.72em; font-weight:700;
-    border-radius:999px; padding:2px 9px; min-width:20px; text-align:center;
-}
-.pc-prod-tab.activo .cnt{ background:#0B4DA6; color:#fff; }
+.pc-prod-group-header .texto i{ font-size:.85em; opacity:.8; }
+.pc-prod-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
 
 .pc-prod-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
@@ -250,6 +245,35 @@ include("header.php");
     70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); }
     100%{ box-shadow:0 0 0 0 rgba(11,77,166,0); }
 }
+
+/* ---------- Pestañas de producto (reemplazan los filtros anteriores) ---------- */
+.pc-tabs-toolbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px;
+}
+.pc-tabs-row{
+    display:flex; align-items:center; gap:22px; flex-wrap:wrap; row-gap:4px;
+}
+.pc-tab-item{
+    display:flex; align-items:center; gap:8px; padding:10px 2px 12px 2px;
+    border:none; background:none; cursor:pointer; font-size:.92em; font-weight:600;
+    color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap;
+    transition:color .12s ease, border-color .12s ease;
+}
+.pc-tab-item:hover{ color:#152238; }
+.pc-tab-item i{ font-size:.95em; }
+.pc-tab-item .cnt{
+    background:#EEECE6; color:#5c5947; font-size:.75em; font-weight:700;
+    border-radius:999px; padding:2px 8px; min-width:20px; text-align:center;
+}
+.pc-tab-item.activo{ color:#152238; border-bottom-color:#2F6FED; }
+.pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
+
+.pc-toggle-inactivos{
+    display:flex; align-items:center; gap:7px; font-size:.82em; color:#8a8578;
+    cursor:pointer; user-select:none; padding-bottom:12px; white-space:nowrap;
+}
+.pc-toggle-inactivos input{ width:15px; height:15px; cursor:pointer; accent-color:#2F6FED; }
 </style>
 
 <div class="pc-card">
@@ -262,29 +286,16 @@ include("header.php");
 <br>
     <div class="pc-stat-row" id="statRowProduccion"></div>
 
-    <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
-        <br>
-        <input type="text" id="fprod_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por molde u observaciones...">
-        <select id="fprod_operario" class="form-select" style="max-width:200px">
-            <option value="">Todos los operarios</option>
-        </select>
-        <select id="fprod_maquina" class="form-select" style="max-width:180px">
-            <option value="">Todas las máquinas</option>
-        </select>
-        <select id="fprod_molde" class="form-select" style="max-width:180px">
-            <option value="">Todos los moldes</option>
-        </select>
-        <select id="fprod_color" class="form-select" style="max-width:160px">
-            <option value="">Todos los colores</option>
-        </select>
-        <input type="date" id="fprod_desde" class="form-control" style="max-width:160px" title="Desde">
-        <input type="date" id="fprod_hasta" class="form-control" style="max-width:160px" title="Hasta">
-        <select id="fprod_estado" class="form-select" style="max-width:160px">
-            <option value="">Todos</option>
-            <option value="activa" selected>Activos</option>
-            <option value="inactiva">Inactivos</option>
-        </select>
+    <!-- Antes había una fila de filtros (texto, operario, máquina, molde,
+         color, fechas, estado). Se reemplazó por pestañas de producto:
+         al tocar una, se cargan solo los avances de ese producto. El
+         toggle "Ver inactivos" es lo único que queda como filtro aparte. -->
+    <div class="pc-tabs-toolbar">
+        <div class="pc-tabs-row" id="prodProductoTabs"></div>
+        <label class="pc-toggle-inactivos" title="Incluir también los avances desactivados">
+            <input type="checkbox" id="prodVerInactivos">
+            Ver inactivos
+        </label>
     </div>
 
     <div id="gridProducciones">
@@ -454,21 +465,15 @@ let contadorLineaTicket = 0;
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
                         //   disponible, cantidad, comentario}]
 
+// ── Pestañas de producto (reemplazan los filtros de arriba) ─────────────────
+let produccionesCache = [];      // último listado recibido del backend
+let productoTabActivo = null;    // nombre del producto seleccionado; null = aún sin definir
+
 document.addEventListener('DOMContentLoaded', () => {
-    cargarSelectsFiltro();
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('gridProducciones').innerHTML =
             `<div class="pc-prod-empty" style="color:red;">Error de conexión con el servidor. Revisa la consola (F12).</div>`;
-    });
-
-    let debounceTimer = null;
-    document.getElementById('fprod_texto').addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(cargarProducciones, 350);
-    });
-    ['fprod_operario', 'fprod_maquina', 'fprod_molde', 'fprod_color', 'fprod_estado', 'fprod_desde', 'fprod_hasta'].forEach(id => {
-        document.getElementById(id).addEventListener('change', cargarProducciones);
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
@@ -478,6 +483,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('prod_producto_id').addEventListener('change', (e) => {
         cargarMoldesDeProducto(e.target.value, null);
     });
+
+    document.getElementById('prodVerInactivos').addEventListener('change', () => cargarProducciones());
 
     iniciarAutoRefresh();
 });
@@ -662,32 +669,6 @@ function estiloMaterial(nombre) {
     };
 }
 
-// ── Selects auxiliares ───────────────────────────────────────────────────────
-async function cargarSelectsFiltro() {
-    const [operario, maquinas, moldes, colores] = await Promise.all([
-        llamarProduccion('BUSCAROPERARIOS'),
-        llamarProduccion('BUSCARMAQUINAS'),
-        llamarMoldes('LISTARMOLDES', { texto: '', estado: 'activa' }),
-        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
-    ]);
-    if (operario.success) {
-        const s = document.getElementById('fprod_operario');
-        operario.operario.forEach(o => s.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}</option>`));
-    }
-    if (maquinas.success) {
-        const s = document.getElementById('fprod_maquina');
-        maquinas.maquinas.forEach(m => s.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
-    }
-    if (moldes.success) {
-        const s = document.getElementById('fprod_molde');
-        moldes.moldes.forEach(m => s.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
-    }
-    if (colores.success) {
-        const s = document.getElementById('fprod_color');
-        colores.colores.forEach(c => s.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
-    }
-}
-
 // Categorías de material: mismo patrón de cache que antes, se piden una
 // sola vez por carga de página y se reutilizan cada vez que se abre el modal.
 async function obtenerCategoriasMaterialProd() {
@@ -791,7 +772,7 @@ async function obtenerOpcionesMaterialesProd() {
     return materialesProdCache;
 }
 
-// ── Listado en CARDS, agrupado por producto ("escalera") ─────────────────
+// ── Agrupación por producto ("escalera") ──────────────────────────────────
 // Agrupa las producciones por el nombre del producto, extraído del campo
 // molde_producto que ya guarda cada avance con el formato "MOLDE — PRODUCTO".
 // El orden de los grupos respeta el orden en que aparece cada producto en
@@ -805,6 +786,38 @@ function agruparProduccionesPorProducto(producciones) {
         grupos.get(nombreProducto).push(p);
     });
     return grupos;
+}
+
+// ── Pestañas de producto (reemplazan la fila de filtros anterior) ────────
+// Dibuja una pestaña por cada producto que tenga al menos un avance en el
+// listado actual, con su conteo, más una pestaña "Todos" para ver el
+// tablero completo agrupado (como antes). Al tocar una pestaña, solo se
+// muestran las cards de ese producto.
+function renderTabsProducto(grupos) {
+    const contenedor = document.getElementById('prodProductoTabs');
+    const totalGeneral = [...grupos.values()].reduce((s, items) => s + items.length, 0);
+
+    let html = `
+        <button type="button" class="pc-tab-item ${productoTabActivo === 'TODOS' ? 'activo' : ''}" onclick="seleccionarTabProducto('TODOS')">
+            <i class="fa-solid fa-grip"></i> Todos <span class="cnt">${totalGeneral}</span>
+        </button>`;
+
+    for (const [nombreProducto, items] of grupos) {
+        const nombreEscapado = nombreProducto.replace(/'/g, "\\'");
+        html += `
+            <button type="button" class="pc-tab-item ${productoTabActivo === nombreProducto ? 'activo' : ''}" onclick="seleccionarTabProducto('${nombreEscapado}')">
+                <i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="cnt">${items.length}</span>
+            </button>`;
+    }
+
+    contenedor.innerHTML = html;
+}
+
+function seleccionarTabProducto(nombre) {
+    productoTabActivo = nombre;
+    const grupos = agruparProduccionesPorProducto(produccionesCache);
+    renderTabsProducto(grupos);
+    renderGridProducciones(produccionesCache, false);
 }
 
 function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
@@ -891,30 +904,13 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     </div>`;
 }
 
-async function cargarProducciones(silencioso = false) {
-    const params = {
-        texto: document.getElementById('fprod_texto').value.trim(),
-        operario_id: document.getElementById('fprod_operario').value,
-        maquina_id: document.getElementById('fprod_maquina').value,
-        molde_id: document.getElementById('fprod_molde').value,
-        color_id: document.getElementById('fprod_color').value,
-        estado: document.getElementById('fprod_estado').value,
-        fecha_desde: document.getElementById('fprod_desde').value,
-        fecha_hasta: document.getElementById('fprod_hasta').value,
-    };
-
+// Dibuja el tablero de cards según la pestaña de producto activa. Si es
+// "TODOS", se ve como antes (secciones agrupadas por producto); si es un
+// producto puntual, se ve solo su cuadrícula de avances.
+function renderGridProducciones(producciones, silencioso) {
     const grid = document.getElementById('gridProducciones');
-    if (!silencioso) grid.innerHTML = '<div class="pc-prod-empty">Cargando...</div>';
-
-    const json = await llamarProduccion('LISTARPRODUCCIONES', params);
-
-    if (!json.success) {
-        grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
-        return;
-    }
-
-    const producciones = json.producciones || [];
     renderStatRow(producciones);
+
     if (producciones.length === 0) {
         grid.innerHTML = '<div class="pc-prod-empty">No hay registros de producción.</div>';
         snapshotEstados = {};
@@ -925,22 +921,60 @@ async function cargarProducciones(silencioso = false) {
     const grupos = agruparProduccionesPorProducto(producciones);
 
     let html = '';
-    for (const [nombreProducto, items] of grupos) {
-        html += `
-            <div class="pc-prod-group">
-                <div class="pc-prod-group-header">
-                    <span class="linea"></span>
-                    <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-prod-group-count">· ${items.length}</span></span>
-                    <span class="linea"></span>
-                </div>
-                <div class="pc-prod-grid">
-                    ${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}
-                </div>
-            </div>`;
+    if (productoTabActivo === 'TODOS') {
+        for (const [nombreProducto, items] of grupos) {
+            html += `
+                <div class="pc-prod-group">
+                    <div class="pc-prod-group-header">
+                        <span class="linea"></span>
+                        <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-prod-group-count">· ${items.length}</span></span>
+                        <span class="linea"></span>
+                    </div>
+                    <div class="pc-prod-grid">
+                        ${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}
+                    </div>
+                </div>`;
+        }
+    } else {
+        const items = grupos.get(productoTabActivo) || [];
+        html = items.length
+            ? `<div class="pc-prod-grid">${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}</div>`
+            : '<div class="pc-prod-empty">No hay avances registrados para este producto.</div>';
+        // Igual calculamos el estado de todos para que el snapshot no pierda
+        // de vista lo que pasa en las pestañas que no se están mostrando.
+        producciones.forEach(p => { if (!(p.id in nuevosEstados)) nuevosEstados[p.id] = estadoCorto(p); });
     }
-    grid.innerHTML = html;
 
+    grid.innerHTML = html;
     snapshotEstados = nuevosEstados;
+}
+
+async function cargarProducciones(silencioso = false) {
+    const grid = document.getElementById('gridProducciones');
+    if (!silencioso) grid.innerHTML = '<div class="pc-prod-empty">Cargando...</div>';
+
+    const verInactivos = document.getElementById('prodVerInactivos').checked;
+    const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: verInactivos ? '' : 'activa' });
+
+    if (!json.success) {
+        grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
+        return;
+    }
+
+    produccionesCache = json.producciones || [];
+    const grupos = agruparProduccionesPorProducto(produccionesCache);
+
+    // La pestaña activa por defecto es el PRIMER producto del listado (no
+    // "Todos"). Si la pestaña que estaba activa ya no existe en el nuevo
+    // listado (se desactivó el único avance de ese producto, por ejemplo),
+    // se cae de vuelta al primer producto disponible.
+    if (productoTabActivo === null || (productoTabActivo !== 'TODOS' && !grupos.has(productoTabActivo))) {
+        const primerProducto = grupos.keys().next().value;
+        productoTabActivo = primerProducto ?? 'TODOS';
+    }
+
+    renderTabsProducto(grupos);
+    renderGridProducciones(produccionesCache, silencioso);
 }
 // =============================================================================
 // MENÚ DE MATERIALES + TICKET (sin selección de lote)
