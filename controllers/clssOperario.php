@@ -323,6 +323,10 @@ function buscarDNI()
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 8,
         CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Accept: application/json',
+        ],
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     ]);
     $respuesta = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -333,6 +337,7 @@ function buscarDNI()
         responder(false, 'No se pudo conectar con el servicio de consulta DNI: ' . $errorCurl);
     }
     if ($httpCode !== 200) {
+        error_log("BUSCARDNI dni={$dni} httpCode={$httpCode} body={$respuesta}");
         responder(false, 'DNI no encontrado o servicio no disponible (HTTP ' . $httpCode . ').');
     }
 
