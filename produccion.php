@@ -330,7 +330,9 @@ include("header.php");
             </div>
             <div class="col-md-4 mb-2">
                 <label class="form-label">Máquina</label>
-                <select class="form-select" id="prod_operario_id"><option value="">Selecciona...</option></select>
+                <select class="form-select" id="prod_maquina_id">
+                    <option value="">Selecciona...</option>
+                </select>
             </div>
             <div class="col-md-4 mb-2">
                 <label class="form-label">Categoría de material</label>
