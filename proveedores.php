@@ -17,7 +17,12 @@ include("header.php");
     <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
         <br>
         <input type="text" id="fprov_texto" class="form-control" style="max-width:280px"
-               placeholder="Buscar por razón social, nombre comercial o RUC/DNI...">
+            placeholder="Buscar por razón social, nombre comercial o RUC/DNI...">
+        <select id="fprov_tipo" class="form-select" style="max-width:160px">
+            <option value="">Todos los tipos</option>
+            <option value="cliente">Clientes</option>
+            <option value="proveedor">Proveedores</option>
+        </select>
         <select id="fprov_estado" class="form-select" style="max-width:160px">
             <option value="">Todos</option>
             <option value="activa" selected>Activos</option>
@@ -30,6 +35,7 @@ include("header.php");
         <thead>
             <tr>
                 <th>RUC/DNI</th>
+                <th>Tipo</th>
                 <th>Razón social</th>
                 <th>Nombre comercial</th>
                 <th>Correo</th>
@@ -68,6 +74,14 @@ include("header.php");
             </div>
             <div class="form-text" id="prov_consulta_info"></div>
           </div>
+          <div class="mb-2">
+                <label class="form-label">Tipo *</label>
+                <select class="form-select" name="tipo" id="prov_tipo" required>
+                    <option value="">Selecciona...</option>
+                    <option value="cliente">Cliente</option>
+                    <option value="proveedor">Proveedor (de material)</option>
+                </select>
+            </div>
 
           <div class="mb-2">
             <label class="form-label">Razón social / Nombre completo *</label>
@@ -133,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarProveedores().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyProveedores').innerHTML =
-            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // Búsqueda automática
@@ -144,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('fprov_estado').addEventListener('change', cargarProveedores);
+    document.getElementById('fprov_tipo').addEventListener('change', cargarProveedores);
 
     // Solo dígitos en el campo de documento
     ['prov_ruc'].forEach(id => {
@@ -152,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
-
 // ── Llamadas genéricas ───────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -182,18 +196,19 @@ function badgeRegistro(deletedAt) {
 async function cargarProveedores() {
     const texto  = document.getElementById('fprov_texto').value.trim();
     const estado = document.getElementById('fprov_estado').value;
+    const tipo   = document.getElementById('fprov_tipo').value;
 
-    const json = await llamarProveedores('LISTARPROVEEDORES', { texto, estado });
+    const json = await llamarProveedores('LISTARPROVEEDORES', { texto, estado, tipo });
     const tbody = document.getElementById('tbodyProveedores');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const proveedores = json.proveedores || [];
     if (proveedores.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay proveedores registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay proveedores registrados.</td></tr>';
         return;
     }
 
@@ -209,9 +224,14 @@ async function cargarProveedores() {
             ? telefonos.map(t => t.telefono).join(', ')
             : '-';
 
+        const badgeTipo = p.tipo === 'cliente'
+            ? '<span class="badge bg-info">Cliente</span>'
+            : '<span class="badge bg-warning text-dark">Proveedor</span>';
+
         return `
         <tr id="fila-proveedor-${p.ruc}">
             <td data-label="RUC/DNI">${p.ruc}</td>
+            <td data-label="Tipo">${badgeTipo}</td>
             <td data-label="Razón social">${p.razon_social}</td>
             <td data-label="Nombre comercial">${p.nombre_comercial ?? '-'}</td>
             <td data-label="Correo">${p.correo ?? '-'}</td>
@@ -231,7 +251,6 @@ async function cargarProveedores() {
         </tr>`;
     }).join('');
 }
-
 // ── Teléfonos dinámicos ──────────────────────────────────────────────────────
 function agregarFilaTelefono(telefono = '', contacto = '') {
     const wrap = document.getElementById('prov_telefonos_wrap');
@@ -299,6 +318,7 @@ async function consultarDocumentoProveedor() {
 // ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioProveedor() {
     document.getElementById('formProveedor').reset();
+    document.getElementById('prov_tipo').value = '';
     document.getElementById('prov_telefonos_wrap').innerHTML = '';
     document.getElementById('prov_consulta_info').textContent = '';
     document.getElementById('prov_js_consulta_api').value = '';
@@ -323,7 +343,8 @@ async function abrirModalEditarProveedor(ruc) {
     const p = json.proveedor;
     document.getElementById('modalProveedorTitulo').textContent = 'Editar proveedor';
     document.getElementById('prov_ruc').value = p.ruc;
-    document.getElementById('prov_ruc').disabled = true; // el RUC/DNI es la llave primaria, no se edita
+    document.getElementById('prov_ruc').disabled = true;
+    document.getElementById('prov_tipo').value = p.tipo ?? '';
     document.getElementById('prov_razon_social').value = p.razon_social ?? '';
     document.getElementById('prov_nombre_comercial').value = p.nombre_comercial ?? '';
     document.getElementById('prov_correo').value = p.correo ?? '';
@@ -351,6 +372,7 @@ document.getElementById('formProveedor').addEventListener('submit', async functi
     const params = {
         accion: 'GUARDARPROVEEDOR',
         ruc: document.getElementById('prov_ruc').value.trim(),
+        tipo: document.getElementById('prov_tipo').value,
         razon_social: document.getElementById('prov_razon_social').value.trim(),
         nombre_comercial: document.getElementById('prov_nombre_comercial').value.trim(),
         correo: document.getElementById('prov_correo').value.trim(),

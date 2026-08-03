@@ -87,7 +87,8 @@ function listarProveedores()
     $conectar = conectar_oll_BD();
 
     $texto  = trim($_POST['texto'] ?? '');
-    $estado = trim($_POST['estado'] ?? ''); // '', 'activa', 'inactiva'
+    $estado = trim($_POST['estado'] ?? '');
+    $tipo   = trim($_POST['tipo'] ?? ''); // '', 'cliente', 'proveedor'
 
     $where  = ["1=1"];
     $params = [];
@@ -102,6 +103,10 @@ function listarProveedores()
         $where[] = "deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
         $where[] = "deleted_at IS NOT NULL";
+    }
+    if ($tipo === 'cliente' || $tipo === 'proveedor') {
+        $where[] = "tipo = :tipo";
+        $params['tipo'] = $tipo;
     }
 
     $sql = "SELECT * FROM proveedor WHERE " . implode(' AND ', $where) . " ORDER BY razon_social";
@@ -187,6 +192,7 @@ function guardarProveedor()
     $conectar = conectar_oll_BD();
 
     $ruc              = trim($_POST['ruc'] ?? '');
+    $tipo             = trim($_POST['tipo'] ?? '');
     $razon_social     = trim($_POST['razon_social'] ?? '');
     $nombre_comercial = trim($_POST['nombre_comercial'] ?? '');
     $correo           = trim($_POST['correo'] ?? '');
@@ -199,12 +205,14 @@ function guardarProveedor()
     if (!esDocumentoProveedorValido($ruc)) {
         responder(false, 'El documento del proveedor debe tener 11 dígitos (RUC) u 8 dígitos (DNI).');
     }
+    if ($tipo !== 'cliente' && $tipo !== 'proveedor') {
+        responder(false, 'Debes indicar el tipo: cliente o proveedor.');
+    }
     if (empty($razon_social)) responder(false, 'La razón social / nombre es obligatorio.');
     if ($correo !== '' && !filter_var($correo, FILTER_VALIDATE_EMAIL)) {
         responder(false, 'El correo no tiene un formato válido.');
     }
 
-    // Normalizamos teléfonos: [{ "telefono": "...", "contacto": "..." }, ...]
     $telefonos = json_decode($telefonosJson, true);
     if (!is_array($telefonos)) $telefonos = [];
     $telefonos = array_values(array_filter(
@@ -212,13 +220,12 @@ function guardarProveedor()
         fn($t) => is_array($t) && !empty(trim($t['telefono'] ?? ''))
     ));
 
-    // Si mandaron una consulta de API, validamos que sea JSON válido
     if ($consultaApiJson !== '' && json_decode($consultaApiJson) === null) {
         $consultaApiJson = '';
     }
 
-    // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
+        'tipo'               => 'Tipo',
         'razon_social'       => 'Razón social',
         'nombre_comercial'   => 'Nombre comercial',
         'correo'             => 'Correo',
@@ -228,6 +235,7 @@ function guardarProveedor()
     ];
 
     $datosNuevos = [
+        'tipo'               => $tipo,
         'razon_social'       => $razon_social,
         'nombre_comercial'   => $nombre_comercial ?: null,
         'correo'             => $correo ?: null,
@@ -239,7 +247,6 @@ function guardarProveedor()
     $existente = executeQuery($conectar, "SELECT * FROM proveedor WHERE ruc = :ruc", ['ruc' => $ruc]);
 
     if (empty($existente)) {
-        // ── Creación ─────────────────────────────────────────────────────────
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
         $movimiento         = obtenerMovimientoSesion('crear', $cambios);
@@ -249,16 +256,17 @@ function guardarProveedor()
         try {
             $filas = executeNonQuery($conectar, "
                 INSERT INTO proveedor (
-                    ruc, razon_social, nombre_comercial, telefonos_contacto,
+                    ruc, tipo, razon_social, nombre_comercial, telefonos_contacto,
                     correo, ubigeo, ubicacion, js_consulta_api,
                     created_at, js_session, js_historial
                 ) VALUES (
-                    :ruc, :razon_social, :nombre_comercial, :telefonos_contacto::jsonb,
+                    :ruc, :tipo, :razon_social, :nombre_comercial, :telefonos_contacto::jsonb,
                     :correo, :ubigeo, :ubicacion, :js_consulta_api::jsonb,
                     NOW(), :js_session, :js_historial
                 )
             ", [
                 'ruc'                => $ruc,
+                'tipo'               => $datosNuevos['tipo'],
                 'razon_social'       => $datosNuevos['razon_social'],
                 'nombre_comercial'   => $datosNuevos['nombre_comercial'],
                 'telefonos_contacto' => $datosNuevos['telefonos_contacto'],
@@ -270,11 +278,10 @@ function guardarProveedor()
                 'js_historial'       => $js_historial_nuevo,
             ]);
         } catch (PDOException $e) {
-            // Código 23505 = violación de llave única (Postgres) -> ya existe ese RUC/DNI
             if ($e->getCode() === '23505') {
                 responder(false, 'Ya existe un proveedor registrado con ese RUC/DNI.');
             }
-            throw $e; // lo captura el try/catch general y responde el mensaje real
+            throw $e;
         }
 
         if ($filas < 1) {
@@ -283,9 +290,7 @@ function guardarProveedor()
 
         responder(true, 'Proveedor creado correctamente.', ['ruc' => $ruc, 'modo' => 'crear']);
     } else {
-        // ── Edición ──────────────────────────────────────────────────────────
         $registroAnterior = $existente[0];
-        // El driver puede devolver el jsonb ya decodificado; lo normalizamos a string para comparar justo
         $registroAnterior['telefonos_contacto'] = is_string($registroAnterior['telefonos_contacto'] ?? null)
             ? $registroAnterior['telefonos_contacto']
             : json_encode($registroAnterior['telefonos_contacto'] ?? [], JSON_UNESCAPED_UNICODE);
@@ -296,11 +301,11 @@ function guardarProveedor()
         $js_session         = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-        // Solo pisamos js_consulta_api si mandaron una consulta nueva, para no perder la anterior
         $actualizarApi = $consultaApiJson !== '';
 
         $sql = "
             UPDATE proveedor SET
+                tipo               = :tipo,
                 razon_social       = :razon_social,
                 nombre_comercial   = :nombre_comercial,
                 telefonos_contacto = :telefonos_contacto::jsonb,
@@ -315,6 +320,7 @@ function guardarProveedor()
         ";
 
         $params = [
+            'tipo'               => $datosNuevos['tipo'],
             'razon_social'       => $datosNuevos['razon_social'],
             'nombre_comercial'   => $datosNuevos['nombre_comercial'],
             'telefonos_contacto' => $datosNuevos['telefonos_contacto'],
@@ -336,7 +342,6 @@ function guardarProveedor()
         responder(true, 'Proveedor actualizado correctamente.', ['ruc' => $ruc, 'modo' => 'editar']);
     }
 }
-
 // Soft delete: se marca deleted_at, no se borra físicamente.
 function eliminarProveedor()
 {
