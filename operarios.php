@@ -30,13 +30,14 @@ include("header.php");
             <tr>
                 <th>#</th>
                 <th>Nombre completo</th>
+                <th>DNI</th>
                 <th>Cargo</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyOperarios">
-            <tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -52,6 +53,17 @@ include("header.php");
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">DNI</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="op_dni" maxlength="8"
+                     placeholder="Ej: 73578005" inputmode="numeric">
+              <button type="button" class="btn btn-outline-secondary" id="btnBuscarDNI">
+                <i class="fa-solid fa-magnifying-glass"></i> Buscar
+              </button>
+            </div>
+            <small class="text-muted">Opcional. Autocompleta el nombre si se ingresa.</small>
+          </div>
           <div class="mb-2">
             <label class="form-label">Nombre completo *</label>
             <input type="text" class="form-control" id="op_nombre_completo" required>
@@ -83,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarOperarios().catch(err => {
         console.error('Error cargando operarios:', err);
         document.getElementById('tbodyOperarios').innerHTML =
-            `<tr><td colspan="5" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     let debounceTimer = null;
@@ -92,6 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
         debounceTimer = setTimeout(cargarOperarios, 350);
     });
     document.getElementById('fop_estado').addEventListener('change', cargarOperarios);
+
+    document.getElementById('btnBuscarDNI').addEventListener('click', buscarDNIOperario);
+    document.getElementById('op_dni').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); buscarDNIOperario(); }
+    });
 });
 
 async function llamarOperario(accion, params = {}) {
@@ -126,13 +143,13 @@ async function cargarOperarios() {
     const tbody = document.getElementById('tbodyOperarios');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const operarios = json.operarios || [];
     if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay operarios registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay operarios registrados.</td></tr>';
         return;
     }
 
@@ -140,6 +157,7 @@ async function cargarOperarios() {
         <tr id="fila-operario-${o.id}">
             <td data-label="#">${o.id}</td>
             <td data-label="Nombre completo">${o.nombre_completo}</td>
+            <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo ?? '-'}</td>
             <td data-label="Estado">${badgeEstadoOperario(o.deleted_at)}</td>
             <td data-label="Acciones" class="pc-td-acciones">
@@ -181,8 +199,34 @@ async function abrirModalEditarOperario(id) {
     document.getElementById('modalOperarioTitulo').textContent = 'Editar operario #' + id;
     document.getElementById('op_nombre_completo').value = o.nombre_completo;
     document.getElementById('op_cargo').value = o.cargo ?? '';
+    document.getElementById('op_dni').value = o.dni ?? '';
 
     modalOperario.show();
+}
+
+async function buscarDNIOperario() {
+    const dni = document.getElementById('op_dni').value.trim();
+    if (!/^\d{8}$/.test(dni)) {
+        Swal.fire('DNI inválido', 'Ingresa un DNI de 8 dígitos.', 'warning');
+        return;
+    }
+
+    const btn = document.getElementById('btnBuscarDNI');
+    const textoOriginal = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+        const json = await llamarOperario('BUSCARDNI', { dni });
+        if (json.success) {
+            document.getElementById('op_nombre_completo').value = json.nombre_completo;
+        } else {
+            Swal.fire('No encontrado', json.message, 'error');
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = textoOriginal;
+    }
 }
 
 document.getElementById('formOperario').addEventListener('submit', async function (e) {
@@ -192,6 +236,7 @@ document.getElementById('formOperario').addEventListener('submit', async functio
         id: operarioIdActual,
         nombre_completo: document.getElementById('op_nombre_completo').value.trim(),
         cargo: document.getElementById('op_cargo').value.trim(),
+        dni: document.getElementById('op_dni').value.trim(),
     };
 
     const json = await llamarOperario('GUARDAROPERARIO', params);

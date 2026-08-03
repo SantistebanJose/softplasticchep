@@ -3,7 +3,7 @@
 /**
  * controllers/clssOperario.php
  * Controlador del módulo de Operarios
- * Tabla real: operario (id, nombre_completo, cargo, activo, created_at,
+ * Tabla real: operario (id, nombre_completo, cargo, dni, activo, created_at,
  *             updated_at, deleted_at, js_session, js_historial)
  *
  * Soft delete vía deleted_at (mismo patrón que 'orden_produccion' / 'moldes').
@@ -37,6 +37,9 @@ function controladorOperario($accion)
             break;
         case 'REACTIVAROPERARIO':
             reactivarOperario();
+            break;
+        case 'BUSCARDNI':
+            buscarDNI();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -162,17 +165,33 @@ function guardarOperario()
     $id              = intval($_POST['id'] ?? 0);
     $nombre_completo = trim($_POST['nombre_completo'] ?? '');
     $cargo           = trim($_POST['cargo'] ?? '');
+    $dni             = trim($_POST['dni'] ?? '');
 
     if (empty($nombre_completo)) responder(false, 'El nombre completo es obligatorio.');
+    if ($dni !== '' && !preg_match('/^\d{8}$/', $dni)) {
+        responder(false, 'El DNI debe tener 8 dígitos.');
+    }
+
+    // Validar unicidad del DNI (excluyendo al propio registro en edición)
+    if ($dni !== '') {
+        $existe = executeQuery($conectar, "
+            SELECT id FROM operario WHERE dni = :dni AND id <> :id
+        ", ['dni' => $dni, 'id' => $id]);
+        if (!empty($existe)) {
+            responder(false, 'Ya existe un operario registrado con ese DNI.');
+        }
+    }
 
     $mapaCampos = [
         'nombre_completo' => 'Nombre completo',
         'cargo'           => 'Cargo',
+        'dni'             => 'DNI',
     ];
 
     $datosNuevos = [
         'nombre_completo' => $nombre_completo,
         'cargo'           => $cargo !== '' ? $cargo : null,
+        'dni'             => $dni !== '' ? $dni : null,
     ];
 
     if ($id === 0) {
@@ -184,13 +203,14 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo, activo, created_at, js_session, js_historial)
+                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial)
             VALUES
-                (:nombre_completo, :cargo, true, NOW(), :js_session, :js_historial)
+                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre_completo' => $datosNuevos['nombre_completo'],
             'cargo'           => $datosNuevos['cargo'],
+            'dni'             => $datosNuevos['dni'],
             'js_session'      => $js_session,
             'js_historial'    => $js_historial_nuevo,
         ]);
@@ -215,6 +235,7 @@ function guardarOperario()
             UPDATE operario SET
                 nombre_completo = :nombre_completo,
                 cargo           = :cargo,
+                dni             = :dni,
                 updated_at      = NOW(),
                 js_session      = :js_session,
                 js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -222,6 +243,7 @@ function guardarOperario()
         ", [
             'nombre_completo' => $datosNuevos['nombre_completo'],
             'cargo'           => $datosNuevos['cargo'],
+            'dni'             => $datosNuevos['dni'],
             'id'              => $id,
             'js_session'      => $js_session,
             'js_historial'    => $js_historial_nuevo,
@@ -280,6 +302,49 @@ function reactivarOperario()
     registrarMovimiento($conectar, $id, 'reactivar', $cambios);
 
     responder(true, 'Operario reactivado correctamente.');
+}
+
+// =============================================================================
+// CONSULTA EXTERNA DE DNI
+// =============================================================================
+
+function buscarDNI()
+{
+    $dni = trim($_POST['dni'] ?? '');
+
+    if (!preg_match('/^\d{8}$/', $dni)) {
+        responder(false, 'El DNI debe tener 8 dígitos.');
+    }
+
+    $url = "https://graphperu.daustinn.com/api/query/{$dni}";
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 8,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    $respuesta = curl_exec($ch);
+    $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $errorCurl = curl_error($ch);
+    curl_close($ch);
+
+    if ($respuesta === false) {
+        responder(false, 'No se pudo conectar con el servicio de consulta DNI: ' . $errorCurl);
+    }
+    if ($httpCode !== 200) {
+        responder(false, 'DNI no encontrado o servicio no disponible (HTTP ' . $httpCode . ').');
+    }
+
+    $datos = json_decode($respuesta, true);
+    if (!$datos || empty($datos['fullName'])) {
+        responder(false, 'No se encontraron datos para ese DNI.');
+    }
+
+    responder(true, 'OK', [
+        'dni'             => $datos['documentID'] ?? $dni,
+        'nombre_completo' => $datos['fullName']    ?? '',
+    ]);
 }
 
 // =============================================================================
