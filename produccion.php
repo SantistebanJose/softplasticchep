@@ -330,9 +330,7 @@ include("header.php");
             </div>
             <div class="col-md-4 mb-2">
                 <label class="form-label">Máquina</label>
-                <select class="form-select" id="prod_maquina_id">
-                    <option value="">Selecciona...</option>
-                </select>
+                <select class="form-select" id="prod_operario_id"><option value="">Selecciona...</option></select>
             </div>
             <div class="col-md-4 mb-2">
                 <label class="form-label">Categoría de material</label>
@@ -457,6 +455,8 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+
+
 var total = 0;
 const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
 const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el filtro de moldes y el <select> de color
@@ -465,6 +465,7 @@ const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduc
 
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
+let tsOperario = null;
 let materialesProdCache = null; // cache de materiales para las cards
 let productosMoldeProdCache = null; // cache de productos (para el 1er select en cascada)
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
@@ -495,6 +496,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     iniciarAutoRefresh();
 });
+function inicializarTomSelectOperario() {
+    if (tsOperario) return;
+    tsOperario = new TomSelect('#prod_operario_id', {
+        valueField: 'id',
+        labelField: 'nombre_completo',
+        searchField: ['nombre_completo', 'dni'],
+        options: [],
+        placeholder: 'Buscar por nombre o DNI...',
+        render: {
+            option: function (data, escape) {
+                return `<div>
+                    <span>${escape(data.nombre_completo)}</span>
+                    ${data.dni ? `<span class="text-muted small"> — DNI ${escape(data.dni)}</span>` : ''}
+                    ${data.cargo ? `<div class="text-muted small">${escape(data.cargo)}</div>` : ''}
+                </div>`;
+            },
+            item: function (data, escape) {
+                return `<div>${escape(data.nombre_completo)}</div>`;
+            }
+        }
+    });
+}
 // =============================================================================
 // TIEMPO REAL: refresco silencioso en segundo plano
 // =============================================================================
@@ -732,11 +755,23 @@ async function cargarSelectsModal(seleccion = {}) {
         obtenerProductosMoldeProd(),
     ]);
 
-    const operarioSelect = document.getElementById('prod_operario_id');
-    operarioSelect.innerHTML = '<option value="">Selecciona...</option>';
-    if (operario.success) operario.operario.forEach(o =>
-        operarioSelect.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}${o.cargo ? ' - ' + o.cargo : ''}</option>`));
-    if (seleccion.operario_id) operarioSelect.value = seleccion.operario_id;
+    // Operario: ahora usa Tom Select (buscador por nombre o DNI) en vez
+    // de un <select> nativo con insertAdjacentHTML.
+    inicializarTomSelectOperario();
+    tsOperario.clearOptions();
+    if (operario.success) operario.operario.forEach(o => {
+        tsOperario.addOption({
+            id: o.id,
+            nombre_completo: o.nombre_completo,
+            cargo: o.cargo,
+            dni: o.dni,
+        });
+    });
+    if (seleccion.operario_id) {
+        tsOperario.setValue(seleccion.operario_id);
+    } else {
+        tsOperario.clear();
+    }
 
     const maquinaSelect = document.getElementById('prod_maquina_id');
     maquinaSelect.innerHTML = '<option value="">Selecciona...</option>';
@@ -767,7 +802,6 @@ async function cargarSelectsModal(seleccion = {}) {
         colorSelect.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
     if (seleccion.color_id) colorSelect.value = seleccion.color_id;
 }
-
 async function obtenerOpcionesMaterialesProd() {
     if (materialesProdCache) return materialesProdCache;
     const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {});
@@ -1123,12 +1157,12 @@ function obtenerDetalleJsonProd() {
     })));
 }
 
-// ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioProduccion() {
     document.getElementById('formProduccion').reset();
     document.getElementById('prod_mat_buscar').value = '';
     document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
     document.getElementById('prod_molde_id').disabled = true;
+    if (tsOperario) tsOperario.clear();
     produccionIdActual = 0;
     ticketLineas = [];
     renderTicket();

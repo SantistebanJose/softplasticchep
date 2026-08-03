@@ -163,8 +163,17 @@ function controladorProduccion($accion)
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre_completo, cargo FROM operario WHERE activo = true ORDER BY nombre_completo";
-    $result = executeQuery($conectar, $sql, []);
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where = ["activo = true"];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "(LOWER(nombre_completo) LIKE LOWER(:texto) OR dni LIKE :texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    $sql = "SELECT id, nombre_completo, cargo, dni FROM operario WHERE " . implode(' AND ', $where) . " ORDER BY nombre_completo LIMIT 50";
+    $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
 }
 
