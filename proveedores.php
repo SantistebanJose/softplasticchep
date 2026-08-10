@@ -22,6 +22,7 @@ include("header.php");
             <option value="">Todos los tipos</option>
             <option value="cliente">Clientes</option>
             <option value="proveedor">Proveedores</option>
+            <option value="ambos">Ambos</option>
         </select>
         <select id="fprov_estado" class="form-select" style="max-width:160px">
             <option value="">Todos</option>
@@ -74,14 +75,18 @@ include("header.php");
             </div>
             <div class="form-text" id="prov_consulta_info"></div>
           </div>
+
           <div class="mb-2">
-                <label class="form-label">Tipo *</label>
-                <select class="form-select" name="tipo" id="prov_tipo" required>
-                    <option value="">Selecciona...</option>
-                    <option value="cliente">Cliente</option>
-                    <option value="proveedor">Proveedor (de material)</option>
-                </select>
-            </div>
+              <label class="form-label d-block">Tipo *</label>
+              <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="checkbox" id="prov_tipo_cliente" value="cliente">
+                  <label class="form-check-label" for="prov_tipo_cliente">Cliente</label>
+              </div>
+              <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="checkbox" id="prov_tipo_proveedor" value="proveedor">
+                  <label class="form-check-label" for="prov_tipo_proveedor">Proveedor</label>
+              </div>
+          </div>
 
           <div class="mb-2">
             <label class="form-label">Razón social / Nombre completo *</label>
@@ -167,6 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
 // ── Llamadas genéricas ───────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -190,6 +196,26 @@ function badgeRegistro(deletedAt) {
     return !deletedAt
         ? '<span class="badge bg-success">Activo</span>'
         : '<span class="badge bg-secondary">Inactivo</span>';
+}
+
+function badgeTipo(jsTipoRaw) {
+    let tipos = [];
+    try {
+        tipos = typeof jsTipoRaw === 'string' ? JSON.parse(jsTipoRaw) : (jsTipoRaw || []);
+    } catch (e) { tipos = []; }
+    const cliente = tipos.includes('cliente');
+    const proveedor = tipos.includes('proveedor');
+    if (cliente && proveedor) return '<span class="badge bg-primary">Ambos</span>';
+    if (cliente) return '<span class="badge bg-info">Cliente</span>';
+    if (proveedor) return '<span class="badge bg-warning text-dark">Proveedor</span>';
+    return '<span class="badge bg-secondary">Sin tipo</span>';
+}
+
+function obtenerTiposSeleccionados() {
+    const tipos = [];
+    if (document.getElementById('prov_tipo_cliente').checked) tipos.push('cliente');
+    if (document.getElementById('prov_tipo_proveedor').checked) tipos.push('proveedor');
+    return JSON.stringify(tipos);
 }
 
 // ── Listado ──────────────────────────────────────────────────────────────────
@@ -224,14 +250,10 @@ async function cargarProveedores() {
             ? telefonos.map(t => t.telefono).join(', ')
             : '-';
 
-        const badgeTipo = p.tipo === 'cliente'
-            ? '<span class="badge bg-info">Cliente</span>'
-            : '<span class="badge bg-warning text-dark">Proveedor</span>';
-
         return `
         <tr id="fila-proveedor-${p.ruc}">
             <td data-label="RUC/DNI">${p.ruc}</td>
-            <td data-label="Tipo">${badgeTipo}</td>
+            <td data-label="Tipo">${badgeTipo(p.js_tipo)}</td>
             <td data-label="Razón social">${p.razon_social}</td>
             <td data-label="Nombre comercial">${p.nombre_comercial ?? '-'}</td>
             <td data-label="Correo">${p.correo ?? '-'}</td>
@@ -251,6 +273,7 @@ async function cargarProveedores() {
         </tr>`;
     }).join('');
 }
+
 // ── Teléfonos dinámicos ──────────────────────────────────────────────────────
 function agregarFilaTelefono(telefono = '', contacto = '') {
     const wrap = document.getElementById('prov_telefonos_wrap');
@@ -318,7 +341,8 @@ async function consultarDocumentoProveedor() {
 // ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioProveedor() {
     document.getElementById('formProveedor').reset();
-    document.getElementById('prov_tipo').value = '';
+    document.getElementById('prov_tipo_cliente').checked = false;
+    document.getElementById('prov_tipo_proveedor').checked = false;
     document.getElementById('prov_telefonos_wrap').innerHTML = '';
     document.getElementById('prov_consulta_info').textContent = '';
     document.getElementById('prov_js_consulta_api').value = '';
@@ -344,7 +368,14 @@ async function abrirModalEditarProveedor(ruc) {
     document.getElementById('modalProveedorTitulo').textContent = 'Editar proveedor';
     document.getElementById('prov_ruc').value = p.ruc;
     document.getElementById('prov_ruc').disabled = true;
-    document.getElementById('prov_tipo').value = p.tipo ?? '';
+
+    let tiposProveedor = [];
+    try {
+        tiposProveedor = typeof p.js_tipo === 'string' ? JSON.parse(p.js_tipo) : (p.js_tipo || []);
+    } catch (e) { tiposProveedor = []; }
+    document.getElementById('prov_tipo_cliente').checked = tiposProveedor.includes('cliente');
+    document.getElementById('prov_tipo_proveedor').checked = tiposProveedor.includes('proveedor');
+
     document.getElementById('prov_razon_social').value = p.razon_social ?? '';
     document.getElementById('prov_nombre_comercial').value = p.nombre_comercial ?? '';
     document.getElementById('prov_correo').value = p.correo ?? '';
@@ -369,10 +400,15 @@ async function abrirModalEditarProveedor(ruc) {
 document.getElementById('formProveedor').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (!document.getElementById('prov_tipo_cliente').checked && !document.getElementById('prov_tipo_proveedor').checked) {
+        Swal.fire('Atención', 'Selecciona al menos un tipo: cliente y/o proveedor.', 'warning');
+        return;
+    }
+
     const params = {
         accion: 'GUARDARPROVEEDOR',
         ruc: document.getElementById('prov_ruc').value.trim(),
-        tipo: document.getElementById('prov_tipo').value,
+        js_tipo: obtenerTiposSeleccionados(),
         razon_social: document.getElementById('prov_razon_social').value.trim(),
         nombre_comercial: document.getElementById('prov_nombre_comercial').value.trim(),
         correo: document.getElementById('prov_correo').value.trim(),

@@ -4,13 +4,18 @@
  * controllers/clssProveedor.php
  * Controlador del módulo de Proveedores
  * Tabla real: proveedor (ruc PK, razon_social, nombre_comercial, telefonos_contacto jsonb,
- *             correo, ubigeo, ubicacion, js_consulta_api jsonb, js_session, js_historial,
- *             created_at, update_at, deleted_at)
+ *             correo, ubigeo, ubicacion, js_tipo jsonb, js_consulta_api jsonb, js_session,
+ *             js_historial, created_at, update_at, deleted_at)
  * Soft delete vía deleted_at (no existe columna 'activo').
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  *
  * El campo "ruc" en la tabla identifica al proveedor y ahora acepta tanto
  * RUC (11 dígitos, empresa) como DNI (8 dígitos, persona natural).
+ *
+ * El campo "js_tipo" es un array jsonb con los valores 'cliente' y/o
+ * 'proveedor'. Un registro puede ser cliente, proveedor, o ambos a la vez
+ * (cuando el array trae los dos valores). No existe un tercer valor "ambos"
+ * guardado en la BD: se calcula en el frontend a partir del array.
  *
  * NOTA IMPORTANTE:
  * Este archivo SIEMPRE debe responder JSON puro. Para blindarnos contra cualquier
@@ -78,6 +83,18 @@ function esDocumentoProveedorValido(string $numero): bool
     return (bool) preg_match('/^\d{8}$|^\d{11}$/', $numero);
 }
 
+/**
+ * Normaliza el arreglo de tipos recibido desde el frontend (JSON string)
+ * a un array PHP con solo los valores permitidos ('cliente', 'proveedor'),
+ * sin duplicados. Cualquier otro valor se descarta silenciosamente.
+ */
+function normalizarTiposProveedor($tiposRaw): array
+{
+    $tipos = json_decode($tiposRaw, true);
+    if (!is_array($tipos)) $tipos = [];
+    return array_values(array_unique(array_intersect($tipos, ['cliente', 'proveedor'])));
+}
+
 // =============================================================================
 // PROVEEDORES
 // =============================================================================
@@ -88,7 +105,7 @@ function listarProveedores()
 
     $texto  = trim($_POST['texto'] ?? '');
     $estado = trim($_POST['estado'] ?? '');
-    $tipo   = trim($_POST['tipo'] ?? ''); // '', 'cliente', 'proveedor'
+    $tipo   = trim($_POST['tipo'] ?? ''); // '', 'cliente', 'proveedor', 'ambos'
 
     $where  = ["1=1"];
     $params = [];
@@ -105,8 +122,10 @@ function listarProveedores()
         $where[] = "deleted_at IS NOT NULL";
     }
     if ($tipo === 'cliente' || $tipo === 'proveedor') {
-        $where[] = "tipo = :tipo";
-        $params['tipo'] = $tipo;
+        $where[] = "js_tipo @> :tipo_json::jsonb";
+        $params['tipo_json'] = json_encode([$tipo]);
+    } elseif ($tipo === 'ambos') {
+        $where[] = "js_tipo @> '[\"cliente\",\"proveedor\"]'::jsonb";
     }
 
     $sql = "SELECT * FROM proveedor WHERE " . implode(' AND ', $where) . " ORDER BY razon_social";
@@ -192,7 +211,6 @@ function guardarProveedor()
     $conectar = conectar_oll_BD();
 
     $ruc              = trim($_POST['ruc'] ?? '');
-    $tipo             = trim($_POST['tipo'] ?? '');
     $razon_social     = trim($_POST['razon_social'] ?? '');
     $nombre_comercial = trim($_POST['nombre_comercial'] ?? '');
     $correo           = trim($_POST['correo'] ?? '');
@@ -205,9 +223,12 @@ function guardarProveedor()
     if (!esDocumentoProveedorValido($ruc)) {
         responder(false, 'El documento del proveedor debe tener 11 dígitos (RUC) u 8 dígitos (DNI).');
     }
-    if ($tipo !== 'cliente' && $tipo !== 'proveedor') {
-        responder(false, 'Debes indicar el tipo: cliente o proveedor.');
+
+    $tipos = normalizarTiposProveedor(trim($_POST['js_tipo'] ?? '[]'));
+    if (empty($tipos)) {
+        responder(false, 'Debes seleccionar al menos un tipo: cliente y/o proveedor.');
     }
+
     if (empty($razon_social)) responder(false, 'La razón social / nombre es obligatorio.');
     if ($correo !== '' && !filter_var($correo, FILTER_VALIDATE_EMAIL)) {
         responder(false, 'El correo no tiene un formato válido.');
@@ -225,7 +246,7 @@ function guardarProveedor()
     }
 
     $mapaCampos = [
-        'tipo'               => 'Tipo',
+        'js_tipo'            => 'Tipo',
         'razon_social'       => 'Razón social',
         'nombre_comercial'   => 'Nombre comercial',
         'correo'             => 'Correo',
@@ -235,7 +256,7 @@ function guardarProveedor()
     ];
 
     $datosNuevos = [
-        'tipo'               => $tipo,
+        'js_tipo'            => json_encode($tipos, JSON_UNESCAPED_UNICODE),
         'razon_social'       => $razon_social,
         'nombre_comercial'   => $nombre_comercial ?: null,
         'correo'             => $correo ?: null,
@@ -256,17 +277,17 @@ function guardarProveedor()
         try {
             $filas = executeNonQuery($conectar, "
                 INSERT INTO proveedor (
-                    ruc, tipo, razon_social, nombre_comercial, telefonos_contacto,
+                    ruc, js_tipo, razon_social, nombre_comercial, telefonos_contacto,
                     correo, ubigeo, ubicacion, js_consulta_api,
                     created_at, js_session, js_historial
                 ) VALUES (
-                    :ruc, :tipo, :razon_social, :nombre_comercial, :telefonos_contacto::jsonb,
+                    :ruc, :js_tipo::jsonb, :razon_social, :nombre_comercial, :telefonos_contacto::jsonb,
                     :correo, :ubigeo, :ubicacion, :js_consulta_api::jsonb,
                     NOW(), :js_session, :js_historial
                 )
             ", [
                 'ruc'                => $ruc,
-                'tipo'               => $datosNuevos['tipo'],
+                'js_tipo'            => $datosNuevos['js_tipo'],
                 'razon_social'       => $datosNuevos['razon_social'],
                 'nombre_comercial'   => $datosNuevos['nombre_comercial'],
                 'telefonos_contacto' => $datosNuevos['telefonos_contacto'],
@@ -294,6 +315,9 @@ function guardarProveedor()
         $registroAnterior['telefonos_contacto'] = is_string($registroAnterior['telefonos_contacto'] ?? null)
             ? $registroAnterior['telefonos_contacto']
             : json_encode($registroAnterior['telefonos_contacto'] ?? [], JSON_UNESCAPED_UNICODE);
+        $registroAnterior['js_tipo'] = is_string($registroAnterior['js_tipo'] ?? null)
+            ? $registroAnterior['js_tipo']
+            : json_encode($registroAnterior['js_tipo'] ?? [], JSON_UNESCAPED_UNICODE);
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -305,22 +329,22 @@ function guardarProveedor()
 
         $sql = "
             UPDATE proveedor SET
-                tipo               = :tipo,
-                razon_social       = :razon_social,
-                nombre_comercial   = :nombre_comercial,
-                telefonos_contacto = :telefonos_contacto::jsonb,
-                correo             = :correo,
-                ubigeo             = :ubigeo,
-                ubicacion          = :ubicacion,
-                update_at          = NOW(),
-                js_session         = :js_session,
-                js_historial       = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb"
+                js_tipo             = :js_tipo::jsonb,
+                razon_social        = :razon_social,
+                nombre_comercial    = :nombre_comercial,
+                telefonos_contacto  = :telefonos_contacto::jsonb,
+                correo              = :correo,
+                ubigeo              = :ubigeo,
+                ubicacion           = :ubicacion,
+                update_at           = NOW(),
+                js_session          = :js_session,
+                js_historial        = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb"
                 . ($actualizarApi ? ", js_consulta_api = :js_consulta_api::jsonb" : "") . "
             WHERE ruc = :ruc
         ";
 
         $params = [
-            'tipo'               => $datosNuevos['tipo'],
+            'js_tipo'            => $datosNuevos['js_tipo'],
             'razon_social'       => $datosNuevos['razon_social'],
             'nombre_comercial'   => $datosNuevos['nombre_comercial'],
             'telefonos_contacto' => $datosNuevos['telefonos_contacto'],
