@@ -2,10 +2,10 @@
 //bd.php
 function conectar_oll_BD() {
     $host = "bi.back-mrsoft.com";
-    $user = "usrweb";
-    $password = 'admin-Captaian*1278871/&%561652';
+    $user = "usrwebapp";
+    $password = '004a058a0c7e5bcbad23ea603529e66f65935f2c14245a12e7a7d10821be89ca';
     $port = "5432";
-    $nombreBD = "bdplasticche";
+    $nombreBD = "bd_restaurante";
 
     try {
         $dsn = "pgsql:host=$host;port=$port;dbname=$nombreBD";
@@ -18,7 +18,3 @@ function conectar_oll_BD() {
     }
 
 }
-
-
-
-//conectarBD();
