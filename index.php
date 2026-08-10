@@ -122,6 +122,11 @@ window.addEventListener('load', function () {
         <h3><i class="fa-solid fa-bolt" style="color:var(--pc-red);margin-right:6px;"></i> Acceso rápido</h3>
     </div>
     <div style="padding:20px;">
+
+        <!-- Sección 1: Flujo de producción -->
+        <h4 class="pc-quick-section-title">
+            <i class="fa-solid fa-industry" style="color:var(--pc-navy);margin-right:6px;"></i> Producción
+        </h4>
         <div class="pc-quick-grid">
             <a href="produccion.php" class="pc-quick-btn q-blue">
                 <i class="fa-solid fa-industry"></i> Producción
@@ -132,7 +137,17 @@ window.addEventListener('load', function () {
             <a href="empaquetado.php" class="pc-quick-btn q-warning">
                 <i class="fa-solid fa-box-open"></i> Empaquetado
             </a>
-            <a href="operarios.php" class="pc-quick-btn q-success">
+            <a href="ventas.php" class="pc-quick-btn q-success">
+                <i class="fa-solid fa-cash-register"></i> Ventas
+            </a>
+        </div>
+
+        <!-- Sección 2: Gestión -->
+        <h4 class="pc-quick-section-title">
+            <i class="fa-solid fa-clipboard-list" style="color:var(--pc-navy);margin-right:6px;"></i> Gestión
+        </h4>
+        <div class="pc-quick-grid">
+            <a href="operarios.php" class="pc-quick-btn q-warning">
                 <i class="fa-solid fa-hard-hat"></i> Operarios
             </a>
             <a href="maquinas.php" class="pc-quick-btn q-red">
@@ -141,13 +156,34 @@ window.addEventListener('load', function () {
             <a href="moldes.php" class="pc-quick-btn q-dark">
                 <i class="fa-solid fa-shapes"></i> Moldes
             </a>
+        </div>
 
+        <!-- Sección 3: Reportes -->
+        <h4 class="pc-quick-section-title">
+            <i class="fa-solid fa-chart-column" style="color:var(--pc-navy);margin-right:6px;"></i> Reportes
+        </h4>
+        <div class="pc-quick-grid">
             <a href="disponibilidad_venta.php" class="pc-quick-btn q-dark">
                 <i class="fa-solid fa-chart-column"></i> REPORTES
             </a>
         </div>
+
     </div>
 </div>
+
+<style>
+.pc-quick-section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--pc-navy);
+    margin: 18px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.pc-quick-section-title:first-of-type {
+    margin-top: 0;
+}
+</style>
 <!--
 <div class="pc-metric-grid">
     <div class="pc-card pc-metric-card">
