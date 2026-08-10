@@ -154,20 +154,26 @@ function buscarProveedores()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    $where  = ["deleted_at IS NULL"];
+    // Solo trae registros cuyo js_tipo incluya 'proveedor'. Un proveedor
+    // puede ser también cliente a la vez (js_tipo con ambos valores) y
+    // sigue apareciendo aquí; lo que se excluye son los que son
+    // EXCLUSIVAMENTE cliente (no tienen 'proveedor' en su js_tipo).
+    $where  = ["deleted_at IS NULL", "js_tipo @> '[\"proveedor\"]'::jsonb"];
     $params = [];
     if ($texto !== '') {
         $where[] = "(LOWER(razon_social) LIKE LOWER(:texto) OR ruc LIKE :texto)";
         $params['texto'] = "%$texto%";
     }
 
+    // Antes tenía LIMIT 50: como ahora el buscador es client-side (Tom
+    // Select filtra sobre la lista ya cargada), subimos el límite para
+    // no perder proveedores fuera del top-50 alfabético.
     $sql = "SELECT ruc, razon_social, nombre_comercial FROM proveedor
-            WHERE " . implode(' AND ', $where) . " ORDER BY razon_social LIMIT 50";
+            WHERE " . implode(' AND ', $where) . " ORDER BY razon_social LIMIT 500";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['proveedores' => $result]);
 }
-
 function buscarMateriales()
 {
     $conectar = conectar_oll_BD();

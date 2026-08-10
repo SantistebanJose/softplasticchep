@@ -67,7 +67,7 @@ include("header.php");
           <div class="row">
             <div class="col-md-6 mb-2">
                 <label class="form-label">Proveedor *</label>
-                <select class="form-select" id="compra_proveedor_id" required>
+                <select class="form-select" id="compra_proveedor_id">
                     <option value="">Selecciona un proveedor...</option>
                 </select>
             </div>
@@ -157,8 +157,10 @@ include("header.php");
   </div>
 </div>
 
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
@@ -173,9 +175,12 @@ let eliminarComprobanteFlag = false;
 let contadorFilaMaterial = 0;
 let materialesCache = null; // cache de la lista de materiales (BUSCARMATERIALES)
 let unidadesPorFamiliaCache = {}; // cache: raizId -> [unidades compatibles]
+let tomSelectFiltroProveedor = null;
+let tomSelectModalProveedor = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedoresFiltro();
+    inicializarTomSelectModal();
     cargarCompras().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyCompras').innerHTML =
@@ -187,11 +192,22 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarCompras, 350);
     });
-    ['fcompra_proveedor', 'fcompra_estado', 'fcompra_desde', 'fcompra_hasta'].forEach(id => {
+    // fcompra_proveedor ya NO va aquí: Tom Select dispara cargarCompras() por su cuenta
+    ['fcompra_estado', 'fcompra_desde', 'fcompra_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarCompras);
     });
 });
 
+// Render compartido: nombre + comercial arriba, RUC/DNI chico abajo. Sirve
+// tanto para el filtro como para el modal.
+function renderOpcionProveedor(data, escape) {
+    const nombreComercial = data.nombre_comercial ? ' - ' + escape(data.nombre_comercial) : '';
+    const rucLinea = data.ruc ? `<small class="d-block text-muted">RUC/DNI: ${escape(data.ruc)}</small>` : '';
+    return `<div>
+                <span>${escape(data.razon_social)}${nombreComercial}</span>
+                ${rucLinea}
+            </div>`;
+}
 // ── Llamadas genéricas ────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -261,27 +277,52 @@ function cerrarVerComprobante() {
     document.getElementById('verComprobanteBody').innerHTML = '';
 }
 
-// ── Selects auxiliares ───────────────────────────────────────────────────────
 async function cargarProveedoresFiltro() {
     const json = await llamarCompras('BUSCARPROVEEDORES', {});
     if (!json.success) return;
-    const select = document.getElementById('fcompra_proveedor');
-    json.proveedores.forEach(p => {
-        select.insertAdjacentHTML('beforeend', `<option value="${p.ruc}">${p.razon_social}</option>`);
+
+    tomSelectFiltroProveedor = new TomSelect('#fcompra_proveedor', {
+        valueField: 'ruc',
+        labelField: 'razon_social',
+        searchField: ['razon_social', 'nombre_comercial', 'ruc'],
+        options: json.proveedores,
+        create: false,
+        placeholder: 'Todos los proveedores',
+        render: {
+            option: renderOpcionProveedor,
+            item: (data, escape) => `<div>${escape(data.razon_social)}</div>`,
+            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+        },
+        onChange: cargarCompras
+    });
+}
+function inicializarTomSelectModal() {
+    tomSelectModalProveedor = new TomSelect('#compra_proveedor_id', {
+        valueField: 'ruc',
+        labelField: 'razon_social',
+        searchField: ['razon_social', 'nombre_comercial', 'ruc'],
+        options: [],
+        create: false,
+        placeholder: 'Busca por nombre o RUC/DNI...',
+        render: {
+            option: renderOpcionProveedor,
+            item: (data, escape) => `<div>${escape(data.razon_social)}</div>`,
+            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+        }
     });
 }
 
 async function cargarProveedoresModal(seleccionarRuc = '') {
-    const select = document.getElementById('compra_proveedor_id');
-    select.innerHTML = '<option value="">Selecciona un proveedor...</option>';
     const json = await llamarCompras('BUSCARPROVEEDORES', {});
+
+    tomSelectModalProveedor.clear(true);
+    tomSelectModalProveedor.clearOptions();
     if (json.success) {
-        json.proveedores.forEach(p => {
-            select.insertAdjacentHTML('beforeend',
-                `<option value="${p.ruc}">${p.razon_social}${p.nombre_comercial ? ' - ' + p.nombre_comercial : ''}</option>`);
-        });
+        tomSelectModalProveedor.addOptions(json.proveedores);
     }
-    if (seleccionarRuc) select.value = seleccionarRuc;
+    if (seleccionarRuc) {
+        tomSelectModalProveedor.setValue(seleccionarRuc, true);
+    }
 }
 
 async function obtenerOpcionesMateriales() {
@@ -559,6 +600,7 @@ function limpiarFormularioCompra() {
     document.getElementById('compra_comprobante_actual').innerHTML = '';
     document.getElementById('compra_total_visual').textContent = formatearMoneda(0);
     document.getElementById('compra_total_img_cargado').value = '';
+    if (tomSelectModalProveedor) tomSelectModalProveedor.clear(true);
     compraIdActual = 0;
     comprobanteActualRuta = null;
     eliminarComprobanteFlag = false;
@@ -621,6 +663,11 @@ function quitarComprobanteActual(e) {
 
 document.getElementById('formCompra').addEventListener('submit', async function (e) {
     e.preventDefault();
+
+    if (!document.getElementById('compra_proveedor_id').value) {
+        Swal.fire('Atención', 'Debes seleccionar un proveedor.', 'warning');
+        return;
+    }
 
     const detalleJson = obtenerDetalleJson();
     if (JSON.parse(detalleJson).length === 0) {
