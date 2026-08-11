@@ -437,8 +437,13 @@ async function cargarProveedoresModal(seleccionarRuc = '') {
     }
 }
 
-function abrirModalMaterialRapido(nombrePrellenado = '', tomSelectInstance) {
-    tomSelectMaterialActivo = tomSelectInstance;
+function abrirModalMaterialRapido(nombrePrellenado = '', filaId = null) {
+    // Antes recibía la instancia de TomSelect directamente (funcionaba desde
+    // el modal de proveedor porque esa instancia es global). Para el material
+    // de cada fila recibimos el id del <tr> y recuperamos la instancia que
+    // quedó guardada ahí (ver agregarFilaMaterial()).
+    tomSelectMaterialActivo = filaId ? (document.getElementById(filaId)?.tomSelectInstance || null) : null;
+
     document.getElementById('formMaterialRapido').reset();
     document.getElementById('mat_rapido_nombre').value = nombrePrellenado;
     document.getElementById('mat_rapido_picker').value = '#000000';
@@ -739,6 +744,10 @@ async function agregarFilaMaterial(datos = null) {
             cargarUnidadesDeLaFila();
         }
     });
+    // NUEVO: guardamos la instancia en el propio <tr> para poder recuperarla
+    // desde el onclick del botón "Registrar tinte" (que corre en scope global
+    // y no puede ver esta constante local).
+    tr.tomSelectInstance = tomSelectMaterial;
 
     // Antes se leía todo desde matSelect.selectedOptions[0].dataset — con
     // Tom Select el material elegido se consulta así.
