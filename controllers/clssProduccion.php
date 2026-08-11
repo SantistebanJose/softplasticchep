@@ -121,6 +121,9 @@ function controladorProduccion($accion)
         case 'REACTIVARPRODUCCION':
             reactivarProduccion();
             break;
+        case 'REGISTRARMERMA':
+            registrarMerma();
+            break;
         case 'BUSCAROPERARIOS':
             buscarOperarios();
             break;
@@ -358,8 +361,16 @@ function listarProducciones()
     ";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['producciones' => $result]);
-}
+
+        foreach ($result as &$fila) {
+            $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
+                ? json_decode($fila['js_cantidades_merma'], true)
+                : [];
+        }
+        unset($fila);
+
+        responder(true, 'OK', ['producciones' => $result]);
+    }
 function buscarCategoriasMaterial()
 {
     $conectar = conectar_oll_BD();
@@ -890,6 +901,70 @@ function enviarAEnsamblaje()
     ]);
 
     responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id]);
+}
+
+// Registra un lote de merma para este avance, etiquetado automáticamente
+// con el color del avance (pd.color_id) en el momento del registro. Se
+// guarda como un elemento más dentro del array jsonb
+// produccion.js_cantidades_merma: {color_id, color_nombre, color_rgb,
+// cantidad, fecha, usuario}. Permite registrar merma varias veces sobre
+// el mismo avance (se van acumulando).
+function registrarMerma()
+{
+    $conectar = conectar_oll_BD();
+    $id = intval($_POST['id'] ?? 0);
+    $cantidadMerma = floatval($_POST['cantidad_merma'] ?? 0);
+
+    if (!$id) responder(false, 'ID inválido.');
+    if ($cantidadMerma <= 0) responder(false, 'La cantidad de merma debe ser mayor a 0.');
+
+    $actual = executeQuery(
+        $conectar,
+        "SELECT pd.id, pd.deleted_at, pd.color_id,
+                co.nombre AS color_nombre, co.rgb AS color_rgb
+         FROM produccion pd
+         LEFT JOIN color co ON co.id = pd.color_id
+         WHERE pd.id = :id",
+        ['id' => $id]
+    );
+    if (empty($actual)) responder(false, 'Registro de producción no encontrado.');
+    if (!empty($actual[0]['deleted_at'])) responder(false, 'No puedes registrar merma en un avance inactivo.');
+    if (empty($actual[0]['color_id'])) responder(false, 'Este avance no tiene un color asignado.');
+
+    $nuevaEntrada = [
+        'color_id'     => (int) $actual[0]['color_id'],
+        'color_nombre' => $actual[0]['color_nombre'],
+        'color_rgb'    => $actual[0]['color_rgb'],
+        'cantidad'     => $cantidadMerma,
+        'fecha'        => date('Y-m-d H:i:s'),
+        'usuario'      => $_SESSION['nombre_usuario'] ?? 'Sistema',
+    ];
+    $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
+
+    $cambios = [[
+        'campo' => 'Merma registrada',
+        'valor_antes' => '-',
+        'valor_despues' => "{$cantidadMerma} kg color {$actual[0]['color_nombre']}",
+    ]];
+    $movimiento   = obtenerMovimientoSesion('registrar_merma', $cambios);
+    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+    executeNonQuery($conectar, "
+        UPDATE produccion SET
+            js_cantidades_merma = COALESCE(js_cantidades_merma, '[]'::jsonb) || jsonb_build_array(:nueva::jsonb),
+            updated_at   = NOW(),
+            js_session   = :js_session,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id
+    ", [
+        'id'           => $id,
+        'nueva'        => $jsNuevaEntrada,
+        'js_session'   => $js_session,
+        'js_historial' => $js_historial,
+    ]);
+
+    responder(true, 'Merma registrada correctamente.', ['id' => $id, 'merma' => $nuevaEntrada]);
 }
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).

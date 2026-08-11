@@ -458,9 +458,22 @@ include("header.php");
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <label class="form-label">Cantidad producida (kg) *</label>
-          <input type="number" step="0.0001" min="0.0001" class="form-control"
-                 id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+            <label class="form-label">Cantidad producida (kg) *</label>
+            <input type="number" step="0.0001" min="0.0001" class="form-control"
+                    id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+
+            <hr>
+
+            <label class="form-label mb-1">Merma (opcional)</label>
+            <div class="d-flex align-items-center gap-2 mb-2" id="merma_color_info" style="font-size:.85em;"></div>
+            <div class="input-group">
+                <input type="number" step="0.0001" min="0.0001" class="form-control"
+                    id="cantidad_merma_kg" placeholder="Kg de merma">
+                <button type="button" class="btn btn-outline-danger" id="btnRegistrarMerma">
+                    <i class="fa-triangle-exclamation"></i> Registrar merma
+                </button>
+            </div>
+            <div class="form-text" id="merma_registrada_txt"></div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -919,6 +932,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     if (p.fecha) metaPartes.push(formatearFechaCorta(p.fecha));
 
     const tags = [];
+    if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
+
+    const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+    const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
+    if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
     if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
 
     return `
@@ -1425,8 +1443,57 @@ let produccionIdParaEnsamblaje = null;
 function abrirModalCantidadParaEnsamblaje(produccionId) {
     produccionIdParaEnsamblaje = produccionId;
     document.getElementById('formCantidadEnsamblaje').reset();
+
+    const p = produccionesCache.find(x => x.id == produccionId);
+    renderInfoMermaModal(p);
+
     modalCantidadEnsamblaje.show();
 }
+
+function renderInfoMermaModal(p) {
+    const cont = document.getElementById('merma_color_info');
+    const txt  = document.getElementById('merma_registrada_txt');
+    document.getElementById('cantidad_merma_kg').value = '';
+
+    if (!p) { cont.innerHTML = ''; txt.textContent = ''; return; }
+
+    cont.innerHTML = `
+        <span class="pc-color-dot" style="background:${p.color_rgb || '#ccc'}"></span>
+        <span>Color de este avance: <b>${p.color_nombre || '-'}</b></span>
+    `;
+
+    const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+    const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
+    txt.textContent = totalMerma > 0
+        ? `Merma ya registrada en este avance: ${formatearCantidadProd(totalMerma)} kg`
+        : 'Aún no se registró merma para este avance.';
+}
+document.getElementById('btnRegistrarMerma').addEventListener('click', async () => {
+    const valor = parseFloat(document.getElementById('cantidad_merma_kg').value);
+    if (isNaN(valor) || valor <= 0) {
+        Swal.fire('Dato inválido', 'Ingresa una cantidad de merma mayor a 0.', 'warning');
+        return;
+    }
+
+    const json = await llamarProduccion('REGISTRARMERMA', {
+        id: produccionIdParaEnsamblaje,
+        cantidad_merma: valor,
+    });
+
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+
+    const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
+    if (p) {
+        p.js_cantidades_merma = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+        p.js_cantidades_merma.push(json.merma);
+    }
+    renderInfoMermaModal(p);
+
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Merma registrada', showConfirmButton: false, timer: 1500 });
+});
 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
