@@ -246,7 +246,11 @@ function buscarMaterialesProduccion()
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id,
+    // m.color distingue un tinte (true) de un material normal (false); m.rgb
+    // trae el color real del tinte para pintar su card con ese color en vez
+    // de uno "hasheado" por nombre. El frontend arma las pestañas
+    // Materiales / Tintes a partir de este campo.
+    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color, m.rgb,
                    u.nombre_corto AS unidad_corto
             FROM material m
             LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
@@ -255,7 +259,6 @@ function buscarMaterialesProduccion()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['materiales' => $result]);
 }
-
 // Ya no se usa desde el formulario (el usuario ya no elige lote), pero se
 // mantiene disponible por si algún otro módulo/reporte la necesita para
 // mostrar trazabilidad. El reparto FIFO automático al guardar consulta

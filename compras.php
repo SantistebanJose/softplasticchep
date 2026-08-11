@@ -204,6 +204,15 @@ include("header.php");
 </div>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
+<style>
+/* Los dropdowns de Tom Select que usan dropdownParent:'body' cuelgan
+   directo de <body>, fuera del modal — hay que subirles el z-index
+   por encima del modal de Bootstrap (1055) o quedan tapados y parecen
+   "no cargar" al escribir. */
+.ts-dropdown {
+    z-index: 1075;
+}
+</style>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
@@ -873,6 +882,7 @@ function reactivarCompra(id) {
         }
     });
 }
+
 </script>
 
 <?php require __DIR__ . '/footer.php'; ?>

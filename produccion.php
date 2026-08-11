@@ -73,6 +73,15 @@ include("header.php");
     display:flex; align-items:center; justify-content:center;
 }
 .pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.85em; padding:20px 6px; }
+.pc-mat-tabs{ display:flex; gap:6px; padding:0 12px 10px 12px; }
+.pc-mat-tab{
+    flex:1; border:1px solid #e2ddcd; background:#fff; border-radius:9px;
+    padding:7px 10px; font-size:.78em; font-weight:600; color:#8a8578;
+    display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
+    transition:.12s ease;
+}
+.pc-mat-tab:hover{ border-color:#d8d4c8; color:#5c5947; }
+.pc-mat-tab.activo{ background:#152238; border-color:#152238; color:#fff; }
 
 .pc-tk-list{ list-style:none; margin:0; padding:0; max-height:340px; overflow-y:auto; }
 .pc-tk-item{ border-bottom:1px dashed #eee2c8; padding:10px 12px; display:flex; gap:10px; }
@@ -395,6 +404,14 @@ include("header.php");
                 <div class="pc-mat-panel-head">
                     <h6><i class="fa-solid fa-boxes-stacked"></i> Menú de materiales</h6>
                 </div>
+                <div class="pc-mat-tabs">
+                    <button type="button" class="pc-mat-tab activo" data-tipo="material" onclick="seleccionarTabMaterial('material')">
+                        <i class="fa-solid fa-cube"></i> Materiales
+                    </button>
+                    <button type="button" class="pc-mat-tab" data-tipo="tinte" onclick="seleccionarTabMaterial('tinte')">
+                        <i class="fa-solid fa-droplet"></i> Tintes
+                    </button>
+                </div>
                 <div class="pc-mat-search">
                     <input type="text" id="prod_mat_buscar" class="form-control form-control-sm" placeholder="Buscar material...">
                 </div>
@@ -472,6 +489,8 @@ let materialesProdCache = null; // cache de materiales para las cards
 let productosMoldeProdCache = null; // cache de productos (para el 1er select en cascada)
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
 let contadorLineaTicket = 0;
+let tipoMaterialActivo = 'material'; // 'material' | 'tinte' — pestaña activa del menú
+
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
                         //   disponible, cantidad, comentario}]
 
@@ -498,6 +517,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     iniciarAutoRefresh();
 });
+
+
+function esTinte(m) {
+    return m.color === true || m.color === 't' || m.color === 'true';
+}
+
+function seleccionarTabMaterial(tipo) {
+    tipoMaterialActivo = tipo;
+    document.querySelectorAll('.pc-mat-tab').forEach(btn => {
+        btn.classList.toggle('activo', btn.dataset.tipo === tipo);
+    });
+    renderGridMateriales();
+}
 function inicializarTomSelectOperario() {
     if (tsOperario) return;
     tsOperario = new TomSelect('#prod_operario_id', {
@@ -688,13 +720,19 @@ const ICONOS_MATERIAL = [
     'fa-cube', 'fa-flask', 'fa-layer-group', 'fa-industry',
     'fa-vial', 'fa-box-open', 'fa-recycle', 'fa-weight-hanging',
 ];
-function estiloMaterial(nombre) {
+function estiloMaterial(material) {
+    const nombre = material.nombre || '';
     let hash = 0;
     for (let i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) >>> 0;
-    return {
-        ...PALETA_RESINA[hash % PALETA_RESINA.length],
-        icono: ICONOS_MATERIAL[hash % ICONOS_MATERIAL.length],
-    };
+    const icono = esTinte(material) ? 'fa-droplet' : ICONOS_MATERIAL[hash % ICONOS_MATERIAL.length];
+
+    // Los tintes usan su color real (material.rgb) en vez del color
+    // "hasheado" por nombre — se reconocen de un vistazo, igual que en
+    // el módulo de Colores.
+    if (esTinte(material) && material.rgb) {
+        return { color: material.rgb, bg: material.rgb + '22', icono };
+    }
+    return { ...PALETA_RESINA[hash % PALETA_RESINA.length], icono };
 }
 
 // Categorías de material: mismo patrón de cache que antes, se piden una
@@ -1021,17 +1059,16 @@ async function renderGridMateriales() {
     const materiales = await obtenerOpcionesMaterialesProd();
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
-    const visibles = filtro
-        ? materiales.filter(m => m.nombre.toLowerCase().includes(filtro))
-        : materiales;
+    let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
+    if (filtro) visibles = visibles.filter(m => m.nombre.toLowerCase().includes(filtro));
 
     if (visibles.length === 0) {
-        grid.innerHTML = '<div class="pc-mat-empty">No se encontró ningún material con ese nombre.</div>';
+        grid.innerHTML = `<div class="pc-mat-empty">No se encontró ningún ${tipoMaterialActivo === 'tinte' ? 'tinte' : 'material'} con ese nombre.</div>`;
         return;
     }
 
     grid.innerHTML = visibles.map(m => {
-        const est = estiloMaterial(m.nombre);
+        const est = estiloMaterial(m); // <-- antes: estiloMaterial(m.nombre)
         const enTicket = ticketLineas.filter(l => l.material_id == m.id)
             .reduce((s, l) => s + Number(l.cantidad || 0), 0);
         return `
@@ -1045,7 +1082,6 @@ async function renderGridMateriales() {
         </button>`;
     }).join('');
 }
-
 // Tocar una card de material la agrega al ticket con cantidad 1 (o, si ya
 // estaba en el ticket, le suma 1). No se pregunta por lote/proveedor: el
 // backend decide automáticamente de dónde sale el material al guardar.
@@ -1060,7 +1096,7 @@ async function seleccionarMaterial(materialId) {
         return;
     }
 
-    const est = estiloMaterial(material.nombre);
+    const est = estiloMaterial(material); // <-- antes: estiloMaterial(material.nombre)
     ticketLineas.push({
         tempId: ++contadorLineaTicket,
         material_id: material.id,
@@ -1076,7 +1112,6 @@ async function seleccionarMaterial(materialId) {
     renderTicket();
     renderGridMateriales();
 }
-
 function cambiarCantidadTicket(tempId, delta) {
     const linea = ticketLineas.find(l => l.tempId === tempId);
     if (!linea) return;
@@ -1145,10 +1180,30 @@ function renderTicket() {
         </li>
     `).join('');
 
-    const total = ticketLineas.reduce((suma, linea) => suma + Number(linea.cantidad), 0);
+    // Los materiales del ticket pueden venir en distintas unidades (Kg, ML,
+    // L, UND) — sumarlos todos como si fueran la misma cosa no tiene
+    // sentido. Se agrupan por unidad para el desglose; el campo "Kg en
+    // total" (que alimenta produccion.cantidad, los kg insertados en
+    // máquina) SOLO suma las líneas cuya unidad es Kg. El resto (tintes en
+    // ML/L, piezas en UND) queda solo como información en el desglose.
+    const subtotalesPorUnidad = {};
+    ticketLineas.forEach(l => {
+        const u = (l.unidad_corto || '').trim() || '-';
+        subtotalesPorUnidad[u] = (subtotalesPorUnidad[u] || 0) + Number(l.cantidad || 0);
+    });
+
+    const totalKg = Object.entries(subtotalesPorUnidad)
+        .filter(([u]) => u.toLowerCase() === 'kg')
+        .reduce((s, [, cant]) => s + cant, 0);
+
     totalInput.readOnly = true;
-    totalInput.value = Math.round(total); // entero, aunque las líneas tengan decimales
-    detalle.textContent = `${ticketLineas.length} material${ticketLineas.length === 1 ? '' : 'es'} en este avance`;
+    totalInput.value = Math.round(totalKg); // entero, igual que antes
+
+    const desglose = Object.entries(subtotalesPorUnidad)
+        .map(([u, cant]) => `${formatearCantidadProd(cant)} ${u}`)
+        .join(' · ');
+
+    detalle.textContent = `${ticketLineas.length} material${ticketLineas.length === 1 ? '' : 'es'} en este avance — ${desglose}`;
 }
 
 function obtenerDetalleJsonProd() {
@@ -1167,6 +1222,8 @@ function limpiarFormularioProduccion() {
     if (tsOperario) tsOperario.clear();
     produccionIdActual = 0;
     ticketLineas = [];
+    tipoMaterialActivo = 'material';
+    document.querySelectorAll('.pc-mat-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.tipo === 'material'));
     renderTicket();
 }
 
@@ -1232,10 +1289,8 @@ async function abrirModalEditarProduccion(id) {
 
     const materiales = await obtenerOpcionesMaterialesProd();
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
-        const est = estiloMaterial(d.material_nombre);
         const materialActual = materiales.find(m => m.id == d.material_id);
-        // El stock_actual ya tiene restada esta producción; para no bloquear
-        // el stepper al editar, le sumamos de vuelta lo que esta línea consume.
+        const est = estiloMaterial(materialActual || { nombre: d.material_nombre }); // <-- cambio
         const disponibleParaEditar = (materialActual ? parseFloat(materialActual.stock_actual) : 0) + d.cantidad;
         return {
             tempId: ++contadorLineaTicket,
