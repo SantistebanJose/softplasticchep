@@ -518,32 +518,19 @@ async function cargarCompras() {
 // datos (modo edición) puede traer: material_id, unidad_medida_id, cantidad,
 // sub_total (P.U guardado, aunque la BD siga llamándolo sub_total), total,
 // comentario (tal cual vienen de OBTENERCOMPRA).
+// ── Detalle de materiales (dinámico) ─────────────────────────────────────────
 async function agregarFilaMaterial(datos = null) {
     const materiales = await obtenerOpcionesMateriales();
     const filaId = 'fila-mat-' + (++contadorFilaMaterial);
     const wrap = document.getElementById('compra_detalle_wrap');
 
-    // El indicador "Derivado" es solo informativo: un material derivado (ej.
-    // clips de gancho) SÍ puede comprarse a proveedores con normalidad, así
-    // que no se bloquea ni se filtra del selector, solo se marca visualmente.
-    const opcionesMaterialHtml = materiales.map(m => {
-        const esDerivado = m.derivado === true || m.derivado === 't' || m.derivado === 'true';
-        const etiquetaTipo = esDerivado ? ' · derivado' : '';
-        return `<option value="${m.id}"
-                 data-unidad-id="${m.unidad_medida_id ?? ''}"
-                 data-unidad-corto="${m.unidad_corto ?? ''}"
-                 data-derivado="${esDerivado ? '1' : '0'}"
-                 ${datos && datos.material_id == m.id ? 'selected' : ''}>
-            ${m.nombre} (stock: ${m.stock_actual ?? 0} ${m.unidad_corto ?? ''}${etiquetaTipo})
-         </option>`;
-    }).join('');
-
     const tr = document.createElement('tr');
     tr.id = filaId;
     tr.className = 'fila-detalle-material';
     tr.innerHTML = `
-        <td data-label="Material"><select class="form-select mat-select" required>
-                <option value="">Selecciona...</option>${opcionesMaterialHtml}
+        <td data-label="Material">
+            <select class="form-select mat-select" required>
+                <option value="">Selecciona...</option>
             </select>
             <span class="pc-derivado-badge mat-derivado-badge" style="display:none;">
                 <i class="fa-solid fa-circle-info"></i> Material derivado
@@ -570,12 +557,12 @@ async function agregarFilaMaterial(datos = null) {
                     value="${datos ? datos.total : ''}"></td>
         <td data-label="Comentario"><input type="text" class="form-control mat-comentario" placeholder="Opcional"
                     value="${datos ? (datos.comentario ?? '') : ''}"></td>
-        <td class="pc-td-fila-acciones"><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove(); recalcularTotalCompra();">
+        <td class="pc-td-fila-acciones"><button type="button" class="btn btn-outline-danger btn-sm eliminar-fila-btn">
                 <i class="fa-solid fa-xmark"></i></button></td>
     `;
     wrap.appendChild(tr);
 
-    const matSelect       = tr.querySelector('.mat-select');
+    const matSelectEl     = tr.querySelector('.mat-select');
     const unidadSelect    = tr.querySelector('.mat-unidad');
     const cantidadInput   = tr.querySelector('.mat-cantidad');
     const puInput         = tr.querySelector('.mat-pu');
@@ -585,17 +572,55 @@ async function agregarFilaMaterial(datos = null) {
     const unidadAlerta    = tr.querySelector('.mat-unidad-alerta');
     const derivadoBadge   = tr.querySelector('.mat-derivado-badge');
 
+    // Buscador tipo Tom Select para materiales — mismo patrón que el de
+    // proveedor: nombre grande + stock/derivado como subtexto, filtra
+    // escribiendo el nombre.
+    function renderOpcionMaterial(data, escape) {
+        const esDerivado = data.derivado === true || data.derivado === 't' || data.derivado === 'true';
+        const etiquetaTipo = esDerivado ? ' · derivado' : '';
+        return `<div>
+                    <span>${escape(data.nombre)}</span>
+                    <small class="d-block text-muted">stock: ${escape(String(data.stock_actual ?? 0))} ${escape(data.unidad_corto ?? '')}${etiquetaTipo}</small>
+                </div>`;
+    }
+
+    const tomSelectMaterial = new TomSelect(matSelectEl, {
+        valueField: 'id',
+        labelField: 'nombre',
+        searchField: ['nombre'],
+        options: materiales,
+        create: false,
+        placeholder: 'Busca un material...',
+        dropdownParent: 'body',   // <-- evita que .pc-table-wrap le recorte el dropdown
+        render: {
+            option: renderOpcionMaterial,
+            item: (data, escape) => `<div>${escape(data.nombre)}</div>`,
+            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+        },
+        onChange: () => {
+            actualizarBadgeDerivado();
+            cargarUnidadesDeLaFila();
+        }
+    });
+
+    // Antes se leía todo desde matSelect.selectedOptions[0].dataset — con
+    // Tom Select el material elegido se consulta así.
+    function materialSeleccionado() {
+        const val = tomSelectMaterial.getValue();
+        return val ? tomSelectMaterial.options[val] : null;
+    }
+
     function actualizarBadgeDerivado() {
-        const matOpt = matSelect.selectedOptions[0];
-        const esDerivado = matOpt && matOpt.dataset.derivado === '1';
+        const matData = materialSeleccionado();
+        const esDerivado = matData && (matData.derivado === true || matData.derivado === 't' || matData.derivado === 'true');
         derivadoBadge.style.display = esDerivado ? 'inline-flex' : 'none';
     }
 
     function actualizarConversion() {
         const unidadOpt = unidadSelect.selectedOptions[0];
         const equiv = unidadOpt ? parseFloat(unidadOpt.dataset.equiv || '1') : 1;
-        const matOpt = matSelect.selectedOptions[0];
-        const unidadBaseCorto = matOpt ? (matOpt.dataset.unidadCorto || '') : '';
+        const matData = materialSeleccionado();
+        const unidadBaseCorto = matData ? (matData.unidad_corto || '') : '';
         const cantidad = parseFloat(cantidadInput.value) || 0;
         if (cantidad > 0 && equiv && equiv !== 1) {
             conversionTexto.textContent = `= ${formatearCantidad(cantidad * equiv)} ${unidadBaseCorto}`.trim();
@@ -605,9 +630,6 @@ async function agregarFilaMaterial(datos = null) {
         }
     }
 
-    // Total = Cantidad × P.U, recalculado en cada tecla. Si el usuario edita
-    // Total a mano, queda "congelado" ahí hasta que vuelva a tocar Cantidad
-    // o P.U (entonces retoma el cálculo automático).
     function actualizarTotalDesdeCantidadYPU() {
         const cantidad = parseFloat(cantidadInput.value) || 0;
         const pu = parseFloat(puInput.value) || 0;
@@ -616,19 +638,14 @@ async function agregarFilaMaterial(datos = null) {
         recalcularTotalCompra();
     }
 
-    // Carga en el <select> de unidad SOLO las unidades compatibles con la
-    // familia del material elegido: su unidad raíz + las compuestas que
-    // apuntan a ella (LISTARUNIDADESCOMPATIBLES). Si el material no tiene
-    // unidad base asignada, se bloquea el selector y se muestra una alerta
-    // clara en vez de dejarlo como una opción más del combo.
     async function cargarUnidadesDeLaFila(unidadPreseleccionada = '') {
-        const matOpt = matSelect.selectedOptions[0];
-        const raizId = matOpt ? matOpt.dataset.unidadId : '';
+        const matData = materialSeleccionado();
+        const raizId = matData ? matData.unidad_medida_id : '';
 
         if (!raizId) {
             unidadSelect.disabled = true;
             unidadSelect.innerHTML = '<option value="">Elige un material primero...</option>';
-            unidadAlerta.style.display = matOpt ? 'block' : 'none'; // solo alerta si YA eligió material sin unidad
+            unidadAlerta.style.display = matData ? 'block' : 'none';
             conversionBadge.style.display = 'none';
             return;
         }
@@ -642,18 +659,12 @@ async function agregarFilaMaterial(datos = null) {
                 ${u.nombre} (${u.nombre_corto})
              </option>`).join('');
 
-        // Si no venía una unidad precargada (edición), se autoselecciona la
-        // raíz del material — siempre está incluida en la lista de compatibles.
         if (!unidadPreseleccionada) {
             unidadSelect.value = raizId;
         }
         actualizarConversion();
     }
 
-    matSelect.addEventListener('change', () => {
-        actualizarBadgeDerivado();
-        cargarUnidadesDeLaFila();
-    });
     unidadSelect.addEventListener('change', actualizarConversion);
 
     cantidadInput.addEventListener('input', () => {
@@ -666,9 +677,18 @@ async function agregarFilaMaterial(datos = null) {
         recalcularTotalCompra();
     });
 
-    // Precarga inicial: si venimos de edición (o ya hay material elegido),
-    // cargamos de una vez las unidades compatibles con la unidad ya guardada.
+    // Hay que destruir la instancia de Tom Select al quitar la fila, si no
+    // deja huérfano su dropdown en el DOM.
+    tr.querySelector('.eliminar-fila-btn').addEventListener('click', () => {
+        tomSelectMaterial.destroy();
+        tr.remove();
+        recalcularTotalCompra();
+    });
+
+    // Precarga en modo edición: selecciona en silencio (sin disparar
+    // onChange) y luego carga unidades a mano con la que ya venía guardada.
     if (datos && datos.material_id) {
+        tomSelectMaterial.setValue(String(datos.material_id), true);
         actualizarBadgeDerivado();
         await cargarUnidadesDeLaFila(datos.unidad_medida_id ?? '');
     }
