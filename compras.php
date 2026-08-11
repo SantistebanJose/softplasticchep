@@ -66,7 +66,12 @@ include("header.php");
 
           <div class="row">
             <div class="col-md-6 mb-2">
-                <label class="form-label">Proveedor *</label>
+                <label class="form-label d-flex justify-content-between align-items-center">
+                    Proveedor *
+                    <button type="button" class="btn btn-sm btn-link p-0" onclick="abrirModalProveedorRapido()">
+                        <i class="fa-solid fa-plus"></i> Nuevo proveedor
+                    </button>
+                </label>
                 <select class="form-select" id="compra_proveedor_id">
                     <option value="">Selecciona un proveedor...</option>
                 </select>
@@ -156,6 +161,47 @@ include("header.php");
     </div>
   </div>
 </div>
+<!-- Modal Alta rápida de proveedor -->
+<div class="modal fade" id="modalProveedorRapido" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formProveedorRapido">
+        <div class="modal-header">
+          <h5 class="modal-title">Registrar proveedor</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">RUC / DNI *</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="prov_rapido_ruc" maxlength="11" required>
+              <button type="button" class="btn btn-outline-secondary" onclick="consultarDocumentoRapido()">
+                <i class="fa-solid fa-magnifying-glass"></i> Consultar
+              </button>
+            </div>
+            <div class="form-text">8 dígitos (DNI) u 11 dígitos (RUC). "Consultar" autocompleta el nombre.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Razón social / Nombre *</label>
+            <input type="text" class="form-control" id="prov_rapido_razon" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Nombre comercial</label>
+            <input type="text" class="form-control" id="prov_rapido_comercial">
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="prov_rapido_tambien_cliente">
+            <label class="form-check-label" for="prov_rapido_tambien_cliente">También es cliente</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar proveedor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -163,9 +209,12 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
+const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
+const llamarProveedores = (accion, params = {}) => llamar(CONTROLADOR_PROVEEDORES, accion, params);
 const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
 const RUTA_VER_COMPROBANTE = 'controllers/ver_comprobante.php'; // sirve el archivo validando sesión
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
+const modalProveedorRapido = new bootstrap.Modal(document.getElementById('modalProveedorRapido'));
 const modalVerComprobante = new bootstrap.Modal(document.getElementById('modalVerComprobante'));
 
 let modoEdicionCompra = false;
@@ -307,11 +356,18 @@ function inicializarTomSelectModal() {
         render: {
             option: renderOpcionProveedor,
             item: (data, escape) => `<div>${escape(data.razon_social)}</div>`,
-            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+            no_results: (data, escape) => `
+                <div class="no-results d-flex justify-content-between align-items-center gap-2">
+                    <span>Sin resultados para "${escape(data.input)}"</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0"
+                            onmousedown="event.preventDefault()"
+                            onclick="abrirModalProveedorRapido('${escape(data.input)}')">
+                        <i class="fa-solid fa-plus"></i> Registrar
+                    </button>
+                </div>`
         }
     });
 }
-
 async function cargarProveedoresModal(seleccionarRuc = '') {
     const json = await llamarCompras('BUSCARPROVEEDORES', {});
 
@@ -324,6 +380,65 @@ async function cargarProveedoresModal(seleccionarRuc = '') {
         tomSelectModalProveedor.setValue(seleccionarRuc, true);
     }
 }
+
+function abrirModalProveedorRapido(documentoPrellenado = '') {
+    document.getElementById('formProveedorRapido').reset();
+    document.getElementById('prov_rapido_ruc').value =
+        /^\d{8}$|^\d{11}$/.test(documentoPrellenado) ? documentoPrellenado : '';
+    modalProveedorRapido.show();
+}
+
+async function consultarDocumentoRapido() {
+    const numero = document.getElementById('prov_rapido_ruc').value.trim();
+    if (!/^\d{8}$|^\d{11}$/.test(numero)) {
+        Swal.fire('Atención', 'Ingresa un documento válido (8 u 11 dígitos).', 'warning');
+        return;
+    }
+    const json = await llamarProveedores('CONSULTARDOCUMENTO', { numero });
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+    document.getElementById('prov_rapido_razon').value = json.data.name || '';
+}
+
+document.getElementById('formProveedorRapido').addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const ruc = document.getElementById('prov_rapido_ruc').value.trim();
+    const razon = document.getElementById('prov_rapido_razon').value.trim();
+
+    if (!/^\d{8}$|^\d{11}$/.test(ruc)) {
+        Swal.fire('Atención', 'El RUC/DNI debe tener 8 u 11 dígitos.', 'warning');
+        return;
+    }
+    if (!razon) {
+        Swal.fire('Atención', 'La razón social / nombre es obligatorio.', 'warning');
+        return;
+    }
+
+    const tipos = ['proveedor'];
+    if (document.getElementById('prov_rapido_tambien_cliente').checked) tipos.push('cliente');
+
+    const json = await llamarProveedores('GUARDARPROVEEDOR', {
+        ruc,
+        razon_social: razon,
+        nombre_comercial: document.getElementById('prov_rapido_comercial').value.trim(),
+        js_tipo: JSON.stringify(tipos),
+        telefonos_contacto: '[]',
+    });
+
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+
+    modalProveedorRapido.hide();
+    Swal.fire('Listo', 'Proveedor registrado correctamente.', 'success');
+
+    // Recarga el Tom Select del modal de compra y deja seleccionado el nuevo proveedor
+    await cargarProveedoresModal(ruc);
+});
 
 async function obtenerOpcionesMateriales() {
     if (materialesCache) return materialesCache;
