@@ -13,6 +13,10 @@
  *   - false => material COMPUESTO (materia prima que se compra a proveedores)
  *   - true  => material DERIVADO (sale como subproducto/derivado de un proceso
  *              interno, ej. "CLICK DE GANCHO", y no se compra directamente)
+ * `color` (boolean, default false) marca si este material es un TINTE.
+ * `rgb` (text, nullable) guarda el color real del tinte (HEX/RGB), usado
+ *   tanto para pintar su card en Producción como para sincronizar el
+ *   registro correspondiente en la tabla `color` (ver asegurarColorParaTinte()).
  * Soft delete vía deleted_at.
  */
 
@@ -254,8 +258,14 @@ function guardarMaterial()
     $conectar    = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
     $nombre      = trim($_POST['nombre'] ?? '');
+    $nombre      = mb_strtoupper($nombre, 'UTF-8'); // NUEVO: normaliza a mayúsculas, respalda al frontend
     $rgb   = trim($_POST['rgb'] ?? '');
     $color = obtenerColorPost();
+    $colorNombre = trim($_POST['color_nombre'] ?? '');
+    if ($colorNombre === '') {
+        $colorNombre = $nombre; // fallback si no mandan nombre de color explícito
+    }
+    $colorNombre = mb_strtoupper($colorNombre, 'UTF-8');
     $stockMinimo = $_POST['stock_minimo'] !== '' ? floatval($_POST['stock_minimo'] ?? 0) : 0;
     $stockActual = $_POST['stock_actual'] !== '' ? floatval($_POST['stock_actual'] ?? 0) : 0;
     $derivado    = obtenerDerivadoPost();
@@ -322,6 +332,7 @@ function guardarMaterial()
         'stock_minimo'    => 'Stock mínimo',
         'stock_actual'    => 'Stock actual',
         'derivado_texto'  => 'Tipo',
+        'color_texto'     => 'Es tinte',
     ];
 
     $datosNuevos = [
@@ -330,8 +341,9 @@ function guardarMaterial()
         'stock_minimo'   => $stockMinimo,
         'stock_actual'   => $stockActual,
         'derivado_texto' => $derivado ? 'DERIVADO' : 'COMPUESTO',
+        'color_texto'    => $color ? 'Sí' : 'No',
     ];
-    asegurarColorParaTinte($conectar, $color, $nombre, $rgb);
+    asegurarColorParaTinte($conectar, $color, $colorNombre, $rgb);
 
     if ($id === 0) {
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
@@ -342,8 +354,8 @@ function guardarMaterial()
 
         $result = executeQuery($conectar, "
             
-            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, derivado, js_producto, created_at, js_session, js_historial)
-            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, :derivado, :js_producto, NOW(), :js_session, :js_historial)
+            INSERT INTO material (nombre, unidad_medida_id, stock_minimo, stock_actual, derivado, color, rgb, js_producto, created_at, js_session, js_historial)
+            VALUES (:nombre, :unidad_medida_id, :stock_minimo, :stock_actual, :derivado, :color, :rgb, :js_producto, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'           => $nombre,
@@ -351,6 +363,8 @@ function guardarMaterial()
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
             'derivado'         => $derivado ? 'true' : 'false',
+            'color'            => $color ? 'true' : 'false',
+            'rgb'              => $rgb !== '' ? $rgb : null,
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,
             'js_producto'      => $jsProductoJson,
@@ -363,6 +377,7 @@ function guardarMaterial()
         $registroAnterior = $actual[0];
         $registroAnterior['nombre_unidad']  = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
         $registroAnterior['derivado_texto'] = filter_var($registroAnterior['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'DERIVADO' : 'COMPUESTO';
+        $registroAnterior['color_texto']    = filter_var($registroAnterior['color'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'Sí' : 'No';
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -378,6 +393,8 @@ function guardarMaterial()
                 stock_minimo     = :stock_minimo,
                 stock_actual     = :stock_actual,
                 derivado         = :derivado,
+                color            = :color,
+                rgb              = :rgb,
                 js_producto      = :js_producto,
                 update_at        = NOW(),
                 js_session       = :js_session,
@@ -389,6 +406,8 @@ function guardarMaterial()
             'stock_minimo'     => $stockMinimo,
             'stock_actual'     => $stockActual,
             'derivado'         => $derivado ? 'true' : 'false',
+            'color'            => $color ? 'true' : 'false',
+            'rgb'              => $rgb !== '' ? $rgb : null,
             'id'               => $id,
             'js_session'       => $js_session,
             'js_historial'     => $js_historial_nuevo,
