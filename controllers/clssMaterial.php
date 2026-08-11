@@ -217,11 +217,45 @@ function obtenerDerivadoPost(): bool
     return filter_var($_POST['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN);
 }
 
+function obtenerColorPost(): bool
+{
+    return filter_var($_POST['color'] ?? false, FILTER_VALIDATE_BOOLEAN);
+}
+
+function asegurarColorParaTinte($conectar, bool $esTinte, string $nombre, ?string $rgb): void
+{
+    if (!$esTinte) {
+        return;
+    }
+
+    $existente = executeQuery(
+        $conectar,
+        "SELECT id FROM color WHERE nombre ILIKE :nombre",
+        ['nombre' => $nombre]
+    );
+
+    if (!empty($existente)) {
+        executeNonQuery(
+            $conectar,
+            "UPDATE color SET rgb = :rgb, update_at = NOW() WHERE id = :id",
+            ['rgb' => $rgb ?: null, 'id' => $existente[0]['id']]
+        );
+        return;
+    }
+
+    executeNonQuery($conectar, "
+        INSERT INTO color (nombre, rgb, created_at)
+        VALUES (:nombre, :rgb, NOW())
+    ", ['nombre' => $nombre, 'rgb' => $rgb ?: null]);
+}
+
 function guardarMaterial()
 {
     $conectar    = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
     $nombre      = trim($_POST['nombre'] ?? '');
+    $rgb   = trim($_POST['rgb'] ?? '');
+    $color = obtenerColorPost();
     $stockMinimo = $_POST['stock_minimo'] !== '' ? floatval($_POST['stock_minimo'] ?? 0) : 0;
     $stockActual = $_POST['stock_actual'] !== '' ? floatval($_POST['stock_actual'] ?? 0) : 0;
     $derivado    = obtenerDerivadoPost();
@@ -297,6 +331,7 @@ function guardarMaterial()
         'stock_actual'   => $stockActual,
         'derivado_texto' => $derivado ? 'DERIVADO' : 'COMPUESTO',
     ];
+    asegurarColorParaTinte($conectar, $color, $nombre, $rgb);
 
     if ($id === 0) {
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);

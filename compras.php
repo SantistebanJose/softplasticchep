@@ -203,6 +203,49 @@ include("header.php");
   </div>
 </div>
 
+<!-- Modal Alta rápida de material-tinte -->
+<div class="modal fade" id="modalMaterialRapido" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formMaterialRapido">
+        <div class="modal-header">
+          <h5 class="modal-title">Registrar tinte</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">Nombre *</label>
+            <input type="text" class="form-control" id="mat_rapido_nombre" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Unidad de medida (base) *</label>
+            <select class="form-select" id="mat_rapido_unidad" required>
+              <option value="">Selecciona...</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Color (RGB/HEX)</label>
+            <div class="d-flex gap-2 align-items-center">
+              <input type="color" class="form-control form-control-color" id="mat_rapido_picker" value="#000000">
+              <input type="text" class="form-control" id="mat_rapido_rgb" placeholder="#000000">
+            </div>
+            <div class="form-text">Se usará también para crear/actualizar su registro en el módulo Colores.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Stock mínimo</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="mat_rapido_stock_minimo" value="0">
+          </div>
+          <!-- Este alta siempre crea un TINTE: color=1 va fijo, no editable aquí -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar tinte</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
 <style>
 /* Los dropdowns de Tom Select que usan dropdownParent:'body' cuelgan
@@ -219,6 +262,10 @@ include("header.php");
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
+const CONTROLADOR_MATERIAL = 'controllers/clssMaterial.php';
+const llamarMaterial = (accion, params = {}) => llamar(CONTROLADOR_MATERIAL, accion, params);
+const modalMaterialRapido = new bootstrap.Modal(document.getElementById('modalMaterialRapido'));
+let tomSelectMaterialActivo = null; // fila cuyo Tom Select se actualizará al guardar
 const llamarProveedores = (accion, params = {}) => llamar(CONTROLADOR_PROVEEDORES, accion, params);
 const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
 const RUTA_VER_COMPROBANTE = 'controllers/ver_comprobante.php'; // sirve el archivo validando sesión
@@ -349,7 +396,15 @@ async function cargarProveedoresFiltro() {
         render: {
             option: renderOpcionProveedor,
             item: (data, escape) => `<div>${escape(data.razon_social)}</div>`,
-            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+            no_results: (data, escape) => `
+            <div class="no-results d-flex justify-content-between align-items-center gap-2">
+                <span>Sin resultados para "${escape(data.input)}"</span>
+                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onmousedown="event.preventDefault()"
+                        onclick="abrirModalMaterialRapido('${escape(data.input)}', tomSelectMaterial)">
+                    <i class="fa-solid fa-plus"></i> Registrar tinte
+                </button>
+            </div>`
         },
         onChange: cargarCompras
     });
@@ -365,15 +420,7 @@ function inicializarTomSelectModal() {
         render: {
             option: renderOpcionProveedor,
             item: (data, escape) => `<div>${escape(data.razon_social)}</div>`,
-            no_results: (data, escape) => `
-                <div class="no-results d-flex justify-content-between align-items-center gap-2">
-                    <span>Sin resultados para "${escape(data.input)}"</span>
-                    <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0"
-                            onmousedown="event.preventDefault()"
-                            onclick="abrirModalProveedorRapido('${escape(data.input)}')">
-                        <i class="fa-solid fa-plus"></i> Registrar
-                    </button>
-                </div>`
+            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
         }
     });
 }
@@ -389,6 +436,35 @@ async function cargarProveedoresModal(seleccionarRuc = '') {
         tomSelectModalProveedor.setValue(seleccionarRuc, true);
     }
 }
+
+function abrirModalMaterialRapido(nombrePrellenado = '', tomSelectInstance) {
+    tomSelectMaterialActivo = tomSelectInstance;
+    document.getElementById('formMaterialRapido').reset();
+    document.getElementById('mat_rapido_nombre').value = nombrePrellenado;
+    document.getElementById('mat_rapido_picker').value = '#000000';
+    cargarUnidadesRaizModalMaterial();
+    modalMaterialRapido.show();
+}
+
+// Usa la misma acción con la que tu material.php llena el select de unidad
+// de medida (unidad RAÍZ). Si el nombre de la acción es distinto, ajústalo aquí.
+async function cargarUnidadesRaizModalMaterial() {
+    const json = await llamarUnidades('BUSCARUNIDADES', {});
+    const select = document.getElementById('mat_rapido_unidad');
+    select.innerHTML = '<option value="">Selecciona...</option>';
+    if (json.success) {
+        // Si BUSCARUNIDADES trae también compuestas, filtra por unidad_base_id vacío.
+        (json.unidades || [])
+            .filter(u => !u.unidad_base_id)
+            .forEach(u => {
+                select.innerHTML += `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`;
+            });
+    }
+}
+
+document.getElementById('mat_rapido_picker').addEventListener('input', (e) => {
+    document.getElementById('mat_rapido_rgb').value = e.target.value;
+});
 
 function abrirModalProveedorRapido(documentoPrellenado = '') {
     document.getElementById('formProveedorRapido').reset();
@@ -447,6 +523,50 @@ document.getElementById('formProveedorRapido').addEventListener('submit', async 
 
     // Recarga el Tom Select del modal de compra y deja seleccionado el nuevo proveedor
     await cargarProveedoresModal(ruc);
+});
+
+document.getElementById('formMaterialRapido').addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const nombre = document.getElementById('mat_rapido_nombre').value.trim();
+    const unidadMedidaId = document.getElementById('mat_rapido_unidad').value;
+
+    if (!nombre) {
+        Swal.fire('Atención', 'El nombre es obligatorio.', 'warning');
+        return;
+    }
+    if (!unidadMedidaId) {
+        Swal.fire('Atención', 'Selecciona la unidad de medida base.', 'warning');
+        return;
+    }
+
+    const json = await llamarMaterial('GUARDARMATERIAL', {
+        id: 0,
+        nombre,
+        unidad_medida_id: unidadMedidaId,
+        stock_minimo: document.getElementById('mat_rapido_stock_minimo').value || 0,
+        stock_actual: 0,
+        color: '1', // siempre tinte desde este alta rápida
+        rgb: document.getElementById('mat_rapido_rgb').value.trim(),
+        productos_ids: '[]',
+    });
+
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+
+    modalMaterialRapido.hide();
+    Swal.fire('Listo', 'Tinte registrado correctamente (también creado/vinculado en Colores).', 'success');
+
+    // Refresca el cache de materiales y actualiza SOLO la fila que abrió el modal
+    materialesCache = null;
+    const materiales = await obtenerOpcionesMateriales();
+    if (tomSelectMaterialActivo) {
+        tomSelectMaterialActivo.clearOptions();
+        tomSelectMaterialActivo.addOptions(materiales);
+        tomSelectMaterialActivo.setValue(String(json.id), true); // dispara onChange -> carga unidad y conversión
+    }
 });
 
 async function obtenerOpcionesMateriales() {
@@ -604,7 +724,15 @@ async function agregarFilaMaterial(datos = null) {
         render: {
             option: renderOpcionMaterial,
             item: (data, escape) => `<div>${escape(data.nombre)}</div>`,
-            no_results: (data, escape) => `<div class="no-results">Sin resultados para "${escape(data.input)}"</div>`
+            no_results: (data, escape) => `
+                <div class="no-results d-flex justify-content-between align-items-center gap-2">
+                    <span>Sin resultados para "${escape(data.input)}"</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0"
+                            onmousedown="event.preventDefault()"
+                            onclick="abrirModalMaterialRapido('${escape(data.input)}', tomSelectMaterial)">
+                        <i class="fa-solid fa-plus"></i> Registrar tinte
+                    </button>
+                </div>`
         },
         onChange: () => {
             actualizarBadgeDerivado();
