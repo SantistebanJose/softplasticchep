@@ -405,20 +405,20 @@ function obtenerProduccion($id)
     // Detalle con toda la info del lote de origen (se conserva para
     // trazabilidad interna, aunque el formulario ya no la muestre línea
     // por línea: el frontend agrupa estas filas por material_id).
-    $detalle = executeQuery(
+        $detalle = executeQuery(
         $conectar,
         "SELECT rpm.*, m.nombre AS material_nombre,
                 rcm.compra_id, c.fecha_compra, p.razon_social AS proveedor,
                 rcm.cantidad_base AS lote_cantidad_base,
                 ub.nombre_corto AS unidad_base_corto
-         FROM rel_produccion_material rpm
-         JOIN material m ON m.id = rpm.material_id
-         JOIN rel_compra_material rcm ON rcm.id = rpm.rel_compra_material_id
-         JOIN compra c ON c.id = rcm.compra_id
-         JOIN proveedor p ON p.ruc = c.proveedor_id
-         LEFT JOIN unidad_medida ub ON ub.id = m.unidad_medida_id
-         WHERE rpm.produccion_id = :id AND rpm.deleted_at IS NULL
-         ORDER BY rpm.id",
+        FROM rel_produccion_material rpm
+        JOIN material m ON m.id = rpm.material_id
+        LEFT JOIN rel_compra_material rcm ON rcm.id = rpm.rel_compra_material_id
+        LEFT JOIN compra c ON c.id = rcm.compra_id
+        LEFT JOIN proveedor p ON p.ruc = c.proveedor_id
+        LEFT JOIN unidad_medida ub ON ub.id = m.unidad_medida_id
+        WHERE rpm.produccion_id = :id AND rpm.deleted_at IS NULL
+        ORDER BY rpm.id",
         ['id' => $id]
     );
 
@@ -658,80 +658,65 @@ function guardarProduccion()
 }
 
 /**
- * Reparte la cantidad total pedida de cada material entre los lotes
- * disponibles de ese material, del más antiguo al más nuevo (FIFO), e
- * inserta una línea de rel_produccion_material por cada lote que participe
- * (puede ser más de una si un solo lote no alcanza). Resta del stock del
- * material en cada paso. El usuario ya no elige el lote: solo indicó
- * material + cantidad, y aquí se decide automáticamente "de dónde sale".
+ * Valida y descuenta cada línea del detalle directamente contra
+ * material.stock_actual. Ya NO reparte por lotes/FIFO: se inserta una
+ * sola línea por material en rel_produccion_material, sin
+ * rel_compra_material_id (queda NULL — ya no hay lote de origen puntual).
+ * La trazabilidad por lote de compra queda descontinuada para avances de
+ * producción; el stock_actual del material es ahora la única fuente de
+ * verdad de disponibilidad.
  */
 function insertarLineasYRestarStock($conectar, int $produccionId, array $detalle): void
 {
     foreach ($detalle as $linea) {
-        $materialId       = $linea['material_id'];
-        $cantidadRestante = round((float) $linea['cantidad'], 4);
-        $comentario       = $linea['comentario'];
+        $materialId = $linea['material_id'];
+        $cantidad   = round((float) $linea['cantidad'], 4);
+        $comentario = $linea['comentario'];
 
-        $lotes = executeQuery(
+        $mat = executeQuery(
             $conectar,
-            "SELECT lote_id, disponible, proveedor, fecha_compra, unidad_base_corto
-             FROM view_lotes_material_disponible
-             WHERE material_id = :material_id AND disponible > 0.0001
-             ORDER BY fecha_compra ASC, lote_id ASC",
-            ['material_id' => $materialId]
+            "SELECT nombre, stock_actual FROM material WHERE id = :id",
+            ['id' => $materialId]
         );
+        if (empty($mat)) throw new Exception("Material #$materialId no encontrado.");
 
-        $totalDisponible = 0.0;
-        foreach ($lotes as $l) $totalDisponible += (float) $l['disponible'];
-
-        if ($cantidadRestante > $totalDisponible + 0.0001) {
-            $mat = executeQuery($conectar, "SELECT nombre FROM material WHERE id = :id", ['id' => $materialId]);
-            $nombreMaterial = $mat[0]['nombre'] ?? "material #$materialId";
+        $stockActual = (float) $mat[0]['stock_actual'];
+        if ($cantidad > $stockActual + 0.0001) {
             throw new Exception(
-                'No hay stock suficiente de "' . $nombreMaterial . '". '
-                . 'Disponible: ' . number_format($totalDisponible, 4)
-                . ', solicitado: ' . number_format($cantidadRestante, 4) . '.'
+                'No hay stock suficiente de "' . $mat[0]['nombre'] . '". '
+                . 'Disponible: ' . number_format($stockActual, 4)
+                . ', solicitado: ' . number_format($cantidad, 4) . '.'
             );
         }
 
-        foreach ($lotes as $lote) {
-            if ($cantidadRestante <= 0.0001) break;
+        $movimiento   = obtenerMovimientoSesion('crear_linea');
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-            $tomar = min($cantidadRestante, (float) $lote['disponible']);
+        executeNonQuery($conectar, "
+            INSERT INTO rel_produccion_material (
+                produccion_id, material_id, rel_compra_material_id, cantidad, comentario,
+                created_at, updated_at, js_session, js_historial
+            ) VALUES (
+                :produccion_id, :material_id, NULL, :cantidad, :comentario,
+                NOW(), NOW(), :js_session, :js_historial
+            )
+        ", [
+            'produccion_id' => $produccionId,
+            'material_id'   => $materialId,
+            'cantidad'      => $cantidad,
+            'comentario'    => $comentario,
+            'js_session'    => $js_session,
+            'js_historial'  => $js_historial,
+        ]);
 
-            $movimiento   = obtenerMovimientoSesion('crear_linea');
-            $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-            $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
-
-            executeNonQuery($conectar, "
-                INSERT INTO rel_produccion_material (
-                    produccion_id, material_id, rel_compra_material_id, cantidad, comentario,
-                    created_at, updated_at, js_session, js_historial
-                ) VALUES (
-                    :produccion_id, :material_id, :rel_compra_material_id, :cantidad, :comentario,
-                    NOW(), NOW(), :js_session, :js_historial
-                )
-            ", [
-                'produccion_id'           => $produccionId,
-                'material_id'             => $materialId,
-                'rel_compra_material_id'  => $lote['lote_id'],
-                'cantidad'                => $tomar,
-                'comentario'              => $comentario,
-                'js_session'              => $js_session,
-                'js_historial'            => $js_historial,
-            ]);
-
-            executeNonQuery(
-                $conectar,
-                "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                ['cantidad' => $tomar, 'mid' => $materialId]
-            );
-
-            $cantidadRestante = round($cantidadRestante - $tomar, 4);
-        }
+        executeNonQuery(
+            $conectar,
+            "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
+            ['cantidad' => $cantidad, 'mid' => $materialId]
+        );
     }
 }
-
 // Soft delete: revierte el stock (devuelve la cantidad consumida) de las
 // líneas activas y desactiva el avance + sus líneas.
 function eliminarProduccion()
@@ -902,13 +887,13 @@ function enviarAEnsamblaje()
 
     responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id]);
 }
-
-// Registra un lote de merma para este avance, etiquetado automáticamente
-// con el color del avance (pd.color_id) en el momento del registro. Se
-// guarda como un elemento más dentro del array jsonb
-// produccion.js_cantidades_merma: {color_id, color_nombre, color_rgb,
-// cantidad, fecha, usuario}. Permite registrar merma varias veces sobre
-// el mismo avance (se van acumulando).
+// Registra un lote de merma para este avance:
+//  1) Inserta una fila en `merma` (fuente de verdad, una fila por registro,
+//     con color_ref = nombre del color en ese momento).
+//  2) Además agrega la misma entrada al array jsonb
+//     produccion.js_cantidades_merma, como copia redundante — sirve para
+//     mostrar el total de merma en las cards del listado sin tener que
+//     hacer join/subconsulta contra `merma` cada vez.
 function registrarMerma()
 {
     $conectar = conectar_oll_BD();
@@ -941,31 +926,57 @@ function registrarMerma()
     ];
     $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
 
-    $cambios = [[
-        'campo' => 'Merma registrada',
-        'valor_antes' => '-',
-        'valor_despues' => "{$cantidadMerma} kg color {$actual[0]['color_nombre']}",
-    ]];
-    $movimiento   = obtenerMovimientoSesion('registrar_merma', $cambios);
-    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+    $conectar->beginTransaction();
+    try {
+        // 1) Fila propia en `merma`
+        $nuevaMerma = executeQuery($conectar, "
+            INSERT INTO merma (producion_id, color_ref, cantidad, js_merma, created_at, update_at)
+            VALUES (:produccion_id, :color_ref, :cantidad, :js_merma, NOW(), NOW())
+            RETURNING id
+        ", [
+            'produccion_id' => $id,
+            'color_ref'     => $actual[0]['color_nombre'],
+            'cantidad'      => $cantidadMerma,
+            'js_merma'      => $jsNuevaEntrada,
+        ]);
+        $mermaId = $nuevaMerma[0]['id'] ?? null;
+        if (!$mermaId) throw new Exception('No se pudo registrar la merma.');
 
-    executeNonQuery($conectar, "
-        UPDATE produccion SET
-            js_cantidades_merma = COALESCE(js_cantidades_merma, '[]'::jsonb) || jsonb_build_array(:nueva::jsonb),
-            updated_at   = NOW(),
-            js_session   = :js_session,
-            js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-        WHERE id = :id
-    ", [
-        'id'           => $id,
-        'nueva'        => $jsNuevaEntrada,
-        'js_session'   => $js_session,
-        'js_historial' => $js_historial,
-    ]);
+        // 2) Copia redundante en produccion.js_cantidades_merma
+        $cambios = [[
+            'campo' => 'Merma registrada',
+            'valor_antes' => '-',
+            'valor_despues' => "{$cantidadMerma} kg color {$actual[0]['color_nombre']}",
+        ]];
+        $movimiento   = obtenerMovimientoSesion('registrar_merma', $cambios);
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-    responder(true, 'Merma registrada correctamente.', ['id' => $id, 'merma' => $nuevaEntrada]);
+        executeNonQuery($conectar, "
+            UPDATE produccion SET
+                js_cantidades_merma = COALESCE(js_cantidades_merma, '[]'::jsonb) || jsonb_build_array(:nueva::jsonb),
+                updated_at   = NOW(),
+                js_session   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id
+        ", [
+            'id'           => $id,
+            'nueva'        => $jsNuevaEntrada,
+            'js_session'   => $js_session,
+            'js_historial' => $js_historial,
+        ]);
+
+        $conectar->commit();
+
+        $nuevaEntrada['merma_id'] = $mermaId;
+        responder(true, 'Merma registrada correctamente.', ['id' => $id, 'merma' => $nuevaEntrada]);
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error registrando merma: " . $e->getMessage());
+        responder(false, 'No se pudo registrar la merma: ' . $e->getMessage());
+    }
 }
+
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
 function iniciarCorrida(int $id)
