@@ -130,6 +130,13 @@ include("header.php");
     .config-tab-pane {
         padding-top: 14px;
     }
+    .config-venta-block {
+        background: #f8f9fb;
+        border: 1px solid #eceef1;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+    }
 </style>
 
 <div class="pc-card">
@@ -251,6 +258,15 @@ include("header.php");
         </div>
         <div class="modal-body">
           <input type="hidden" id="config_producto_id">
+
+          <!-- "Se vende por" es una sola configuración a nivel de producto,
+               no depende del molde, por eso va aquí arriba y no dentro de los tabs. -->
+          <div class="config-venta-block">
+              <label class="form-label mb-1">Se vende por</label>
+              <select class="form-select" id="config_se_vende_por" required>
+                  <option value="">Seleccione...</option>
+              </select>
+          </div>
 
           <ul class="nav nav-tabs" id="configNavTabs" role="tablist"></ul>
           <div class="tab-content" id="configTabContent"></div>
@@ -504,14 +520,18 @@ function reactivarProducto(id) {
 }
 
 // =============================================================================
-// CONFIGURACIÓN DE PRODUCTO (por cada molde asociado)
+// CONFIGURACIÓN DE PRODUCTO
+// "Se vende por" vive a nivel producto (arriba del todo, fuera de los tabs).
+// Cada tab de molde solo trae: necesita ensamblaje, salida en producción,
+// salida de merma.
 // =============================================================================
 
 /**
  * Abre el modal de configuración: obtiene los moldes asociados a este
  * producto (reutilizando LISTARMOLDESPRODUCTO de clssMoldes.php, filtrado
- * por producto_id) y la configuración ya guardada (producto.js_confi),
- * y arma un tab por cada molde.
+ * por producto_id), la configuración por molde ya guardada
+ * (producto.js_configuracion) y la configuración de venta ya guardada
+ * (producto.js_configuracion_venta), y arma un tab por cada molde.
  */
 async function abrirModalConfiguracion(productoId, productoDescripcion) {
     const [jsonMoldes, jsonProd] = await Promise.all([
@@ -530,10 +550,13 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
         return;
     }
 
-    const configActual = jsonProd.producto.js_configuracion || [];
+    const configActual      = jsonProd.producto.js_configuracion || [];
+    const configVentaActual = jsonProd.producto.js_configuracion_venta || {};
+
     document.getElementById('config_producto_id').value = productoId;
     document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
 
+    llenarSelectUnidades('config_se_vende_por', configVentaActual.se_vende_por_unidad_medida_id);
     construirTabsConfiguracion(moldesDelProducto, configActual);
     modalConfigProducto.show();
 }
@@ -579,11 +602,6 @@ function construirTabsConfiguracion(moldes, configActual) {
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">Se vende por</label>
-                    <select class="form-select" id="sel_venta_${m.molde_id}"></select>
-                </div>
-
-                <div class="mb-3">
                     <label class="form-label">Salida en Producción</label>
                     <select class="form-select" id="sel_salidaprod_${m.molde_id}"></select>
                 </div>
@@ -595,7 +613,6 @@ function construirTabsConfiguracion(moldes, configActual) {
             </div>
         `);
 
-        llenarSelectUnidades(`sel_venta_${m.molde_id}`, cfg.se_vende_por_unidad_medida_id);
         llenarSelectUnidades(`sel_salidaprod_${m.molde_id}`, cfg.salida_produccion_unidad_medida_id);
         llenarSelectUnidades(`sel_salidamerma_${m.molde_id}`, cfg.salida_merma_unidad_medida_id);
     });
@@ -611,6 +628,20 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     e.preventDefault();
 
     const productoId = parseInt(document.getElementById('config_producto_id').value, 10);
+
+    // ── "Se vende por" (a nivel producto) ───────────────────────────────
+    const ventaSel = document.getElementById('config_se_vende_por');
+    if (!ventaSel.value) {
+        Swal.fire('Falta información', 'Selecciona "Se vende por" para el producto.', 'warning');
+        return;
+    }
+    const ventaOpt = ventaSel.selectedOptions[0];
+    const configuracionVenta = {
+        se_vende_por_unidad_medida_id: parseInt(ventaSel.value, 10),
+        se_vende_por: ventaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
+    };
+
+    // ── Configuración por molde ──────────────────────────────────────────
     const panes = document.querySelectorAll('#configTabContent .tab-pane');
     const configuraciones = [];
     let valido = true;
@@ -622,17 +653,15 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
         const moldeNombre = pane.dataset.moldeNombre;
 
         const ensamblaje     = pane.querySelector(`input[name="ensamblaje_${moldeId}"]:checked`)?.value ?? 'no';
-        const ventaSel       = document.getElementById(`sel_venta_${moldeId}`);
         const salidaProdSel  = document.getElementById(`sel_salidaprod_${moldeId}`);
         const salidaMermaSel = document.getElementById(`sel_salidamerma_${moldeId}`);
 
-        if (!ventaSel.value || !salidaProdSel.value || !salidaMermaSel.value) {
+        if (!salidaProdSel.value || !salidaMermaSel.value) {
             Swal.fire('Falta información', `Completa todos los campos de configuración para "${moldeNombre}".`, 'warning');
             valido = false;
             return;
         }
 
-        const ventaOpt       = ventaSel.selectedOptions[0];
         const salidaProdOpt  = salidaProdSel.selectedOptions[0];
         const salidaMermaOpt = salidaMermaSel.selectedOptions[0];
 
@@ -640,8 +669,6 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
             molde_id: moldeId,
             molde: moldeNombre,
             necesita_ensamblaje: ensamblaje === 'si' ? 'sí' : 'no',
-            se_vende_por_unidad_medida_id: parseInt(ventaSel.value, 10),
-            se_vende_por: ventaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
             salida_produccion_unidad_medida_id: parseInt(salidaProdSel.value, 10),
             salida_produccion: salidaProdOpt.textContent.split(' - ')[0].trim().toLowerCase(),
             salida_merma_unidad_medida_id: parseInt(salidaMermaSel.value, 10),
@@ -653,7 +680,8 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
 
     const json = await llamar('GUARDARCONFIGPRODUCTO', {
         producto_id: productoId,
-        configuraciones: JSON.stringify(configuraciones)
+        configuraciones: JSON.stringify(configuraciones),
+        configuracion_venta: JSON.stringify(configuracionVenta),
     });
 
     if (json.success) {

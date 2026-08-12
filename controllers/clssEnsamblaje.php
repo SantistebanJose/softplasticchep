@@ -548,13 +548,19 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 // ENSAMBLAJE
 // =============================================================================
 
-// Complementos: ensamblajes finalizados que pasaron por COMPLEMENTAR
-// (js_producto_emsamblado) y luego fueron vinculados a este armado.
 function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): string
 {
+    // La clave 'ensamblaje_complemento_id' debe coincidir EXACTO con lo que
+    // lee el frontend en abrirModalEditarEnsamblaje() (ensamblaje.php), que
+    // arma cada línea del ticket con item.ensamblaje_complemento_id. Antes
+    // esta subquery devolvía 'ensamblaje_id', lo que hacía que al editar un
+    // ensamblaje con complementos ya vinculados, esas líneas se guardaran
+    // con ensamblaje_complemento_id = undefined y se descartaran solas al
+    // reenviar el formulario (liberando el complemento sin que el usuario
+    // lo pidiera).
     return "(
         SELECT jsonb_agg(jsonb_build_object(
-                   'ensamblaje_id', ec.id,
+                   'ensamblaje_complemento_id', ec.id,
                    'producto_codigo', pc.codigo,
                    'producto_descripcion', pc.descripcion,
                    'cantidad_peso_kg', ec.cantidad_peso_kg
@@ -566,7 +572,6 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
           AND ec.js_producto_emsamblado IS NOT NULL
     ) AS js_complementos_utilizados";
 }
-
 function listarEnsamblajes()
 {
     $conectar = conectar_oll_BD();

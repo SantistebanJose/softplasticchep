@@ -278,22 +278,30 @@ function guardarProducto()
  */
 function guardarConfigProducto()
 {
-    $conectar    = conectar_oll_BD();
-    $producto_id = intval($_POST['producto_id'] ?? 0);
-    $configJson  = $_POST['configuraciones'] ?? '[]';
+    $conectar     = conectar_oll_BD();
+    $producto_id  = intval($_POST['producto_id'] ?? 0);
+    $configJson   = $_POST['configuraciones'] ?? '[]';
+    $ventaJson    = $_POST['configuracion_venta'] ?? '{}';
 
     if (!$producto_id) responder(false, 'Producto inválido.');
 
     $configuraciones = json_decode($configJson, true);
     if (!is_array($configuraciones)) responder(false, 'Formato de configuración inválido.');
 
+    $configuracionVenta = json_decode($ventaJson, true);
+    if (!is_array($configuracionVenta)) responder(false, 'Formato de configuración de venta inválido.');
+
     $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');
 
-    // Validación mínima de cada fila (una por molde)
+    // "Se vende por" es a nivel producto (una sola vez, no por molde)
+    if (empty($configuracionVenta['se_vende_por_unidad_medida_id'])) {
+        responder(false, 'Falta "Se vende por" para el producto.');
+    }
+
+    // Validación mínima de cada fila (una por molde) — ya SIN se_vende_por
     foreach ($configuraciones as $c) {
         if (empty($c['molde_id'])) responder(false, 'Falta el molde en una de las configuraciones.');
-        if (empty($c['se_vende_por_unidad_medida_id']))      responder(false, 'Falta "Se vende por" para el molde "' . ($c['molde'] ?? '') . '".');
         if (empty($c['salida_produccion_unidad_medida_id'])) responder(false, 'Falta "Salida en Producción" para el molde "' . ($c['molde'] ?? '') . '".');
         if (empty($c['salida_merma_unidad_medida_id']))      responder(false, 'Falta "Salida de Merma" para el molde "' . ($c['molde'] ?? '') . '".');
     }
@@ -315,16 +323,19 @@ function guardarConfigProducto()
     }
     unset($c);
 
-    $jsConfiJson = json_encode($configuraciones, JSON_UNESCAPED_UNICODE);
+    $jsConfiJson  = json_encode($configuraciones, JSON_UNESCAPED_UNICODE);
+    $jsVentaJson  = json_encode($configuracionVenta, JSON_UNESCAPED_UNICODE);
 
     executeQuery($conectar, "
         UPDATE producto SET
-            js_configuracion   = :js_configuracion,
+            js_configuracion       = :js_configuracion,
+            js_configuracion_venta = :js_configuracion_venta,
             updated_at = NOW()
         WHERE id = :id
     ", [
-        'js_configuracion' => $jsConfiJson,
-        'id'       => $producto_id,
+        'js_configuracion'       => $jsConfiJson,
+        'js_configuracion_venta' => $jsVentaJson,
+        'id'                     => $producto_id,
     ]);
 
     responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);
