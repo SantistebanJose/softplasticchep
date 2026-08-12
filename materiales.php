@@ -73,9 +73,11 @@ include("header.php");
                 <option value="">Sin unidad de medida</option>
             </select>
             <div class="form-text">
-                Solo se muestran unidades <strong>raíz</strong> (ej: Kilogramo, Unidad, Litro).
-                Las unidades compuestas (ej: Saco 25kg, Rollo 50m) se eligen únicamente al registrar
-                una compra, y el sistema convierte automáticamente a esta unidad para actualizar el stock.
+                Puedes elegir cualquier unidad activa: una raíz (ej: Gramo) o una compuesta
+                ya definida (ej: Kilogramo, Saco 25kg). El stock de este material se maneja
+                siempre en la unidad que elijas aquí. Al registrar una compra en otra unidad
+                de la misma familia, el sistema convierte automáticamente entre ambas usando
+                sus equivalencias.
             </div>
           </div>
 
@@ -225,15 +227,17 @@ async function llamar(url, accion, params = {}) {
 const llamarMateriales = (accion, params = {}) => llamar(CONTROLADOR_MATERIALES, accion, params);
 const llamarUnidades   = (accion, params = {}) => llamar(CONTROLADOR_UNIDADES, accion, params);
 
-// ── Selector de unidades: solo RAÍZ, activas ─────────────────────────────────
-// Una unidad "compuesta" (ej. Saco 25kg, unidad_base_id -> Kilogramo) NO debe
-// poder asignarse como unidad propia de un material: rompería la conversión
-// que se usa en Compras (cantidad_base = cantidad_comprada * equivalencia),
-// porque esa fórmula asume que el stock del material ya está en su unidad raíz.
-// El filtro real vive en el backend (LISTARUNIDADESRAIZ + validación en
-// GUARDARMATERIAL); aquí solo consumimos esa acción dedicada.
+// ── Selector de unidades: cualquier unidad activa (raíz o compuesta) ────────
+// Antes solo se permitían unidades RAÍZ, porque la conversión de Compras
+// asumía que el stock del material siempre estaba en la raíz de la familia.
+// Ahora unidad_medida.equivalencia ya guarda la equivalencia real hacia la
+// raíz para CUALQUIER unidad (raíz = 1, compuesta = su factor), así que el
+// material puede llevarse en cualquier unidad de una familia (Gramo,
+// Kilogramo, etc.) y la conversión en Compras se hace de forma relativa
+// entre la unidad de compra y esta. El filtro real vive en el backend
+// (GUARDARMATERIAL solo valida que la unidad exista y esté activa).
 async function cargarUnidadesSelect() {
-    const json = await llamarUnidades('LISTARUNIDADESRAIZ');
+    const json = await llamarUnidades('LISTARUNIDADESPARABASE', { excluir: 0 });
     const select = document.getElementById('material_unidad_medida_id');
     if (!json.success) return;
 

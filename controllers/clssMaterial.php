@@ -5,10 +5,19 @@
  * Controlador del módulo de Materia Prima
  * Tabla real: material (id, nombre, unidad_medida_id, stock_minimo, stock_actual,
  *             derivado, js_session, js_historial, created_at, update_at, deleted_at)
- * unidad_medida_id es OPCIONAL y, si se envía, DEBE ser una unidad RAÍZ
- * (unidad_base_id IS NULL) — el stock de un material siempre se maneja en su
- * unidad base; las unidades compuestas (sacos, bolsas, rollos) solo se eligen
- * al momento de comprar, y se convierten con `equivalencia` hacia esta unidad.
+ * unidad_medida_id es OPCIONAL y puede ser CUALQUIER unidad activa de
+ * unidad_medida — una raíz (ej: Gramo) o una compuesta ya creada (ej:
+ * Kilogramo, Saco 25kg). El stock del material se maneja siempre en la
+ * unidad que tenga asignada, tal cual, sin forzarla a la raíz de su familia.
+ * Al registrar una compra en otra unidad de la misma familia, la conversión
+ * hacia esta unidad debe hacerse de forma RELATIVA usando
+ * unidad_medida.equivalencia (que ya guarda "cuánto equivale 1 unidad de
+ * esta hacia la raíz real de su familia": 1 para las raíces, un factor para
+ * las compuestas):
+ *
+ *     cantidad_en_unidad_material = cantidad_comprada
+ *         * (equivalencia_unidad_compra / equivalencia_unidad_material)
+ *
  * `derivado` (boolean, default false) distingue:
  *   - false => material COMPUESTO (materia prima que se compra a proveedores)
  *   - true  => material DERIVADO (sale como subproducto/derivado de un proceso
@@ -303,19 +312,18 @@ function guardarMaterial()
     if ($stockMinimo < 0)  responder(false, 'El stock mínimo no puede ser negativo.');
     if ($stockActual < 0)  responder(false, 'El stock actual no puede ser negativo.');
 
-    // Si se envió una unidad de medida, debe existir, estar activa y ser RAÍZ.
-    // (el stock del material siempre se guarda en su unidad base; las unidades
-    // compuestas -sacos, bolsas, rollos- solo aplican al comprar).
+    // Si se envió una unidad de medida, solo validamos que exista y esté
+    // activa. Puede ser una raíz (Gramo) o una compuesta (Kilogramo, Saco
+    // 25kg) — el stock del material se maneja en la unidad que sea, y la
+    // conversión al comprar en otra unidad de la misma familia se hace de
+    // forma relativa usando unidad_medida.equivalencia (ver docblock arriba).
     if ($unidadMedidaId !== null) {
         $unidad = executeQuery(
             $conectar,
-            "SELECT id, unidad_base_id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
+            "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
             ['id' => $unidadMedidaId]
         );
         if (empty($unidad)) responder(false, 'La unidad de medida seleccionada no existe o está inactiva.');
-        if (!empty($unidad[0]['unidad_base_id'])) {
-            responder(false, 'Debes elegir una unidad de medida raíz (ej: Kilogramo, Metro, Unidad), no una compuesta (ej: Saco 25kg).');
-        }
     }
 
     // Nombre único (excluyendo el propio registro si es edición)
