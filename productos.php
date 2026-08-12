@@ -530,8 +530,7 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
         return;
     }
 
-    const configActual = jsonProd.producto.js_confi || [];
-
+    const configActual = jsonProd.producto.js_configuracion || [];
     document.getElementById('config_producto_id').value = productoId;
     document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
 
@@ -596,9 +595,9 @@ function construirTabsConfiguracion(moldes, configActual) {
             </div>
         `);
 
-        llenarSelectUnidades(`sel_venta_${m.molde_id}`, cfg.se_vende_por_id);
-        llenarSelectUnidades(`sel_salidaprod_${m.molde_id}`, cfg.salida_produccion_id);
-        llenarSelectUnidades(`sel_salidamerma_${m.molde_id}`, cfg.salida_merma_id);
+        llenarSelectUnidades(`sel_venta_${m.molde_id}`, cfg.se_vende_por_unidad_medida_id);
+        llenarSelectUnidades(`sel_salidaprod_${m.molde_id}`, cfg.salida_produccion_unidad_medida_id);
+        llenarSelectUnidades(`sel_salidamerma_${m.molde_id}`, cfg.salida_merma_unidad_medida_id);
     });
 }
 
@@ -641,11 +640,11 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
             molde_id: moldeId,
             molde: moldeNombre,
             necesita_ensamblaje: ensamblaje === 'si' ? 'sí' : 'no',
-            se_vende_por_id: parseInt(ventaSel.value, 10),
+            se_vende_por_unidad_medida_id: parseInt(ventaSel.value, 10),
             se_vende_por: ventaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
-            salida_produccion_id: parseInt(salidaProdSel.value, 10),
+            salida_produccion_unidad_medida_id: parseInt(salidaProdSel.value, 10),
             salida_produccion: salidaProdOpt.textContent.split(' - ')[0].trim().toLowerCase(),
-            salida_merma_id: parseInt(salidaMermaSel.value, 10),
+            salida_merma_unidad_medida_id: parseInt(salidaMermaSel.value, 10),
             salida_merma: salidaMermaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
         });
     });
