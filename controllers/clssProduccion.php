@@ -43,6 +43,18 @@
  *   MERMA: se descartó por ahora — el campo `merma_total` ya no se pide
  *   ni se guarda desde este formulario.
  *
+ *   REGISTRO DE MERMA (color libre, no ligado al avance): una merma NO
+ *   siempre corresponde al color propio del avance donde se registra —
+ *   típicamente ocurre en las primeras vueltas tras un cambio de molde o
+ *   color, cuando sale una mezcla (ej. "combinado azul y rojo") que no es
+ *   ni el color anterior ni el nuevo puro. Por eso `registrarMerma()` ya
+ *   no obliga a usar `produccion.color_id`: el usuario elige 0, 1 o varios
+ *   colores de la lista y/o escribe una nota libre describiendo la merma.
+ *   `produccion_id` solo indica en qué avance se registró (trazabilidad de
+ *   cuándo/dónde), no que el material perdido sea "del color de ese
+ *   avance". El objetivo es simplemente contabilizar cuánto se perdió,
+ *   sin forzar una atribución de color que no aplica.
+ *
  *   Cada avance puede consumir uno o varios materiales. El USUARIO ya no
  *   elige el lote de origen: solo indica material + cantidad total, y el
  *   backend reparte esa cantidad automáticamente entre los lotes
@@ -887,55 +899,93 @@ function enviarAEnsamblaje()
 
     responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id]);
 }
+
 // Registra un lote de merma para este avance:
-//  1) Inserta una fila en `merma` (fuente de verdad, una fila por registro,
-//     con color_ref = nombre del color en ese momento).
+//  1) Inserta una fila en `merma` (fuente de verdad, una fila por registro).
 //  2) Además agrega la misma entrada al array jsonb
 //     produccion.js_cantidades_merma, como copia redundante — sirve para
 //     mostrar el total de merma en las cards del listado sin tener que
 //     hacer join/subconsulta contra `merma` cada vez.
+//
+// El color de la merma es INDEPENDIENTE del color propio del avance: se
+// eligen 0, 1 o varios colores (ej. una mezcla "rojo + azul" que sale en
+// las primeras vueltas tras un cambio de molde/color) y/o se escribe una
+// nota libre (ej. "purga", "mezcla cambio de molde"). Se exige al menos
+// uno de los dos, para que la merma quede identificable de algún modo,
+// pero NO se exige que coincida con produccion.color_id.
 function registrarMerma()
 {
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     $cantidadMerma = floatval($_POST['cantidad_merma'] ?? 0);
+    $coloresJson = trim($_POST['colores'] ?? '[]');
+    $nota = trim($_POST['nota'] ?? '');
 
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadMerma <= 0) responder(false, 'La cantidad de merma debe ser mayor a 0.');
 
-    $actual = executeQuery(
-        $conectar,
-        "SELECT pd.id, pd.deleted_at, pd.color_id,
-                co.nombre AS color_nombre, co.rgb AS color_rgb
-         FROM produccion pd
-         LEFT JOIN color co ON co.id = pd.color_id
-         WHERE pd.id = :id",
-        ['id' => $id]
-    );
+    $coloresIds = json_decode($coloresJson, true);
+    if (!is_array($coloresIds)) $coloresIds = [];
+    $coloresIds = array_values(array_unique(array_map('intval', $coloresIds)));
+
+    if (empty($coloresIds) && $nota === '') {
+        responder(false, 'Selecciona al menos un color o describe la merma (ej. "combinado", "purga").');
+    }
+
+    $actual = executeQuery($conectar, "SELECT id, deleted_at FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($actual)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($actual[0]['deleted_at'])) responder(false, 'No puedes registrar merma en un avance inactivo.');
-    if (empty($actual[0]['color_id'])) responder(false, 'Este avance no tiene un color asignado.');
+
+    // Traemos nombre/rgb de los colores elegidos (pueden ser 0, 1 o varios;
+    // no tienen por qué incluir el color propio del avance).
+    $coloresInfo = [];
+    if (!empty($coloresIds)) {
+        $placeholders = [];
+        $params = [];
+        foreach ($coloresIds as $i => $cid) {
+            $key = "c$i";
+            $placeholders[] = ":$key";
+            $params[$key] = $cid;
+        }
+        $filasColor = executeQuery(
+            $conectar,
+            "SELECT id, nombre, rgb FROM color WHERE id IN (" . implode(',', $placeholders) . ") AND deleted_at IS NULL",
+            $params
+        );
+        if (empty($filasColor)) responder(false, 'Los colores seleccionados no son válidos.');
+        $coloresInfo = array_map(fn($c) => [
+            'id' => (int) $c['id'], 'nombre' => $c['nombre'], 'rgb' => $c['rgb'],
+        ], $filasColor);
+    }
+
+    // Texto legible para color_ref (columna de resumen en `merma`), ej.
+    // "Rojo + Azul (mezcla al cambiar de molde)" o "Sin color definido (purga)".
+    $nombresColores = array_map(fn($c) => $c['nombre'], $coloresInfo);
+    $colorRefTexto = !empty($nombresColores) ? implode(' + ', $nombresColores) : 'Sin color definido';
+    if ($nota !== '') $colorRefTexto .= " ($nota)";
 
     $nuevaEntrada = [
-        'color_id'     => (int) $actual[0]['color_id'],
-        'color_nombre' => $actual[0]['color_nombre'],
-        'color_rgb'    => $actual[0]['color_rgb'],
-        'cantidad'     => $cantidadMerma,
-        'fecha'        => date('Y-m-d H:i:s'),
-        'usuario'      => $_SESSION['nombre_usuario'] ?? 'Sistema',
+        'colores'   => $coloresInfo,
+        'color_ref' => $colorRefTexto,
+        'nota'      => $nota ?: null,
+        'cantidad'  => $cantidadMerma,
+        'fecha'     => date('Y-m-d H:i:s'),
+        'usuario'   => $_SESSION['nombre_usuario'] ?? 'Sistema',
     ];
     $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
 
     $conectar->beginTransaction();
     try {
-        // 1) Fila propia en `merma`
+        // 1) Fila propia en `merma`. producion_id solo indica en qué avance
+        // se registró (trazabilidad de cuándo/dónde), no que el material
+        // perdido sea "del color de ese avance".
         $nuevaMerma = executeQuery($conectar, "
             INSERT INTO merma (producion_id, color_ref, cantidad, js_merma, created_at, update_at)
             VALUES (:produccion_id, :color_ref, :cantidad, :js_merma, NOW(), NOW())
             RETURNING id
         ", [
             'produccion_id' => $id,
-            'color_ref'     => $actual[0]['color_nombre'],
+            'color_ref'     => $colorRefTexto,
             'cantidad'      => $cantidadMerma,
             'js_merma'      => $jsNuevaEntrada,
         ]);
@@ -946,7 +996,7 @@ function registrarMerma()
         $cambios = [[
             'campo' => 'Merma registrada',
             'valor_antes' => '-',
-            'valor_despues' => "{$cantidadMerma} kg color {$actual[0]['color_nombre']}",
+            'valor_despues' => "{$cantidadMerma} kg — {$colorRefTexto}",
         ]];
         $movimiento   = obtenerMovimientoSesion('registrar_merma', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);

@@ -290,6 +290,17 @@ include("header.php");
     cursor:pointer; user-select:none; padding-bottom:12px; white-space:nowrap;
 }
 .pc-toggle-inactivos input{ width:15px; height:15px; cursor:pointer; accent-color:#2F6FED; }
+
+/* ---------- Chips de color para merma (multi-selección + nota libre) ---------- */
+.pc-merma-chip{
+    display:inline-flex; align-items:center; gap:5px; padding:5px 10px;
+    border:1px solid #e2ddcd; background:#fff; border-radius:999px;
+    font-size:.75em; font-weight:600; color:#5c5947; cursor:pointer;
+    transition:.12s ease;
+}
+.pc-merma-chip:hover{ border-color:#d8d4c8; }
+.pc-merma-chip.activo{ background:#152238; border-color:#152238; color:#fff; }
+.pc-merma-chip.activo .pc-color-dot{ border-color:rgba(255,255,255,.5); }
 </style>
 
 <div class="pc-card">
@@ -465,7 +476,10 @@ include("header.php");
             <hr>
 
             <label class="form-label mb-1">Merma (opcional)</label>
-            <div class="d-flex align-items-center gap-2 mb-2" id="merma_color_info" style="font-size:.85em;"></div>
+            
+            <div class="d-flex flex-wrap gap-1 mb-2" id="merma_colores_chips"></div>
+            <input type="text" class="form-control form-control-sm mb-2" id="merma_nota"
+                   placeholder="Nota opcional (ej. 'combinado azul y rojo', 'purga')">
             <div class="input-group">
                 <input type="number" step="0.0001" min="0.0001" class="form-control"
                     id="cantidad_merma_kg" placeholder="Kg de merma">
@@ -1439,6 +1453,8 @@ function finalizarProduccion(id) {
 
 const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
 let produccionIdParaEnsamblaje = null;
+let coloresMermaCache = null;       // cache de colores activos, para los chips de merma
+let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
 
 function abrirModalCantidadParaEnsamblaje(produccionId) {
     produccionIdParaEnsamblaje = produccionId;
@@ -1450,17 +1466,52 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     modalCantidadEnsamblaje.show();
 }
 
-function renderInfoMermaModal(p) {
-    const cont = document.getElementById('merma_color_info');
-    const txt  = document.getElementById('merma_registrada_txt');
+async function obtenerColoresParaMerma() {
+    if (coloresMermaCache) return coloresMermaCache;
+    const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
+    coloresMermaCache = json.success ? json.colores : [];
+    return coloresMermaCache;
+}
+
+function toggleColorMerma(id) {
+    const idx = mermaColoresSeleccionados.indexOf(id);
+    if (idx >= 0) mermaColoresSeleccionados.splice(idx, 1);
+    else mermaColoresSeleccionados.push(id);
+    renderChipsColorMerma();
+}
+
+function renderChipsColorMerma() {
+    const cont = document.getElementById('merma_colores_chips');
+    if (!cont || !cont.dataset.colores) return;
+    const colores = JSON.parse(cont.dataset.colores);
+    cont.innerHTML = colores.map(c => {
+        const activo = mermaColoresSeleccionados.includes(Number(c.id));
+        return `<button type="button" class="pc-merma-chip ${activo ? 'activo' : ''}" onclick="toggleColorMerma(${c.id})">
+            <span class="pc-color-dot" style="background:${c.rgb || '#ccc'}"></span>${c.nombre}
+        </button>`;
+    }).join('');
+}
+
+// El color/tipo de la merma es independiente del color propio del avance
+// (puede ser una mezcla al cambiar de molde, purga, etc.). Por defecto se
+// pre-marca el color del avance como punto de partida (el caso más común
+// es merma de un solo color), pero el operario puede desmarcarlo, sumar
+// otros colores, y/o agregar una nota libre.
+async function renderInfoMermaModal(p) {
+    const cont = document.getElementById('merma_colores_chips');
+    const notaInput = document.getElementById('merma_nota');
+    const txt = document.getElementById('merma_registrada_txt');
     document.getElementById('cantidad_merma_kg').value = '';
+    if (notaInput) notaInput.value = '';
+    mermaColoresSeleccionados = [];
 
-    if (!p) { cont.innerHTML = ''; txt.textContent = ''; return; }
+    if (!p) { if (cont) cont.innerHTML = ''; txt.textContent = ''; return; }
 
-    cont.innerHTML = `
-        <span class="pc-color-dot" style="background:${p.color_rgb || '#ccc'}"></span>
-        <span>Color de este avance: <b>${p.color_nombre || '-'}</b></span>
-    `;
+    const colores = await obtenerColoresParaMerma();
+    cont.dataset.colores = JSON.stringify(colores);
+
+    if (p.color_id) mermaColoresSeleccionados = [Number(p.color_id)];
+    renderChipsColorMerma();
 
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
@@ -1475,9 +1526,17 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
         return;
     }
 
+    const nota = document.getElementById('merma_nota').value.trim();
+    if (mermaColoresSeleccionados.length === 0 && nota === '') {
+        Swal.fire('Dato inválido', 'Selecciona al menos un color o escribe una nota que describa la merma (ej. "combinado", "purga").', 'warning');
+        return;
+    }
+
     const json = await llamarProduccion('REGISTRARMERMA', {
         id: produccionIdParaEnsamblaje,
         cantidad_merma: valor,
+        colores: JSON.stringify(mermaColoresSeleccionados),
+        nota: nota,
     });
 
     if (!json.success) {
@@ -1490,7 +1549,19 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
         p.js_cantidades_merma = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
         p.js_cantidades_merma.push(json.merma);
     }
-    renderInfoMermaModal(p);
+
+    // Se deja el modal listo para registrar otra merma distinta en la
+    // misma sesión (ej. primero la mezcla de transición, luego la merma
+    // pura del nuevo color), volviendo a pre-marcar el color del avance.
+    document.getElementById('cantidad_merma_kg').value = '';
+    document.getElementById('merma_nota').value = '';
+    mermaColoresSeleccionados = p && p.color_id ? [Number(p.color_id)] : [];
+    renderChipsColorMerma();
+
+    const mermasActualizadas = p ? p.js_cantidades_merma : [];
+    const totalMerma = mermasActualizadas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
+    document.getElementById('merma_registrada_txt').textContent =
+        `Merma ya registrada en este avance: ${formatearCantidadProd(totalMerma)} kg`;
 
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Merma registrada', showConfirmButton: false, timer: 1500 });
 });
