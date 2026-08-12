@@ -245,6 +245,28 @@ include("header.php");
 .pc-stat-chip.s-success .ico{ background:#E8F7EE; color:#16A34A; }
 .pc-stat-chip.s-warning .ico{ background:#FDF1E0; color:#D97706; }
 
+.pc-ens-step{ display:flex; gap:12px; padding:14px 0; }
+.pc-ens-step + .pc-ens-step{ border-top:1px solid #eee7db; }
+.pc-ens-step-num{
+    width:26px; height:26px; border-radius:50%; flex:0 0 auto;
+    background:#152238; color:#fff; font-weight:700; font-size:.8em;
+    display:flex; align-items:center; justify-content:center; margin-top:2px;
+}
+.pc-ens-step-num.alt{ background:#D97706; }
+.pc-ens-step-body{ flex:1; min-width:0; }
+
+.pc-merma-lista{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+.pc-merma-lista:empty{ display:none; }
+.pc-merma-item{
+    display:flex; align-items:center; gap:8px; font-size:.8em;
+    background:#FDF1E0; border:1px solid #f0dcae; border-radius:8px; padding:6px 10px;
+}
+.pc-merma-item .dots{ display:flex; gap:2px; flex:0 0 auto; }
+.pc-merma-item .cant{ font-weight:700; color:#8a5a10; flex:0 0 auto; }
+.pc-merma-item .nota{ color:#8a8578; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.pc-merma-form{ background:#fdfcfa; border:1px dashed #e2ddcd; border-radius:10px; padding:12px; }
+
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
 /* ---------- Estado visual en las cards de producción ---------- */
@@ -461,7 +483,7 @@ include("header.php");
 </div>
 <!-- Modal previo: Cantidad producida (antes de pasar a ensamblaje) -->
 <div class="modal fade" id="modalCantidadEnsamblaje" tabindex="-1">
-  <div class="modal-dialog modal-sm modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form id="formCantidadEnsamblaje">
         <div class="modal-header">
@@ -469,25 +491,38 @@ include("header.php");
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-            <label class="form-label">Cantidad producida (kg) *</label>
-            <input type="number" step="0.0001" min="0.0001" class="form-control"
-                    id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
 
-            <hr>
-
-            <label class="form-label mb-1">Merma (opcional)</label>
-            
-            <div class="d-flex flex-wrap gap-1 mb-2" id="merma_colores_chips"></div>
-            <input type="text" class="form-control form-control-sm mb-2" id="merma_nota"
-                   placeholder="Nota opcional (ej. 'combinado azul y rojo', 'purga')">
-            <div class="input-group">
-                <input type="number" step="0.0001" min="0.0001" class="form-control"
-                    id="cantidad_merma_kg" placeholder="Kg de merma">
-                <button type="button" class="btn btn-outline-danger" id="btnRegistrarMerma">
-                    <i class="fa-triangle-exclamation"></i> Registrar merma
-                </button>
+            <div class="pc-ens-step">
+                <div class="pc-ens-step-num">1</div>
+                <div class="pc-ens-step-body">
+                    <label class="form-label mb-1">Cantidad producida (kg) *</label>
+                    <input type="number" step="0.0001" min="0.0001" class="form-control"
+                           id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+                </div>
             </div>
-            <div class="form-text" id="merma_registrada_txt"></div>
+
+            <div class="pc-ens-step">
+                <div class="pc-ens-step-num alt">2</div>
+                <div class="pc-ens-step-body">
+                    <label class="form-label mb-1">Merma <span class="text-muted fw-normal">(opcional)</span></label>
+
+                    <div id="merma_lista_registrada" class="pc-merma-lista"></div>
+
+                    <div class="pc-merma-form">
+                        <div class="d-flex flex-wrap gap-1 mb-2" id="merma_colores_chips"></div>
+                        <input type="text" class="form-control form-control-sm mb-2" id="merma_nota"
+                               placeholder='Nota opcional (ej. "combinado azul y rojo", "purga")'>
+                        <div class="input-group">
+                            <input type="number" step="0.0001" min="0.0001" class="form-control"
+                                   id="cantidad_merma_kg" placeholder="Kg de merma">
+                            <button type="button" class="btn btn-outline-danger" id="btnRegistrarMerma">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Registrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -690,6 +725,21 @@ async function llamarColor(accion, params = {}) {
     return resp.json();
 }
 
+function renderListaMermas(p) {
+    const cont = document.getElementById('merma_lista_registrada');
+    const mermas = p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+    if (mermas.length === 0) { cont.innerHTML = ''; return; }
+
+    cont.innerHTML = mermas.map(m => {
+        const colores = m.colores || (m.color_nombre ? [{ nombre: m.color_nombre, rgb: m.color_rgb }] : []);
+        const dots = colores.map(c => `<span class="pc-color-dot" style="background:${c.rgb || '#ccc'}"></span>`).join('');
+        return `<div class="pc-merma-item">
+            <span class="dots">${dots}</span>
+            <span class="cant">${formatearCantidadProd(m.cantidad)} ${m.unidad_medida || 'KG'}</span>
+            <span class="nota">${m.merma || (colores.map(c => c.nombre).join(', ') || 'Sin descripción')}</span>
+        </div>`;
+    }).join('');
+}
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
@@ -1487,7 +1537,8 @@ function renderChipsColorMerma() {
     cont.innerHTML = colores.map(c => {
         const activo = mermaColoresSeleccionados.includes(Number(c.id));
         return `<button type="button" class="pc-merma-chip ${activo ? 'activo' : ''}" onclick="toggleColorMerma(${c.id})">
-            <span class="pc-color-dot" style="background:${c.rgb || '#ccc'}"></span>${c.nombre}
+            ${activo ? '<i class="fa-solid fa-check"></i>' : `<span class="pc-color-dot" style="background:${c.rgb || '#ccc'}"></span>`}
+            ${c.nombre}
         </button>`;
     }).join('');
 }

@@ -908,37 +908,40 @@ function enviarAEnsamblaje()
 //     hacer join/subconsulta contra `merma` cada vez.
 //
 // El color de la merma es INDEPENDIENTE del color propio del avance: se
-// eligen 0, 1 o varios colores (ej. una mezcla "rojo + azul" que sale en
-// las primeras vueltas tras un cambio de molde/color) y/o se escribe una
-// nota libre (ej. "purga", "mezcla cambio de molde"). Se exige al menos
-// uno de los dos, para que la merma quede identificable de algún modo,
-// pero NO se exige que coincida con produccion.color_id.
+// elige (opcional) UN color de la lista completa de colores activos — por
+// ejemplo, si la mezcla resultante corresponde visualmente a un color ya
+// existente en el catálogo (ej. "MORADO" al mezclar rojo+azul) — y/o se
+// escribe una descripción libre en "merma" (ej. "Antiguo color",
+// "combinación de ambos colores", "purga"). Se exige al menos uno de los
+// dos. `producion_id` solo indica en qué avance se registró (trazabilidad
+// de cuándo/dónde), no que el material perdido sea "del color de ese
+// avance".
+//
+// Cada entrada del jsonb lleva su propio "id" (el id real de la fila en
+// `merma`), para poder identificarla/referenciarla individualmente más
+// adelante (editar, anular, etc.) sin depender de su posición en el array.
 function registrarMerma()
 {
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     $cantidadMerma = floatval($_POST['cantidad_merma'] ?? 0);
-    $coloresJson = trim($_POST['colores'] ?? '[]');
-    $nota = trim($_POST['nota'] ?? '');
+    $coloresRaw = json_decode($_POST['colores'] ?? '[]', true);
+    $coloresIds = is_array($coloresRaw) ? array_values(array_unique(array_map('intval', $coloresRaw))) : [];
+    $mermaTexto = trim($_POST['nota'] ?? '');
+    $unidadMedida = 'KG';
 
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadMerma <= 0) responder(false, 'La cantidad de merma debe ser mayor a 0.');
-
-    $coloresIds = json_decode($coloresJson, true);
-    if (!is_array($coloresIds)) $coloresIds = [];
-    $coloresIds = array_values(array_unique(array_map('intval', $coloresIds)));
-
-    if (empty($coloresIds) && $nota === '') {
-        responder(false, 'Selecciona al menos un color o describe la merma (ej. "combinado", "purga").');
+    if (empty($coloresIds) && $mermaTexto === '') {
+        responder(false, 'Selecciona al menos un color o describe la merma (ej. "combinación de ambos colores", "purga").');
     }
 
     $actual = executeQuery($conectar, "SELECT id, deleted_at FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($actual)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($actual[0]['deleted_at'])) responder(false, 'No puedes registrar merma en un avance inactivo.');
 
-    // Traemos nombre/rgb de los colores elegidos (pueden ser 0, 1 o varios;
-    // no tienen por qué incluir el color propio del avance).
-    $coloresInfo = [];
+    // Trae nombre + rgb de todos los colores seleccionados
+    $colores = [];
     if (!empty($coloresIds)) {
         $placeholders = [];
         $params = [];
@@ -947,56 +950,46 @@ function registrarMerma()
             $placeholders[] = ":$key";
             $params[$key] = $cid;
         }
-        $filasColor = executeQuery(
-            $conectar,
-            "SELECT id, nombre, rgb FROM color WHERE id IN (" . implode(',', $placeholders) . ") AND deleted_at IS NULL",
-            $params
-        );
-        if (empty($filasColor)) responder(false, 'Los colores seleccionados no son válidos.');
-        $coloresInfo = array_map(fn($c) => [
-            'id' => (int) $c['id'], 'nombre' => $c['nombre'], 'rgb' => $c['rgb'],
-        ], $filasColor);
+        $sql = "SELECT id, nombre, rgb FROM color WHERE id IN (" . implode(',', $placeholders) . ") AND deleted_at IS NULL";
+        $filas = executeQuery($conectar, $sql, $params);
+        if (count($filas) !== count($coloresIds)) {
+            responder(false, 'Uno o más colores seleccionados no existen o están inactivos.');
+        }
+        foreach ($filas as $f) {
+            $colores[] = ['color_id' => (int)$f['id'], 'nombre' => $f['nombre'], 'rgb' => $f['rgb']];
+        }
     }
 
-    // Texto legible para color_ref (columna de resumen en `merma`), ej.
-    // "Rojo + Azul (mezcla al cambiar de molde)" o "Sin color definido (purga)".
-    $nombresColores = array_map(fn($c) => $c['nombre'], $coloresInfo);
-    $colorRefTexto = !empty($nombresColores) ? implode(' + ', $nombresColores) : 'Sin color definido';
-    if ($nota !== '') $colorRefTexto .= " ($nota)";
-
-    $nuevaEntrada = [
-        'colores'   => $coloresInfo,
-        'color_ref' => $colorRefTexto,
-        'nota'      => $nota ?: null,
-        'cantidad'  => $cantidadMerma,
-        'fecha'     => date('Y-m-d H:i:s'),
-        'usuario'   => $_SESSION['nombre_usuario'] ?? 'Sistema',
-    ];
-    $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
+    $colorRefTexto = !empty($colores) ? implode(', ', array_column($colores, 'nombre')) : 'Sin color definido';
+    if ($mermaTexto !== '') $colorRefTexto .= " — $mermaTexto";
 
     $conectar->beginTransaction();
     try {
-        // 1) Fila propia en `merma`. producion_id solo indica en qué avance
-        // se registró (trazabilidad de cuándo/dónde), no que el material
-        // perdido sea "del color de ese avance".
         $nuevaMerma = executeQuery($conectar, "
             INSERT INTO merma (producion_id, color_ref, cantidad, js_merma, created_at, update_at)
-            VALUES (:produccion_id, :color_ref, :cantidad, :js_merma, NOW(), NOW())
+            VALUES (:produccion_id, :color_ref, :cantidad, '{}'::jsonb, NOW(), NOW())
             RETURNING id
-        ", [
-            'produccion_id' => $id,
-            'color_ref'     => $colorRefTexto,
-            'cantidad'      => $cantidadMerma,
-            'js_merma'      => $jsNuevaEntrada,
-        ]);
+        ", ['produccion_id' => $id, 'color_ref' => $colorRefTexto, 'cantidad' => $cantidadMerma]);
         $mermaId = $nuevaMerma[0]['id'] ?? null;
         if (!$mermaId) throw new Exception('No se pudo registrar la merma.');
 
-        // 2) Copia redundante en produccion.js_cantidades_merma
+        $nuevaEntrada = [
+            'id'            => $mermaId,
+            'merma'         => $mermaTexto ?: null,
+            'fecha'         => date('Y-m-d H:i:s'),
+            'usuario'       => $_SESSION['nombre_usuario'] ?? 'Sistema',
+            'cantidad'      => $cantidadMerma,
+            'unidad_medida' => $unidadMedida,
+            'colores'       => $colores, // [{color_id,nombre,rgb}, ...] — puede venir vacío si es solo nota libre
+        ];
+        $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
+
+        executeNonQuery($conectar, "UPDATE merma SET js_merma = :js_merma WHERE id = :id",
+            ['js_merma' => $jsNuevaEntrada, 'id' => $mermaId]);
+
         $cambios = [[
-            'campo' => 'Merma registrada',
-            'valor_antes' => '-',
-            'valor_despues' => "{$cantidadMerma} kg — {$colorRefTexto}",
+            'campo' => 'Merma registrada', 'valor_antes' => '-',
+            'valor_despues' => "{$cantidadMerma} {$unidadMedida} — {$colorRefTexto}",
         ]];
         $movimiento   = obtenerMovimientoSesion('registrar_merma', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1005,20 +998,12 @@ function registrarMerma()
         executeNonQuery($conectar, "
             UPDATE produccion SET
                 js_cantidades_merma = COALESCE(js_cantidades_merma, '[]'::jsonb) || jsonb_build_array(:nueva::jsonb),
-                updated_at   = NOW(),
-                js_session   = :js_session,
+                updated_at = NOW(), js_session = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
-        ", [
-            'id'           => $id,
-            'nueva'        => $jsNuevaEntrada,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial,
-        ]);
+        ", ['id' => $id, 'nueva' => $jsNuevaEntrada, 'js_session' => $js_session, 'js_historial' => $js_historial]);
 
         $conectar->commit();
-
-        $nuevaEntrada['merma_id'] = $mermaId;
         responder(true, 'Merma registrada correctamente.', ['id' => $id, 'merma' => $nuevaEntrada]);
     } catch (Throwable $e) {
         $conectar->rollBack();

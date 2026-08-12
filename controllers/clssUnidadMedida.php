@@ -4,9 +4,24 @@
  * controllers/clssUnidadMedida.php
  * Controlador del módulo de Unidad de Medida
  * Tabla real: unidad_medida (id, nombre, nombre_corto, unidad_base_id, equivalencia,
+ *             unidad_referencia_id, equivalencia_referencia,
  *             js_session, js_historial, created_at, update_at, deleted_at)
- * unidad_base_id NULL => unidad RAÍZ (kg, metro, unidad...). NOT NULL => unidad COMPUESTA
- * que pertenece a la familia de esa raíz (ej: "Saco 25kg" -> raíz "Kilogramo").
+ * unidad_base_id NULL => unidad RAÍZ (kg, metro, unidad...). NOT NULL => unidad
+ * COMPUESTA que pertenece a la familia de esa raíz (ej: "Saco 25kg" -> raíz
+ * "Gramo"). unidad_base_id SIEMPRE apunta a la raíz real de la familia, nunca
+ * a otra compuesta, para que toda conversión de stock (cantidad_base =
+ * cantidad * equivalencia) siga siendo una sola multiplicación en el resto
+ * del sistema.
+ *
+ * Sin embargo, en el formulario el usuario SÍ puede elegir como base otra
+ * unidad compuesta ya creada (ej: "Kilogramo" al crear "Saco"). Cuando pasa
+ * eso, el controlador "aplana" el cálculo antes de guardar:
+ *   - unidad_base_id / equivalencia   -> siempre relativos a la raíz real
+ *     (ej: Saco -> Gramo, equivalencia 25000)
+ *   - unidad_referencia_id / equivalencia_referencia -> lo que el usuario
+ *     realmente eligió, solo para mostrarlo bonito en el listado
+ *     (ej: Saco = 25 Kilogramo)
+ *
  * Soft delete vía deleted_at.
  */
 
@@ -26,6 +41,9 @@ function controladorUnidadMedida($accion)
             break;
         case 'LISTARUNIDADESRAIZ':
             listarUnidadesRaiz();
+            break;
+        case 'LISTARUNIDADESPARABASE':
+            listarUnidadesParaBase(intval($_POST['excluir'] ?? 0));
             break;
         case 'LISTARUNIDADESCOMPATIBLES':
             listarUnidadesCompatibles(intval($_POST['unidad_medida_id'] ?? 0));
@@ -71,14 +89,19 @@ function listarUnidadesMedida()
         $where[] = "u.deleted_at IS NOT NULL";
     }
 
-    // Traemos también el nombre de la unidad base (familia) para mostrarlo en el listado
+    // Traemos el nombre de la unidad base REAL (siempre raíz, para la familia)
+    // y también el de la unidad de referencia que el usuario eligió al llenar
+    // el formulario (puede ser una compuesta, solo para mostrar bonito).
     $sql = "
         SELECT
             u.*,
             b.nombre       AS base_nombre,
-            b.nombre_corto AS base_corto
+            b.nombre_corto AS base_corto,
+            r.nombre       AS ref_nombre,
+            r.nombre_corto AS ref_corto
         FROM unidad_medida u
         LEFT JOIN unidad_medida b ON b.id = u.unidad_base_id
+        LEFT JOIN unidad_medida r ON r.id = u.unidad_referencia_id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY COALESCE(b.nombre, u.nombre), u.equivalencia
     ";
@@ -87,7 +110,9 @@ function listarUnidadesMedida()
     responder(true, 'OK', ['unidades' => $result]);
 }
 
-// Solo unidades RAÍZ (unidad_base_id IS NULL), activas. Para el selector de materiales.
+// Solo unidades RAÍZ (unidad_base_id IS NULL), activas. Se conserva por si
+// otro módulo (ej: material.php) todavía la usa para algún selector que solo
+// deba mostrar raíces.
 function listarUnidadesRaiz()
 {
     $conectar = conectar_oll_BD();
@@ -98,8 +123,24 @@ function listarUnidadesRaiz()
     responder(true, 'OK', ['unidades' => $result]);
 }
 
+// Todas las unidades activas (raíces Y compuestas) que pueden elegirse como
+// "unidad base" al crear/editar una compuesta. Excluye la unidad que se está
+// editando, para que no pueda elegirse a sí misma.
+function listarUnidadesParaBase($excluirId)
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery(
+        $conectar,
+        "SELECT * FROM unidad_medida WHERE deleted_at IS NULL AND id <> :excluir ORDER BY nombre",
+        ['excluir' => $excluirId]
+    );
+    responder(true, 'OK', ['unidades' => $result]);
+}
+
 // Unidades compatibles con la familia de una unidad raíz dada: la raíz misma
 // + todas las compuestas que apuntan a ella. Para el selector de compras.
+// No necesita cambios: unidad_base_id siempre apunta a la raíz real, incluso
+// cuando la equivalencia se calculó a partir de otra compuesta.
 function listarUnidadesCompatibles($unidadMedidaId)
 {
     $conectar = conectar_oll_BD();
@@ -198,33 +239,49 @@ function guardarUnidadMedida()
     $nombre       = trim($_POST['nombre'] ?? '');
     $nombreCorto  = trim($_POST['nombre_corto'] ?? '');
 
-    // Si viene vacío, es unidad RAÍZ (NULL). Si viene con valor, es COMPUESTA.
-    $unidadBaseId = !empty($_POST['unidad_base_id']) ? intval($_POST['unidad_base_id']) : null;
+    // Lo que el usuario eligió en el formulario. Si viene vacío, es unidad
+    // RAÍZ. Si viene con valor, puede ser otra raíz O otra compuesta (ej:
+    // Kilogramo) — eso se resuelve más abajo.
+    $unidadBaseId          = !empty($_POST['unidad_base_id']) ? intval($_POST['unidad_base_id']) : null;
+    $equivalenciaIngresada = $unidadBaseId !== null ? floatval($_POST['equivalencia'] ?? 0) : 1;
 
-    // Si es raíz, equivalencia siempre es 1 (el trigger lo refuerza, pero validamos
-    // aquí también para dar un mensaje de error amigable antes de tocar la BD).
-    if ($unidadBaseId === null) {
-        $equivalencia = 1;
-    } else {
-        $equivalencia = floatval($_POST['equivalencia'] ?? 0);
-    }
-
-    // ── Validaciones ──────────────────────────────────────────────────────────
+    // ── Validaciones básicas ─────────────────────────────────────────────────
     if (empty($nombre))      responder(false, 'El nombre es obligatorio.');
     if (empty($nombreCorto)) responder(false, 'El nombre corto (abreviatura) es obligatorio.');
 
+    // Estos son los valores que finalmente se guardan: unidad_base_id/equivalencia
+    // SIEMPRE relativos a la raíz real de la familia (para no romper las
+    // conversiones de stock en el resto del sistema). unidad_referencia_id/
+    // equivalencia_referencia guardan lo que el usuario realmente eligió, solo
+    // para mostrarlo bonito en el listado.
+    $unidadBaseRealId       = null;
+    $equivalenciaReal       = 1;
+    $unidadReferenciaId     = null;
+    $equivalenciaReferencia = null;
+
     if ($unidadBaseId !== null) {
         if ($unidadBaseId === $id) responder(false, 'Una unidad no puede ser su propia unidad base.');
-        if ($equivalencia <= 0)    responder(false, 'La equivalencia debe ser mayor a 0 para una unidad compuesta.');
+        if ($equivalenciaIngresada <= 0) responder(false, 'La equivalencia debe ser mayor a 0 para una unidad compuesta.');
 
-        $base = executeQuery(
+        $seleccionada = executeQuery(
             $conectar,
-            "SELECT id, unidad_base_id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
+            "SELECT id, unidad_base_id, equivalencia FROM unidad_medida WHERE id = :id AND deleted_at IS NULL",
             ['id' => $unidadBaseId]
         );
-        if (empty($base)) responder(false, 'La unidad base seleccionada no existe o está inactiva.');
-        if (!empty($base[0]['unidad_base_id'])) {
-            responder(false, 'La unidad base debe ser una unidad raíz (ej: Kilogramo), no otra compuesta.');
+        if (empty($seleccionada)) responder(false, 'La unidad base seleccionada no existe o está inactiva.');
+        $sel = $seleccionada[0];
+
+        if (empty($sel['unidad_base_id'])) {
+            // Eligió una raíz directamente (ej: Gramo) -> sin nada que aplanar
+            $unidadBaseRealId = (int) $sel['id'];
+            $equivalenciaReal = $equivalenciaIngresada;
+        } else {
+            // Eligió otra compuesta (ej: Kilogramo) -> aplanamos hacia SU raíz real
+            $unidadBaseRealId = (int) $sel['unidad_base_id'];
+            $equivalenciaReal = $equivalenciaIngresada * (float) $sel['equivalencia'];
+
+            $unidadReferenciaId     = (int) $sel['id'];
+            $equivalenciaReferencia = $equivalenciaIngresada;
         }
     }
 
@@ -246,8 +303,8 @@ function guardarUnidadMedida()
     $datosNuevos = [
         'nombre'          => $nombre,
         'nombre_corto'    => $nombreCorto,
-        'unidad_base_nom' => obtenerNombreUnidadLegible($conectar, $unidadBaseId),
-        'equivalencia'    => $equivalencia,
+        'unidad_base_nom' => obtenerNombreUnidadLegible($conectar, $unidadBaseRealId),
+        'equivalencia'    => $equivalenciaReal,
     ];
 
     if ($id === 0) {
@@ -259,16 +316,26 @@ function guardarUnidadMedida()
 
         try {
             $result = executeQuery($conectar, "
-                INSERT INTO unidad_medida (nombre, nombre_corto, unidad_base_id, equivalencia, created_at, js_session, js_historial)
-                VALUES (:nombre, :nombre_corto, :unidad_base_id, :equivalencia, NOW(), :js_session, :js_historial)
+                INSERT INTO unidad_medida (
+                    nombre, nombre_corto, unidad_base_id, equivalencia,
+                    unidad_referencia_id, equivalencia_referencia,
+                    created_at, js_session, js_historial
+                )
+                VALUES (
+                    :nombre, :nombre_corto, :unidad_base_id, :equivalencia,
+                    :unidad_referencia_id, :equivalencia_referencia,
+                    NOW(), :js_session, :js_historial
+                )
                 RETURNING id
             ", [
-                'nombre'         => $datosNuevos['nombre'],
-                'nombre_corto'   => $datosNuevos['nombre_corto'],
-                'unidad_base_id' => $unidadBaseId,
-                'equivalencia'   => $equivalencia,
-                'js_session'     => $js_session,
-                'js_historial'   => $js_historial_nuevo,
+                'nombre'                  => $datosNuevos['nombre'],
+                'nombre_corto'            => $datosNuevos['nombre_corto'],
+                'unidad_base_id'          => $unidadBaseRealId,
+                'equivalencia'            => $equivalenciaReal,
+                'unidad_referencia_id'    => $unidadReferenciaId,
+                'equivalencia_referencia' => $equivalenciaReferencia,
+                'js_session'              => $js_session,
+                'js_historial'            => $js_historial_nuevo,
             ]);
         } catch (Exception $e) {
             responder(false, 'No se pudo guardar: ' . $e->getMessage());
@@ -281,15 +348,19 @@ function guardarUnidadMedida()
         $registroAnterior = $actual[0];
         $registroAnterior['unidad_base_nom'] = obtenerNombreUnidadLegible($conectar, $registroAnterior['unidad_base_id']);
 
-        // Si esta unidad ya tiene compuestas apuntándole y se intenta convertirla en compuesta, bloquear
+        // Si esta unidad ya tiene otras unidades dependiendo de ella (ya sea
+        // como base real o como referencia elegida en el formulario) y se
+        // intenta convertirla en compuesta, bloquear.
         if ($unidadBaseId !== null) {
             $hijas = executeQuery(
                 $conectar,
-                "SELECT id FROM unidad_medida WHERE unidad_base_id = :id AND deleted_at IS NULL",
+                "SELECT id FROM unidad_medida
+                 WHERE (unidad_base_id = :id OR unidad_referencia_id = :id)
+                   AND deleted_at IS NULL",
                 ['id' => $id]
             );
             if (!empty($hijas)) {
-                responder(false, 'Esta unidad es una raíz con unidades compuestas dependiendo de ella; no puede convertirse en compuesta.');
+                responder(false, 'Esta unidad tiene otras unidades dependiendo de ella (como base o como referencia); no puede convertirse en compuesta.');
             }
         }
 
@@ -302,22 +373,26 @@ function guardarUnidadMedida()
         try {
             executeQuery($conectar, "
                 UPDATE unidad_medida SET
-                    nombre          = :nombre,
-                    nombre_corto    = :nombre_corto,
-                    unidad_base_id  = :unidad_base_id,
-                    equivalencia    = :equivalencia,
-                    update_at       = NOW(),
-                    js_session      = :js_session,
-                    js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                    nombre                   = :nombre,
+                    nombre_corto             = :nombre_corto,
+                    unidad_base_id           = :unidad_base_id,
+                    equivalencia             = :equivalencia,
+                    unidad_referencia_id     = :unidad_referencia_id,
+                    equivalencia_referencia  = :equivalencia_referencia,
+                    update_at                = NOW(),
+                    js_session               = :js_session,
+                    js_historial             = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
                 WHERE id = :id
             ", [
-                'nombre'         => $datosNuevos['nombre'],
-                'nombre_corto'   => $datosNuevos['nombre_corto'],
-                'unidad_base_id' => $unidadBaseId,
-                'equivalencia'   => $equivalencia,
-                'id'             => $id,
-                'js_session'     => $js_session,
-                'js_historial'   => $js_historial_nuevo,
+                'nombre'                  => $datosNuevos['nombre'],
+                'nombre_corto'            => $datosNuevos['nombre_corto'],
+                'unidad_base_id'          => $unidadBaseRealId,
+                'equivalencia'            => $equivalenciaReal,
+                'unidad_referencia_id'    => $unidadReferenciaId,
+                'equivalencia_referencia' => $equivalenciaReferencia,
+                'id'                      => $id,
+                'js_session'              => $js_session,
+                'js_historial'            => $js_historial_nuevo,
             ]);
         } catch (Exception $e) {
             responder(false, 'No se pudo actualizar: ' . $e->getMessage());
@@ -348,14 +423,18 @@ function eliminarUnidadMedida()
         responder(false, 'No puedes desactivar esta unidad: está siendo usada por uno o más materiales activos.');
     }
 
-    // No permitir desactivar una unidad raíz que tenga unidades compuestas activas dependiendo de ella
+    // No permitir desactivar una unidad que tenga otras unidades activas
+    // dependiendo de ella, ya sea como base real o como referencia elegida
+    // en el formulario (ej: no desactivar Kilogramo si Saco lo usa de base).
     $conHijas = executeQuery(
         $conectar,
-        "SELECT id FROM unidad_medida WHERE unidad_base_id = :id AND deleted_at IS NULL",
+        "SELECT id FROM unidad_medida
+         WHERE (unidad_base_id = :id OR unidad_referencia_id = :id)
+           AND deleted_at IS NULL",
         ['id' => $id]
     );
     if (!empty($conHijas)) {
-        responder(false, 'No puedes desactivar esta unidad: tiene unidades compuestas activas de su misma familia (ej: sacos, bolsas).');
+        responder(false, 'No puedes desactivar esta unidad: tiene otras unidades activas dependiendo de ella (ej: sacos, bolsas).');
     }
 
     $cambios = [[

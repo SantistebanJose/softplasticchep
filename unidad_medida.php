@@ -75,16 +75,19 @@ include("header.php");
                 <option value="compuesta">Unidad compuesta (saco, bolsa, rollo, cartón...)</option>
             </select>
             <div class="form-text">
-                Una unidad <strong>raíz</strong> es la base de una familia (ej: Kilogramo).
-                Una unidad <strong>compuesta</strong> pertenece a la familia de una raíz y define
-                cuánto equivale de esa raíz (ej: "Saco 25kg" equivale a 25 Kilogramos).
+                Una unidad <strong>raíz</strong> es la base de una familia (ej: Gramo).
+                Una unidad <strong>compuesta</strong> puede definirse en base a la raíz
+                (ej: "Kilogramo" = 1000 Gramos) o en base a otra unidad compuesta ya
+                creada (ej: "Saco 25kg" = 25 Kilogramos). El sistema calcula solo la
+                equivalencia real hacia la raíz de la familia para que las conversiones
+                de stock sigan funcionando igual.
             </div>
           </div>
 
           <div class="mb-2" id="grupo_unidad_base" style="display:none;">
-            <label class="form-label">Unidad base (familia) *</label>
+            <label class="form-label">Unidad base *</label>
             <select class="form-select" name="unidad_base_id" id="unidad_base_id">
-                <option value="">Selecciona la unidad raíz...</option>
+                <option value="">Selecciona la unidad base...</option>
             </select>
           </div>
 
@@ -93,7 +96,7 @@ include("header.php");
             <input type="number" step="0.0001" min="0.0001" class="form-control"
                    name="equivalencia" id="unidad_equivalencia" placeholder="Ej: 25">
             <div class="form-text" id="texto_ayuda_equivalencia">
-                ¿A cuántas unidades base equivale una unidad de esta?
+                ¿A cuántas unidades de la seleccionada como base equivale una unidad de esta?
             </div>
           </div>
         </div>
@@ -163,16 +166,17 @@ function toggleTipoUnidad() {
     }
 }
 
-// Carga el select de unidades raíz (para elegir la familia de una compuesta).
-// Excluye la unidad que se está editando (una unidad no puede ser su propia base).
+// Carga el select de unidades base: ahora incluye raíces Y compuestas ya
+// creadas (ej: para poder elegir "Kilogramo" como base de "Saco"). El
+// servidor ya excluye la unidad que se está editando.
 async function cargarSelectUnidadesBase() {
-    const json = await llamarUnidades('LISTARUNIDADESRAIZ');
+    const json = await llamarUnidades('LISTARUNIDADESPARABASE', { excluir: unidadIdEnEdicion || 0 });
     const select = document.getElementById('unidad_base_id');
     if (!json.success) return;
 
-    const unidades = (json.unidades || []).filter(u => u.id != unidadIdEnEdicion);
-    select.innerHTML = '<option value="">Selecciona la unidad raíz...</option>' +
-        unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+    const unidades = json.unidades || [];
+    select.innerHTML = '<option value="">Selecciona la unidad base...</option>' +
+        unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})${u.unidad_base_id ? '' : ' — raíz'}</option>`).join('');
 }
 
 // ── Listado ──────────────────────────────────────────────────────────────────
@@ -202,7 +206,11 @@ async function cargarUnidades() {
             ? `<span class="badge bg-info text-dark">${u.base_nombre} (${u.base_corto})</span>`
             : '<span class="badge bg-primary">Raíz</span>'}
         </td>
-        <td data-label="Equivalencia">${u.unidad_base_id ? `${u.equivalencia} ${u.base_corto}` : '1 (es raíz)'}</td>
+        <td data-label="Equivalencia">${u.unidad_base_id
+            ? (u.unidad_referencia_id
+                ? `${u.equivalencia_referencia} ${u.ref_corto} <span class="text-muted">(= ${u.equivalencia} ${u.base_corto})</span>`
+                : `${u.equivalencia} ${u.base_corto}`)
+            : '1 (es raíz)'}</td>
         <td data-label="Estado">${!u.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
             : '<span class="badge bg-secondary">Inactivo</span>'}
@@ -253,8 +261,16 @@ async function abrirModalEditarUnidad(id) {
     toggleTipoUnidad();
 
     if (esCompuesta) {
-        document.getElementById('unidad_base_id').value = u.unidad_base_id;
-        document.getElementById('unidad_equivalencia').value = u.equivalencia;
+        // Si se guardó eligiendo una compuesta como referencia (ej: Kilogramo
+        // para Saco), mostramos esa referencia en el modal. Si se guardó
+        // apuntando directo a una raíz, mostramos esa raíz.
+        if (u.unidad_referencia_id) {
+            document.getElementById('unidad_base_id').value = u.unidad_referencia_id;
+            document.getElementById('unidad_equivalencia').value = u.equivalencia_referencia;
+        } else {
+            document.getElementById('unidad_base_id').value = u.unidad_base_id;
+            document.getElementById('unidad_equivalencia').value = u.equivalencia;
+        }
     }
 
     modalUnidad.show();
