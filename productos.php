@@ -99,6 +99,10 @@ include("header.php");
         background: #dcfce7;
         color: #15803d;
     }
+    .pc-icon-btn[title="Configurar"]:hover {
+        background: #e0e7ff;
+        color: #3730a3;
+    }
     .pc-btn {
         border-radius: 8px;
         font-weight: 500;
@@ -117,6 +121,14 @@ include("header.php");
         text-align: center;
         padding: 40px 20px;
         color: #9ca3af;
+    }
+
+    /* ── Modal de configuración por molde ── */
+    #configNavTabs .nav-link {
+        font-weight: 500;
+    }
+    .config-tab-pane {
+        padding-top: 14px;
     }
 </style>
 
@@ -225,14 +237,45 @@ include("header.php");
   </div>
 </div>
 
+<!-- Modal Configuración de Producto (por molde) -->
+<div class="modal fade" id="modalConfigProducto" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="formConfigProducto">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="fa-solid fa-gear"></i>
+            <span id="configProductoTitulo">Configuración de Producto</span>
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="config_producto_id">
+
+          <ul class="nav nav-tabs" id="configNavTabs" role="tablist"></ul>
+          <div class="tab-content" id="configTabContent"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <!-- SheetJS: librería para generar archivos Excel (.xlsx) 100% en el navegador -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
-const CONTROLADOR = 'controllers/clssProductos.php'; // clssProductos.php vive en su propia carpeta
-const modalProducto = new bootstrap.Modal(document.getElementById('modalProducto'));
-let unidadesCache = [];
+const CONTROLADOR        = 'controllers/clssProductos.php'; // clssProductos.php vive en su propia carpeta
+const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php';     // se reutiliza para saber qué moldes tiene el producto
+
+const modalProducto       = new bootstrap.Modal(document.getElementById('modalProducto'));
+const modalConfigProducto = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
+
+let unidadesCache  = [];
 let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -258,10 +301,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// ── Llamada genérica al controlador ─────────────────────────────────────────
-async function llamar(accion, params = {}) {
+// ── Llamada genérica a un controlador (por defecto, el de Productos) ────────
+async function llamar(accion, params = {}, controlador = CONTROLADOR) {
     const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR, {
+    const resp = await fetch(controlador, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body
@@ -330,6 +373,9 @@ async function cargarProductos() {
                 <button class="pc-icon-btn" onclick="abrirModalEditar(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
                 </button>
+                <button class="pc-icon-btn" onclick="abrirModalConfiguracion(${p.id}, '${escapeAttr(p.descripcion)}')" title="Configurar">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
                 ${p.activo
                     ? `<button class="pc-icon-btn" onclick="eliminarProducto(${p.id})" title="Desactivar">
                            <i class="fa-solid fa-trash"></i></button>`
@@ -339,6 +385,10 @@ async function cargarProductos() {
             </td>
         </tr>
     `).join('');
+}
+
+function escapeAttr(texto) {
+    return String(texto ?? '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 // ── Exportar a Excel ─────────────────────────────────────────────────────────
@@ -452,6 +502,168 @@ function reactivarProducto(id) {
         }
     });
 }
+
+// =============================================================================
+// CONFIGURACIÓN DE PRODUCTO (por cada molde asociado)
+// =============================================================================
+
+/**
+ * Abre el modal de configuración: obtiene los moldes asociados a este
+ * producto (reutilizando LISTARMOLDESPRODUCTO de clssMoldes.php, filtrado
+ * por producto_id) y la configuración ya guardada (producto.js_confi),
+ * y arma un tab por cada molde.
+ */
+async function abrirModalConfiguracion(productoId, productoDescripcion) {
+    const [jsonMoldes, jsonProd] = await Promise.all([
+        llamar('LISTARMOLDESPRODUCTO', {}, CONTROLADOR_MOLDES),
+        llamar('OBTENERPRODUCTO', { id: productoId })
+    ]);
+
+    if (!jsonMoldes.success) { Swal.fire('Error', jsonMoldes.message, 'error'); return; }
+    if (!jsonProd.success)   { Swal.fire('Error', jsonProd.message, 'error'); return; }
+
+    const moldesDelProducto = (jsonMoldes.moldes_producto || [])
+        .filter(m => m.producto_id === productoId);
+
+    if (moldesDelProducto.length === 0) {
+        Swal.fire('Sin moldes asociados', 'Este producto no tiene ningún molde asociado todavía. Ve al módulo de Moldes y asócialo primero.', 'info');
+        return;
+    }
+
+    const configActual = jsonProd.producto.js_confi || [];
+
+    document.getElementById('config_producto_id').value = productoId;
+    document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
+
+    construirTabsConfiguracion(moldesDelProducto, configActual);
+    modalConfigProducto.show();
+}
+
+function construirTabsConfiguracion(moldes, configActual) {
+    const navTabs    = document.getElementById('configNavTabs');
+    const tabContent = document.getElementById('configTabContent');
+    navTabs.innerHTML    = '';
+    tabContent.innerHTML = '';
+
+    moldes.forEach((m, idx) => {
+        const activo = idx === 0;
+        const cfg    = configActual.find(c => c.molde_id === m.molde_id) || {};
+        const esSi   = cfg.necesita_ensamblaje === 'sí';
+
+        navTabs.insertAdjacentHTML('beforeend', `
+            <li class="nav-item" role="presentation">
+                <button class="nav-link ${activo ? 'active' : ''}" data-bs-toggle="tab"
+                        data-bs-target="#tabMolde${m.molde_id}" type="button">
+                    ${m.nombre}
+                </button>
+            </li>
+        `);
+
+        tabContent.insertAdjacentHTML('beforeend', `
+            <div class="tab-pane fade config-tab-pane ${activo ? 'show active' : ''}"
+                 id="tabMolde${m.molde_id}"
+                 data-molde-id="${m.molde_id}"
+                 data-molde-nombre="${escapeAttr(m.nombre)}">
+
+                <div class="mb-3">
+                    <label class="form-label d-block">Necesita Ensamblaje</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="ensamblaje_${m.molde_id}"
+                               id="ens_si_${m.molde_id}" value="si" ${esSi ? 'checked' : ''}>
+                        <label class="form-check-label" for="ens_si_${m.molde_id}">Sí</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="ensamblaje_${m.molde_id}"
+                               id="ens_no_${m.molde_id}" value="no" ${!esSi ? 'checked' : ''}>
+                        <label class="form-check-label" for="ens_no_${m.molde_id}">No</label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Se vende por</label>
+                    <select class="form-select" id="sel_venta_${m.molde_id}"></select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Salida en Producción</label>
+                    <select class="form-select" id="sel_salidaprod_${m.molde_id}"></select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Salida de Merma</label>
+                    <select class="form-select" id="sel_salidamerma_${m.molde_id}"></select>
+                </div>
+            </div>
+        `);
+
+        llenarSelectUnidades(`sel_venta_${m.molde_id}`, cfg.se_vende_por_id);
+        llenarSelectUnidades(`sel_salidaprod_${m.molde_id}`, cfg.salida_produccion_id);
+        llenarSelectUnidades(`sel_salidamerma_${m.molde_id}`, cfg.salida_merma_id);
+    });
+}
+
+function llenarSelectUnidades(selectId, unidadIdSeleccionada) {
+    const sel = document.getElementById(selectId);
+    sel.innerHTML = '<option value="">Seleccione...</option>' +
+        unidadesCache.map(u => `<option value="${u.id}" ${String(u.id) === String(unidadIdSeleccionada) ? 'selected' : ''}>${u.codigo} - ${u.nombre}</option>`).join('');
+}
+
+document.getElementById('formConfigProducto').addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const productoId = parseInt(document.getElementById('config_producto_id').value, 10);
+    const panes = document.querySelectorAll('#configTabContent .tab-pane');
+    const configuraciones = [];
+    let valido = true;
+
+    panes.forEach(pane => {
+        if (!valido) return;
+
+        const moldeId     = parseInt(pane.dataset.moldeId, 10);
+        const moldeNombre = pane.dataset.moldeNombre;
+
+        const ensamblaje     = pane.querySelector(`input[name="ensamblaje_${moldeId}"]:checked`)?.value ?? 'no';
+        const ventaSel       = document.getElementById(`sel_venta_${moldeId}`);
+        const salidaProdSel  = document.getElementById(`sel_salidaprod_${moldeId}`);
+        const salidaMermaSel = document.getElementById(`sel_salidamerma_${moldeId}`);
+
+        if (!ventaSel.value || !salidaProdSel.value || !salidaMermaSel.value) {
+            Swal.fire('Falta información', `Completa todos los campos de configuración para "${moldeNombre}".`, 'warning');
+            valido = false;
+            return;
+        }
+
+        const ventaOpt       = ventaSel.selectedOptions[0];
+        const salidaProdOpt  = salidaProdSel.selectedOptions[0];
+        const salidaMermaOpt = salidaMermaSel.selectedOptions[0];
+
+        configuraciones.push({
+            molde_id: moldeId,
+            molde: moldeNombre,
+            necesita_ensamblaje: ensamblaje === 'si' ? 'sí' : 'no',
+            se_vende_por_id: parseInt(ventaSel.value, 10),
+            se_vende_por: ventaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
+            salida_produccion_id: parseInt(salidaProdSel.value, 10),
+            salida_produccion: salidaProdOpt.textContent.split(' - ')[0].trim().toLowerCase(),
+            salida_merma_id: parseInt(salidaMermaSel.value, 10),
+            salida_merma: salidaMermaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
+        });
+    });
+
+    if (!valido) return;
+
+    const json = await llamar('GUARDARCONFIGPRODUCTO', {
+        producto_id: productoId,
+        configuraciones: JSON.stringify(configuraciones)
+    });
+
+    if (json.success) {
+        modalConfigProducto.hide();
+        Swal.fire('Listo', json.message, 'success');
+    } else {
+        Swal.fire('Error', json.message, 'error');
+    }
+});
 </script>
 
 <?php require __DIR__ . '/footer.php'; ?>

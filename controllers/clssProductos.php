@@ -5,7 +5,17 @@
  * Controlador del módulo de Productos (Mercadería para la venta)
  * Tabla real: producto (singular) — id, codigo, descripcion, unidad_venta_id,
  *             cant_equivale, unidad_equivale_id, peso_unitario_g, activo,
+ *             js_configuracion (jsonb — configuración por producto+molde),
  *             created_at, updated_at
+ *
+ * Convención de nombres dentro de cada fila de js_configuracion:
+ *   se_vende_por_unidad_medida_id / se_vende_por          (texto corto en minúscula)
+ *   salida_produccion_unidad_medida_id / salida_produccion
+ *   salida_merma_unidad_medida_id / salida_merma
+ * El sufijo "_unidad_medida_id" deja explícito que ese id apunta a
+ * unidad_medida.id, así cualquier query o revisión rápida del JSON queda
+ * clara sin tener que adivinar a qué tabla referencia.
+ *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -37,6 +47,9 @@ function controladorProductos($accion)
             break;
         case 'REACTIVARPRODUCTO':
             reactivarProducto();
+            break;
+        case 'GUARDARCONFIGPRODUCTO':
+            guardarConfigProducto();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -100,6 +113,15 @@ function listarProductos()
     responder(true, 'OK', ['productos' => $result]);
 }
 
+/**
+ * Obtiene un producto por id, junto con su js_configuracion decodificado.
+ * Cada fila de js_configuracion se enriquece con el detalle real (nombre_corto
+ * - nombre) de se_vende_por_unidad_medida_id, salida_produccion_unidad_medida_id
+ * y salida_merma_unidad_medida_id, resuelto en el momento contra unidad_medida.
+ * Así el front (o cualquier otro módulo que consuma esta configuración) no
+ * depende del texto que haya quedado guardado en el JSON, que podría
+ * desactualizarse si alguien renombra una unidad de medida más adelante.
+ */
 function obtenerProducto($id)
 {
     $conectar = conectar_oll_BD();
@@ -119,7 +141,58 @@ function obtenerProducto($id)
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Producto no encontrado.');
-    responder(true, 'OK', ['producto' => $result[0]]);
+
+    $producto = $result[0];
+    // js_configuracion: lista de configuraciones, una por cada molde asociado al producto
+    $producto['js_configuracion'] = json_decode($producto['js_configuracion'] ?? '[]', true) ?: [];
+
+    if (!empty($producto['js_configuracion'])) {
+        // 1) Recolectar todos los ids de unidad usados en toda la configuración
+        $unidadIds = [];
+        foreach ($producto['js_configuracion'] as $c) {
+            foreach (['se_vende_por_unidad_medida_id', 'salida_produccion_unidad_medida_id', 'salida_merma_unidad_medida_id'] as $campo) {
+                if (!empty($c[$campo])) $unidadIds[] = (int) $c[$campo];
+            }
+        }
+        $unidadIds = array_unique($unidadIds);
+
+        // 2) Resolverlos todos en una sola consulta
+        $unidadesDetalle = [];
+        if (!empty($unidadIds)) {
+            $placeholders = [];
+            $params = [];
+            foreach ($unidadIds as $i => $uid) {
+                $key = "u$i";
+                $placeholders[] = ":$key";
+                $params[$key] = $uid;
+            }
+            $rowsUnidades = executeQuery(
+                $conectar,
+                "SELECT id, nombre_corto, nombre FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+                $params
+            );
+            foreach ($rowsUnidades as $u) {
+                $unidadesDetalle[$u['id']] = $u;
+            }
+        }
+
+        // 3) Adjuntar el detalle legible a cada fila de configuración
+        foreach ($producto['js_configuracion'] as &$c) {
+            foreach ([
+                'se_vende_por_unidad_medida_id'      => 'se_vende_por_detalle',
+                'salida_produccion_unidad_medida_id' => 'salida_produccion_detalle',
+                'salida_merma_unidad_medida_id'      => 'salida_merma_detalle',
+            ] as $campoId => $campoDetalle) {
+                $uid = $c[$campoId] ?? null;
+                $c[$campoDetalle] = isset($unidadesDetalle[$uid])
+                    ? $unidadesDetalle[$uid]['nombre_corto'] . ' - ' . $unidadesDetalle[$uid]['nombre']
+                    : null;
+            }
+        }
+        unset($c);
+    }
+
+    responder(true, 'OK', ['producto' => $producto]);
 }
 
 function guardarProducto()
@@ -184,6 +257,77 @@ function guardarProducto()
         ]);
         responder(true, 'Producto actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
+}
+
+/**
+ * Guarda la configuración de un producto por cada molde asociado.
+ * Se recibe un JSON (string) con un array de objetos:
+ * [
+ *   {
+ *     "molde_id": 2,
+ *     "molde": "molde 1",
+ *     "necesita_ensamblaje": "sí" | "no",
+ *     "se_vende_por_unidad_medida_id": 5,        "se_vende_por": "gruesas",
+ *     "salida_produccion_unidad_medida_id": 1,   "salida_produccion": "unidades",
+ *     "salida_merma_unidad_medida_id": 1,        "salida_merma": "unidades"
+ *   },
+ *   ...
+ * ]
+ * Se sobreescribe por completo el arreglo (siempre se manda el set completo
+ * de moldes del producto desde el front).
+ */
+function guardarConfigProducto()
+{
+    $conectar    = conectar_oll_BD();
+    $producto_id = intval($_POST['producto_id'] ?? 0);
+    $configJson  = $_POST['configuraciones'] ?? '[]';
+
+    if (!$producto_id) responder(false, 'Producto inválido.');
+
+    $configuraciones = json_decode($configJson, true);
+    if (!is_array($configuraciones)) responder(false, 'Formato de configuración inválido.');
+
+    $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
+    if (empty($existe)) responder(false, 'Producto no encontrado.');
+
+    // Validación mínima de cada fila (una por molde)
+    foreach ($configuraciones as $c) {
+        if (empty($c['molde_id'])) responder(false, 'Falta el molde en una de las configuraciones.');
+        if (empty($c['se_vende_por_unidad_medida_id']))      responder(false, 'Falta "Se vende por" para el molde "' . ($c['molde'] ?? '') . '".');
+        if (empty($c['salida_produccion_unidad_medida_id'])) responder(false, 'Falta "Salida en Producción" para el molde "' . ($c['molde'] ?? '') . '".');
+        if (empty($c['salida_merma_unidad_medida_id']))      responder(false, 'Falta "Salida de Merma" para el molde "' . ($c['molde'] ?? '') . '".');
+    }
+
+    // Se conserva el created_at de cada fila si ya existía antes (misma molde_id)
+    $actual = executeQuery($conectar, "SELECT js_configuracion FROM producto WHERE id = :id", ['id' => $producto_id]);
+    $configAnterior = json_decode($actual[0]['js_configuracion'] ?? '[]', true) ?: [];
+    $creadosPorMolde = [];
+    foreach ($configAnterior as $prev) {
+        if (!empty($prev['molde_id'])) {
+            $creadosPorMolde[$prev['molde_id']] = $prev['created_at'] ?? null;
+        }
+    }
+
+    $ahora = date('Y-m-d H:i:s');
+    foreach ($configuraciones as &$c) {
+        $c['created_at'] = $creadosPorMolde[$c['molde_id']] ?? $ahora;
+        $c['updated_at'] = $ahora;
+    }
+    unset($c);
+
+    $jsConfiJson = json_encode($configuraciones, JSON_UNESCAPED_UNICODE);
+
+    executeQuery($conectar, "
+        UPDATE producto SET
+            js_configuracion   = :js_configuracion,
+            updated_at = NOW()
+        WHERE id = :id
+    ", [
+        'js_configuracion' => $jsConfiJson,
+        'id'       => $producto_id,
+    ]);
+
+    responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);
 }
 
 // Soft delete: no se borra físicamente, solo se marca activo = FALSE.
