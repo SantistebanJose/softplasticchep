@@ -1111,7 +1111,6 @@ async function cargarProducciones(silencioso = false) {
 
     const verInactivos = document.getElementById('prodVerInactivos').checked;
     const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: verInactivos ? '' : 'activa' });
-    console.log(json);
     if (!json.success) {
         grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
         return;
@@ -1325,7 +1324,7 @@ async function abrirModalCrearProduccion() {
 async function abrirModalEditarProduccion(id) {
     const json = await llamarProduccion('OBTENERPRODUCCION', { id });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
-
+    console.log('json', json);
     limpiarFormularioProduccion();
     modoEdicionProduccion = true;
     produccionIdActual = id;
