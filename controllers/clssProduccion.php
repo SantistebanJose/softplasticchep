@@ -362,7 +362,8 @@ function listarProducciones()
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
             ), 0) AS items_count,
-            pr.js_configuracion
+            pr.js_configuracion,
+            x.item
 
         FROM produccion pd
         LEFT JOIN operario op ON op.id = pd.operario_id
@@ -371,6 +372,7 @@ function listarProducciones()
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
         LEFT JOIN producto pr on split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
+        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
