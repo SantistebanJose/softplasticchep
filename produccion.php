@@ -495,7 +495,7 @@ include("header.php");
         </div>
         <div class="modal-body">
 
-            <div class="pc-ens-step">
+            <div class="pc-ens-step" id="pasoCantidadProducida">
                 <div class="pc-ens-step-num">1</div>
                 <div class="pc-ens-step-body">
                 <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>                    <input type="number" step="0.0001" min="0.0001" class="form-control"
@@ -528,7 +528,7 @@ include("header.php");
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Continuar <i class="fa-solid fa-arrow-right"></i></button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitCantidadEnsamblaje">Continuar <i class="fa-solid fa-arrow-right"></i></button>
         </div>
       </form>
     </div>
@@ -1037,7 +1037,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     // por completo aquí mismo (producto terminado desde producción).
     const requiereEnsamblaje = necesitaEnsamblaje(p);
     const mostrarBotonEnsamblaje = corridaFinalizada && requiereEnsamblaje;
-
+    const mostrarBotonMerma = corridaFinalizada && !requiereEnsamblaje;
     const textoEstado = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: 'En ensamblaje' }[estado];
 
     // Línea de metadatos: color · operario · máquina · fecha, separados por
@@ -1056,9 +1056,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
     if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
-    if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
     if (corridaFinalizada && !requiereEnsamblaje) tags.push({ texto: 'No requiere ensamblaje', clase: 'no-ensamblaje' });
-
     return `
     <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
         <div class="pc-prod-card-top">
@@ -1110,6 +1108,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             ${mostrarBotonEnsamblaje
                 ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
                     Pasar a ensamblaje <i class="fa-solid fa-arrow-right"></i></button>`
+                : ''
+            }
+            ${mostrarBotonMerma
+                ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id}, true)" title="Registrar merma de este avance">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Registrar merma</button>`
                 : ''
             }
         </div>
@@ -1561,13 +1564,30 @@ let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;       // cache de colores activos, para los chips de merma
 let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
 
-function abrirModalCantidadParaEnsamblaje(produccionId) {
+let modoSoloMerma = false;
+
+function abrirModalCantidadParaEnsamblaje(produccionId, soloMerma = false) {
     produccionIdParaEnsamblaje = produccionId;
+    modoSoloMerma = soloMerma;
     document.getElementById('formCantidadEnsamblaje').reset();
 
     const p = produccionesCache.find(x => x.id == produccionId);
     aplicarUnidadesEtapaModal(p);
     renderInfoMermaModal(p);
+
+    const pasoProducida = document.getElementById('pasoCantidadProducida');
+    const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
+    const btnSubmit = document.getElementById('btnSubmitCantidadEnsamblaje');
+
+    if (soloMerma) {
+        pasoProducida.style.display = 'none';
+        inputProducida.required = false;
+        btnSubmit.textContent = 'Cerrar';
+    } else {
+        pasoProducida.style.display = '';
+        inputProducida.required = true;
+        btnSubmit.innerHTML = 'Continuar <i class="fa-solid fa-arrow-right"></i>';
+    }
 
     modalCantidadEnsamblaje.show();
 }
@@ -1676,6 +1696,13 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
+
+    if (modoSoloMerma) {
+        modalCantidadEnsamblaje.hide();
+        cargarProducciones();
+        return;
+    }
+
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
@@ -1689,13 +1716,6 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
         return;
     }
 
-    // Antes faltaba esta llamada por completo: el formulario validaba y
-    // cerraba el modal como si hubiera guardado, pero nunca se enviaba
-    // nada al backend (la variable "json" ni siquiera existía). Ahora se
-    // llama a ENVIARAENSAMBLAJE, mandando también la unidad configurada
-    // en esta etapa para que el backend la persista junto a la cantidad
-    // (así la etapa de Ensamblaje sabe si son kg, unidades, etc. sin tener
-    // que volver a leer la configuración del molde).
     const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
         id: produccionIdParaEnsamblaje,
         cantidad_producida: valor,
@@ -1709,7 +1729,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
 
     modalCantidadEnsamblaje.hide();
     Swal.fire('Listo', 'Avance enviado a ensamblaje correctamente.', 'success');
-    cargarProducciones(); // se queda en Producción, la card pasa a "Finalizado"
+    cargarProducciones();
 });
 </script>
 
