@@ -361,13 +361,16 @@ function listarProducciones()
             COALESCE((
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
-            ), 0) AS items_count
+            ), 0) AS items_count,
+            pr.js_configuracion
+
         FROM produccion pd
         LEFT JOIN operario op ON op.id = pd.operario_id
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
+        LEFT JOIN producto pr on split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";

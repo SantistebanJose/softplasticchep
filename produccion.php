@@ -1111,7 +1111,7 @@ async function cargarProducciones(silencioso = false) {
 
     const verInactivos = document.getElementById('prodVerInactivos').checked;
     const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: verInactivos ? '' : 'activa' });
-
+    console.log(json);
     if (!json.success) {
         grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
         return;

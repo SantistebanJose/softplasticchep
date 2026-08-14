@@ -108,7 +108,7 @@ function buscarClientes()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    $where  = ["tipo = 'cliente'", "deleted_at IS NULL"];
+    $where  = ["js_tipo @> '[\"cliente\"]'::jsonb", "deleted_at IS NULL"];
     $params = [];
 
     if ($texto !== '') {
@@ -127,7 +127,6 @@ function buscarClientes()
     $result = executeQuery($conectar, $sql, $params);
     responderVenta(true, 'OK', ['clientes' => $result]);
 }
-
 // =============================================================================
 // PRODUCTOS/COLORES DISPONIBLES PARA VENDER
 // (mismo criterio que clssDisponibilidadVenta.php, siempre sin vendidos)
@@ -351,11 +350,15 @@ function guardarVenta()
     if (empty($cliente_ruc)) responderVenta(false, 'Debes seleccionar un cliente.');
 
     $cliente = executeQuery($conectar,
-        "SELECT ruc, tipo, deleted_at FROM proveedor WHERE ruc = :ruc",
+        "SELECT ruc, js_tipo, deleted_at FROM proveedor WHERE ruc = :ruc",
         ['ruc' => $cliente_ruc]
     );
     if (empty($cliente)) responderVenta(false, 'Cliente no encontrado.');
-    if ($cliente[0]['tipo'] !== 'cliente') responderVenta(false, 'El RUC/DNI seleccionado no corresponde a un cliente.');
+
+    $tiposCliente = json_decode($cliente[0]['js_tipo'] ?? '[]', true) ?: [];
+    if (!in_array('cliente', $tiposCliente, true)) {
+        responderVenta(false, 'El RUC/DNI seleccionado no corresponde a un cliente.');
+    }
     if (!empty($cliente[0]['deleted_at'])) responderVenta(false, 'El cliente seleccionado está inactivo.');
 
     $itemsInput = json_decode($itemsJson, true);
@@ -444,7 +447,6 @@ function guardarVenta()
         responderVenta(false, 'No se pudo registrar la venta: ' . $e->getMessage());
     }
 }
-
 function anularVenta(int $id)
 {
     $conectar = conectar_oll_BD();
