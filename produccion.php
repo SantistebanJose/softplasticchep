@@ -323,6 +323,9 @@ include("header.php");
 .pc-merma-chip:hover{ border-color:#d8d4c8; }
 .pc-merma-chip.activo{ background:#152238; border-color:#152238; color:#fff; }
 .pc-merma-chip.activo .pc-color-dot{ border-color:rgba(255,255,255,.5); }
+
+/* ---------- Badge "no requiere ensamblaje" ---------- */
+.pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
 </style>
 
 <div class="pc-card">
@@ -495,8 +498,7 @@ include("header.php");
             <div class="pc-ens-step">
                 <div class="pc-ens-step-num">1</div>
                 <div class="pc-ens-step-body">
-                    <label class="form-label mb-1">Cantidad producida (kg) *</label>
-                    <input type="number" step="0.0001" min="0.0001" class="form-control"
+                <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>                    <input type="number" step="0.0001" min="0.0001" class="form-control"
                            id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
                 </div>
             </div>
@@ -743,6 +745,52 @@ function renderListaMermas(p) {
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
+// Unidad configurada en el item del molde/producto para una etapa dada.
+// Si el avance no tiene item (molde sin configuración), cae a "kg".
+function unidadEtapa(p, campo) {
+    const item = p && p.item ? p.item : null;
+    const val = item && item[campo] ? String(item[campo]).trim() : 'kg';
+    return val || 'kg';
+}
+
+function esUnidadEntera(unidad) {
+    return (unidad || '').toLowerCase() !== 'kg';
+}
+
+// Un molde/producto puede estar configurado para NO pasar por ensamblaje
+// (ej. producto terminado que sale directo de producción). item.necesita_ensamblaje
+// vale "no" en ese caso; cualquier otro valor (incluyendo ausencia del
+// campo, por compatibilidad con moldes viejos sin configurar) se trata
+// como "sí necesita ensamblaje".
+function necesitaEnsamblaje(p) {
+    const item = p && p.item ? p.item : null;
+    if (!item || item.necesita_ensamblaje === undefined || item.necesita_ensamblaje === null) return true;
+    return String(item.necesita_ensamblaje).trim().toLowerCase() !== 'no';
+}
+
+// Ajusta los campos del modal de "Pasar a ensamblaje" (cantidad producida
+// + merma) según la unidad configurada en cada etapa para este molde.
+function aplicarUnidadesEtapaModal(p) {
+    const unidadProduccion = unidadEtapa(p, 'salida_produccion');
+    const unidadMerma = unidadEtapa(p, 'salida_merma');
+
+    const lbl = document.getElementById('lbl_cantidad_producida');
+    const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
+    lbl.textContent = `Cantidad producida (${unidadProduccion}) *`;
+    inputProducida.step = esUnidadEntera(unidadProduccion) ? '1' : '0.0001';
+    inputProducida.min = esUnidadEntera(unidadProduccion) ? '1' : '0.0001';
+    inputProducida.placeholder = esUnidadEntera(unidadProduccion) ? 'Ej. 120' : 'Ej. 25.5';
+    inputProducida.dataset.unidad = unidadProduccion;
+
+    const inputMerma = document.getElementById('cantidad_merma_kg');
+    inputMerma.placeholder = `${unidadMerma} de merma`;
+    inputMerma.step = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
+    inputMerma.min = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
+    inputMerma.dataset.unidad = unidadMerma;
+
+    const btnMerma = document.getElementById('btnRegistrarMerma');
+    btnMerma.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Registrar (${unidadMerma})`;
+}
 
 function formatearFechaHoraLocal(fechaIso) {
     // Convierte "2026-07-10 14:30:00" a formato válido para datetime-local
@@ -983,6 +1031,13 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
     const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
+    // El botón "Pasar a ensamblaje" solo se muestra si la corrida terminó Y
+    // el item de configuración (molde/producto) indica que sí requiere pasar
+    // por ensamblaje. Si item.necesita_ensamblaje === "no", el avance se da
+    // por completo aquí mismo (producto terminado desde producción).
+    const requiereEnsamblaje = necesitaEnsamblaje(p);
+    const mostrarBotonEnsamblaje = corridaFinalizada && requiereEnsamblaje;
+
     const textoEstado = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: 'En ensamblaje' }[estado];
 
     // Línea de metadatos: color · operario · máquina · fecha, separados por
@@ -1002,6 +1057,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
     if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
     if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
+    if (corridaFinalizada && !requiereEnsamblaje) tags.push({ texto: 'No requiere ensamblaje', clase: 'no-ensamblaje' });
 
     return `
     <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
@@ -1030,7 +1086,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             </div>
         </div>
 
-        ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => `<span class="pc-prod-tag">${t}</span>`).join('')}</div>` : ''}
+        ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
 
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
 
@@ -1051,7 +1107,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                 : `<button type="button" class="pc-prod-ghost-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                        <i class="fa-solid fa-rotate-left"></i></button>`
             }
-            ${corridaFinalizada
+            ${mostrarBotonEnsamblaje
                 ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
                     Pasar a ensamblaje <i class="fa-solid fa-arrow-right"></i></button>`
                 : ''
@@ -1510,6 +1566,7 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     document.getElementById('formCantidadEnsamblaje').reset();
 
     const p = produccionesCache.find(x => x.id == produccionId);
+    aplicarUnidadesEtapaModal(p);
     renderInfoMermaModal(p);
 
     modalCantidadEnsamblaje.show();
@@ -1547,15 +1604,19 @@ function renderChipsColorMerma() {
 // pre-marca el color del avance como punto de partida (el caso más común
 // es merma de un solo color), pero el operario puede desmarcarlo, sumar
 // otros colores, y/o agregar una nota libre.
+//
+// La lista de mermas ya registradas para este avance se dibuja con
+// renderListaMermas() (llena #merma_lista_registrada) — antes este código
+// intentaba escribir en un elemento #merma_registrada_txt que no existe en
+// el HTML, lo que rompía el modal con un error de JS.
 async function renderInfoMermaModal(p) {
     const cont = document.getElementById('merma_colores_chips');
     const notaInput = document.getElementById('merma_nota');
-    const txt = document.getElementById('merma_registrada_txt');
     document.getElementById('cantidad_merma_kg').value = '';
     if (notaInput) notaInput.value = '';
     mermaColoresSeleccionados = [];
 
-    if (!p) { if (cont) cont.innerHTML = ''; txt.textContent = ''; return; }
+    if (!p) { if (cont) cont.innerHTML = ''; renderListaMermas(null); return; }
 
     const colores = await obtenerColoresParaMerma();
     cont.dataset.colores = JSON.stringify(colores);
@@ -1563,22 +1624,20 @@ async function renderInfoMermaModal(p) {
     if (p.color_id) mermaColoresSeleccionados = [Number(p.color_id)];
     renderChipsColorMerma();
 
-    const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
-    const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
-    txt.textContent = totalMerma > 0
-        ? `Merma ya registrada en este avance: ${formatearCantidadProd(totalMerma)} kg`
-        : 'Aún no se registró merma para este avance.';
+    renderListaMermas(p);
 }
 document.getElementById('btnRegistrarMerma').addEventListener('click', async () => {
-    const valor = parseFloat(document.getElementById('cantidad_merma_kg').value);
+    const inputMerma = document.getElementById('cantidad_merma_kg');
+    const unidadMerma = inputMerma.dataset.unidad || 'kg';
+    const valor = parseFloat(inputMerma.value);
+    const nota = document.getElementById('merma_nota').value.trim(); // <-- antes: variable "nota" no definida
+
     if (isNaN(valor) || valor <= 0) {
         Swal.fire('Dato inválido', 'Ingresa una cantidad de merma mayor a 0.', 'warning');
         return;
     }
-
-    const nota = document.getElementById('merma_nota').value.trim();
-    if (mermaColoresSeleccionados.length === 0 && nota === '') {
-        Swal.fire('Dato inválido', 'Selecciona al menos un color o escribe una nota que describa la merma (ej. "combinado", "purga").', 'warning');
+    if (esUnidadEntera(unidadMerma) && !Number.isInteger(valor)) {
+        Swal.fire('Dato inválido', `La cantidad de merma debe ser un número entero (unidad: ${unidadMerma}).`, 'warning');
         return;
     }
 
@@ -1608,25 +1667,39 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
     mermaColoresSeleccionados = p && p.color_id ? [Number(p.color_id)] : [];
     renderChipsColorMerma();
 
-    const mermasActualizadas = p ? p.js_cantidades_merma : [];
-    const totalMerma = mermasActualizadas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
-    document.getElementById('merma_registrada_txt').textContent =
-        `Merma ya registrada en este avance: ${formatearCantidadProd(totalMerma)} kg`;
+    // Refresca la lista visible de mermas ya registradas (antes intentaba
+    // escribir en un elemento inexistente y nunca actualizaba la vista).
+    renderListaMermas(p);
 
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Merma registrada', showConfirmButton: false, timer: 1500 });
 });
 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
-    const valor = parseFloat(document.getElementById('cantidad_producida_ensamblaje').value);
+    const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
+    const unidadProducida = inputProducida.dataset.unidad || 'kg';
+    const valor = parseFloat(inputProducida.value);
+
     if (isNaN(valor) || valor <= 0) {
         Swal.fire('Dato inválido', 'Ingresa una cantidad producida mayor a 0.', 'warning');
         return;
     }
+    if (esUnidadEntera(unidadProducida) && !Number.isInteger(valor)) {
+        Swal.fire('Dato inválido', `La cantidad producida debe ser un número entero (unidad: ${unidadProducida}).`, 'warning');
+        return;
+    }
 
+    // Antes faltaba esta llamada por completo: el formulario validaba y
+    // cerraba el modal como si hubiera guardado, pero nunca se enviaba
+    // nada al backend (la variable "json" ni siquiera existía). Ahora se
+    // llama a ENVIARAENSAMBLAJE, mandando también la unidad configurada
+    // en esta etapa para que el backend la persista junto a la cantidad
+    // (así la etapa de Ensamblaje sabe si son kg, unidades, etc. sin tener
+    // que volver a leer la configuración del molde).
     const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
         id: produccionIdParaEnsamblaje,
         cantidad_producida: valor,
+        unidad: unidadProducida,
     });
 
     if (!json.success) {

@@ -363,7 +363,9 @@ function listarProducciones()
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
             ), 0) AS items_count,
             pr.js_configuracion,
-            x.item
+            x.item,
+            x.item->>'salida_produccion' AS unidad_salida_produccion,
+            x.item->>'salida_merma'      AS unidad_salida_merma
 
         FROM produccion pd
         LEFT JOIN operario op ON op.id = pd.operario_id
@@ -383,6 +385,7 @@ function listarProducciones()
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
+            $fila['item'] = !empty($fila['item']) ? json_decode($fila['item'], true) : null;
         }
         unset($fila);
 
@@ -409,7 +412,9 @@ function obtenerProduccion($id)
                 co.nombre AS color_nombre, co.rgb AS color_rgb,
                 cm.nombre AS categoria_material_nombre,
                 pr.js_configuracion,
-                x.item
+                x.item,
+                x.item->>'salida_produccion' AS unidad_salida_produccion,
+                x.item->>'salida_merma'      AS unidad_salida_merma
          FROM produccion pd
          LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
@@ -421,7 +426,17 @@ function obtenerProduccion($id)
          WHERE pd.id = :id",
         ['id' => $id]
     );
-    if (empty($produccion)) responder(false, 'Registro de producción no encontrado.');
+
+    // FIX: antes, por falta de llaves, el "responder(false, 'no encontrado')"
+    // se ejecutaba SIEMPRE (existiera o no el registro), porque el `if` sin
+    // llaves solo "adoptaba" la línea del json_decode, no la de responder().
+    // Esto hacía fallar OBTENERPRODUCCION (usado al editar un avance) el
+    // 100% de las veces. Ahora sí corta la ejecución únicamente cuando el
+    // registro no existe.
+    if (empty($produccion)) {
+        responder(false, 'Registro de producción no encontrado.');
+    }
+    $produccion[0]['item'] = !empty($produccion[0]['item']) ? json_decode($produccion[0]['item'], true) : null;
 
     // Detalle con toda la info del lote de origen (se conserva para
     // trazabilidad interna, aunque el formulario ya no la muestre línea
@@ -461,6 +476,7 @@ function obtenerIpCliente(): string
     return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
 }
 
+
 function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
     return [
@@ -474,6 +490,42 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
         'cambios'   => $cambios,
         'timestamp' => date('Y-m-d H:i:s'),
     ];
+}
+
+/**
+ * Devuelve el item de js_configuracion (producto.js_configuracion) del
+ * molde asociado a un avance de producción, con las unidades de salida
+ * configuradas por etapa (salida_produccion, salida_merma). Se deriva
+ * en vivo desde unico_molde_producto — no se persiste por avance porque
+ * la configuración del molde/producto es la fuente de verdad.
+ */
+function obtenerItemConfigProduccion($conectar, int $produccionId): ?array
+{
+    $rows = executeQuery($conectar, "
+        SELECT x.item
+        FROM produccion pd
+        LEFT JOIN producto pr ON split_part(pd.unico_molde_producto, '-', 2)::bigint = pr.id
+        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
+            ON (x.item->>'molde_id')::bigint = pd.molde_id
+        WHERE pd.id = :id
+    ", ['id' => $produccionId]);
+
+    if (empty($rows) || empty($rows[0]['item'])) return null;
+    $item = json_decode($rows[0]['item'], true);
+    return is_array($item) ? $item : null;
+}
+
+/**
+ * Unidad de salida configurada para una etapa ('salida_produccion' o
+ * 'salida_merma'). Si el molde no tiene configuración, cae a 'KG'
+ * (comportamiento previo).
+ */
+function obtenerUnidadEtapa(?array $item, string $campo): string
+{
+    if ($item && !empty($item[$campo])) {
+        return strtoupper(trim($item[$campo]));
+    }
+    return 'KG';
 }
 
 function guardarProduccion()
@@ -871,6 +923,12 @@ function enviarAEnsamblaje()
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
+    $item = obtenerItemConfigProduccion($conectar, $id);
+    $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
+
+    if ($unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
+        responder(false, "La cantidad producida debe ser un número entero (unidad configurada: $unidadProduccion).");
+    }
     $existe = executeQuery(
         $conectar,
         "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje FROM produccion WHERE id = :id",
@@ -884,7 +942,7 @@ function enviarAEnsamblaje()
     $cambios = [[
         'campo' => 'Envío a ensamblaje',
         'valor_antes' => '(no enviado)',
-        'valor_despues' => "Enviado, {$cantidadProducida} kg producidos",
+        'valor_despues' => "Enviado, {$cantidadProducida} " . strtolower($unidadProduccion) . " producidos",
     ]];
     $movimiento   = obtenerMovimientoSesion('enviar_ensamblaje', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -906,7 +964,7 @@ function enviarAEnsamblaje()
         'js_historial'        => $js_historial,
     ]);
 
-    responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id]);
+    responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id, 'unidad' => $unidadProduccion]);
 }
 
 // Registra un lote de merma para este avance:
@@ -937,10 +995,25 @@ function registrarMerma()
     $coloresRaw = json_decode($_POST['colores'] ?? '[]', true);
     $coloresIds = is_array($coloresRaw) ? array_values(array_unique(array_map('intval', $coloresRaw))) : [];
     $mermaTexto = trim($_POST['nota'] ?? '');
-    $unidadMedida = 'KG';
 
     if (!$id) responder(false, 'ID inválido.');
-    if ($cantidadMerma <= 0) responder(false, 'La cantidad de merma debe ser mayor a 0.');
+
+    $item = obtenerItemConfigProduccion($conectar, $id);
+    $unidadMedida = obtenerUnidadEtapa($item, 'salida_merma');
+
+    // FIX: antes, por falta de llaves en el `if ($cantidadMerma <= 0)`,
+    // este último responder() se ejecutaba SIEMPRE (con cantidad válida o
+    // no), porque solo el `if` anidado de "número entero" quedaba dentro
+    // del bloque condicional. Por eso el modal mostraba "La cantidad de
+    // merma debe ser mayor a 0" incluso al ingresar un valor correcto.
+    // Ahora cada validación tiene su propio bloque con llaves y se evalúa
+    // de forma independiente.
+    if ($cantidadMerma <= 0) {
+        responder(false, 'La cantidad de merma debe ser mayor a 0.');
+    }
+    if ($unidadMedida !== 'KG' && floor($cantidadMerma) != $cantidadMerma) {
+        responder(false, "La cantidad de merma debe ser un número entero (unidad configurada: $unidadMedida).");
+    }
     if (empty($coloresIds) && $mermaTexto === '') {
         responder(false, 'Selecciona al menos un color o describe la merma (ej. "combinación de ambos colores", "purga").');
     }
