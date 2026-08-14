@@ -367,7 +367,8 @@ include("header.php");
     <div class="modal-content">
       <form id="formProduccion">
         <div class="modal-header">
-        <h5 class="modal-title" id="tituloModalCantidadEnsamblaje"><i class="fa-solid fa-weight-hanging"></i> Cantidad producida</h5>          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <h5 class="modal-title" id="modalProduccionTitulo">Registrar producción</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
 
@@ -495,8 +496,8 @@ include("header.php");
     <div class="modal-content">
       <form id="formCantidadEnsamblaje">
         <div class="modal-header">
-          <h5 class="modal-title"><i class="fa-solid fa-weight-hanging"></i> Cantidad producida</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <h5 class="modal-title" id="tituloModalCantidadEnsamblaje"><i class="fa-solid fa-weight-hanging"></i> Cantidad producida</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
 
