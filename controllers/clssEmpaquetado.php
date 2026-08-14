@@ -97,8 +97,11 @@ function controladorEmpaquetado($accion)
         case 'LISTARENSAMBLAJESPARAEMPAQUETADO':
             listarEnsamblajesParaEmpaquetado();
             break;
+        case 'LISTARPRODUCCIONESPARAEMPAQUETADO':
+            listarProduccionesParaEmpaquetado();
+            break;
         case 'LISTAREMPAQUETADOS':
-            listarEmpaquetados(intval($_POST['ensamblaje_id'] ?? 0));
+            listarEmpaquetadosPorOrigen(intval($_POST['ensamblaje_id'] ?? 0), intval($_POST['produccion_id'] ?? 0));
             break;
         case 'LISTARTODOSEMPAQUETADOS':
             listarTodosEmpaquetados();
@@ -128,7 +131,6 @@ function controladorEmpaquetado($accion)
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // LISTADOS AUXILIARES
 // =============================================================================
@@ -170,10 +172,6 @@ function buscarUnidadesMedida()
 //     (ensamblaje_id_referido IS NOT NULL);
 //   - ensamblajes que YA TIENEN al menos un registro de empaquetado
 //     (LEFT JOIN empaquetado ee ... WHERE ee.emsamblaje_id IS NULL).
-//     Esto significa que, a diferencia de antes, un ensamblaje ya
-//     empaquetado desaparece del grid en cuanto tiene su primer
-//     registro; sigue visible únicamente en el listado general de abajo
-//     (LISTARTODOSEMPAQUETADOS).
 function listarEnsamblajesParaEmpaquetado()
 {
     $conectar          = conectar_oll_BD();
@@ -235,6 +233,81 @@ function listarEnsamblajesParaEmpaquetado()
     responder(true, 'OK', ['ensamblajes' => $result]);
 }
 
+/**
+ * Avances de producción que, según la configuración del molde/producto
+ * (item.necesita_ensamblaje = 'no'), van DIRECTO a empaquetado sin pasar
+ * por ensamblaje. Se listan los que ya fueron enviados
+ * (enviado_ensamblaje = TRUE, seteado por clssProduccion::enviarAEnsamblaje)
+ * y que aún no tienen ningún registro de empaquetado propio.
+ */
+function listarProduccionesParaEmpaquetado()
+{
+    $conectar          = conectar_oll_BD();
+    $texto             = trim($_POST['texto'] ?? '');
+    $productoId        = trim($_POST['producto_id'] ?? '');
+    $soloSinEmpaquetar = ($_POST['solo_sin_empaquetar'] ?? '0') === '1';
+
+    $where = [
+        "pd.deleted_at IS NULL",
+        "pd.enviado_ensamblaje = TRUE",
+        "pd.fecha_hora_fin IS NOT NULL",
+        "ee.id IS NULL", // sin ningún registro de empaquetado todavía (mismo criterio que el grid de ensamblajes)
+        "COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'",
+    ];
+    $params = [];
+
+    if ($texto !== '') {
+        $where[] = "(LOWER(pr.codigo) LIKE LOWER(:texto) OR LOWER(pr.descripcion) LIKE LOWER(:texto))";
+        $params['texto'] = "%$texto%";
+    }
+    if ($productoId !== '') {
+        $where[] = "pr.id = :producto_id";
+        $params['producto_id'] = $productoId;
+    }
+    if ($soloSinEmpaquetar) {
+        $where[] = "NOT EXISTS (
+            SELECT 1 FROM empaquetado emp2
+            WHERE emp2.produccion_id = pd.id AND emp2.deleted_at IS NULL
+        )";
+    }
+
+    $sql = "
+        SELECT
+            pd.id AS produccion_id,
+            pr.id AS producto_id,
+            pr.codigo AS producto_codigo,
+            pr.descripcion AS producto_descripcion,
+            pd.cantidad_producida_kg,
+            pd.fecha_hora_fin,
+            mo.nombre AS molde_nombre,
+            co.nombre AS color_nombre,
+            op.nombre_completo AS operario_produccion_nombre,
+            (
+                SELECT COUNT(*) FROM empaquetado emp
+                WHERE emp.produccion_id = pd.id AND emp.deleted_at IS NULL
+            ) AS empaquetados_count,
+            (
+                SELECT COALESCE(SUM(emp.cantidad_tota * COALESCE(um.equivalencia, 1)), 0)
+                FROM empaquetado emp
+                LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+                WHERE emp.produccion_id = pd.id AND emp.deleted_at IS NULL
+            ) AS cantidad_total_empaquetada
+        FROM produccion pd
+        LEFT JOIN empaquetado ee ON ee.produccion_id = pd.id
+        INNER JOIN producto pr ON pr.id = split_part(pd.unico_molde_producto, '-', 2)::bigint
+        LEFT JOIN molde mo ON mo.id = pd.molde_id
+        LEFT JOIN color co ON co.id = pd.color_id
+        LEFT JOIN operario op ON op.id = pd.operario_id
+        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
+            ON (x.item->>'molde_id')::bigint = mo.id
+        LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY pd.fecha_hora_fin DESC
+    ";
+
+    $result = executeQuery($conectar, $sql, $params);
+    responder(true, 'OK', ['producciones' => $result]);
+}
 // =============================================================================
 // EMPAQUETADO (registro plano, con bultos internos en js_cantidades)
 // =============================================================================
@@ -266,6 +339,37 @@ function listarEmpaquetados(int $ensamblajeId)
         WHERE emp.emsamblaje_id = :ensamblaje_id AND emp.deleted_at IS NULL
         ORDER BY emp.created_at DESC
     ", ['ensamblaje_id' => $ensamblajeId]);
+
+    responder(true, 'OK', ['empaquetados' => $result]);
+}
+function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
+{
+    if (!$ensamblajeId && !$produccionId) responder(false, 'Debes indicar el ensamblaje o la producción de origen.');
+    $conectar = conectar_oll_BD();
+
+    $condicion = $ensamblajeId ? "emp.emsamblaje_id = :origen_id" : "emp.produccion_id = :origen_id";
+    $origenId  = $ensamblajeId ?: $produccionId;
+
+    $result = executeQuery($conectar, "
+        SELECT
+            emp.id, emp.producto_id, emp.emsamblaje_id, emp.produccion_id, emp.unidad_medida,
+            emp.cantidad_tota, emp.js_cantidades,
+            emp.operario_id, emp.pasado_venta, emp.venta_id_ref,
+            emp.created_at, emp.update_at,
+            um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto,
+            um.equivalencia, um.unidad_base_id,
+            ub.nombre_corto AS unidad_base_corto,
+            CASE WHEN um.unidad_base_id IS NOT NULL
+                 THEN emp.cantidad_tota * um.equivalencia
+                 ELSE NULL END AS cantidad_tota_en_base,
+            op.nombre_completo AS operario_nombre
+        FROM empaquetado emp
+        LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+        LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
+        LEFT JOIN operario op ON op.id = emp.operario_id
+        WHERE $condicion AND emp.deleted_at IS NULL
+        ORDER BY emp.created_at DESC
+    ", ['origen_id' => $origenId]);
 
     responder(true, 'OK', ['empaquetados' => $result]);
 }
@@ -304,25 +408,26 @@ function listarTodosEmpaquetados()
     }
 
     $sql = "SELECT
-                emp.id, emp.emsamblaje_id, emp.producto_id,
-                p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
-                emp.cantidad_tota, emp.js_cantidades,
-                emp.operario_id, op.nombre_completo AS operario_nombre,
-                emp.pasado_venta, emp.venta_id_ref,
-                emp.created_at, emp.update_at,
-                um.nombre_corto AS unidad_corto, um.equivalencia, um.unidad_base_id,
-                ub.nombre_corto AS unidad_base_corto,
-                CASE WHEN um.unidad_base_id IS NOT NULL
-                     THEN emp.cantidad_tota * um.equivalencia
-                     ELSE NULL END AS cantidad_tota_en_base
-            FROM empaquetado emp
-            LEFT JOIN producto p ON p.id = emp.producto_id
-            LEFT JOIN operario op ON op.id = emp.operario_id
-            LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
-            LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY emp.created_at DESC
-            LIMIT 300";
+            emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
+            p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
+            emp.cantidad_tota, emp.js_cantidades,
+            emp.operario_id, op.nombre_completo AS operario_nombre,
+            emp.pasado_venta, emp.venta_id_ref,
+            emp.created_at, emp.update_at,
+            um.nombre_corto AS unidad_corto, um.equivalencia, um.unidad_base_id,
+            ub.nombre_corto AS unidad_base_corto,
+            CASE WHEN um.unidad_base_id IS NOT NULL
+                 THEN emp.cantidad_tota * um.equivalencia
+                 ELSE NULL END AS cantidad_tota_en_base,
+            CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END AS origen_tipo
+        FROM empaquetado emp
+        LEFT JOIN producto p ON p.id = emp.producto_id
+        LEFT JOIN operario op ON op.id = emp.operario_id
+        LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+        LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY emp.created_at DESC
+        LIMIT 300";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['empaquetados' => $result]);
@@ -367,26 +472,61 @@ function crearEmpaquetado()
     $conectar = conectar_oll_BD();
 
     $ensamblajeId = intval($_POST['ensamblaje_id'] ?? 0);
+    $produccionId = intval($_POST['produccion_id'] ?? 0);
     $unidadMedida = intval($_POST['unidad_medida'] ?? 0);
     $operarioId   = intval($_POST['operario_id'] ?? 0);
     $bultosJson   = trim($_POST['bultos'] ?? '[]');
 
-    if (!$ensamblajeId) responder(false, 'ID de ensamblaje inválido.');
+    if (!$ensamblajeId && !$produccionId) {
+        responder(false, 'Debes indicar el ensamblaje o la producción de origen.');
+    }
+    if ($ensamblajeId && $produccionId) {
+        responder(false, 'Un empaquetado solo puede tener un origen: ensamblaje o producción, no ambos.');
+    }
     if (!$unidadMedida) responder(false, 'Debes indicar la unidad de medida.');
     if (!$operarioId) responder(false, 'Debes indicar el operario.');
 
     [$bultos, $cantidadTotal] = normalizarBultos(json_decode($bultosJson, true));
     if (empty($bultos)) responder(false, 'Debes registrar al menos un bulto con cantidad mayor a 0.');
 
-    $ensamblaje = executeQuery(
-        $conectar,
-        "SELECT id, producto_id, fin, deleted_at FROM ensamblaje WHERE id = :id",
-        ['id' => $ensamblajeId]
-    );
-    if (empty($ensamblaje)) responder(false, 'El ensamblaje indicado no existe.');
-    if (!empty($ensamblaje[0]['deleted_at'])) responder(false, 'Este ensamblaje está inactivo.');
-    if (empty($ensamblaje[0]['fin'])) responder(false, 'Este ensamblaje aún no ha finalizado; no se puede empaquetar todavía.');
-    $productoId = intval($ensamblaje[0]['producto_id']);
+    $productoId = null;
+
+    if ($ensamblajeId) {
+        $ensamblaje = executeQuery(
+            $conectar,
+            "SELECT id, producto_id, fin, deleted_at FROM ensamblaje WHERE id = :id",
+            ['id' => $ensamblajeId]
+        );
+        if (empty($ensamblaje)) responder(false, 'El ensamblaje indicado no existe.');
+        if (!empty($ensamblaje[0]['deleted_at'])) responder(false, 'Este ensamblaje está inactivo.');
+        if (empty($ensamblaje[0]['fin'])) responder(false, 'Este ensamblaje aún no ha finalizado; no se puede empaquetar todavía.');
+        $productoId = intval($ensamblaje[0]['producto_id']);
+    } else {
+        // Origen: producción directa (sin ensamblaje), validado contra la
+        // misma configuración que usa clssProduccion::enviarAEnsamblaje().
+        $prod = executeQuery(
+            $conectar,
+            "SELECT id, deleted_at, fecha_hora_fin, unico_molde_producto, js_configuracion_moment
+             FROM produccion WHERE id = :id",
+            ['id' => $produccionId]
+        );
+        if (empty($prod)) responder(false, 'La producción indicada no existe.');
+        if (!empty($prod[0]['deleted_at'])) responder(false, 'Esta producción está inactiva.');
+        if (empty($prod[0]['fecha_hora_fin'])) responder(false, 'Esta producción aún no ha finalizado su corrida.');
+
+        $item = !empty($prod[0]['js_configuracion_moment']) ? json_decode($prod[0]['js_configuracion_moment'], true) : null;
+        $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
+        if ($necesitaEnsamblaje) {
+            responder(false, 'Esta producción está configurada para pasar por ensamblaje; no puede empaquetarse directamente.');
+        }
+
+        $yaUsada = executeQuery($conectar, "SELECT id FROM empaquetado WHERE produccion_id = :id", ['id' => $produccionId]);
+        if (!empty($yaUsada)) responder(false, 'Esta producción ya tiene un registro de empaquetado.');
+
+        $partes = explode('-', $prod[0]['unico_molde_producto'] ?? '');
+        $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
+        if (!$productoId) responder(false, 'No se pudo determinar el producto de esta producción.');
+    }
 
     $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedida]);
     if (empty($unidad)) responder(false, 'La unidad de medida indicada no existe o está inactiva.');
@@ -394,9 +534,10 @@ function crearEmpaquetado()
     $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operarioId]);
     if (empty($operario)) responder(false, 'El operario indicado no existe o está inactivo.');
 
+    $origenTexto = $ensamblajeId ? "ensamblaje #$ensamblajeId" : "producción #$produccionId";
     $cambios = [[
         'campo' => 'Empaquetado', 'valor_antes' => '(nuevo)',
-        'valor_despues' => count($bultos) . " bulto(s), total $cantidadTotal",
+        'valor_despues' => count($bultos) . " bulto(s), total $cantidadTotal, origen: $origenTexto",
     ]];
     $movimiento   = obtenerMovimientoSesionEmp('crear', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -405,17 +546,18 @@ function crearEmpaquetado()
 
     $nuevo = executeQuery($conectar, "
         INSERT INTO empaquetado (
-            producto_id, emsamblaje_id, unidad_medida, operario_id,
+            producto_id, emsamblaje_id, produccion_id, unidad_medida, operario_id,
             cantidad_tota, js_cantidades,
             created_at, js_session, js_historial
         ) VALUES (
-            :producto_id, :emsamblaje_id, :unidad_medida, :operario_id,
+            :producto_id, :emsamblaje_id, :produccion_id, :unidad_medida, :operario_id,
             :cantidad_tota, :js_cantidades,
             NOW(), :js_session, :js_historial
         ) RETURNING id
     ", [
         'producto_id'    => $productoId,
-        'emsamblaje_id'  => $ensamblajeId,
+        'emsamblaje_id'  => $ensamblajeId ?: null,
+        'produccion_id'  => $produccionId ?: null,
         'unidad_medida'  => $unidadMedida,
         'operario_id'    => $operarioId,
         'cantidad_tota'  => $cantidadTotal,
@@ -426,7 +568,6 @@ function crearEmpaquetado()
 
     responder(true, 'Empaquetado registrado correctamente.', ['id' => $nuevo[0]['id'] ?? null]);
 }
-
 function editarEmpaquetado()
 {
     $conectar = conectar_oll_BD();

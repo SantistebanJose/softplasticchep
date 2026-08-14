@@ -1,4 +1,5 @@
 <?php
+ob_start();
 
 /**
  * controllers/clssProductos.php
@@ -150,7 +151,7 @@ function obtenerProducto($id)
         // 1) Recolectar todos los ids de unidad usados en toda la configuración
         $unidadIds = [];
         foreach ($producto['js_configuracion'] as $c) {
-            foreach (['se_vende_por_unidad_medida_id', 'salida_produccion_unidad_medida_id', 'salida_merma_unidad_medida_id'] as $campo) {
+            foreach (['salida_produccion_unidad_medida_id', 'salida_merma_unidad_medida_id'] as $campo) {
                 if (!empty($c[$campo])) $unidadIds[] = (int) $c[$campo];
             }
         }
@@ -179,7 +180,6 @@ function obtenerProducto($id)
         // 3) Adjuntar el detalle legible a cada fila de configuración
         foreach ($producto['js_configuracion'] as &$c) {
             foreach ([
-                'se_vende_por_unidad_medida_id'      => 'se_vende_por_detalle',
                 'salida_produccion_unidad_medida_id' => 'salida_produccion_detalle',
                 'salida_merma_unidad_medida_id'      => 'salida_merma_detalle',
             ] as $campoId => $campoDetalle) {

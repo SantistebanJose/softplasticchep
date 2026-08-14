@@ -49,7 +49,7 @@ if (empty($_SESSION['usuario_id'])) {
                 </div>
                 <div class="pc-info-pill">
                     <i class="fa-solid fa-location-dot"></i>
-                    <span>Dirección de la planta</span>
+                    <span>Av. San Juan 1 Mza. L Lote. 08, San Juan de Lurigancho - Lima</span>
                 </div>
                 <div class="pc-info-pill pc-info-whatsapp">
                     <i class="fa-brands fa-whatsapp"></i>

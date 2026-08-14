@@ -7,33 +7,18 @@ include("header.php");
 ?>
 
 <!--
-    empaquetado.php (REESCRITO 2026-07-27 v3)
+    empaquetado.php (REESCRITO 2026-07-30 v4)
 
     MODELO DE UI:
-    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
-       con conteo y suma normalizada (a unidad base) de lo ya empaquetado.
-       Excluye ensamblajes ya absorbidos como complemento de otro armado.
-
-       NOTA (2026-07-30): el controlador ahora también excluye del grid
-       cualquier ensamblaje que YA TENGA al menos un registro de
-       empaquetado (ver clssEmpaquetado.php). Como consecuencia, la rama
-       de este archivo que pinta el botón como "Ver empaquetado" (outline)
-       para ensamblajes con empaquetados_count > 0 queda como código
-       muerto: esas filas ya no llegan del backend, así que el botón
-       siempre se renderiza como "Empaquetar". Se deja el código tal cual
-       por si en el futuro se decide volver a mostrar esos ensamblajes.
-    2) Al tocar el botón se abre un modal para ESE ensamblaje:
-       - Lista de registros de empaquetado ya hechos (tabla), con
-         Editar/Eliminar/Reactivar según corresponda.
-       - Formulario de alta/edición: unidad de medida, operario, y una
-         lista dinámica de "bultos". Al guardar con éxito, el modal se
-         CIERRA solo (antes se quedaba abierto sin feedback visual claro).
-    3) Tabla de "Registros de empaquetado" debajo del grid, con TODOS los
-       registros de todos los ensamblajes (historial general), con sus
-       propios filtros de estado (disponible/vendido) y rango de fechas,
-       además de reusar el buscador de producto de arriba. Esta tabla
-       sigue mostrando ensamblajes ya empaquetados (no se ve afectada por
-       el cambio de la nota anterior).
+    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO).
+    2) Grid de producciones DIRECTAS a empaquetado, sin pasar por ensamblaje
+       (LISTARPRODUCCIONESPARAEMPAQUETADO) — moldes/productos configurados
+       con necesita_ensamblaje = 'no'.
+    3) Modal compartido: recibe (ensamblajeId, productoLabel, produccionId).
+       Ambos ids son mutuamente excluyentes; uno de los dos siempre es 0.
+    4) Tabla de "Registros de empaquetado" (histórico general, ambos
+       orígenes), con columna "Origen" que distingue Ensamblaje/Producción
+       vía el campo origen_tipo que devuelve el backend.
 -->
 
 <style>
@@ -125,6 +110,16 @@ include("header.php");
 </div>
 
 <div class="pc-card mt-3">
+    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2>Producciones directas a empaquetar</h2>
+        <small class="text-muted">Moldes/productos configurados sin ensamblaje</small>
+    </div>
+    <div class="pc-emp-grid" id="gridProduccionesDirectas">
+        <div class="pc-emp-empty">Cargando...</div>
+    </div>
+</div>
+
+<div class="pc-card mt-3">
     <div class="pc-card-header">
         <h2>Registros de empaquetado</h2>
     </div>
@@ -146,7 +141,7 @@ include("header.php");
         <table class="pc-emp-tabla">
             <thead>
                 <tr>
-                    <th>Ensamblaje</th>
+                    <th>Origen</th>
                     <th>Producto</th>
                     <th>Unidades Paquetes</th>
                     <th>Total</th>
@@ -163,7 +158,7 @@ include("header.php");
     </div>
 </div>
 
-<!-- Modal por ensamblaje: lista de registros + alta/edición -->
+<!-- Modal por ensamblaje/producción: lista de registros + alta/edición -->
 <div class="modal fade" id="modalEmpaquetado" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -198,6 +193,7 @@ include("header.php");
         <form id="formEmpaquetado">
             <input type="hidden" id="emp_id" value="0">
             <input type="hidden" id="emp_ensamblaje_id" value="0">
+            <input type="hidden" id="emp_produccion_id" value="0">
             <div class="row">
                 <div class="col-md-6 mb-2">
                     <label class="form-label">Unidad de medida *</label>
@@ -241,7 +237,10 @@ include("header.php");
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
 const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
 
+// ── Estado del modal: ensamblajeId y produccionId son mutuamente
+// excluyentes — solo uno de los dos es > 0 en cada apertura. ──
 let empEnsamblajeIdActual = 0;
+let empProduccionIdActual = 0;
 let empIdEnEdicion = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
@@ -250,6 +249,7 @@ let contadorBulto = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
+    cargarProduccionesDirectasEmpaquetado();
     cargarListadoGeneralEmp();
 
     let debounceTimer = null;
@@ -257,10 +257,14 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
             cargarPendientesEmpaquetado();
+            cargarProduccionesDirectasEmpaquetado();
             cargarListadoGeneralEmp();
         }, 350);
     });
-    document.getElementById('femp_solo_sin').addEventListener('change', cargarPendientesEmpaquetado);
+    document.getElementById('femp_solo_sin').addEventListener('change', () => {
+        cargarPendientesEmpaquetado();
+        cargarProduccionesDirectasEmpaquetado();
+    });
 
     ['flist_estado', 'flist_fecha_desde', 'flist_fecha_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarListadoGeneralEmp);
@@ -388,7 +392,72 @@ async function cargarPendientesEmpaquetado() {
 }
 
 // =============================================================================
-// LISTADO GENERAL (debajo del grid)
+// GRID DE PRODUCCIONES DIRECTAS (sin ensamblaje)
+// =============================================================================
+
+async function cargarProduccionesDirectasEmpaquetado() {
+    const params = {
+        texto: document.getElementById('femp_texto').value.trim(),
+        solo_sin_empaquetar: document.getElementById('femp_solo_sin').checked ? '1' : '0',
+    };
+    const json = await llamarEmpaquetado('LISTARPRODUCCIONESPARAEMPAQUETADO', params);
+    const grid = document.getElementById('gridProduccionesDirectas');
+
+    if (!json.success) {
+        grid.innerHTML = `<div class="pc-emp-empty">${json.message}</div>`;
+        return;
+    }
+
+    const filas = json.producciones || [];
+    if (filas.length === 0) {
+        grid.innerHTML = '<div class="pc-emp-empty">No hay producciones directas pendientes de empaquetar.</div>';
+        return;
+    }
+
+    grid.innerHTML = filas.map(pd => {
+        const yaEmpaquetado = (pd.empaquetados_count ?? 0) > 0;
+        const btnClase  = yaEmpaquetado ? 'pc-btn-empaquetar pc-btn-empaquetar--hecho' : 'pc-btn-empaquetar';
+        const btnIcono  = yaEmpaquetado ? 'fa-solid fa-eye' : 'fa-solid fa-box';
+        const btnTexto  = yaEmpaquetado ? 'Ver empaquetado' : 'Empaquetar';
+        const productoLabel = `${(pd.producto_codigo ?? '')} - ${(pd.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
+        return `
+        <div class="pc-emp-card">
+            <div class="pc-emp-card-head">
+                <div class="titulo">
+                    <span class="id">Producción #${pd.produccion_id}</span>
+                    <span class="producto-titulo">${pd.producto_codigo ?? ''} - ${pd.producto_descripcion ?? '-'}</span>
+                </div>
+            </div>
+            <div class="pc-emp-card-body">
+                <div class="pc-emp-field">
+                    <span class="lbl">Molde / Color</span>
+                    <span class="val">${pd.molde_nombre ?? '-'} · ${pd.color_nombre ?? '-'}</span>
+                </div>
+                <div class="pc-emp-field">
+                    <span class="lbl">Producido</span>
+                    <span class="val">${formatearCantidadEmp(pd.cantidad_producida_kg)}</span>
+                </div>
+                <div class="pc-emp-field span-2">
+                    <span class="lbl">Registros de empaquetado</span>
+                    <span class="val">${pd.empaquetados_count ?? 0}</span>
+                </div>
+                <div class="pc-emp-field span-2">
+                    <span class="lbl">Finalizado</span>
+                    <span class="val">${formatearFechaHoraLegibleEmp(pd.fecha_hora_fin)}</span>
+                </div>
+            </div>
+            <div class="pc-emp-card-foot">
+                <button type="button" class="${btnClase}"
+                        onclick="abrirModalEmpaquetado(0, '${productoLabel}', ${pd.produccion_id})">
+                    <i class="${btnIcono}"></i> ${btnTexto}
+                </button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// =============================================================================
+// LISTADO GENERAL (debajo de los grids)
 // =============================================================================
 
 async function cargarListadoGeneralEmp() {
@@ -418,9 +487,14 @@ async function cargarListadoGeneralEmp() {
         const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
         const vendido = !!r.pasado_venta;
         const productoLabel = `${(r.producto_codigo ?? '')} - ${(r.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
+        const esProduccion = r.origen_tipo === 'produccion';
+        const origenTexto  = esProduccion ? `Producción #${r.produccion_id}` : `Ensamblaje #${r.emsamblaje_id}`;
+        const onclickAbrir = esProduccion
+            ? `abrirModalEmpaquetado(0, '${productoLabel}', ${r.produccion_id})`
+            : `abrirModalEmpaquetado(${r.emsamblaje_id}, '${productoLabel}')`;
         return `
         <tr>
-            <td>#${r.emsamblaje_id}</td>
+            <td>${origenTexto}</td>
             <td>${r.producto_codigo ?? ''} - ${r.producto_descripcion ?? '-'}</td>
             <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
@@ -430,8 +504,8 @@ async function cargarListadoGeneralEmp() {
                 ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
                 : '<span class="badge bg-success">Disponible</span>'}</td>
             <td>
-                <button type="button" class="pc-icon-btn" title="Abrir ensamblaje"
-                        onclick="abrirModalEmpaquetado(${r.emsamblaje_id}, '${productoLabel}')">
+                <button type="button" class="pc-icon-btn" title="Abrir"
+                        onclick="${onclickAbrir}">
                     <i class="fa-solid fa-box-open"></i>
                 </button>
             </td>
@@ -483,10 +557,18 @@ async function cargarSelectsFormEmp() {
 // MODAL: lista de registros + formulario
 // =============================================================================
 
-async function abrirModalEmpaquetado(ensamblajeId, productoLabel) {
-    empEnsamblajeIdActual = ensamblajeId;
-    document.getElementById('modalEmpaquetadoTitulo').textContent = `Empaquetar #${ensamblajeId} — ${productoLabel}`;
-    document.getElementById('emp_ensamblaje_id').value = ensamblajeId;
+// ensamblajeId y produccionId son mutuamente excluyentes: pasa 0 en el que
+// no aplique. Si produccionId > 0, ensamblajeId debe venir en 0 (y viceversa).
+async function abrirModalEmpaquetado(ensamblajeId, productoLabel, produccionId = 0) {
+    empEnsamblajeIdActual = ensamblajeId || 0;
+    empProduccionIdActual = produccionId || 0;
+
+    const etiquetaOrigen = empEnsamblajeIdActual
+        ? `Empaquetar #${empEnsamblajeIdActual}`
+        : `Empaquetar (Producción #${empProduccionIdActual})`;
+    document.getElementById('modalEmpaquetadoTitulo').textContent = `${etiquetaOrigen} — ${productoLabel}`;
+    document.getElementById('emp_ensamblaje_id').value = empEnsamblajeIdActual;
+    document.getElementById('emp_produccion_id').value = empProduccionIdActual;
 
     cancelarEdicionEmp(); // resetea el formulario a modo "nuevo"
     await cargarSelectsFormEmp();
@@ -499,7 +581,10 @@ async function cargarRegistrosEmp() {
     const tbody = document.getElementById('tablaRegistrosEmp');
     tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
-    const json = await llamarEmpaquetado('LISTAREMPAQUETADOS', { ensamblaje_id: empEnsamblajeIdActual });
+    const json = await llamarEmpaquetado('LISTAREMPAQUETADOS', {
+        ensamblaje_id: empEnsamblajeIdActual,
+        produccion_id: empProduccionIdActual,
+    });
     if (!json.success) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${json.message}</td></tr>`;
         return;
@@ -507,7 +592,7 @@ async function cargarRegistrosEmp() {
 
     const registros = json.empaquetados || [];
     if (registros.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay registros de empaquetado para este ensamblaje.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay registros de empaquetado para este origen.</td></tr>';
         return;
     }
 
@@ -620,6 +705,7 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
     const params = {
         id: empIdEnEdicion,
         ensamblaje_id: empEnsamblajeIdActual,
+        produccion_id: empProduccionIdActual,
         unidad_medida: document.getElementById('emp_unidad_medida').value,
         operario_id: document.getElementById('emp_operario_id').value,
         bultos: bultosJson,
@@ -631,7 +717,11 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
     if (json.success) {
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
         cancelarEdicionEmp();
-        await Promise.all([cargarPendientesEmpaquetado(), cargarListadoGeneralEmp()]);
+        await Promise.all([
+            cargarPendientesEmpaquetado(),
+            cargarProduccionesDirectasEmpaquetado(),
+            cargarListadoGeneralEmp(),
+        ]);
         modalEmpaquetado.hide();
     } else {
         Swal.fire('Error', json.message, 'error');
@@ -651,7 +741,12 @@ function eliminarRegistroEmp(id) {
         if (json.success) {
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
             if (empIdEnEdicion === id) cancelarEdicionEmp();
-            await Promise.all([cargarRegistrosEmp(), cargarPendientesEmpaquetado(), cargarListadoGeneralEmp()]);
+            await Promise.all([
+                cargarRegistrosEmp(),
+                cargarPendientesEmpaquetado(),
+                cargarProduccionesDirectasEmpaquetado(),
+                cargarListadoGeneralEmp(),
+            ]);
         } else {
             Swal.fire('Error', json.message, 'error');
         }

@@ -362,10 +362,9 @@ function listarProducciones()
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
             ), 0) AS items_count,
-            pr.js_configuracion,
-            x.item,
-            x.item->>'salida_produccion' AS unidad_salida_produccion,
-            x.item->>'salida_merma'      AS unidad_salida_merma
+            cfg.item,
+            cfg.item->>'salida_produccion' AS unidad_salida_produccion,
+            cfg.item->>'salida_merma'      AS unidad_salida_merma
 
         FROM produccion pd
         LEFT JOIN operario op ON op.id = pd.operario_id
@@ -373,8 +372,9 @@ function listarProducciones()
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
-        LEFT JOIN producto pr on split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
+        LEFT JOIN producto pr ON split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
+        LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
@@ -411,18 +411,18 @@ function obtenerProduccion($id)
                 mo.nombre AS molde_nombre,
                 co.nombre AS color_nombre, co.rgb AS color_rgb,
                 cm.nombre AS categoria_material_nombre,
-                pr.js_configuracion,
-                x.item,
-                x.item->>'salida_produccion' AS unidad_salida_produccion,
-                x.item->>'salida_merma'      AS unidad_salida_merma
+                cfg.item,
+                cfg.item->>'salida_produccion' AS unidad_salida_produccion,
+                cfg.item->>'salida_merma'      AS unidad_salida_merma
          FROM produccion pd
          LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
          LEFT JOIN molde mo ON mo.id = pd.molde_id
          LEFT JOIN color co ON co.id = pd.color_id
          LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
-         LEFT JOIN producto pr on split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
-        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
+         LEFT JOIN producto pr ON split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
+         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
+         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
          WHERE pd.id = :id",
         ['id' => $id]
     );
@@ -499,22 +499,33 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
  * en vivo desde unico_molde_producto — no se persiste por avance porque
  * la configuración del molde/producto es la fuente de verdad.
  */
+/**
+ * Devuelve el item de configuración de un avance. Prioriza la "foto"
+ * guardada en produccion.js_configuracion_moment (fuente de verdad desde
+ * que existe esa columna). Si el avance es anterior a este cambio y no
+ * tiene foto guardada, cae al comportamiento viejo: derivarlo en vivo
+ * desde producto.js_configuracion.
+ */
 function obtenerItemConfigProduccion($conectar, int $produccionId): ?array
 {
     $rows = executeQuery($conectar, "
-        SELECT x.item
-        FROM produccion pd
-        LEFT JOIN producto pr ON split_part(pd.unico_molde_producto, '-', 2)::bigint = pr.id
-        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
-            ON (x.item->>'molde_id')::bigint = pd.molde_id
-        WHERE pd.id = :id
+        SELECT js_configuracion_moment, molde_id, unico_molde_producto
+        FROM produccion
+        WHERE id = :id
     ", ['id' => $produccionId]);
 
-    if (empty($rows) || empty($rows[0]['item'])) return null;
-    $item = json_decode($rows[0]['item'], true);
-    return is_array($item) ? $item : null;
-}
+    if (empty($rows)) return null;
 
+    if (!empty($rows[0]['js_configuracion_moment'])) {
+        $item = json_decode($rows[0]['js_configuracion_moment'], true);
+        if (is_array($item)) return $item;
+    }
+
+    // Fallback (avances viejos sin foto guardada)
+    $partes = explode('-', $rows[0]['unico_molde_producto'] ?? '');
+    $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
+    return obtenerItemConfigProductoMolde($conectar, $productoId, (int) $rows[0]['molde_id']);
+}
 /**
  * Unidad de salida configurada para una etapa ('salida_produccion' o
  * 'salida_merma'). Si el molde no tiene configuración, cae a 'KG'
@@ -539,6 +550,10 @@ function guardarProduccion()
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
+    $partesUnico = explode('-', $unico_molde);
+    $productoIdParaConfig = isset($partesUnico[1]) ? intval($partesUnico[1]) : 0;
+    $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
+    $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
     $cantidad           = intval($_POST['cantidad'] ?? 0); // kg insertados en máquina en este avance
     $fecha              = trim($_POST['fecha'] ?? '');
@@ -614,12 +629,12 @@ function guardarProduccion()
                 INSERT INTO produccion (
                     operario_id, maquina_id, molde_id, color_id, cantidad,
                     categoria_material_id, unico_molde_producto, molde_producto,
-                    fecha, observaciones,
+                    fecha, observaciones, js_configuracion_moment,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
                     :categoria_material_id, :unico_molde, :molde_producto,
-                    :fecha, :observaciones,
+                    :fecha, :observaciones, :js_config_moment,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
@@ -633,6 +648,7 @@ function guardarProduccion()
                 'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
+                'js_config_moment'       => $jsConfigMoment,
                 'js_session'             => $js_session,
                 'js_historial'           => $js_historial,
             ]);
@@ -699,6 +715,7 @@ function guardarProduccion()
                     molde_producto         = :molde_producto,
                     fecha                  = :fecha,
                     observaciones          = :observaciones,
+                    js_configuracion_moment = :js_config_moment,
                     updated_at             = NOW(),
                     js_session             = :js_session,
                     js_historial           = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -714,6 +731,7 @@ function guardarProduccion()
                 'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
+                'js_config_moment'       => $jsConfigMoment,
                 'js_session'             => $js_session,
                 'js_historial'           => $js_historial,
                 'id'                     => $id,
@@ -926,6 +944,12 @@ function enviarAEnsamblaje()
     $item = obtenerItemConfigProduccion($conectar, $id);
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
 
+    // El destino (ensamblaje o empaquetado) sale de la foto de configuración
+    // guardada en el avance. La columna/flujo de datos es el mismo
+    // (enviado_ensamblaje, fecha_envio_ensamblaje); solo cambia la etiqueta.
+    $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
+    $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
+
     if ($unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
         responder(false, "La cantidad producida debe ser un número entero (unidad configurada: $unidadProduccion).");
     }
@@ -935,16 +959,16 @@ function enviarAEnsamblaje()
         ['id' => $id]
     );
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
-    if (!empty($existe[0]['deleted_at'])) responder(false, 'No puedes enviar a ensamblaje un registro inactivo.');
+    if (!empty($existe[0]['deleted_at'])) responder(false, "No puedes enviar a $destino un registro inactivo.");
     if (empty($existe[0]['fecha_hora_fin'])) responder(false, 'Primero debes finalizar la corrida.');
-    if (!empty($existe[0]['enviado_ensamblaje'])) responder(false, 'Este avance ya fue enviado a ensamblaje.');
+    if (!empty($existe[0]['enviado_ensamblaje'])) responder(false, "Este avance ya fue enviado a $destino.");
 
     $cambios = [[
-        'campo' => 'Envío a ensamblaje',
+        'campo' => "Envío a $destino",
         'valor_antes' => '(no enviado)',
         'valor_despues' => "Enviado, {$cantidadProducida} " . strtolower($unidadProduccion) . " producidos",
     ]];
-    $movimiento   = obtenerMovimientoSesion('enviar_ensamblaje', $cambios);
+    $movimiento   = obtenerMovimientoSesion('enviar_' . $destino, $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -964,9 +988,8 @@ function enviarAEnsamblaje()
         'js_historial'        => $js_historial,
     ]);
 
-    responder(true, 'Avance enviado a ensamblaje correctamente.', ['id' => $id, 'unidad' => $unidadProduccion]);
+    responder(true, "Avance enviado a $destino correctamente.", ['id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino]);
 }
-
 // Registra un lote de merma para este avance:
 //  1) Inserta una fila en `merma` (fuente de verdad, una fila por registro).
 //  2) Además agrega la misma entrada al array jsonb
@@ -1168,4 +1191,28 @@ function responder(bool $ok, string $msg, array $extra = []): void
     header('Content-Type: application/json');
     echo json_encode(array_merge(['success' => $ok, 'message' => $msg], $extra));
     exit;
+}
+
+/**
+ * Busca el item de configuración (producto.js_configuracion) para un
+ * producto+molde puntual, directamente contra la tabla producto — sin
+ * depender de que ya exista una fila en `produccion`. Se usa al GUARDAR
+ * un avance para tomar la "foto" que se persiste en
+ * produccion.js_configuracion_moment.
+ */
+function obtenerItemConfigProductoMolde($conectar, int $productoId, int $moldeId): ?array
+{
+    if (!$productoId || !$moldeId) return null;
+
+    $rows = executeQuery($conectar, "
+        SELECT x.item
+        FROM producto pr
+        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
+            ON (x.item->>'molde_id')::bigint = :molde_id
+        WHERE pr.id = :producto_id
+    ", ['producto_id' => $productoId, 'molde_id' => $moldeId]);
+
+    if (empty($rows) || empty($rows[0]['item'])) return null;
+    $item = json_decode($rows[0]['item'], true);
+    return is_array($item) ? $item : null;
 }

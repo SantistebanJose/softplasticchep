@@ -205,6 +205,12 @@ include("header.php");
 .pc-prod-ghost-btn.success:hover{ color:#16A34A; background:#E8F7EE; }
 .pc-prod-ghost-btn.warn:hover{ color:#D97706; background:#FDF1E0; }
 
+.pc-prod-sin-ensamblaje{
+    font-size:.72em; color:#a7a293; font-style:italic;
+    display:flex; align-items:center; gap:5px; margin-top:-2px;
+}
+.pc-prod-sin-ensamblaje i{ font-size:.9em; opacity:.7; }
+
 .pc-btn-ensamblaje{
     margin-left:auto; padding:7px 13px; font-size:.78em; border-radius:8px; border:none;
     background:#1f2430; color:#fff; font-weight:600; display:inline-flex; align-items:center; gap:6px;
@@ -361,8 +367,7 @@ include("header.php");
     <div class="modal-content">
       <form id="formProduccion">
         <div class="modal-header">
-          <h5 class="modal-title" id="modalProduccionTitulo">Registrar producción</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title" id="tituloModalCantidadEnsamblaje"><i class="fa-solid fa-weight-hanging"></i> Cantidad producida</h5>          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
 
@@ -819,7 +824,8 @@ function formatearFechaCorta(fechaIso) {
 // ── Texto de una sola línea con el estado de la corrida (dentro de la card) ─
 function estadoCorridaTexto(p) {
     if (p.enviado_ensamblaje) {
-        return `Enviado a ensamblaje · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
+        const etapa = necesitaEnsamblaje(p) ? 'ensamblaje' : 'empaquetado';
+        return `Enviado a ${etapa} · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
     }
     if (!p.fecha_hora_inicio) {
         return 'Corrida sin iniciar';
@@ -1031,17 +1037,21 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
     const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
-    // El botón "Pasar a ensamblaje" solo se muestra si la corrida terminó Y
-    // el item de configuración (molde/producto) indica que sí requiere pasar
-    // por ensamblaje. Si item.necesita_ensamblaje === "no", el avance se da
-    // por completo aquí mismo (producto terminado desde producción).
+    // Ahora SIEMPRE que la corrida terminó se muestra el botón de avanzar:
+    // el texto (y el destino real) depende de si el molde/producto
+    // necesita ensamblaje o no (item.necesita_ensamblaje === "no").
     const requiereEnsamblaje = necesitaEnsamblaje(p);
-    const mostrarBotonEnsamblaje = corridaFinalizada && requiereEnsamblaje;
-    const mostrarBotonMerma = corridaFinalizada && !requiereEnsamblaje;
-    const textoEstado = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: 'En ensamblaje' }[estado];
+    const etapaTexto = requiereEnsamblaje ? 'ensamblaje' : 'empaquetado';
+    const mostrarBotonAvanzar = corridaFinalizada;
 
-    // Línea de metadatos: color · operario · máquina · fecha, separados por
-    // puntos medios (::after en CSS). Se omite lo que no venga con dato.
+    const textoEstadoMap = {
+        sin: 'Sin iniciar',
+        curso: 'En curso',
+        fin: 'Finalizada',
+        ensamblaje: requiereEnsamblaje ? 'En ensamblaje' : 'En empaquetado',
+    };
+    const textoEstado = textoEstadoMap[estado];
+
     const metaPartes = [];
     if (p.color_nombre) {
         metaPartes.push(`${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`);
@@ -1056,7 +1066,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
     if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
-    if (corridaFinalizada && !requiereEnsamblaje) tags.push({ texto: 'No requiere ensamblaje', clase: 'no-ensamblaje' });
+    if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });
+
     return `
     <div class="pc-prod-card estado-${estado} ${p.deleted_at ? 'inactiva' : ''} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-produccion-${p.id}">
         <div class="pc-prod-card-top">
@@ -1088,6 +1099,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
 
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
 
+        ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
+
         <div class="pc-prod-card-foot">
             ${puedeIniciar
                 ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
@@ -1105,20 +1118,14 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                 : `<button type="button" class="pc-prod-ghost-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                        <i class="fa-solid fa-rotate-left"></i></button>`
             }
-            ${mostrarBotonEnsamblaje
-                ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ensamblaje">
-                    Pasar a ensamblaje <i class="fa-solid fa-arrow-right"></i></button>`
-                : ''
-            }
-            ${mostrarBotonMerma
-                ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id}, true)" title="Registrar merma de este avance">
-                    <i class="fa-solid fa-triangle-exclamation"></i> Registrar merma</button>`
+            ${mostrarBotonAvanzar
+                ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ${etapaTexto}">
+                    Pasar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i></button>`
                 : ''
             }
         </div>
     </div>`;
 }
-
 // Dibuja el tablero de cards según la pestaña de producto activa. Si es
 // "TODOS", se ve como antes (secciones agrupadas por producto); si es un
 // producto puntual, se ve solo su cuadrícula de avances.
@@ -1566,32 +1573,23 @@ let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merm
 
 let modoSoloMerma = false;
 
-function abrirModalCantidadParaEnsamblaje(produccionId, soloMerma = false) {
+function abrirModalCantidadParaEnsamblaje(produccionId) {
     produccionIdParaEnsamblaje = produccionId;
-    modoSoloMerma = soloMerma;
     document.getElementById('formCantidadEnsamblaje').reset();
 
     const p = produccionesCache.find(x => x.id == produccionId);
+    const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
+
+    document.getElementById('tituloModalCantidadEnsamblaje').innerHTML =
+        `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — antes de pasar a ${etapaTexto}`;
+    document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML =
+        `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
+
     aplicarUnidadesEtapaModal(p);
     renderInfoMermaModal(p);
 
-    const pasoProducida = document.getElementById('pasoCantidadProducida');
-    const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
-    const btnSubmit = document.getElementById('btnSubmitCantidadEnsamblaje');
-
-    if (soloMerma) {
-        pasoProducida.style.display = 'none';
-        inputProducida.required = false;
-        btnSubmit.textContent = 'Cerrar';
-    } else {
-        pasoProducida.style.display = '';
-        inputProducida.required = true;
-        btnSubmit.innerHTML = 'Continuar <i class="fa-solid fa-arrow-right"></i>';
-    }
-
     modalCantidadEnsamblaje.show();
 }
-
 async function obtenerColoresParaMerma() {
     if (coloresMermaCache) return coloresMermaCache;
     const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
@@ -1697,12 +1695,6 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    if (modoSoloMerma) {
-        modalCantidadEnsamblaje.hide();
-        cargarProducciones();
-        return;
-    }
-
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
@@ -1728,7 +1720,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     modalCantidadEnsamblaje.hide();
-    Swal.fire('Listo', 'Avance enviado a ensamblaje correctamente.', 'success');
+    Swal.fire('Listo', json.message, 'success');
     cargarProducciones();
 });
 </script>

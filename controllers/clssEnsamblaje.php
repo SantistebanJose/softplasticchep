@@ -572,6 +572,7 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
           AND ec.js_producto_emsamblado IS NOT NULL
     ) AS js_complementos_utilizados";
 }
+
 function listarEnsamblajes()
 {
     $conectar = conectar_oll_BD();
