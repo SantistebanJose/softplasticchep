@@ -458,15 +458,19 @@ async function cargarSelectsFiltroEns() {
             `<option value="${o.id}">${o.nombre_completo}</option>`));
     }
 }
-async function obtenerProductosDisponiblesEns() {
-    if (productosDisponiblesEnsCache && productosDisponiblesEnsCache.length > 0) return productosDisponiblesEnsCache;
-    const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '' });
-    productosDisponiblesEnsCache = json.success ? json.productos : [];
-    return productosDisponiblesEnsCache;
+async function obtenerProductosDisponiblesEns(incluirEnsamblajeId = 0) {
+    if (!incluirEnsamblajeId) {
+        if (productosDisponiblesEnsCache && productosDisponiblesEnsCache.length > 0) return productosDisponiblesEnsCache;
+        const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '' });
+        productosDisponiblesEnsCache = json.success ? json.productos : [];
+        return productosDisponiblesEnsCache;
+    }
+    const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '', incluir_ensamblaje_id: incluirEnsamblajeId });
+    return json.success ? json.productos : [];
 }
-async function cargarSelectsModalEns(seleccion = {}) {
+async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     const [productos, operario] = await Promise.all([
-        obtenerProductosDisponiblesEns(),
+        obtenerProductosDisponiblesEns(incluirEnsamblajeId),
         llamarEnsamblaje('BUSCAROPERARIOS'),
     ]);
 
@@ -945,8 +949,9 @@ async function abrirModalEditarEnsamblaje(id) {
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Editar ensamblaje #' + id;
     await cargarSelectsModalEns({
         producto_id: e.producto_id,
+        color_id: e.color_id_actual,
         operario_id: e.operario_id,
-    });
+    }, id);
 
     const moldes = parseJsonColumna(e.js_moldes_utilizados);
     const derivados = parseJsonColumna(e.js_derivados_utilizados);

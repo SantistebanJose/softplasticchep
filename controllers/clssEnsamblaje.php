@@ -232,17 +232,33 @@ function buscarProductosDisponiblesEnsamblaje()
 {
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
+    $incluirEnsamblajeId = intval($_POST['incluir_ensamblaje_id'] ?? 0);
+
+    $condicionLibre = "NOT EXISTS (
+        SELECT 1 FROM rel_ensamblaje_producto rep
+        WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+    )";
+    if ($incluirEnsamblajeId > 0) {
+        $condicionLibre = "(" . $condicionLibre . " OR EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep2
+            WHERE rep2.molde_produccion_id = t1.id AND rep2.deleted_at IS NULL
+              AND rep2.ensamblaje_id = :incluir_ensamblaje_id
+        ))";
+    }
 
     $where = [
         "t1.enviado_ensamblaje = TRUE",
         "t1.deleted_at IS NULL",
         "t1.fecha_hora_fin IS NOT NULL",
-        "NOT EXISTS (
-            SELECT 1 FROM rel_ensamblaje_producto rep
-            WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
-        )",
+        // NUEVO: solo moldes que SÍ necesitan pasar por Ensamblaje. Si el
+        // avance no tiene foto de configuración guardada (viejo) ni molde
+        // configurado, se asume 'sí' por compatibilidad (comportamiento
+        // previo a que existiera esta bandera).
+        "COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no'",
+        $condicionLibre,
     ];
     $params = [];
+    if ($incluirEnsamblajeId > 0) $params['incluir_ensamblaje_id'] = $incluirEnsamblajeId;
     if ($texto !== '') {
         $where[] = "LOWER(UPPER(CONCAT(t4.descripcion, ' (', t3.nombre, ')'))) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
@@ -257,6 +273,9 @@ function buscarProductosDisponiblesEnsamblaje()
             LEFT JOIN molde t2 ON t2.id = t1.molde_id
             LEFT JOIN color t3 ON t3.id = t1.color_id
             INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
+            LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
+                ON (x.item->>'molde_id')::bigint = t2.id
+            LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
             WHERE " . implode(' AND ', $where) . "
             ORDER BY productoformato
             LIMIT 200";
@@ -264,7 +283,6 @@ function buscarProductosDisponiblesEnsamblaje()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['productos' => $result]);
 }
-
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
@@ -426,6 +444,7 @@ function buscarProduccionesDisponibles()
     $where  = [
         "t1.deleted_at IS NULL",
         "t1.fecha_hora_fin IS NOT NULL",
+        "COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no'",
         "NOT EXISTS (
             SELECT 1 FROM rel_ensamblaje_producto rep
             WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
@@ -466,13 +485,15 @@ function buscarProduccionesDisponibles()
             LEFT JOIN color t3 ON t3.id = t1.color_id
             INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
             LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+            LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
+                ON (x.item->>'molde_id')::bigint = t2.id
+            LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
             WHERE " . implode(' AND ', $where) . "
             ORDER BY t1.fecha_hora_fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
 }
-
 // Usado por el botón "Pasar a ensamblaje" desde la card de producción.
 function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 {
@@ -490,12 +511,16 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
              t4.id AS producto_id,
              t1.color_id,
              t3.nombre AS color_nombre_verif,
-             cm.nombre AS categoria_material_nombre_verif
+             cm.nombre AS categoria_material_nombre_verif,
+             COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') AS necesita_ensamblaje
          FROM produccion t1
          LEFT JOIN molde t2 ON t2.id = t1.molde_id
          LEFT JOIN color t3 ON t3.id = t1.color_id
          INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
          LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+         LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
+             ON (x.item->>'molde_id')::bigint = t2.id
+         LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
          WHERE t1.id = :id
            AND t1.deleted_at IS NULL
            AND t1.fecha_hora_fin IS NOT NULL
@@ -509,10 +534,12 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
     if (empty($data)) {
         responder(false, 'Esta producción no está disponible para ensamblaje (no existe, no está finalizada, no tiene producto vinculado, o ya fue usada en otro ensamblaje).');
     }
+    if (strtolower(trim($data[0]['necesita_ensamblaje'])) === 'no') {
+        responder(false, 'Este molde/producto no requiere ensamblaje: pasa directo a empaquetado.');
+    }
 
     responder(true, 'OK', ['produccion' => $data[0]]);
 }
-
 // =============================================================================
 // AUDITORÍA (idéntico patrón al resto de controladores)
 // =============================================================================
@@ -647,25 +674,32 @@ function obtenerEnsamblaje($id)
     $ensamblaje = executeQuery(
         $conectar,
         "SELECT
-             e.id AS ensamblaje_id,
-             e.producto_id,
-             p.codigo AS producto_codigo,
-             p.descripcion AS producto_descripcion,
-             e.operario_ortorgado AS operario_id,
-             o.nombre_completo AS operario_nombre,
-             e.inicio,
-             e.fin,
-             e.cantidad_peso_kg,
-             e.deleted_at,
-             e.js_moldes_utilizados,
-             e.js_derivados_utilizados,
-             " . subquerySelectComplementosUtilizados('e') . ",
-             e.js_producto_emsamblado,
-             e.ensamblaje_id_referido
-         FROM ensamblaje e
-         LEFT JOIN producto p ON p.id = e.producto_id
-         LEFT JOIN operario o ON o.id = e.operario_ortorgado
-         WHERE e.id = :id",
+            e.id AS ensamblaje_id,
+            e.producto_id,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto_descripcion,
+            e.operario_ortorgado AS operario_id,
+            o.nombre_completo AS operario_nombre,
+            e.inicio,
+            e.fin,
+            e.cantidad_peso_kg,
+            e.deleted_at,
+            e.js_moldes_utilizados,
+            e.js_derivados_utilizados,
+            " . subquerySelectComplementosUtilizados('e') . ",
+            e.js_producto_emsamblado,
+            e.ensamblaje_id_referido,
+            (
+                SELECT pd.color_id
+                FROM rel_ensamblaje_producto rep
+                JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
+                LIMIT 1
+            ) AS color_id_actual
+        FROM ensamblaje e
+        LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN operario o ON o.id = e.operario_ortorgado
+        WHERE e.id = :id",
         ['id' => $id]
     );
     if (empty($ensamblaje)) responder(false, 'Registro de ensamblaje no encontrado.');
