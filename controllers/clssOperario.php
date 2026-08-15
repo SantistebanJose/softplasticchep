@@ -4,7 +4,7 @@
  * controllers/clssOperario.php
  * Controlador del módulo de Operarios
  * Tabla real: operario (id, nombre_completo, cargo, dni, activo, created_at,
- *             updated_at, deleted_at, js_session, js_historial)
+ *             updated_at, deleted_at, js_session, js_historial, js_sucursales)
  *
  * Soft delete vía deleted_at (mismo patrón que 'orden_produccion' / 'moldes').
  * La columna 'activo' se mantiene sincronizada con deleted_at por
@@ -13,12 +13,27 @@
  *   - Desactivar -> activo = false, deleted_at = NOW()
  *   - Reactivar  -> activo = true,  deleted_at = NULL
  *
+ * js_sucursales (jsonb): arreglo denormalizado de las sucursales donde
+ * trabaja el operario, ej: [{"sucursal_id":1,"nombre":"SUCURSAL 1"}].
+ * El id es la fuente de verdad; 'nombre' es solo para no tener que hacer
+ * join al listar. Se resincroniza completo en cada guardado (no se hace
+ * merge parcial).
+ *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
+
+// PHP 8.5 imprime avisos "Deprecated" como HTML antes del cuerpo de la
+// respuesta si display_errors está activo. Como este controlador SIEMPRE
+// responde JSON puro (ver responder()), cualquier warning/notice impreso
+// aquí rompe el JSON.parse() del frontend. Se silencia solo la salida en
+// pantalla de deprecated/notice (los errores reales igual se registran
+// en el log si error_log/log_errors está configurado en php.ini).
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
+ini_set('display_errors', '0');
 
 function controladorOperario($accion)
 {
@@ -98,6 +113,62 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
     return $cambios;
 }
 
+/**
+ * Compara el arreglo de sucursales asignado antes/después y devuelve
+ * una entrada de cambio legible (o null si no hubo diferencia).
+ * $anteriorJson es el valor crudo de la columna js_sucursales (string|null).
+ * $nuevasSucursales es el arreglo ya resuelto [{sucursal_id, nombre}, ...].
+ */
+function compararSucursales(?string $anteriorJson, array $nuevasSucursales): ?array
+{
+    $anteriorArr = json_decode($anteriorJson ?? '[]', true) ?: [];
+
+    $nombresAntes   = array_column($anteriorArr, 'nombre');
+    $nombresDespues = array_column($nuevasSucursales, 'nombre');
+
+    sort($nombresAntes);
+    sort($nombresDespues);
+
+    if ($nombresAntes === $nombresDespues) {
+        return null;
+    }
+
+    return [
+        'campo'         => 'Sucursales asignadas',
+        'valor_antes'   => $nombresAntes   ? implode(', ', $nombresAntes)   : '(ninguna)',
+        'valor_despues' => $nombresDespues ? implode(', ', $nombresDespues) : '(ninguna)',
+    ];
+}
+
+/**
+ * Recibe los ids de sucursal seleccionados en el form, los valida contra
+ * la tabla sucursal (solo activas) y devuelve el arreglo denormalizado
+ * listo para guardar en js_sucursales.
+ */
+function resolverSucursales($conectar, array $idsSucursal): array
+{
+    $idsSucursal = array_values(array_unique(array_map('intval', $idsSucursal)));
+    $idsSucursal = array_filter($idsSucursal, fn($id) => $id > 0);
+    if (empty($idsSucursal)) return [];
+
+    $placeholders = [];
+    $params = [];
+    foreach ($idsSucursal as $i => $id) {
+        $key = "id{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $id;
+    }
+
+    $sql = "SELECT id, nombre FROM sucursal
+            WHERE id IN (" . implode(',', $placeholders) . ") AND delete_at IS NULL";
+    $result = executeQuery($conectar, $sql, $params);
+
+    return array_map(fn($s) => [
+        'sucursal_id' => (int)$s['id'],
+        'nombre'      => $s['nombre'],
+    ], $result);
+}
+
 function registrarMovimiento($conectar, int $id, string $accion, array $cambios): void
 {
     $movimiento         = obtenerMovimientoSesion($accion, $cambios);
@@ -126,6 +197,7 @@ function listarOperarios()
 
     $texto       = trim($_POST['texto'] ?? '');
     $visibilidad = trim($_POST['visibilidad'] ?? 'activas'); // activas, eliminadas, todas
+    $sucursal_id = intval($_POST['sucursal_id'] ?? 0);
 
     $where  = ["1=1"];
     $params = [];
@@ -139,13 +211,20 @@ function listarOperarios()
     } elseif ($visibilidad !== 'todas') {
         $where[] = "deleted_at IS NULL";
     }
+    if ($sucursal_id > 0) {
+        $where[] = "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(js_sucursales, '[]'::jsonb)) AS suc
+            WHERE (suc->>'sucursal_id')::int = :sucursal_id
+        )";
+        $params['sucursal_id'] = $sucursal_id;
+    }
 
     $sql = "SELECT * FROM operario
             WHERE " . implode(' AND ', $where) . "
             ORDER BY nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['operarios' => $result]);
+    responder(true, 'OK', ['operarios' => decodificarSucursalesFilas($result)]);
 }
 
 function obtenerOperario($id)
@@ -155,7 +234,27 @@ function obtenerOperario($id)
 
     $result = executeQuery($conectar, "SELECT * FROM operario WHERE id = :id", ['id' => $id]);
     if (empty($result)) responder(false, 'Operario no encontrado.');
-    responder(true, 'OK', ['operario' => $result[0]]);
+    $filas = decodificarSucursalesFilas($result);
+    responder(true, 'OK', ['operario' => $filas[0]]);
+}
+
+/**
+ * executeQuery devuelve las columnas jsonb (js_sucursales, etc.) como
+ * strings JSON crudos, no como arreglos PHP. Si no se decodifican antes
+ * de json_encode() en responder(), llegan al frontend como un string con
+ * JSON escapado en vez de un array, y {}.map() revienta en el navegador.
+ */
+function decodificarSucursalesFilas(array $filas): array
+{
+    foreach ($filas as &$fila) {
+        if (isset($fila['js_sucursales']) && is_string($fila['js_sucursales'])) {
+            $fila['js_sucursales'] = json_decode($fila['js_sucursales'], true) ?: [];
+        } elseif (!isset($fila['js_sucursales'])) {
+            $fila['js_sucursales'] = [];
+        }
+    }
+    unset($fila);
+    return $filas;
 }
 
 function guardarOperario()
@@ -166,6 +265,10 @@ function guardarOperario()
     $nombre_completo = trim($_POST['nombre_completo'] ?? '');
     $cargo           = trim($_POST['cargo'] ?? '');
     $dni             = trim($_POST['dni'] ?? '');
+
+    // sucursales llega como JSON: "[1,3]" (ids seleccionados en el multi-select)
+    $sucursalesInput = json_decode($_POST['sucursales'] ?? '[]', true);
+    if (!is_array($sucursalesInput)) $sucursalesInput = [];
 
     if (empty($nombre_completo)) responder(false, 'El nombre completo es obligatorio.');
     if ($dni !== '' && !preg_match('/^\d{8}$/', $dni)) {
@@ -182,6 +285,9 @@ function guardarOperario()
         }
     }
 
+    $sucursalesResueltas = resolverSucursales($conectar, $sucursalesInput);
+    $js_sucursales_json  = json_encode($sucursalesResueltas, JSON_UNESCAPED_UNICODE);
+
     $mapaCampos = [
         'nombre_completo' => 'Nombre completo',
         'cargo'           => 'Cargo',
@@ -196,6 +302,13 @@ function guardarOperario()
 
     if ($id === 0) {
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
+        if (!empty($sucursalesResueltas)) {
+            $cambios[] = [
+                'campo'         => 'Sucursales asignadas',
+                'valor_antes'   => '(ninguna)',
+                'valor_despues' => implode(', ', array_column($sucursalesResueltas, 'nombre')),
+            ];
+        }
 
         $movimiento         = obtenerMovimientoSesion('crear', $cambios);
         $js_session         = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -203,9 +316,9 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial)
+                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial, js_sucursales)
             VALUES
-                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial)
+                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales)
             RETURNING id
         ", [
             'nombre_completo' => $datosNuevos['nombre_completo'],
@@ -213,6 +326,7 @@ function guardarOperario()
             'dni'             => $datosNuevos['dni'],
             'js_session'      => $js_session,
             'js_historial'    => $js_historial_nuevo,
+            'js_sucursales'   => $js_sucursales_json,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Operario creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
@@ -227,6 +341,11 @@ function guardarOperario()
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
+        $cambioSucursales = compararSucursales($registroAnterior['js_sucursales'] ?? null, $sucursalesResueltas);
+        if ($cambioSucursales !== null) {
+            $cambios[] = $cambioSucursales;
+        }
+
         $movimiento         = obtenerMovimientoSesion('editar', $cambios);
         $js_session         = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -236,6 +355,7 @@ function guardarOperario()
                 nombre_completo = :nombre_completo,
                 cargo           = :cargo,
                 dni             = :dni,
+                js_sucursales   = :js_sucursales,
                 updated_at      = NOW(),
                 js_session      = :js_session,
                 js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -244,6 +364,7 @@ function guardarOperario()
             'nombre_completo' => $datosNuevos['nombre_completo'],
             'cargo'           => $datosNuevos['cargo'],
             'dni'             => $datosNuevos['dni'],
+            'js_sucursales'   => $js_sucursales_json,
             'id'              => $id,
             'js_session'      => $js_session,
             'js_historial'    => $js_historial_nuevo,
@@ -331,7 +452,8 @@ function buscarDNI()
     $respuesta = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $errorCurl = curl_error($ch);
-    curl_close($ch);
+    // curl_close() ya no hace nada desde PHP 8.0 y genera un aviso
+    // "Deprecated" en PHP 8.5+; se omite intencionalmente.
 
     if ($respuesta === false) {
         responder(false, 'No se pudo conectar con el servicio de consulta DNI: ' . $errorCurl);

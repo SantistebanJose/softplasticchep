@@ -6,6 +6,8 @@ $activePage = 'operarios';
 include("header.php");
 ?>
 
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Operarios</h2>
@@ -22,6 +24,9 @@ include("header.php");
             <option value="eliminadas">Inactivos</option>
             <option value="todas">Todos</option>
         </select>
+        <select id="fop_sucursal" class="form-select" style="max-width:220px">
+            <option value="0">Todas las sucursales</option>
+        </select>
     </div>
 
     <div class="pc-table-wrap pc-table-responsive-cards">
@@ -32,12 +37,13 @@ include("header.php");
                 <th>Nombre completo</th>
                 <th>DNI</th>
                 <th>Cargo</th>
+                <th>Sucursales</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyOperarios">
-            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -72,6 +78,11 @@ include("header.php");
             <label class="form-label">Cargo</label>
             <input type="text" class="form-control" id="op_cargo" placeholder="Opcional">
           </div>
+          <div class="mb-2">
+            <label class="form-label">Sucursales</label>
+            <select id="op_sucursales" multiple placeholder="Selecciona una o más sucursales..."></select>
+            <small class="text-muted">Opcional. Donde trabaja este operario.</small>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -84,19 +95,28 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
-const CONTROLADOR_OPERARIO = 'controllers/clssOperario.php';
+const CONTROLADOR_OPERARIO  = 'controllers/clssOperario.php';
+const CONTROLADOR_SUCURSAL  = 'controllers/clssSucursal.php';
 const modalOperario = new bootstrap.Modal(document.getElementById('modalOperario'));
 
 let modoEdicionOperario = false;
 let operarioIdActual = 0;
+let tomSelectSucursales = null;
+let sucursalesActivas = [];
 
-document.addEventListener('DOMContentLoaded', () => {
-    cargarOperarios().catch(err => {
+document.addEventListener('DOMContentLoaded', async () => {
+    inicializarTomSelectSucursales();
+
+    try {
+        await cargarSucursalesActivas();
+        await cargarOperarios();
+    } catch (err) {
         console.error('Error cargando operarios:', err);
         document.getElementById('tbodyOperarios').innerHTML =
-            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
-    });
+            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+    }
 
     let debounceTimer = null;
     document.getElementById('fop_texto').addEventListener('input', () => {
@@ -104,12 +124,23 @@ document.addEventListener('DOMContentLoaded', () => {
         debounceTimer = setTimeout(cargarOperarios, 350);
     });
     document.getElementById('fop_estado').addEventListener('change', cargarOperarios);
+    document.getElementById('fop_sucursal').addEventListener('change', cargarOperarios);
 
     document.getElementById('btnBuscarDNI').addEventListener('click', buscarDNIOperario);
     document.getElementById('op_dni').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); buscarDNIOperario(); }
     });
 });
+
+function inicializarTomSelectSucursales() {
+    tomSelectSucursales = new TomSelect('#op_sucursales', {
+        valueField: 'id',
+        labelField: 'nombre',
+        searchField: 'nombre',
+        options: [],
+        plugins: ['remove_button'],
+    });
+}
 
 async function llamarOperario(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -127,29 +158,71 @@ async function llamarOperario(accion, params = {}) {
     }
 }
 
+async function llamarSucursal(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_SUCURSAL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    const texto = await resp.text();
+    try {
+        return JSON.parse(texto);
+    } catch (e) {
+        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
+        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
+    }
+}
+
+async function cargarSucursalesActivas() {
+    const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
+    if (!json.success) return;
+
+    sucursalesActivas = json.sucursales || [];
+
+    // Poblar Tom Select del modal
+    tomSelectSucursales.clearOptions();
+    sucursalesActivas.forEach(s => tomSelectSucursales.addOption({ id: s.id, nombre: s.nombre }));
+
+    // Poblar filtro de la tabla
+    const selectFiltro = document.getElementById('fop_sucursal');
+    selectFiltro.innerHTML = '<option value="0">Todas las sucursales</option>' +
+        sucursalesActivas.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+}
+
 function badgeEstadoOperario(deletedAt) {
     return !deletedAt
         ? '<span class="badge bg-success">Activo</span>'
         : '<span class="badge bg-secondary">Inactivo</span>';
 }
 
+function badgesSucursales(jsSucursales) {
+    let sucursales = jsSucursales || [];
+    if (typeof sucursales === 'string') {
+        try { sucursales = JSON.parse(sucursales); } catch (e) { sucursales = []; }
+    }
+    if (!Array.isArray(sucursales) || sucursales.length === 0) return '<span class="text-muted">-</span>';
+    return sucursales.map(s => `<span class="badge bg-light text-dark border">${s.nombre}</span>`).join(' ');
+}
+
 async function cargarOperarios() {
     const params = {
         texto: document.getElementById('fop_texto').value.trim(),
         visibilidad: document.getElementById('fop_estado').value,
+        sucursal_id: document.getElementById('fop_sucursal').value,
     };
 
     const json = await llamarOperario('LISTAROPERARIOS', params);
     const tbody = document.getElementById('tbodyOperarios');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const operarios = json.operarios || [];
     if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay operarios registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay operarios registrados.</td></tr>';
         return;
     }
 
@@ -159,6 +232,7 @@ async function cargarOperarios() {
             <td data-label="Nombre completo">${o.nombre_completo}</td>
             <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo ?? '-'}</td>
+            <td data-label="Sucursales">${badgesSucursales(o.js_sucursales)}</td>
             <td data-label="Estado">${badgeEstadoOperario(o.deleted_at)}</td>
             <td data-label="Acciones" class="pc-td-acciones">
                 <button class="pc-icon-btn" onclick="abrirModalEditarOperario(${o.id})" title="Editar">
@@ -177,6 +251,7 @@ async function cargarOperarios() {
 
 function limpiarFormularioOperario() {
     document.getElementById('formOperario').reset();
+    tomSelectSucursales.clear();
     operarioIdActual = 0;
 }
 
@@ -200,6 +275,12 @@ async function abrirModalEditarOperario(id) {
     document.getElementById('op_nombre_completo').value = o.nombre_completo;
     document.getElementById('op_cargo').value = o.cargo ?? '';
     document.getElementById('op_dni').value = o.dni ?? '';
+
+    let sucursalesAsignadas = o.js_sucursales || [];
+    if (typeof sucursalesAsignadas === 'string') {
+        try { sucursalesAsignadas = JSON.parse(sucursalesAsignadas); } catch (e) { sucursalesAsignadas = []; }
+    }
+    sucursalesAsignadas.forEach(s => tomSelectSucursales.addItem(s.sucursal_id, true));
 
     modalOperario.show();
 }
@@ -237,6 +318,7 @@ document.getElementById('formOperario').addEventListener('submit', async functio
         nombre_completo: document.getElementById('op_nombre_completo').value.trim(),
         cargo: document.getElementById('op_cargo').value.trim(),
         dni: document.getElementById('op_dni').value.trim(),
+        sucursales: JSON.stringify(tomSelectSucursales.getValue()),
     };
 
     const json = await llamarOperario('GUARDAROPERARIO', params);
