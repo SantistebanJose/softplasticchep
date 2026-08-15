@@ -169,6 +169,50 @@ include("header.php");
 .pc-tk-resumen-texto .total{ font-size:.95em; color:#3a3730; }
 .pc-tk-resumen-texto .total b{ font-size:1.15em; color:var(--pc-blue,#2F6FED); }
 .pc-tk-resumen-texto .detalle{ font-size:.75em; color:#8a8578; }
+
+
+/* ---------- Pestañas de producto (igual que en Producción) ---------- */
+.pc-tabs-toolbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px;
+}
+.pc-tabs-row{
+    display:flex; align-items:center; gap:22px; flex-wrap:wrap; row-gap:4px;
+}
+.pc-tab-item{
+    display:flex; align-items:center; gap:8px; padding:10px 2px 12px 2px;
+    border:none; background:none; cursor:pointer; font-size:.92em; font-weight:600;
+    color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap;
+    transition:color .12s ease, border-color .12s ease;
+}
+.pc-tab-item:hover{ color:#152238; }
+.pc-tab-item i{ font-size:.95em; }
+.pc-tab-item .cnt{
+    background:#EEECE6; color:#5c5947; font-size:.75em; font-weight:700;
+    border-radius:999px; padding:2px 8px; min-width:20px; text-align:center;
+}
+.pc-tab-item.activo{ color:#152238; border-bottom-color:#2F6FED; }
+.pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
+
+.pc-toggle-inactivos{
+    display:flex; align-items:center; gap:7px; font-size:.82em; color:#8a8578;
+    cursor:pointer; user-select:none; padding-bottom:12px; white-space:nowrap;
+}
+.pc-toggle-inactivos input{ width:15px; height:15px; cursor:pointer; accent-color:#2F6FED; }
+
+/* ---------- Agrupación por producto ("escalera"), igual que Producción ---------- */
+.pc-ens-group{ margin-bottom:26px; }
+.pc-ens-group:last-child{ margin-bottom:4px; }
+.pc-ens-group-header{
+    display:flex; align-items:center; gap:10px; margin:4px 0 12px 0;
+}
+.pc-ens-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
+.pc-ens-group-header .texto{
+    font-size:.78em; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae; border-radius:999px;
+    padding:6px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px;
+}
+.pc-ens-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
 </style>
 
 <div class="pc-card">
@@ -183,19 +227,21 @@ include("header.php");
         <br>
         <input type="text" id="fens_texto" class="form-control" style="max-width:260px"
                placeholder="Buscar por producto...">
-        <select id="fens_producto" class="form-select" style="max-width:220px">
-            <option value="">Todos los productos</option>
-        </select>
         <select id="fens_operario" class="form-select" style="max-width:200px">
             <option value="">Todos los operarios</option>
         </select>
         <input type="date" id="fens_desde" class="form-control" style="max-width:160px" title="Desde">
         <input type="date" id="fens_hasta" class="form-control" style="max-width:160px" title="Hasta">
-        <select id="fens_estado" class="form-select" style="max-width:160px">
-            <option value="">Todos</option>
-            <option value="activa" selected>Activos</option>
-            <option value="inactiva">Inactivos</option>
-        </select>
+    </div>
+
+    <!-- Pestañas de producto: reemplazan el <select> de producto y el de
+         estado. "Ver inactivos" es el único toggle de estado que queda. -->
+    <div class="pc-tabs-toolbar">
+        <div class="pc-tabs-row" id="ensProductoTabs"></div>
+        <label class="pc-toggle-inactivos" title="Incluir también los ensamblajes desactivados">
+            <input type="checkbox" id="ensVerInactivos">
+            Ver inactivos
+        </label>
     </div>
 
     <div class="pc-ens-grid" id="gridEnsamblajes">
@@ -304,6 +350,8 @@ let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, ensamblaje_complemento_id, nombre, meta, color, bg, icono}]
 let productosDisponiblesEnsCache = null; // cache para el select del modal (producto+color pendientes)
+let ensamblajesCache = [];       // último listado recibido del backend
+let productoTabActivoEns = null; // clave del producto activo; null = aún sin definir
 
 document.addEventListener('DOMContentLoaded', () => {
     inicializarPagina();
@@ -322,9 +370,10 @@ async function inicializarPagina() {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarEnsamblajes, 350);
     });
-    ['fens_producto', 'fens_operario', 'fens_estado', 'fens_desde', 'fens_hasta'].forEach(id => {
+    ['fens_operario', 'fens_desde', 'fens_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarEnsamblajes);
     });
+    document.getElementById('ensVerInactivos').addEventListener('change', () => cargarEnsamblajes());
 
     let debounceDetalle = null;
     document.getElementById('ens_buscar_detalle').addEventListener('input', () => {
@@ -383,6 +432,48 @@ function formatearFechaHoraLegibleEns(fechaIso) {
     if (!fecha) return fechaIso;
     const [y, m, d] = fecha.split('-');
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
+}
+
+// ── Agrupación por producto ("escalera"), igual patrón que Producción ────
+function claveProductoEns(e) {
+    return `${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? 'Sin producto'}`;
+}
+
+function agruparEnsamblajesPorProducto(ensamblajes) {
+    const grupos = new Map();
+    ensamblajes.forEach(e => {
+        const clave = claveProductoEns(e);
+        if (!grupos.has(clave)) grupos.set(clave, []);
+        grupos.get(clave).push(e);
+    });
+    return grupos;
+}
+
+function renderTabsProductoEns(grupos) {
+    const contenedor = document.getElementById('ensProductoTabs');
+    const totalGeneral = [...grupos.values()].reduce((s, items) => s + items.length, 0);
+
+    let html = `
+        <button type="button" class="pc-tab-item ${productoTabActivoEns === 'TODOS' ? 'activo' : ''}" onclick="seleccionarTabProductoEns('TODOS')">
+            <i class="fa-solid fa-grip"></i> Todos <span class="cnt">${totalGeneral}</span>
+        </button>`;
+
+    for (const [nombreProducto, items] of grupos) {
+        const nombreEscapado = nombreProducto.replace(/'/g, "\\'");
+        html += `
+            <button type="button" class="pc-tab-item ${productoTabActivoEns === nombreProducto ? 'activo' : ''}" onclick="seleccionarTabProductoEns('${nombreEscapado}')">
+                <i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="cnt">${items.length}</span>
+            </button>`;
+    }
+
+    contenedor.innerHTML = html;
+}
+
+function seleccionarTabProductoEns(nombre) {
+    productoTabActivoEns = nombre;
+    const grupos = agruparEnsamblajesPorProducto(ensamblajesCache);
+    renderTabsProductoEns(grupos);
+    renderGridEnsamblajes(ensamblajesCache);
 }
 
 function estadoArmadoTexto(e) {
@@ -444,14 +535,7 @@ async function obtenerProductosEns() {
 }
 
 async function cargarSelectsFiltroEns() {
-    const [productos, operario] = await Promise.all([
-        obtenerProductosEns(),
-        llamarEnsamblaje('BUSCAROPERARIOS'),
-    ]);
-    const sProd = document.getElementById('fens_producto');
-    productos.forEach(p => sProd.insertAdjacentHTML('beforeend',
-        `<option value="${p.id}">${p.codigo} - ${p.descripcion}</option>`));
-
+    const operario = await llamarEnsamblaje('BUSCAROPERARIOS');
     if (operario.success) {
         const sOp = document.getElementById('fens_operario');
         operario.operario.forEach(o => sOp.insertAdjacentHTML('beforeend',
@@ -498,13 +582,140 @@ function obtenerProductoIdSeleccionadoEns() {
     return valorSelect ? valorSelect.split('_')[0] : '';
 }
 
-// ── Listado en CARDS ──────────────────────────────────────────────────────
+// ── Card individual de ensamblaje ──────────────────────────────────────────
+function tarjetaEnsamblajeHtml(e) {
+    const producciones = e.producciones_count ?? parseJsonColumna(e.js_moldes_utilizados).length;
+    const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
+    const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
+    const puedeIniciar   = !e.deleted_at && !e.inicio;
+    const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
+    const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
+    const puedeComplementar  = !e.deleted_at && e.fin && !productoEmsamblado;
+    const complementoUsado = !!e.ensamblaje_id_referido;
+
+    return `
+    <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
+        <div class="pc-ens-card-head">
+            <div class="titulo">
+                <span class="id">#${e.ensamblaje_id}</span>
+                <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</span>
+            </div>
+            <div class="badges">
+                ${badgeRegistroEns(e.deleted_at)}
+            </div>
+        </div>
+        <div class="pc-ens-card-body">
+            <div class="pc-ens-field">
+                <span class="lbl">Operario</span>
+                <span class="val">${e.operario_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-ens-field">
+                <span class="lbl">Peso total</span>
+                <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} kg</span>
+            </div>
+            <div class="pc-ens-field">
+                <span class="lbl">Producciones vinculadas</span>
+                <span class="val">${producciones}</span>
+            </div>
+            <div class="pc-ens-field">
+                <span class="lbl">Derivados vinculados</span>
+                <span class="val">${derivadosCount}</span>
+            </div>
+            <div class="pc-ens-field">
+                <span class="lbl">Complementos vinculados</span>
+                <span class="val">${complementosCount}</span>
+            </div>
+            ${productoEmsamblado ? `
+            <div class="pc-ens-field">
+                <span class="lbl">Complementa a</span>
+                <span class="val">
+                    <span class="badge-complemento"><i class="fa-solid fa-puzzle-piece"></i> ${productoEmsamblado.codigo ?? ''} - ${productoEmsamblado.descripcion ?? ''}</span>
+                    <br>
+                    <span class="badge-complemento-estado ${complementoUsado ? 'usado' : 'disponible'}">
+                        <i class="fa-solid ${complementoUsado ? 'fa-lock' : 'fa-circle-check'}"></i>
+                        ${complementoUsado ? `Usado en armado #${e.ensamblaje_id_referido}` : 'Disponible para vincular'}
+                    </span>
+                </span>
+            </div>` : ''}
+            <div class="pc-ens-field span-2">
+                <span class="lbl">Armado</span>
+                <span class="val">${estadoArmadoTexto(e)}</span>
+            </div>
+        </div>
+        <div class="pc-ens-card-foot">
+            <button class="pc-icon-btn" onclick="abrirModalEditarEnsamblaje(${e.ensamblaje_id})" title="Editar">
+                <i class="fa-solid fa-pen"></i>
+            </button>
+            ${puedeIniciar
+                ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarEnsamblajeAccion(${e.ensamblaje_id})" title="Iniciar armado">
+                    <i class="fa-solid fa-play"></i> Iniciar</button>`
+                : ''
+            }
+            ${puedeFinalizar
+                ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarEnsamblajeAccion(${e.ensamblaje_id})" title="Finalizar armado">
+                    <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
+                : ''
+            }
+            ${puedeComplementar
+                ? `<button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
+                    <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>`
+                : ''
+            }
+            ${!e.deleted_at
+                ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
+                       <i class="fa-solid fa-trash"></i></button>`
+                : `<button class="pc-icon-btn" onclick="reactivarEnsamblaje(${e.ensamblaje_id})" title="Reactivar">
+                       <i class="fa-solid fa-rotate-left"></i></button>`
+            }
+        </div>
+    </div>`;
+}
+
+// ── Pinta el grid según la pestaña de producto activa ──────────────────────
+function renderGridEnsamblajes(ensamblajes) {
+    const grid = document.getElementById('gridEnsamblajes');
+
+    if (ensamblajes.length === 0) {
+        grid.className = 'pc-ens-grid';
+        grid.innerHTML = '<div class="pc-ens-empty">No hay registros de ensamblaje.</div>';
+        return;
+    }
+
+    const grupos = agruparEnsamblajesPorProducto(ensamblajes);
+    let html = '';
+
+    if (productoTabActivoEns === 'TODOS') {
+        grid.className = ''; // cada grupo trae su propio pc-ens-grid interno
+        for (const [nombreProducto, items] of grupos) {
+            html += `
+                <div class="pc-ens-group">
+                    <div class="pc-ens-group-header">
+                        <span class="linea"></span>
+                        <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-ens-group-count">· ${items.length}</span></span>
+                        <span class="linea"></span>
+                    </div>
+                    <div class="pc-ens-grid">
+                        ${items.map(tarjetaEnsamblajeHtml).join('')}
+                    </div>
+                </div>`;
+        }
+    } else {
+        grid.className = 'pc-ens-grid';
+        const items = grupos.get(productoTabActivoEns) || [];
+        html = items.length
+            ? items.map(tarjetaEnsamblajeHtml).join('')
+            : '<div class="pc-ens-empty">No hay armados registrados para este producto.</div>';
+    }
+
+    grid.innerHTML = html;
+}
+
+// ── Carga desde el servidor + calcula pestaña por defecto ──────────────────
 async function cargarEnsamblajes() {
     const params = {
         texto: document.getElementById('fens_texto').value.trim(),
-        producto_id: document.getElementById('fens_producto').value,
         operario_id: document.getElementById('fens_operario').value,
-        estado: document.getElementById('fens_estado').value,
+        estado: document.getElementById('ensVerInactivos').checked ? '' : 'activa',
         fecha_desde: document.getElementById('fens_desde').value,
         fecha_hasta: document.getElementById('fens_hasta').value,
     };
@@ -517,99 +728,20 @@ async function cargarEnsamblajes() {
         return;
     }
 
-    const ensamblajes = json.ensamblajes || [];
-    if (ensamblajes.length === 0) {
-        grid.innerHTML = '<div class="pc-ens-empty">No hay registros de ensamblaje.</div>';
-        return;
+    ensamblajesCache = json.ensamblajes || [];
+    const grupos = agruparEnsamblajesPorProducto(ensamblajesCache);
+
+    // Igual que en Producción: por defecto se abre el primer producto del
+    // listado (no "Todos"). Si la pestaña activa ya no existe (se
+    // desactivó su único registro, se cambió el filtro, etc.), cae al
+    // primer producto disponible.
+    if (productoTabActivoEns === null || (productoTabActivoEns !== 'TODOS' && !grupos.has(productoTabActivoEns))) {
+        const primerProducto = grupos.keys().next().value;
+        productoTabActivoEns = primerProducto ?? 'TODOS';
     }
 
-    grid.innerHTML = ensamblajes.map(e => {
-        const producciones = e.producciones_count ?? parseJsonColumna(e.js_moldes_utilizados).length;
-        const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
-        const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
-        const puedeIniciar   = !e.deleted_at && !e.inicio;
-        const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
-        const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
-        const puedeComplementar  = !e.deleted_at && e.fin && !productoEmsamblado;
-        const complementoUsado = !!e.ensamblaje_id_referido;
-
-        return `
-        <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
-            <div class="pc-ens-card-head">
-                <div class="titulo">
-                    <span class="id">#${e.ensamblaje_id}</span>
-                    <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</span>
-                </div>
-                <div class="badges">
-                    ${badgeRegistroEns(e.deleted_at)}
-                </div>
-            </div>
-            <div class="pc-ens-card-body">
-                <div class="pc-ens-field">
-                    <span class="lbl">Operario</span>
-                    <span class="val">${e.operario_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-ens-field">
-                    <span class="lbl">Peso total</span>
-                    <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} kg</span>
-                </div>
-                <div class="pc-ens-field">
-                    <span class="lbl">Producciones vinculadas</span>
-                    <span class="val">${producciones}</span>
-                </div>
-                <div class="pc-ens-field">
-                    <span class="lbl">Derivados vinculados</span>
-                    <span class="val">${derivadosCount}</span>
-                </div>
-                <div class="pc-ens-field">
-                    <span class="lbl">Complementos vinculados</span>
-                    <span class="val">${complementosCount}</span>
-                </div>
-                ${productoEmsamblado ? `
-                <div class="pc-ens-field">
-                    <span class="lbl">Complementa a</span>
-                    <span class="val">
-                        <span class="badge-complemento"><i class="fa-solid fa-puzzle-piece"></i> ${productoEmsamblado.codigo ?? ''} - ${productoEmsamblado.descripcion ?? ''}</span>
-                        <br>
-                        <span class="badge-complemento-estado ${complementoUsado ? 'usado' : 'disponible'}">
-                            <i class="fa-solid ${complementoUsado ? 'fa-lock' : 'fa-circle-check'}"></i>
-                            ${complementoUsado ? `Usado en armado #${e.ensamblaje_id_referido}` : 'Disponible para vincular'}
-                        </span>
-                    </span>
-                </div>` : ''}
-                <div class="pc-ens-field span-2">
-                    <span class="lbl">Armado</span>
-                    <span class="val">${estadoArmadoTexto(e)}</span>
-                </div>
-            </div>
-            <div class="pc-ens-card-foot">
-                <button class="pc-icon-btn" onclick="abrirModalEditarEnsamblaje(${e.ensamblaje_id})" title="Editar">
-                    <i class="fa-solid fa-pen"></i>
-                </button>
-                ${puedeIniciar
-                    ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarEnsamblajeAccion(${e.ensamblaje_id})" title="Iniciar armado">
-                        <i class="fa-solid fa-play"></i> Iniciar</button>`
-                    : ''
-                }
-                ${puedeFinalizar
-                    ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarEnsamblajeAccion(${e.ensamblaje_id})" title="Finalizar armado">
-                        <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
-                    : ''
-                }
-                ${puedeComplementar
-                    ? `<button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
-                        <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>`
-                    : ''
-                }
-                ${!e.deleted_at
-                    ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
-                           <i class="fa-solid fa-trash"></i></button>`
-                    : `<button class="pc-icon-btn" onclick="reactivarEnsamblaje(${e.ensamblaje_id})" title="Reactivar">
-                           <i class="fa-solid fa-rotate-left"></i></button>`
-                }
-            </div>
-        </div>`;
-    }).join('');
+    renderTabsProductoEns(grupos);
+    renderGridEnsamblajes(ensamblajesCache);
 }
 
 // =============================================================================

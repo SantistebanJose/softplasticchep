@@ -540,6 +540,7 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 
     responder(true, 'OK', ['produccion' => $data[0]]);
 }
+
 // =============================================================================
 // AUDITORÍA (idéntico patrón al resto de controladores)
 // =============================================================================
