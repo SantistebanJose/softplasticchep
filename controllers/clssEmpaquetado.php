@@ -412,17 +412,19 @@ function listarTodosEmpaquetados()
             p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
             emp.cantidad_tota, emp.js_cantidades,
             emp.operario_id, op.nombre_completo AS operario_nombre,
+            su.nombre AS sucursal_nombre,
             emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
             um.nombre_corto AS unidad_corto, um.equivalencia, um.unidad_base_id,
             ub.nombre_corto AS unidad_base_corto,
             CASE WHEN um.unidad_base_id IS NOT NULL
-                 THEN emp.cantidad_tota * um.equivalencia
-                 ELSE NULL END AS cantidad_tota_en_base,
+                THEN emp.cantidad_tota * um.equivalencia
+                ELSE NULL END AS cantidad_tota_en_base,
             CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END AS origen_tipo
         FROM empaquetado emp
         LEFT JOIN producto p ON p.id = emp.producto_id
         LEFT JOIN operario op ON op.id = emp.operario_id
+        LEFT JOIN sucursal su ON su.id = emp.sucursal
         LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
         LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         WHERE " . implode(' AND ', $where) . "
@@ -472,6 +474,7 @@ function crearEmpaquetado()
     $conectar = conectar_oll_BD();
 
     $ensamblajeId = intval($_POST['ensamblaje_id'] ?? 0);
+    $sucursalId = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $produccionId = intval($_POST['produccion_id'] ?? 0);
     $unidadMedida = intval($_POST['unidad_medida'] ?? 0);
     $operarioId   = intval($_POST['operario_id'] ?? 0);
@@ -482,6 +485,10 @@ function crearEmpaquetado()
     }
     if ($ensamblajeId && $produccionId) {
         responder(false, 'Un empaquetado solo puede tener un origen: ensamblaje o producción, no ambos.');
+    }
+    if ($sucursalId !== null) {
+        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
+        if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
     }
     if (!$unidadMedida) responder(false, 'Debes indicar la unidad de medida.');
     if (!$operarioId) responder(false, 'Debes indicar el operario.');
@@ -546,11 +553,11 @@ function crearEmpaquetado()
 
     $nuevo = executeQuery($conectar, "
         INSERT INTO empaquetado (
-            producto_id, emsamblaje_id, produccion_id, unidad_medida, operario_id,
+            producto_id, emsamblaje_id, produccion_id, unidad_medida, operario_id, sucursal,
             cantidad_tota, js_cantidades,
             created_at, js_session, js_historial
         ) VALUES (
-            :producto_id, :emsamblaje_id, :produccion_id, :unidad_medida, :operario_id,
+            :producto_id, :emsamblaje_id, :produccion_id, :unidad_medida, :operario_id, :sucursal_id,
             :cantidad_tota, :js_cantidades,
             NOW(), :js_session, :js_historial
         ) RETURNING id
@@ -560,6 +567,7 @@ function crearEmpaquetado()
         'produccion_id'  => $produccionId ?: null,
         'unidad_medida'  => $unidadMedida,
         'operario_id'    => $operarioId,
+        'sucursal_id'    => $sucursalId,
         'cantidad_tota'  => $cantidadTotal,
         'js_cantidades'  => $js_cantidades,
         'js_session'     => $js_session,
@@ -573,11 +581,13 @@ function editarEmpaquetado()
     $conectar = conectar_oll_BD();
 
     $id           = intval($_POST['id'] ?? 0);
+    $sucursalId = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $unidadMedida = intval($_POST['unidad_medida'] ?? 0);
     $operarioId   = intval($_POST['operario_id'] ?? 0);
     $bultosJson   = trim($_POST['bultos'] ?? '[]');
 
     if (!$id) responder(false, 'ID inválido.');
+    if (!$sucursalId) responder(false, 'Debes indicar la sucursal.');
     if (!$unidadMedida) responder(false, 'Debes indicar la unidad de medida.');
     if (!$operarioId) responder(false, 'Debes indicar el operario.');
 
@@ -610,6 +620,7 @@ function editarEmpaquetado()
         UPDATE empaquetado SET
             unidad_medida  = :unidad_medida,
             operario_id    = :operario_id,
+            sucursal        = :sucursal_id,
             cantidad_tota  = :cantidad_tota,
             js_cantidades  = :js_cantidades,
             update_at      = NOW(),
@@ -619,6 +630,7 @@ function editarEmpaquetado()
     ", [
         'unidad_medida' => $unidadMedida,
         'operario_id'   => $operarioId,
+        'sucursal_id'   => $sucursalId,
         'cantidad_tota' => $cantidadTotal,
         'js_cantidades' => $js_cantidades,
         'js_session'    => $js_session,

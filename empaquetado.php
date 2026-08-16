@@ -143,6 +143,7 @@ include("header.php");
                 <tr>
                     <th>Origen</th>
                     <th>Producto</th>
+                    <th>Sucursal</th>
                     <th>Unidades Paquetes</th>
                     <th>Total</th>
                     <th>Operario</th>
@@ -195,13 +196,17 @@ include("header.php");
             <input type="hidden" id="emp_ensamblaje_id" value="0">
             <input type="hidden" id="emp_produccion_id" value="0">
             <div class="row">
-                <div class="col-md-6 mb-2">
+                <div class="col-md-4 mb-2">
                     <label class="form-label">Unidad de medida *</label>
                     <select class="form-select" id="emp_unidad_medida" required></select>
                 </div>
-                <div class="col-md-6 mb-2">
+                <div class="col-md-4 mb-2">
                     <label class="form-label">Operario *</label>
                     <select class="form-select" id="emp_operario_id" required></select>
+                </div>
+                <div class="col-md-4 mb-2">
+                    <label class="form-label">Sucursal</label>
+                    <select class="form-select" id="emp_sucursal_id"></select>
                 </div>
             </div>
 
@@ -496,6 +501,7 @@ async function cargarListadoGeneralEmp() {
         <tr>
             <td>${origenTexto}</td>
             <td>${r.producto_codigo ?? ''} - ${r.producto_descripcion ?? '-'}</td>
+            <td>${r.sucursal_nombre ?? '-'}</td>
             <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
             <td>${r.operario_nombre ?? '-'}</td>
@@ -533,8 +539,9 @@ async function obtenerOperariosEmp() {
 }
 
 async function cargarSelectsFormEmp() {
-    const [unidades, operarios] = await Promise.all([obtenerUnidadesEmp(), obtenerOperariosEmp()]);
-
+    const [unidades, operarios, sucursales] = await Promise.all([
+        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
+    ]);
     const sUnidad = document.getElementById('emp_unidad_medida');
     if (unidades.length === 0) {
         sUnidad.innerHTML = '<option value="">(sin unidades disponibles - revisar consola)</option>';
@@ -542,6 +549,10 @@ async function cargarSelectsFormEmp() {
     } else {
         sUnidad.innerHTML = '<option value="">Selecciona...</option>' +
             unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+    }
+    const sSuc = document.getElementById('emp_sucursal_id');
+        sSuc.innerHTML = '<option value="">Selecciona...</option>' +
+            (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
     }
 
     const sOp = document.getElementById('emp_operario_id');
@@ -662,6 +673,26 @@ function obtenerBultosJsonEmp() {
     return JSON.stringify(bultosState.map(b => parseFloat(b.valor) || 0).filter(v => v > 0));
 }
 
+const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
+
+async function llamarSucursal(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_SUCURSAL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    return resp.json();
+}
+
+let empSucursalesCache = null;
+async function obtenerSucursalesEmp() {
+    if (empSucursalesCache) return empSucursalesCache;
+    const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
+    empSucursalesCache = json.success ? json.sucursales : [];
+    return empSucursalesCache;
+}
+
 // ── Alta / edición ─────────────────────────────────────────────────────────
 function cancelarEdicionEmp() {
     document.getElementById('formEmpaquetado').reset();
@@ -682,7 +713,7 @@ async function editarRegistroEmp(id) {
     document.getElementById('emp_id').value = id;
     document.getElementById('emp_unidad_medida').value = r.unidad_medida;
     document.getElementById('emp_operario_id').value = r.operario_id;
-    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id}`;
+    document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id}`;
     document.getElementById('btnCancelarEdicionEmp').style.display = 'inline-block';
 
     const bultos = parseJsonColumnaEmp(r.js_cantidades);
@@ -708,6 +739,7 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
         produccion_id: empProduccionIdActual,
         unidad_medida: document.getElementById('emp_unidad_medida').value,
         operario_id: document.getElementById('emp_operario_id').value,
+        sucursal_id: document.getElementById('emp_sucursal_id').value,
         bultos: bultosJson,
     };
 
