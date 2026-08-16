@@ -358,6 +358,7 @@ function listarProducciones()
             co.nombre AS color_nombre,
             co.rgb AS color_rgb,
             cm.nombre AS categoria_material_nombre,
+            su.nombre AS sucursal_nombre,
             COALESCE((
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
@@ -372,13 +373,13 @@ function listarProducciones()
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
+        LEFT JOIN sucursal su ON su.id = pd.sucursal
         LEFT JOIN producto pr ON split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
-
     $result = executeQuery($conectar, $sql, $params);
 
         foreach ($result as &$fila) {
@@ -544,6 +545,7 @@ function guardarProduccion()
     $conectar = conectar_oll_BD();
 
     $id                 = intval($_POST['id'] ?? 0);
+    $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $operario_id        = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
     $maquina_id         = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
     $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
@@ -577,6 +579,10 @@ function guardarProduccion()
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
     if (empty($unico_molde) || empty($molde_producto)) {
         responder(false, 'Debes seleccionar un producto y su molde asociado.');
+    }
+    if ($sucursal_id !== null) {
+        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
+        if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
     }
     if (empty($fecha)) $fecha = date('Y-m-d H:i:s');
 
@@ -628,12 +634,12 @@ function guardarProduccion()
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
                     operario_id, maquina_id, molde_id, color_id, cantidad,
-                    categoria_material_id, unico_molde_producto, molde_producto,
+                    categoria_material_id, sucursal, unico_molde_producto, molde_producto,
                     fecha, observaciones, js_configuracion_moment,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
-                    :categoria_material_id, :unico_molde, :molde_producto,
+                    :categoria_material_id, :sucursal_id, :unico_molde, :molde_producto,
                     :fecha, :observaciones, :js_config_moment,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
@@ -644,6 +650,7 @@ function guardarProduccion()
                 'color_id'               => $color_id,
                 'cantidad'               => $cantidad,
                 'categoria_material_id'  => $categoria_material_id,
+                'sucursal_id'            => $sucursal_id,
                 'unico_molde'            => $unico_molde,
                 'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
@@ -711,6 +718,7 @@ function guardarProduccion()
                     color_id               = :color_id,
                     cantidad               = :cantidad,
                     categoria_material_id  = :categoria_material_id,
+                    sucursal            = :sucursal_id,
                     unico_molde_producto   = :unico_molde,
                     molde_producto         = :molde_producto,
                     fecha                  = :fecha,
@@ -727,6 +735,7 @@ function guardarProduccion()
                 'color_id'               => $color_id,
                 'cantidad'               => $cantidad,
                 'categoria_material_id'  => $categoria_material_id,
+                'sucursal_id'            => $sucursal_id,
                 'unico_molde'            => $unico_molde,
                 'molde_producto'         => $molde_producto,
                 'fecha'                  => $fecha,
@@ -929,6 +938,7 @@ function reactivarProduccion()
         responder(false, 'No se pudo reactivar la producción: ' . $e->getMessage());
     }
 }
+
 // Marca el avance como enviado a ensamblaje: guarda la cantidad producida
 // (kg reales de salida, distinto de `cantidad` que son los kg insertados
 // en máquina) y sella fecha_envio_ensamblaje/enviado_ensamblaje.

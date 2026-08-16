@@ -261,15 +261,21 @@ include("header.php");
         <div class="modal-body">
 
         <div class="row">
-            <div class="col-md-7 mb-2">
+            <div class="col-md-5 mb-2">
                 <label class="form-label">Producto a ensamblar *</label>
                 <select class="form-select" id="ens_producto_id" required onchange="cambioProductoEnsamblaje()">
                     <option value="">Selecciona un producto...</option>
                 </select>
             </div>
-            <div class="col-md-5 mb-2">
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Operario</label>
                 <select class="form-select" id="ens_operario_id">
+                    <option value="">Selecciona...</option>
+                </select>
+            </div>
+            <div class="col-md-3 mb-2">
+                <label class="form-label">Sucursal</label>
+                <select class="form-select" id="ens_sucursal_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
@@ -469,6 +475,26 @@ function renderTabsProductoEns(grupos) {
     contenedor.innerHTML = html;
 }
 
+const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
+
+async function llamarSucursal(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_SUCURSAL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    return resp.json();
+}
+
+let sucursalesEnsCache = null;
+async function obtenerSucursalesEns() {
+    if (sucursalesEnsCache) return sucursalesEnsCache;
+    const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
+    sucursalesEnsCache = json.success ? json.sucursales : [];
+    return sucursalesEnsCache;
+}
+
 function seleccionarTabProductoEns(nombre) {
     productoTabActivoEns = nombre;
     const grupos = agruparEnsamblajesPorProducto(ensamblajesCache);
@@ -553,9 +579,10 @@ async function obtenerProductosDisponiblesEns(incluirEnsamblajeId = 0) {
     return json.success ? json.productos : [];
 }
 async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
-    const [productos, operario] = await Promise.all([
+    const [productos, operario, sucursales] = await Promise.all([
         obtenerProductosDisponiblesEns(incluirEnsamblajeId),
         llamarEnsamblaje('BUSCAROPERARIOS'),
+        obtenerSucursalesEns(),
     ]);
 
     const sProd = document.getElementById('ens_producto_id');
@@ -568,6 +595,11 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
         const coincide = Array.from(sProd.options).find(o => o.value === valorBuscado);
         if (coincide) sProd.value = valorBuscado;
     }
+    const sSuc = document.getElementById('ens_sucursal_id');
+        sSuc.innerHTML = '<option value="">Selecciona...</option>' +
+            (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+        if (seleccion.sucursal_id) sSuc.value = seleccion.sucursal_id;
+    
 
     const sOp = document.getElementById('ens_operario_id');
     sOp.innerHTML = '<option value="">Selecciona...</option>';
@@ -608,6 +640,10 @@ function tarjetaEnsamblajeHtml(e) {
             <div class="pc-ens-field">
                 <span class="lbl">Operario</span>
                 <span class="val">${e.operario_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-ens-field">
+                <span class="lbl">Sucursal</span>
+                <span class="val">${e.sucursal_nombre ?? '-'}</span>
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Peso total</span>
@@ -1083,6 +1119,7 @@ async function abrirModalEditarEnsamblaje(id) {
         producto_id: e.producto_id,
         color_id: e.color_id_actual,
         operario_id: e.operario_id,
+        sucursal_id: e.sucursal,
     }, id);
 
     const moldes = parseJsonColumna(e.js_moldes_utilizados);
@@ -1155,6 +1192,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
         operario_ortorgado: document.getElementById('ens_operario_id').value,
+        sucursal_id: document.getElementById('ens_sucursal_id').value,
         detalle: obtenerDetalleJsonEns(),
     };
 

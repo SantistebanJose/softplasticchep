@@ -642,26 +642,28 @@ function listarEnsamblajes()
     }
 
     $sql = "SELECT
-                e.id AS ensamblaje_id,
-                e.producto_id,
-                p.codigo AS producto_codigo,
-                p.descripcion AS producto_descripcion,
-                e.operario_ortorgado AS operario_id,
-                o.nombre_completo AS operario_nombre,
-                e.inicio,
-                e.fin,
-                e.cantidad_peso_kg,
-                e.deleted_at,
-                e.js_moldes_utilizados,
-                e.js_derivados_utilizados,
-                " . subquerySelectComplementosUtilizados('e') . ",
-                e.js_producto_emsamblado,
-                e.ensamblaje_id_referido
-            FROM ensamblaje e
-            LEFT JOIN producto p ON p.id = e.producto_id
-            LEFT JOIN operario o ON o.id = e.operario_ortorgado
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY e.id DESC";
+            e.id AS ensamblaje_id,
+            e.producto_id,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto_descripcion,
+            e.operario_ortorgado AS operario_id,
+            o.nombre_completo AS operario_nombre,
+            su.nombre AS sucursal_nombre,
+            e.inicio,
+            e.fin,
+            e.cantidad_peso_kg,
+            e.deleted_at,
+            e.js_moldes_utilizados,
+            e.js_derivados_utilizados,
+            " . subquerySelectComplementosUtilizados('e') . ",
+            e.js_producto_emsamblado,
+            e.ensamblaje_id_referido
+        FROM ensamblaje e
+        LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN operario o ON o.id = e.operario_ortorgado
+        LEFT JOIN sucursal su ON su.id = e.sucursal
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY e.id DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
@@ -681,6 +683,7 @@ function obtenerEnsamblaje($id)
             p.descripcion AS producto_descripcion,
             e.operario_ortorgado AS operario_id,
             o.nombre_completo AS operario_nombre,
+            e.sucursal,
             e.inicio,
             e.fin,
             e.cantidad_peso_kg,
@@ -713,6 +716,7 @@ function guardarEnsamblaje()
     $conectar = conectar_oll_BD();
 
     $id                  = intval($_POST['id'] ?? 0);
+    $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $producto_id         = intval($_POST['producto_id'] ?? 0);
     $operario_ortorgado  = !empty($_POST['operario_ortorgado']) ? intval($_POST['operario_ortorgado']) : null;
     $detalleJson         = trim($_POST['detalle'] ?? '[]');
@@ -726,6 +730,10 @@ function guardarEnsamblaje()
     if ($operario_ortorgado !== null) {
         $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operario_ortorgado]);
         if (empty($operario)) responder(false, 'El operario seleccionado no existe o está inactivo.');
+    }
+    if ($sucursal_id !== null) {
+        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
+        if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
     }
 
     $detalleEntrada = json_decode($detalleJson, true);
@@ -779,17 +787,18 @@ function guardarEnsamblaje()
 
             $nuevoEnsamblaje = executeQuery($conectar, "
                 INSERT INTO ensamblaje (
-                    producto_id, operario_ortorgado,
+                    producto_id, operario_ortorgado, sucursal,
                     js_derivados_utilizados, js_moldes_utilizados,
                     created_at, js_usuario, js_historial
                 ) VALUES (
-                    :producto_id, :operario_ortorgado,
+                    :producto_id, :operario_ortorgado, :sucursal_id,
                     '[]'::jsonb, '[]'::jsonb,
                     NOW(), :js_usuario, :js_historial
                 ) RETURNING id
             ", [
                 'producto_id'        => $producto_id,
                 'operario_ortorgado' => $operario_ortorgado,
+                'sucursal_id'        => $sucursal_id,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
             ]);
@@ -902,6 +911,7 @@ function guardarEnsamblaje()
                 UPDATE ensamblaje SET
                     producto_id         = :producto_id,
                     operario_ortorgado  = :operario_ortorgado,
+                    sucursal             = :sucursal_id,
                     update_at           = NOW(),
                     js_usuario          = :js_usuario,
                     js_historial        = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -909,6 +919,7 @@ function guardarEnsamblaje()
             ", [
                 'producto_id'        => $producto_id,
                 'operario_ortorgado' => $operario_ortorgado,
+                'sucursal_id'        => $sucursal_id,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
                 'id'                 => $id,

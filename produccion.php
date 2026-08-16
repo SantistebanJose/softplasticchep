@@ -373,25 +373,31 @@ include("header.php");
         <div class="modal-body">
 
           <div class="row">
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <label class="form-label">Operario</label>
                 <select class="form-select" id="prod_operario_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <label class="form-label">Máquina</label>
                 <select class="form-select" id="prod_maquina_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <label class="form-label">Categoría de material</label>
                 <select class="form-select" id="prod_categoria_material_id">
                     <option value="">Selecciona...</option>
                 </select>
             </div>
-          </div>
+            <div class="col-md-3 mb-2">
+                <label class="form-label">Sucursal</label>
+                <select class="form-select" id="prod_sucursal_id">
+                    <option value="">Selecciona...</option>
+                </select>
+            </div>
+        </div>
 
           <!-- Selección en cascada: primero el PRODUCTO, luego (filtrado por
                ese producto) el MOLDE. Antes era un solo select con todas
@@ -660,6 +666,26 @@ function actualizarTextoUltimaActualizacion() {
     el.innerHTML = texto;
 }
 
+const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
+
+async function llamarSucursal(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_SUCURSAL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    return resp.json();
+}
+
+let sucursalesProdCache = null;
+async function obtenerSucursalesProd() {
+    if (sucursalesProdCache) return sucursalesProdCache;
+    const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
+    sucursalesProdCache = json.success ? json.sucursales : [];
+    return sucursalesProdCache;
+}
+
 function estadoCorto(p) {
     if (p.enviado_ensamblaje) return 'ensamblaje';
     if (!p.fecha_hora_inicio) return 'sin';
@@ -919,12 +945,13 @@ async function cargarMoldesDeProducto(productoId, seleccion) {
 }
 
 async function cargarSelectsModal(seleccion = {}) {
-    const [operario, maquinas, colores, categorias, productos] = await Promise.all([
+    const [operario, maquinas, colores, categorias, productos, sucursales] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
         llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
+        obtenerSucursalesProd(),
     ]);
 
     // Operario: ahora usa Tom Select (buscador por nombre o DNI) en vez
@@ -944,6 +971,10 @@ async function cargarSelectsModal(seleccion = {}) {
     } else {
         tsOperario.clear();
     }
+    const sucursalSelect = document.getElementById('prod_sucursal_id');
+    sucursalSelect.innerHTML = '<option value="">Selecciona...</option>' +
+        (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+    if (seleccion.sucursal_id) sucursalSelect.value = seleccion.sucursal_id;
 
     const maquinaSelect = document.getElementById('prod_maquina_id');
     maquinaSelect.innerHTML = '<option value="">Selecciona...</option>';
@@ -1059,8 +1090,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     }
     if (p.operario_nombre) metaPartes.push(p.operario_nombre);
     if (p.maquina_nombre) metaPartes.push(p.maquina_nombre);
+    if (p.sucursal_nombre) metaPartes.push(p.sucursal_nombre);
     if (p.fecha) metaPartes.push(formatearFechaCorta(p.fecha));
-
     const tags = [];
     if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
 
@@ -1414,6 +1445,7 @@ async function abrirModalEditarProduccion(id) {
         unico_molde: p.unico_molde_producto,
         color_id: p.color_id,
         categoria_material_id: p.categoria_material_id,
+        sucursal_id: p.sucursal_id,
     });
     await renderGridMateriales();
 
@@ -1473,6 +1505,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         operario_id: document.getElementById('prod_operario_id').value,
         maquina_id: document.getElementById('prod_maquina_id').value,
         categoria_material_id: document.getElementById('prod_categoria_material_id').value,
+        sucursal_id: document.getElementById('prod_sucursal_id').value,
         molde_id: moldeIdReal,
         unico_molde: uniqueMolde,
         molde_producto: moldeProducto,
