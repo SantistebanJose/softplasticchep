@@ -261,12 +261,20 @@ include("header.php");
 
           <!-- "Se vende por" es una sola configuración a nivel de producto,
                no depende del molde, por eso va aquí arriba y no dentro de los tabs. -->
-          <div class="config-venta-block">
-              <label class="form-label mb-1">Se vende por</label>
-              <select class="form-select" id="config_se_vende_por" required>
-                  <option value="">Seleccione...</option>
-              </select>
-          </div>
+        <div class="config-venta-block">
+            <label class="form-label mb-1">Se vende por</label>
+            <select class="form-select" id="config_se_vende_por" required></select>
+        </div>
+
+        <div class="config-venta-block">
+            <label class="form-label mb-1">Salida en Empaquetado</label>
+            <select class="form-select" id="config_salida_empaquetado" required></select>
+        </div>
+
+        <div class="config-venta-block" id="bloque_salidaens_producto" style="display:none;">
+            <label class="form-label mb-1">Salida en Ensamblaje</label>
+            <select class="form-select" id="config_salida_ensamblaje"></select>
+        </div>
 
           <ul class="nav nav-tabs" id="configNavTabs" role="tablist"></ul>
           <div class="tab-content" id="configTabContent"></div>
@@ -557,7 +565,10 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
     document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
 
     llenarSelectUnidades('config_se_vende_por', configVentaActual.se_vende_por_unidad_medida_id);
+    llenarSelectUnidades('config_salida_empaquetado', configVentaActual.salida_empaquetado_unidad_medida_id);
+    llenarSelectUnidades('config_salida_ensamblaje', configVentaActual.salida_ensamblaje_unidad_medida_id);
     construirTabsConfiguracion(moldesDelProducto, configActual);
+    toggleSalidaEnsamblajeProducto();
     modalConfigProducto.show();
 }
 
@@ -583,20 +594,22 @@ function construirTabsConfiguracion(moldes, configActual) {
 
         tabContent.insertAdjacentHTML('beforeend', `
             <div class="tab-pane fade config-tab-pane ${activo ? 'show active' : ''}"
-                 id="tabMolde${m.molde_id}"
-                 data-molde-id="${m.molde_id}"
-                 data-molde-nombre="${escapeAttr(m.nombre)}">
+                id="tabMolde${m.molde_id}"
+                data-molde-id="${m.molde_id}"
+                data-molde-nombre="${escapeAttr(m.nombre)}">
 
                 <div class="mb-3">
                     <label class="form-label d-block">Necesita Ensamblaje</label>
                     <div class="form-check form-check-inline">
                         <input class="form-check-input" type="radio" name="ensamblaje_${m.molde_id}"
-                               id="ens_si_${m.molde_id}" value="si" ${esSi ? 'checked' : ''}>
+                            id="ens_si_${m.molde_id}" value="si" ${esSi ? 'checked' : ''}
+                            onchange="toggleSalidaEnsamblajeProducto()">
                         <label class="form-check-label" for="ens_si_${m.molde_id}">Sí</label>
                     </div>
                     <div class="form-check form-check-inline">
                         <input class="form-check-input" type="radio" name="ensamblaje_${m.molde_id}"
-                               id="ens_no_${m.molde_id}" value="no" ${!esSi ? 'checked' : ''}>
+                            id="ens_no_${m.molde_id}" value="no" ${!esSi ? 'checked' : ''}
+                            onchange="toggleSalidaEnsamblajeProducto()">
                         <label class="form-check-label" for="ens_no_${m.molde_id}">No</label>
                     </div>
                 </div>
@@ -610,6 +623,8 @@ function construirTabsConfiguracion(moldes, configActual) {
                     <label class="form-label">Salida de Merma</label>
                     <select class="form-select" id="sel_salidamerma_${m.molde_id}"></select>
                 </div>
+
+                
             </div>
         `);
 
@@ -623,6 +638,16 @@ function llenarSelectUnidades(selectId, unidadIdSeleccionada) {
     sel.innerHTML = '<option value="">Seleccione...</option>' +
         unidadesCache.map(u => `<option value="${u.id}" ${String(u.id) === String(unidadIdSeleccionada) ? 'selected' : ''}>${u.codigo} - ${u.nombre}</option>`).join('');
 }
+
+function toggleSalidaEnsamblajeProducto() {
+    const algunSi = [...document.querySelectorAll('#configTabContent .tab-pane')]
+        .some(pane => {
+            const moldeId = pane.dataset.moldeId;
+            return document.getElementById(`ens_si_${moldeId}`)?.checked;
+        });
+    document.getElementById('bloque_salidaens_producto').style.display = algunSi ? 'block' : 'none';
+}
+
 
 document.getElementById('formConfigProducto').addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -641,10 +666,21 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
         se_vende_por: ventaOpt.textContent.split(' - ')[0].trim().toLowerCase(),
     };
 
+    // ── "Salida en Empaquetado" (a nivel producto, siempre obligatoria) ──
+    const empaqSel = document.getElementById('config_salida_empaquetado');
+    if (!empaqSel.value) {
+        Swal.fire('Falta información', 'Selecciona "Salida en Empaquetado" para el producto.', 'warning');
+        return;
+    }
+    const empaqOpt = empaqSel.selectedOptions[0];
+    configuracionVenta.salida_empaquetado_unidad_medida_id = parseInt(empaqSel.value, 10);
+    configuracionVenta.salida_empaquetado = empaqOpt.textContent.split(' - ')[0].trim().toLowerCase();
+
     // ── Configuración por molde ──────────────────────────────────────────
     const panes = document.querySelectorAll('#configTabContent .tab-pane');
     const configuraciones = [];
     let valido = true;
+    let algunMoldeNecesitaEnsamblaje = false;
 
     panes.forEach(pane => {
         if (!valido) return;
@@ -662,6 +698,8 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
             return;
         }
 
+        if (ensamblaje === 'si') algunMoldeNecesitaEnsamblaje = true;
+
         const salidaProdOpt  = salidaProdSel.selectedOptions[0];
         const salidaMermaOpt = salidaMermaSel.selectedOptions[0];
 
@@ -677,6 +715,19 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     });
 
     if (!valido) return;
+
+    // "Salida en Ensamblaje" es a nivel producto, solo obligatoria si
+    // algún molde necesita ensamblaje.
+    if (algunMoldeNecesitaEnsamblaje) {
+        const ensSel = document.getElementById('config_salida_ensamblaje');
+        if (!ensSel.value) {
+            Swal.fire('Falta información', 'Selecciona "Salida en Ensamblaje" para el producto.', 'warning');
+            return;
+        }
+        const ensOpt = ensSel.selectedOptions[0];
+        configuracionVenta.salida_ensamblaje_unidad_medida_id = parseInt(ensSel.value, 10);
+        configuracionVenta.salida_ensamblaje = ensOpt.textContent.split(' - ')[0].trim().toLowerCase();
+    }
 
     const json = await llamar('GUARDARCONFIGPRODUCTO', {
         producto_id: productoId,

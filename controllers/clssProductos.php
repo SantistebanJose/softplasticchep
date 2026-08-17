@@ -298,8 +298,30 @@ function guardarConfigProducto()
     if (empty($configuracionVenta['se_vende_por_unidad_medida_id'])) {
         responder(false, 'Falta "Se vende por" para el producto.');
     }
+    if (empty($configuracionVenta['salida_empaquetado_unidad_medida_id'])) {
+        responder(false, 'Falta "Salida en Empaquetado" para el producto.');
+    }
+
+    // "Salida en Ensamblaje" también es a nivel producto (el ensamblaje
+    // arma el producto terminado a partir de varios moldes, así que la
+    // unidad de salida no depende de un molde puntual). Solo es
+    // obligatoria si al menos un molde del producto necesita ensamblaje;
+    // si ninguno lo necesita, ese producto nunca genera una fila en
+    // `ensamblaje` (ver clssProduccion::enviarAEnsamblaje), así que no
+    // tiene sentido exigir el dato.
+    $algunMoldeNecesitaEnsamblaje = false;
+    foreach ($configuraciones as $c) {
+        if (($c['necesita_ensamblaje'] ?? 'no') === 'sí') {
+            $algunMoldeNecesitaEnsamblaje = true;
+            break;
+        }
+    }
+    if ($algunMoldeNecesitaEnsamblaje && empty($configuracionVenta['salida_ensamblaje_unidad_medida_id'])) {
+        responder(false, 'Falta "Salida en Ensamblaje" para el producto.');
+    }
 
     // Validación mínima de cada fila (una por molde) — ya SIN se_vende_por
+    // y SIN salida_ensamblaje (ahora vive en configuracionVenta, no aquí).
     foreach ($configuraciones as $c) {
         if (empty($c['molde_id'])) responder(false, 'Falta el molde en una de las configuraciones.');
         if (empty($c['salida_produccion_unidad_medida_id'])) responder(false, 'Falta "Salida en Producción" para el molde "' . ($c['molde'] ?? '') . '".');
@@ -340,7 +362,6 @@ function guardarConfigProducto()
 
     responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);
 }
-
 // Soft delete: no se borra físicamente, solo se marca activo = FALSE.
 function eliminarProducto()
 {

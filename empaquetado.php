@@ -553,7 +553,7 @@ async function cargarSelectsFormEmp() {
     const sSuc = document.getElementById('emp_sucursal_id');
         sSuc.innerHTML = '<option value="">Selecciona...</option>' +
             (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
-    }
+    
 
     const sOp = document.getElementById('emp_operario_id');
     if (operarios.length === 0) {
