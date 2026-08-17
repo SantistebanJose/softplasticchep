@@ -1,25 +1,6 @@
 <?php
 ob_start();
 
-/**
- * controllers/clssProductos.php
- * Controlador del módulo de Productos (Mercadería para la venta)
- * Tabla real: producto (singular) — id, codigo, descripcion, unidad_venta_id,
- *             cant_equivale, unidad_equivale_id, peso_unitario_g, activo,
- *             js_configuracion (jsonb — configuración por producto+molde),
- *             created_at, updated_at
- *
- * Convención de nombres dentro de cada fila de js_configuracion:
- *   se_vende_por_unidad_medida_id / se_vende_por          (texto corto en minúscula)
- *   salida_produccion_unidad_medida_id / salida_produccion
- *   salida_merma_unidad_medida_id / salida_merma
- * El sufijo "_unidad_medida_id" deja explícito que ese id apunta a
- * unidad_medida.id, así cualquier query o revisión rápida del JSON queda
- * clara sin tener que adivinar a qué tabla referencia.
- *
- * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
- */
-
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
@@ -114,15 +95,7 @@ function listarProductos()
     responder(true, 'OK', ['productos' => $result]);
 }
 
-/**
- * Obtiene un producto por id, junto con su js_configuracion decodificado.
- * Cada fila de js_configuracion se enriquece con el detalle real (nombre_corto
- * - nombre) de se_vende_por_unidad_medida_id, salida_produccion_unidad_medida_id
- * y salida_merma_unidad_medida_id, resuelto en el momento contra unidad_medida.
- * Así el front (o cualquier otro módulo que consuma esta configuración) no
- * depende del texto que haya quedado guardado en el JSON, que podría
- * desactualizarse si alguien renombra una unidad de medida más adelante.
- */
+
 function obtenerProducto($id)
 {
     $conectar = conectar_oll_BD();
@@ -144,57 +117,83 @@ function obtenerProducto($id)
     if (empty($result)) responder(false, 'Producto no encontrado.');
 
     $producto = $result[0];
-    // js_configuracion: lista de configuraciones, una por cada molde asociado al producto
     $producto['js_configuracion'] = json_decode($producto['js_configuracion'] ?? '[]', true) ?: [];
+    $producto['js_configuracion_empaquetado'] = json_decode($producto['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
 
+    // 1) Recolectar TODOS los ids de unidad usados, tanto por molde
+    //    (js_configuracion) como a nivel producto (js_configuracion_empaquetado),
+    //    para resolverlos en una sola consulta.
+    $unidadIds = [];
+    foreach ($producto['js_configuracion'] as $c) {
+        foreach (['salida_produccion_unidad_medida_id', 'salida_merma_unidad_medida_id'] as $campo) {
+            if (!empty($c[$campo])) $unidadIds[] = (int) $c[$campo];
+        }
+    }
+    foreach ([
+        'se_vende_por_unidad_medida_id',
+        'salida_empaquetado_unidad_medida_id',
+        'salida_ensamblaje_unidad_medida_id',
+    ] as $campo) {
+        if (!empty($producto['js_configuracion_empaquetado'][$campo])) {
+            $unidadIds[] = (int) $producto['js_configuracion_empaquetado'][$campo];
+        }
+    }
+    $unidadIds = array_unique($unidadIds);
+
+    // 2) Resolverlos todos en una sola consulta
+    $unidadesDetalle = [];
+    if (!empty($unidadIds)) {
+        $placeholders = [];
+        $params = [];
+        foreach ($unidadIds as $i => $uid) {
+            $key = "u$i";
+            $placeholders[] = ":$key";
+            $params[$key] = $uid;
+        }
+        $rowsUnidades = executeQuery(
+            $conectar,
+            "SELECT id, nombre_corto, nombre FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+            $params
+        );
+        foreach ($rowsUnidades as $u) {
+            $unidadesDetalle[$u['id']] = $u;
+        }
+    }
+
+    $detalleLegible = function ($uid) use ($unidadesDetalle) {
+        return isset($unidadesDetalle[$uid])
+            ? $unidadesDetalle[$uid]['nombre_corto'] . ' - ' . $unidadesDetalle[$uid]['nombre']
+            : null;
+    };
+
+    // 3a) Adjuntar detalle legible a cada fila de js_configuracion (por molde)
     if (!empty($producto['js_configuracion'])) {
-        // 1) Recolectar todos los ids de unidad usados en toda la configuración
-        $unidadIds = [];
-        foreach ($producto['js_configuracion'] as $c) {
-            foreach (['salida_produccion_unidad_medida_id', 'salida_merma_unidad_medida_id'] as $campo) {
-                if (!empty($c[$campo])) $unidadIds[] = (int) $c[$campo];
-            }
-        }
-        $unidadIds = array_unique($unidadIds);
-
-        // 2) Resolverlos todos en una sola consulta
-        $unidadesDetalle = [];
-        if (!empty($unidadIds)) {
-            $placeholders = [];
-            $params = [];
-            foreach ($unidadIds as $i => $uid) {
-                $key = "u$i";
-                $placeholders[] = ":$key";
-                $params[$key] = $uid;
-            }
-            $rowsUnidades = executeQuery(
-                $conectar,
-                "SELECT id, nombre_corto, nombre FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
-                $params
-            );
-            foreach ($rowsUnidades as $u) {
-                $unidadesDetalle[$u['id']] = $u;
-            }
-        }
-
-        // 3) Adjuntar el detalle legible a cada fila de configuración
         foreach ($producto['js_configuracion'] as &$c) {
             foreach ([
                 'salida_produccion_unidad_medida_id' => 'salida_produccion_detalle',
                 'salida_merma_unidad_medida_id'      => 'salida_merma_detalle',
             ] as $campoId => $campoDetalle) {
                 $uid = $c[$campoId] ?? null;
-                $c[$campoDetalle] = isset($unidadesDetalle[$uid])
-                    ? $unidadesDetalle[$uid]['nombre_corto'] . ' - ' . $unidadesDetalle[$uid]['nombre']
-                    : null;
+                $c[$campoDetalle] = $detalleLegible($uid);
             }
         }
         unset($c);
     }
 
+    // 3b) Adjuntar detalle legible a js_configuracion_empaquetado (a nivel producto)
+    if (!empty($producto['js_configuracion_empaquetado'])) {
+        foreach ([
+            'se_vende_por_unidad_medida_id'       => 'se_vende_por_detalle',
+            'salida_empaquetado_unidad_medida_id' => 'salida_empaquetado_detalle',
+            'salida_ensamblaje_unidad_medida_id'  => 'salida_ensamblaje_detalle',
+        ] as $campoId => $campoDetalle) {
+            $uid = $producto['js_configuracion_empaquetado'][$campoId] ?? null;
+            $producto['js_configuracion_empaquetado'][$campoDetalle] = $detalleLegible($uid);
+        }
+    }
+
     responder(true, 'OK', ['producto' => $producto]);
 }
-
 function guardarProducto()
 {
     $conectar           = conectar_oll_BD();
@@ -267,7 +266,6 @@ function guardarProducto()
  *     "molde_id": 2,
  *     "molde": "molde 1",
  *     "necesita_ensamblaje": "sí" | "no",
- *     "se_vende_por_unidad_medida_id": 5,        "se_vende_por": "gruesas",
  *     "salida_produccion_unidad_medida_id": 1,   "salida_produccion": "unidades",
  *     "salida_merma_unidad_medida_id": 1,        "salida_merma": "unidades"
  *   },
@@ -275,30 +273,49 @@ function guardarProducto()
  * ]
  * Se sobreescribe por completo el arreglo (siempre se manda el set completo
  * de moldes del producto desde el front).
+ *
+ * Además se recibe un JSON (string) con la configuración a nivel PRODUCTO
+ * (no por molde), guardado en producto.js_configuracion_empaquetado:
+ * {
+ *   "se_vende_por_unidad_medida_id": 5,
+ *   "salida_empaquetado_unidad_medida_id": 1,
+ *   "salida_ensamblaje_unidad_medida_id": 1   (solo si algún molde necesita ensamblaje)
+ * }
  */
 function guardarConfigProducto()
 {
-    $conectar     = conectar_oll_BD();
-    $producto_id  = intval($_POST['producto_id'] ?? 0);
-    $configJson   = $_POST['configuraciones'] ?? '[]';
-    $ventaJson    = $_POST['configuracion_venta'] ?? '{}';
+    $conectar        = conectar_oll_BD();
+    $producto_id     = intval($_POST['producto_id'] ?? 0);
+    $configJson      = $_POST['configuraciones'] ?? '[]';
+    $empaquetadoJson = $_POST['configuracion_venta'] ?? '{}';
 
     if (!$producto_id) responder(false, 'Producto inválido.');
 
     $configuraciones = json_decode($configJson, true);
     if (!is_array($configuraciones)) responder(false, 'Formato de configuración inválido.');
-
-    $configuracionVenta = json_decode($ventaJson, true);
-    if (!is_array($configuracionVenta)) responder(false, 'Formato de configuración de venta inválido.');
+    // Un mismo molde no puede aparecer dos veces en la config del producto:
+    // rompería obtenerItemConfigProductoMolde() (que asume unicidad) y
+    // dejaría ambigüedad de cuál fila es la "vigente" para ese molde.
+    $moldeIdsVistos = [];
+    foreach ($configuraciones as $c) {
+        $mid = $c['molde_id'] ?? null;
+        if ($mid === null) continue; // esto ya se valida más abajo como "falta el molde"
+        if (in_array($mid, $moldeIdsVistos, true)) {
+            responder(false, 'El molde "' . ($c['molde'] ?? $mid) . '" aparece más de una vez en la configuración.');
+        }
+        $moldeIdsVistos[] = $mid;
+    }
+    $configuracionEmpaquetado = json_decode($empaquetadoJson, true);
+    if (!is_array($configuracionEmpaquetado)) responder(false, 'Formato de configuración de empaquetado inválido.');
 
     $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');
 
     // "Se vende por" es a nivel producto (una sola vez, no por molde)
-    if (empty($configuracionVenta['se_vende_por_unidad_medida_id'])) {
+    if (empty($configuracionEmpaquetado['se_vende_por_unidad_medida_id'])) {
         responder(false, 'Falta "Se vende por" para el producto.');
     }
-    if (empty($configuracionVenta['salida_empaquetado_unidad_medida_id'])) {
+    if (empty($configuracionEmpaquetado['salida_empaquetado_unidad_medida_id'])) {
         responder(false, 'Falta "Salida en Empaquetado" para el producto.');
     }
 
@@ -316,12 +333,12 @@ function guardarConfigProducto()
             break;
         }
     }
-    if ($algunMoldeNecesitaEnsamblaje && empty($configuracionVenta['salida_ensamblaje_unidad_medida_id'])) {
+    if ($algunMoldeNecesitaEnsamblaje && empty($configuracionEmpaquetado['salida_ensamblaje_unidad_medida_id'])) {
         responder(false, 'Falta "Salida en Ensamblaje" para el producto.');
     }
 
     // Validación mínima de cada fila (una por molde) — ya SIN se_vende_por
-    // y SIN salida_ensamblaje (ahora vive en configuracionVenta, no aquí).
+    // y SIN salida_ensamblaje (ahora viven en configuracionEmpaquetado, no aquí).
     foreach ($configuraciones as $c) {
         if (empty($c['molde_id'])) responder(false, 'Falta el molde en una de las configuraciones.');
         if (empty($c['salida_produccion_unidad_medida_id'])) responder(false, 'Falta "Salida en Producción" para el molde "' . ($c['molde'] ?? '') . '".');
@@ -342,22 +359,28 @@ function guardarConfigProducto()
     foreach ($configuraciones as &$c) {
         $c['created_at'] = $creadosPorMolde[$c['molde_id']] ?? $ahora;
         $c['updated_at'] = $ahora;
+        // Normaliza complementa_a: array de {producto_id, codigo, descripcion}.
+        // Opcional — solo lo llenan los moldes cuyo armado puede complementar
+        // a otro producto (ej. MOLDE GANCHO PINZA).
+        $c['complementa_a'] = is_array($c['complementa_a'] ?? null)
+            ? array_values(array_filter($c['complementa_a'], fn($p) => !empty($p['producto_id'])))
+            : [];
     }
     unset($c);
 
-    $jsConfiJson  = json_encode($configuraciones, JSON_UNESCAPED_UNICODE);
-    $jsVentaJson  = json_encode($configuracionVenta, JSON_UNESCAPED_UNICODE);
+    $jsConfiJson       = json_encode($configuraciones, JSON_UNESCAPED_UNICODE);
+    $jsEmpaquetadoJson = json_encode($configuracionEmpaquetado, JSON_UNESCAPED_UNICODE);
 
     executeQuery($conectar, "
         UPDATE producto SET
-            js_configuracion       = :js_configuracion,
-            js_configuracion_venta = :js_configuracion_venta,
+            js_configuracion             = :js_configuracion,
+            js_configuracion_empaquetado = :js_configuracion_empaquetado,
             updated_at = NOW()
         WHERE id = :id
     ", [
-        'js_configuracion'       => $jsConfiJson,
-        'js_configuracion_venta' => $jsVentaJson,
-        'id'                     => $producto_id,
+        'js_configuracion'             => $jsConfiJson,
+        'js_configuracion_empaquetado' => $jsEmpaquetadoJson,
+        'id'                           => $producto_id,
     ]);
 
     responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);

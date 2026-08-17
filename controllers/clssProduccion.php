@@ -359,6 +359,7 @@ function listarProducciones()
             co.rgb AS color_rgb,
             cm.nombre AS categoria_material_nombre,
             su.nombre AS sucursal_nombre,
+            pr.descripcion AS producto_descripcion,
             COALESCE((
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
@@ -374,7 +375,7 @@ function listarProducciones()
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
         LEFT JOIN sucursal su ON su.id = pd.sucursal
-        LEFT JOIN producto pr ON split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
+        LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto,'-', 2), '')::bigint = pr.id
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
         WHERE " . implode(' AND ', $where) . "
@@ -421,7 +422,7 @@ function obtenerProduccion($id)
          LEFT JOIN molde mo ON mo.id = pd.molde_id
          LEFT JOIN color co ON co.id = pd.color_id
          LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
-         LEFT JOIN producto pr ON split_part(pd.unico_molde_producto,'-', 2)::bigint = pr.id
+         LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto,'-', 2), '')::bigint = pr.id
          LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
          LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
          WHERE pd.id = :id",
@@ -552,11 +553,42 @@ function guardarProduccion()
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
+    $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
+
+    // ── "Foto" de configuración (js_configuracion_moment) ───────────────────
+    // Es la fuente de verdad histórica de ESTE avance: no debe recalcularse
+    // solo porque el usuario editó, por ejemplo, la observación. Solo se
+    // vuelve a tomar la foto cuando:
+    //   a) es un registro nuevo, o
+    //   b) el registro nunca tuvo foto guardada (avance viejo, fallback), o
+    //   c) el molde/producto seleccionado cambió respecto al valor guardado.
+    // En cualquier otro caso se conserva tal cual la foto ya persistida.
     $partesUnico = explode('-', $unico_molde);
     $productoIdParaConfig = isset($partesUnico[1]) ? intval($partesUnico[1]) : 0;
-    $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
-    $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
-    $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
+
+    $jsConfigMoment = null;
+    if ($id === 0) {
+        $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
+        $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
+    } else {
+        $registroActualParaFoto = executeQuery(
+            $conectar,
+            "SELECT molde_id, unico_molde_producto, js_configuracion_moment FROM produccion WHERE id = :id",
+            ['id' => $id]
+        );
+        $sinFotoPrevia = empty($registroActualParaFoto) || empty($registroActualParaFoto[0]['js_configuracion_moment']);
+        $moldeCambio    = !empty($registroActualParaFoto) && (
+            (int) $registroActualParaFoto[0]['molde_id'] !== $molde_id
+            || (string) $registroActualParaFoto[0]['unico_molde_producto'] !== $unico_molde
+        );
+
+        if ($sinFotoPrevia || $moldeCambio) {
+            $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
+            $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
+        } else {
+            $jsConfigMoment = $registroActualParaFoto[0]['js_configuracion_moment'];
+        }
+    }
     $cantidad           = intval($_POST['cantidad'] ?? 0); // kg insertados en máquina en este avance
     $fecha              = trim($_POST['fecha'] ?? '');
     $observaciones      = trim($_POST['observaciones'] ?? '');

@@ -69,6 +69,12 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-complementar:hover{ background:#7C3AED; color:#fff; }
+.pc-btn-empaquetado{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #0E9488;
+    background:#E2F5F3; color:#0E9488; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-empaquetado:hover{ background:#0E9488; color:#fff; }
 
 .badge-condicion-propio{ background:#EAF0FE; color:#2F6FED; border:1px solid #cddafc; }
 .badge-condicion-derivado{ background:#F1EAFD; color:#7C3AED; border:1px solid #dccdfa; }
@@ -552,6 +558,18 @@ function parseJsonObjetoColumna(v) {
     return (typeof v === 'object' && !Array.isArray(v)) ? v : null;
 }
 
+// Categoría de material del armado actual, derivada de las líneas de
+// producción ya agregadas al ticket. null si aún no hay ninguna, o si hay
+// más de una categoría distinta (mixta) — en ese caso no se puede
+// determinar con certeza y no se ofrecen complementos.
+function categoriaMaterialTicketActual() {
+    const cats = ticketDetalleEns
+        .filter(l => l.tipo === 'produccion' && l.categoria_material_id)
+        .map(l => l.categoria_material_id);
+    if (cats.length === 0) return null;
+    return new Set(cats).size === 1 ? cats[0] : null;
+}
+
 // ── Selects auxiliares ────────────────────────────────────────────────────
 async function obtenerProductosEns() {
     if (productosEnsCache && productosEnsCache.length > 0) return productosEnsCache;
@@ -622,9 +640,10 @@ function tarjetaEnsamblajeHtml(e) {
     const puedeIniciar   = !e.deleted_at && !e.inicio;
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
-    const puedeComplementar  = !e.deleted_at && e.fin && !productoEmsamblado;
+    const esDePrimera = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de primera';
+    const puedeDecidirDestino = !e.deleted_at && e.fin && !productoEmsamblado && !e.enviado_empaquetado;
+    const puedeComplementar = puedeDecidirDestino && esDePrimera;
     const complementoUsado = !!e.ensamblaje_id_referido;
-
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
         <div class="pc-ens-card-head">
@@ -650,16 +669,44 @@ function tarjetaEnsamblajeHtml(e) {
                 <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} kg</span>
             </div>
             <div class="pc-ens-field">
+                <span class="lbl">Categoría material</span>
+                <span class="val">${e.categoria_material_nombre ?? '-'}</span>
+            </div>
+            <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
-                <span class="val">${producciones}</span>
+                <span class="val">
+                    ${producciones > 0
+                        ? parseJsonColumna(e.js_moldes_utilizados).map(m =>
+                            `<span class="badge-complemento" style="background:#EAF0FE;color:#2F6FED;border-color:#cddafc;margin:2px 6px 2px 0;">
+                                <i class="fa-solid fa-industry"></i> ${m.molde_nombre ?? ('Producción #' + m.produccion_id)}
+                            </span>`
+                        ).join('')
+                        : '0'}
+                </span>
             </div>
-            <div class="pc-ens-field">
+            <div class="pc-ens-field span-2">
                 <span class="lbl">Derivados vinculados</span>
-                <span class="val">${derivadosCount}</span>
+                <span class="val">
+                    ${derivadosCount > 0
+                        ? parseJsonColumna(e.js_derivados_utilizados).map(d =>
+                            `<span class="badge-complemento" style="background:#E8F7EE;color:#16A34A;border-color:#bfe8cf;margin:2px 6px 2px 0;">
+                                <i class="fa-solid fa-flask"></i> ${d.derivado_nombre ?? ('Derivado #' + d.derivado_id)}
+                            </span>`
+                        ).join('')
+                        : '0'}
+                </span>
             </div>
-            <div class="pc-ens-field">
+            <div class="pc-ens-field span-2">
                 <span class="lbl">Complementos vinculados</span>
-                <span class="val">${complementosCount}</span>
+                <span class="val">
+                    ${complementosCount > 0
+                        ? parseJsonColumna(e.js_complementos_utilizados).map(c =>
+                            `<span class="badge-complemento" style="margin:2px 6px 2px 0;">
+                                <i class="fa-solid fa-puzzle-piece"></i> ${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}
+                            </span>`
+                        ).join('')
+                        : '0'}
+                </span>
             </div>
             ${productoEmsamblado ? `
             <div class="pc-ens-field">
@@ -670,6 +717,15 @@ function tarjetaEnsamblajeHtml(e) {
                     <span class="badge-complemento-estado ${complementoUsado ? 'usado' : 'disponible'}">
                         <i class="fa-solid ${complementoUsado ? 'fa-lock' : 'fa-circle-check'}"></i>
                         ${complementoUsado ? `Usado en armado #${e.ensamblaje_id_referido}` : 'Disponible para vincular'}
+                    </span>
+                </span>
+            </div>` : ''}
+            ${e.enviado_empaquetado ? `
+            <div class="pc-ens-field">
+                <span class="lbl">Empaquetado</span>
+                <span class="val">
+                    <span class="badge-complemento-estado usado">
+                        <i class="fa-solid fa-box"></i> Enviado ${formatearFechaHoraLegibleEns(e.fecha_envio_empaquetado)}
                     </span>
                 </span>
             </div>` : ''}
@@ -692,11 +748,14 @@ function tarjetaEnsamblajeHtml(e) {
                     <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
                 : ''
             }
-            ${puedeComplementar
-                ? `<button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
-                    <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>`
-                : ''
-            }
+            ${puedeDecidirDestino ? `
+                ${puedeComplementar ? `
+                    <button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
+                        <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>
+                ` : ''}
+                <button type="button" class="pc-btn-empaquetado" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})" title="Enviar directo a empaquetado">
+                    <i class="fa-solid fa-box"></i> A Empaquetado</button>
+            ` : ''}
             ${!e.deleted_at
                 ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
@@ -794,6 +853,16 @@ async function obtenerProductosParaComplementar(excluirId) {
 }
 
 async function marcarComplementoAccion(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Pasar este armado a Complementar?',
+        text: 'Quedará disponible para ser consumido dentro de otro ensamblaje distinto y ya no podrá enviarse a empaquetado.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, continuar',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+
     const productos = await obtenerProductosParaComplementar(id);
     if (!productos || productos.length === 0) {
         Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre).', 'warning');
@@ -803,7 +872,7 @@ async function marcarComplementoAccion(id) {
 
     const { value: productoObjetivoId } = await Swal.fire({
         title: 'Marcar como complemento',
-        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto final al que este armado ya finalizado va a complementar (ej: PINZA PALANITA complementando a COLGADOR OSITO MULTIUSO).</p>
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto final al que este armado ya finalizado va a complementar.</p>
                <select id="swal-complemento-producto" class="form-select">
                    <option value="">Selecciona un producto...</option>
                    ${opciones}
@@ -814,25 +883,32 @@ async function marcarComplementoAccion(id) {
         cancelButtonText: 'Cancelar',
         preConfirm: () => {
             const val = document.getElementById('swal-complemento-producto').value;
-            if (!val) {
-                Swal.showValidationMessage('Debes elegir un producto.');
-                return false;
-            }
+            if (!val) { Swal.showValidationMessage('Debes elegir un producto.'); return false; }
             return val;
         }
     });
-
     if (!productoObjetivoId) return;
 
     const json = await llamarEnsamblaje('COMPLEMENTAR', { id, producto_objetivo_id: productoObjetivoId });
-    if (json.success) {
-        Swal.fire('Listo', json.message, 'success');
-        cargarEnsamblajes();
-    } else {
-        Swal.fire('Error', json.message, 'error');
-    }
+    if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
+    else { Swal.fire('Error', json.message, 'error'); }
 }
 
+async function pasarAEmpaquetadoAccion(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Enviar este armado a Empaquetado?',
+        text: 'Se registrará como producto terminado independiente y ya no podrá marcarse como complemento de otro producto.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, enviar',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    const json = await llamarEnsamblaje('PASARAEMPAQUETADO', { id });
+    if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
+    else { Swal.fire('Error', json.message, 'error'); }
+}
 // =============================================================================
 // PANEL DE DETALLE: tabs (producciones / derivados / complemento) + ticket
 // =============================================================================
@@ -879,6 +955,7 @@ async function renderGridDetalle() {
                         color_nombre: colorNombre,
                         cantidad_kg: p.cantidad_kg ?? p.cantidad,
                         fecha_hora_fin: p.fecha_hora_fin,
+                        categoria_material_id: p.categoria_material_id,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
@@ -926,12 +1003,21 @@ async function renderGridDetalle() {
             grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver complementos disponibles.</div>';
             return;
         }
+        const categoriaActual = categoriaMaterialTicketActual();
+        if (!categoriaActual) {
+            grid.innerHTML = '<div class="pc-mat-empty">Agrega al menos una producción con categoría de material definida para ver complementos compatibles.</div>';
+            return;
+        }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, texto });
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', {
+            producto_id: productoId,
+            texto,
+            categoria_material_id: categoriaActual,
+        });
         const complementos = json.success ? (json.complementos || []) : [];
 
         if (complementos.length === 0) {
-            grid.innerHTML = '<div class="pc-mat-empty">No hay armados finalizados marcados como complemento de este producto.</div>';
+            grid.innerHTML = '<div class="pc-mat-empty">No hay armados finalizados de la misma categoría de material marcados como complemento de este producto.</div>';
             return;
         }
 
@@ -975,6 +1061,7 @@ function agregarLineaDetalle(tipo, datos) {
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
+            categoria_material_id: datos.categoria_material_id,
         });
     } else if (tipo === 'derivado') {
         ticketDetalleEns.push({

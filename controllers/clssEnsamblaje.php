@@ -171,6 +171,9 @@ function controladorEnsamblaje($accion)
         case 'FINALIZARENSAMBLAJE':
             finalizarEnsamblaje(intval($_POST['id'] ?? 0));
             break;
+        case 'PASARAEMPAQUETADO':
+            pasarAEmpaquetado(intval($_POST['id'] ?? 0));
+            break;
         case 'COMPLEMENTAR':
             marcarComplemento();
             break;
@@ -336,6 +339,7 @@ function buscarComplementos()
     $conectar   = conectar_oll_BD();
     $texto      = trim($_POST['texto'] ?? '');
     $productoId = intval($_POST['producto_id'] ?? 0);
+    $categoriaMaterialId = intval($_POST['categoria_material_id'] ?? 0) ?: null;
 
     if ($productoId <= 0) {
         responder(true, 'OK', ['complementos' => []]);
@@ -349,6 +353,10 @@ function buscarComplementos()
         "e.ensamblaje_id_referido IS NULL",
     ];
     $params = ['producto_id' => $productoId];
+    if ($categoriaMaterialId !== null) {
+        $where[] = "e.categoria_material_id = :categoria_material_id";
+        $params['categoria_material_id'] = $categoriaMaterialId;
+    }
     if ($texto !== '') {
         $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
@@ -360,9 +368,11 @@ function buscarComplementos()
                 p.codigo AS producto_codigo,
                 p.descripcion AS producto_descripcion,
                 e.cantidad_peso_kg,
-                e.fin
+                e.fin,
+                cm.nombre AS categoria_material_nombre
             FROM ensamblaje e
             LEFT JOIN producto p ON p.id = e.producto_id
+            LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
             WHERE " . implode(' AND ', $where) . "
             ORDER BY e.fin DESC
             LIMIT 100";
@@ -370,7 +380,6 @@ function buscarComplementos()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['complementos' => $result]);
 }
-
 // Productos válidos como OBJETIVO al marcar un ensamblaje con COMPLEMENTAR
 // (select del modal "Marcar como complemento"). NO es el catálogo completo
 // de producto: son solo los productos que AÚN SIGUEN "vivos" dentro del
@@ -387,24 +396,37 @@ function buscarProductosParaComplementar()
     $excluirId = intval($_POST['excluir_id'] ?? 0);
     $texto     = trim($_POST['texto'] ?? '');
 
-    // Resolvemos el producto_id del ensamblaje que se está marcando, para
-    // poder excluir ESE producto de las opciones (no solo esa fila).
     $productoPropioId = 0;
+    $categoriaMaterialIdPropio = null;
+    $categoriaMaterialNombrePropio = null;
     if ($excluirId > 0) {
         $propio = executeQuery(
             $conectar,
-            "SELECT producto_id FROM ensamblaje WHERE id = :id",
+            "SELECT e.producto_id, e.categoria_material_id, cm.nombre AS categoria_material_nombre
+             FROM ensamblaje e
+             LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
+             WHERE e.id = :id",
             ['id' => $excluirId]
         );
         $productoPropioId = !empty($propio) ? intval($propio[0]['producto_id']) : 0;
+        $categoriaMaterialIdPropio = !empty($propio) ? $propio[0]['categoria_material_id'] : null;
+        $categoriaMaterialNombrePropio = !empty($propio) ? $propio[0]['categoria_material_nombre'] : null;
+    }
+
+    // Solo los armados de categoría "De Primera" pueden complementar a otro
+    // producto. Cualquier otra categoría (o sin categoría definida) va
+    // directo a Empaquetado — no se le ofrece ningún destino aquí.
+    if ($categoriaMaterialIdPropio === null || strtolower(trim($categoriaMaterialNombrePropio ?? '')) !== 'de primera') {
+        responder(true, 'OK', ['productos' => []]);
     }
 
     $where = [
         "t1.deleted_at IS NULL",
         "t1.fin IS NOT NULL",
         "t1.ensamblaje_id_referido IS NULL",
+        "t1.categoria_material_id = :categoria_material_id_propio",
     ];
-    $params = [];
+    $params = ['categoria_material_id_propio' => $categoriaMaterialIdPropio];
     if ($excluirId > 0) {
         $where[] = "t1.id != :excluir_id";
         $params['excluir_id'] = $excluirId;
@@ -479,6 +501,7 @@ function buscarProduccionesDisponibles()
                 t4.id AS producto_id,
                 t1.color_id,
                 t3.nombre AS color_nombre_verif,
+                t1.categoria_material_id,
                 cm.nombre AS categoria_material_nombre_verif
             FROM produccion t1
             LEFT JOIN molde t2 ON t2.id = t1.molde_id
@@ -642,28 +665,33 @@ function listarEnsamblajes()
     }
 
     $sql = "SELECT
-            e.id AS ensamblaje_id,
-            e.producto_id,
-            p.codigo AS producto_codigo,
-            p.descripcion AS producto_descripcion,
-            e.operario_ortorgado AS operario_id,
-            o.nombre_completo AS operario_nombre,
-            su.nombre AS sucursal_nombre,
-            e.inicio,
-            e.fin,
-            e.cantidad_peso_kg,
-            e.deleted_at,
-            e.js_moldes_utilizados,
-            e.js_derivados_utilizados,
-            " . subquerySelectComplementosUtilizados('e') . ",
-            e.js_producto_emsamblado,
-            e.ensamblaje_id_referido
-        FROM ensamblaje e
-        LEFT JOIN producto p ON p.id = e.producto_id
-        LEFT JOIN operario o ON o.id = e.operario_ortorgado
-        LEFT JOIN sucursal su ON su.id = e.sucursal
-        WHERE " . implode(' AND ', $where) . "
-        ORDER BY e.id DESC";
+        e.id AS ensamblaje_id,
+        e.producto_id,
+        p.codigo AS producto_codigo,
+        p.descripcion AS producto_descripcion,
+        e.operario_ortorgado AS operario_id,
+        o.nombre_completo AS operario_nombre,
+        su.nombre AS sucursal_nombre,
+        e.inicio,
+        e.fin,
+        e.cantidad_peso_kg,
+        e.deleted_at,
+        e.js_moldes_utilizados,
+        e.js_derivados_utilizados,
+        e.categoria_material_id,
+        cmm.nombre AS categoria_material_nombre,
+        " . subquerySelectComplementosUtilizados('e') . ",
+        e.js_producto_emsamblado,
+        e.ensamblaje_id_referido,
+        e.enviado_empaquetado,
+        e.fecha_envio_empaquetado
+    FROM ensamblaje e
+    LEFT JOIN producto p ON p.id = e.producto_id
+    LEFT JOIN operario o ON o.id = e.operario_ortorgado
+    LEFT JOIN sucursal su ON su.id = e.sucursal
+    LEFT JOIN categoria_material cmm ON cmm.id = e.categoria_material_id
+    WHERE " . implode(' AND ', $where) . "
+    ORDER BY e.id DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
@@ -690,6 +718,8 @@ function obtenerEnsamblaje($id)
             e.deleted_at,
             e.js_moldes_utilizados,
             e.js_derivados_utilizados,
+            e.enviado_empaquetado, 
+            e.fecha_envio_empaquetado,
             " . subquerySelectComplementosUtilizados('e') . ",
             e.js_producto_emsamblado,
             e.ensamblaje_id_referido,
@@ -703,6 +733,7 @@ function obtenerEnsamblaje($id)
         FROM ensamblaje e
         LEFT JOIN producto p ON p.id = e.producto_id
         LEFT JOIN operario o ON o.id = e.operario_ortorgado
+        LEFT JOIN categoria_material cmm ON cmm.id = e.categoria_material_id
         WHERE e.id = :id",
         ['id' => $id]
     );
@@ -1095,6 +1126,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
     $moldes = executeQuery($conectar, "
         SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
                pd.cantidad_producida_kg AS cantidad_kg, pd.fecha,
+               pd.categoria_material_id,
                cm.nombre AS categoria_material_nombre
         FROM rel_ensamblaje_producto rep
         JOIN produccion pd ON pd.id = rep.molde_produccion_id
@@ -1110,18 +1142,30 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.derivado_id IS NOT NULL
     ", ['id' => $ensamblajeId]);
 
+    // La categoría del ARMADO es la categoría de sus producciones vinculadas,
+    // solo si todas coinciden. Si hay categorías mixtas (o ninguna
+    // producción, ej. armado hecho solo con derivados), queda NULL: ese
+    // armado no puede complementar ni recibir complementos hasta que la
+    // categoría quede definida sin ambigüedad.
+    $categoriasDistintas = array_unique(array_filter(
+        array_column($moldes, 'categoria_material_id'),
+        fn($v) => $v !== null
+    ));
+    $categoriaMaterialId = count($categoriasDistintas) === 1 ? reset($categoriasDistintas) : null;
+
     executeNonQuery($conectar, "
         UPDATE ensamblaje SET
             js_moldes_utilizados    = :moldes,
-            js_derivados_utilizados = :derivados
+            js_derivados_utilizados = :derivados,
+            categoria_material_id   = :categoria_material_id
         WHERE id = :id
     ", [
         'id'        => $ensamblajeId,
         'moldes'    => json_encode($moldes, JSON_UNESCAPED_UNICODE),
         'derivados' => json_encode($derivados, JSON_UNESCAPED_UNICODE),
+        'categoria_material_id' => $categoriaMaterialId,
     ]);
 }
-
 // Soft delete: desactiva el ensamblaje, sus líneas activas de
 // rel_ensamblaje_producto (producción/derivado) Y libera los complementos
 // que tuviera tomados (ensamblaje_id_referido = NULL en esos otros
@@ -1363,7 +1407,8 @@ function marcarComplemento()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fin, producto_id, js_producto_emsamblado FROM ensamblaje WHERE id = :id",
+        "SELECT id, deleted_at, fin, producto_id, js_producto_emsamblado, categoria_material_id, enviado_empaquetado
+         FROM ensamblaje WHERE id = :id",
         ['id' => $id]
     );
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
@@ -1372,8 +1417,12 @@ function marcarComplemento()
     if (!empty($e['deleted_at'])) responder(false, 'No puedes marcar como complemento un ensamblaje inactivo.');
     if (empty($e['fin'])) responder(false, 'Solo puedes marcar como complemento un ensamblaje ya finalizado.');
     if (!empty($e['js_producto_emsamblado'])) responder(false, 'Este ensamblaje ya fue marcado como complemento.');
+    if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado; no puede marcarse como complemento.');
     if ($productoObjetivoId == $e['producto_id']) {
         responder(false, 'Un producto no puede complementarse a sí mismo.');
+    }
+    if ($e['categoria_material_id'] === null) {
+        responder(false, 'Este armado no tiene una categoría de material definida (o mezcla varias): no puede complementar. Envíalo a Empaquetado en su lugar.');
     }
 
     $productoObjetivo = executeQuery(
@@ -1383,6 +1432,20 @@ function marcarComplemento()
     );
     if (empty($productoObjetivo)) responder(false, 'El producto objetivo no existe o está inactivo.');
     $p = $productoObjetivo[0];
+
+    // Debe existir al menos un armado propio, vivo y libre, del producto
+    // objetivo, con la MISMA categoría de material.
+    $objetivoConMismaCategoria = executeQuery(
+        $conectar,
+        "SELECT id FROM ensamblaje
+         WHERE producto_id = :producto_id AND deleted_at IS NULL AND fin IS NOT NULL
+           AND ensamblaje_id_referido IS NULL AND categoria_material_id = :categoria_material_id
+         LIMIT 1",
+        ['producto_id' => $productoObjetivoId, 'categoria_material_id' => $e['categoria_material_id']]
+    );
+    if (empty($objetivoConMismaCategoria)) {
+        responder(false, "El producto {$p['codigo']} - {$p['descripcion']} no tiene un armado propio de la misma categoría de material. No pueden complementarse.");
+    }
 
     $jsProductoEmsamblado = json_encode([
         'producto_id' => $p['id'],
@@ -1413,6 +1476,52 @@ function marcarComplemento()
     ]);
 
     responder(true, "Ensamblaje marcado como complemento de {$p['codigo']} - {$p['descripcion']}.");
+}
+// Envía un ensamblaje YA FINALIZADO directo a Empaquetado, como producto
+// terminado independiente, SIN pasar por COMPLEMENTAR. Mutuamente
+// excluyente con "marcar como complemento": una vez elegido un camino,
+// el otro deja de estar disponible (el frontend oculta el botón; aquí se
+// revalida por si acaso).
+function pasarAEmpaquetado(int $id)
+{
+    $conectar = conectar_oll_BD();
+    if (!$id) responder(false, 'ID inválido.');
+
+    $existe = executeQuery(
+        $conectar,
+        "SELECT id, deleted_at, fin, enviado_empaquetado, js_producto_emsamblado
+         FROM ensamblaje WHERE id = :id",
+        ['id' => $id]
+    );
+    if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
+    $e = $existe[0];
+
+    if (!empty($e['deleted_at'])) responder(false, 'No puedes pasar a empaquetado un ensamblaje inactivo.');
+    if (empty($e['fin'])) responder(false, 'Solo puedes pasar a empaquetado un ensamblaje ya finalizado.');
+    if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado.');
+    if (!empty($e['js_producto_emsamblado'])) {
+        responder(false, 'Este ensamblaje ya fue marcado como complemento de otro producto; no puede pasar también a empaquetado.');
+    }
+
+    $cambios = [[
+        'campo' => 'Envío a empaquetado', 'valor_antes' => '(no enviado)',
+        'valor_despues' => 'Enviado a empaquetado',
+    ]];
+    $movimiento   = obtenerMovimientoSesion('enviar_empaquetado', $cambios);
+    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+    executeNonQuery($conectar, "
+        UPDATE ensamblaje SET
+            enviado_empaquetado     = TRUE,
+            fecha_envio_empaquetado = NOW(),
+            update_at               = NOW(),
+            js_usuario              = :js_session,
+            js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+        WHERE id = :id
+    ", ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]);
+
+    responder(true, 'Ensamblaje enviado a empaquetado correctamente.');
 }
 
 // =============================================================================

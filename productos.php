@@ -559,8 +559,7 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
     }
 
     const configActual      = jsonProd.producto.js_configuracion || [];
-    const configVentaActual = jsonProd.producto.js_configuracion_venta || {};
-
+    const configVentaActual = jsonProd.producto.js_configuracion_empaquetado || {};
     document.getElementById('config_producto_id').value = productoId;
     document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
 

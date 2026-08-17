@@ -1020,8 +1020,7 @@ async function obtenerOpcionesMaterialesProd() {
 function agruparProduccionesPorProducto(producciones) {
     const grupos = new Map();
     producciones.forEach(p => {
-        const partes = (p.molde_producto || '').split(' — ');
-        const nombreProducto = partes.length > 1 ? partes[1].trim() : 'Sin producto asociado';
+        const nombreProducto = p.producto_descripcion || 'Sin producto asociado';
         if (!grupos.has(nombreProducto)) grupos.set(nombreProducto, []);
         grupos.get(nombreProducto).push(p);
     });
