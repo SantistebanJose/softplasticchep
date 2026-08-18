@@ -208,6 +208,9 @@ function listarEnsamblajesParaEmpaquetado()
                 p.codigo AS producto_codigo,
                 p.descripcion AS producto_descripcion,
                 e.cantidad_peso_kg,
+                e.unidad_salida_id,
+                us.nombre_corto AS unidad_salida_codigo,
+                us.nombre AS unidad_salida_nombre,
                 e.fin,
                 o.nombre_completo AS operario_ensamblaje_nombre,
                 (
@@ -226,6 +229,7 @@ function listarEnsamblajesParaEmpaquetado()
             LEFT JOIN empaquetado ee ON e.id = ee.emsamblaje_id
             LEFT JOIN producto p ON p.id = e.producto_id
             LEFT JOIN operario o ON o.id = e.operario_ortorgado
+            LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
             WHERE " . implode(' AND ', $where) . "
             ORDER BY e.fin DESC";
 

@@ -369,8 +369,8 @@ async function cargarPendientesEmpaquetado() {
             </div>
             <div class="pc-emp-card-body">
                 <div class="pc-emp-field">
-                    <span class="lbl">Peso ensamblado</span>
-                    <span class="val">${formatearCantidadEmp(e.cantidad_peso_kg)} kg</span>
+                    <span class="lbl">Cantidad ensamblada</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_peso_kg)} ${e.unidad_salida_codigo || 'kg'}</span>
                 </div>
                 <div class="pc-emp-field">
                     <span class="lbl">Registros de empaquetado</span>
