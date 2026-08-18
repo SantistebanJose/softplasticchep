@@ -159,6 +159,9 @@ function controladorEnsamblaje($accion)
         case 'GUARDARENSAMBLAJE':
             guardarEnsamblaje();
             break;
+        case 'FUSIONARENSAMBLAJE':
+            fusionarEnsamblaje();
+            break;
         case 'ELIMINARENSAMBLAJE':
             eliminarEnsamblaje();
             break;
@@ -440,15 +443,32 @@ function buscarProductosParaComplementar()
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT DISTINCT ON (t2.id)
+    // NUEVO: se agrega el color del armado candidato (resuelto desde la
+    // primera producción vinculada vía rel_ensamblaje_producto -> produccion)
+    // para que el select del modal pueda mostrar "Producto (Color)" y el
+    // usuario elija el destino exacto, no solo el producto en general.
+    // DISTINCT ON ahora es por (producto_id, color_id): si el mismo
+    // producto tiene armados libres de distintos colores, aparecen como
+    // opciones separadas.
+    $sql = "SELECT DISTINCT ON (t2.id, col.color_id)
                 t1.id AS ensamblaje_id,
                 t2.id AS producto_id,
                 t2.codigo,
-                t2.descripcion AS producto
+                t2.descripcion AS producto,
+                col.color_id,
+                col.color_nombre
             FROM ensamblaje t1
             JOIN producto t2 ON t1.producto_id = t2.id
+            LEFT JOIN LATERAL (
+                SELECT pd.color_id, co.nombre AS color_nombre
+                FROM rel_ensamblaje_producto rep
+                JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                LEFT JOIN color co ON co.id = pd.color_id
+                WHERE rep.ensamblaje_id = t1.id AND rep.deleted_at IS NULL
+                LIMIT 1
+            ) col ON true
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY t2.id, t1.fin DESC";
+            ORDER BY t2.id, col.color_id, t1.fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['productos' => $result]);
@@ -675,6 +695,12 @@ function listarEnsamblajes()
         e.inicio,
         e.fin,
         e.cantidad_peso_kg,
+        e.unidad_salida_id,
+        us.nombre_corto AS unidad_salida_codigo,
+        us.nombre AS unidad_salida_nombre,
+        NULLIF(p.js_configuracion_empaquetado->>'salida_ensamblaje_unidad_medida_id','')::bigint AS producto_unidad_ensamblaje_id,
+        upe.nombre_corto AS producto_unidad_ensamblaje_codigo,
+        upe.nombre AS producto_unidad_ensamblaje_nombre,
         e.deleted_at,
         e.js_moldes_utilizados,
         e.js_derivados_utilizados,
@@ -690,6 +716,8 @@ function listarEnsamblajes()
     LEFT JOIN operario o ON o.id = e.operario_ortorgado
     LEFT JOIN sucursal su ON su.id = e.sucursal
     LEFT JOIN categoria_material cmm ON cmm.id = e.categoria_material_id
+    LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
+    LEFT JOIN unidad_medida upe ON upe.id = NULLIF(p.js_configuracion_empaquetado->>'salida_ensamblaje_unidad_medida_id','')::bigint
     WHERE " . implode(' AND ', $where) . "
     ORDER BY e.id DESC";
 
@@ -1334,26 +1362,51 @@ function iniciarEnsamblaje(int $id)
 // Marca el fin real del armado con la hora del servidor. Exige el peso
 // (kg) de salida del armado ('peso_kg'), que se guarda en
 // ensamblaje.cantidad_peso_kg.
+// Marca el fin real del armado con la hora del servidor. Exige la cantidad
+// de salida del armado ('peso_kg', nombre del parámetro conservado por
+// compatibilidad con el frontend, aunque ahora puede representar kg,
+// unidades, u otra unidad configurada en producto.js_configuracion_empaquetado
+// .salida_ensamblaje_unidad_medida_id). Se guarda en
+// ensamblaje.cantidad_peso_kg (columna conservada por compatibilidad) +
+// ensamblaje.unidad_salida_id (snapshot de qué unidad se usó). Si el
+// producto no tiene esa config definida, se asume kg (comportamiento
+// previo a este cambio, para no romper productos ya configurados solo
+// parcialmente).
 function finalizarEnsamblaje(int $id)
 {
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
-    $pesoKg = isset($_POST['peso_kg']) && $_POST['peso_kg'] !== '' ? floatval($_POST['peso_kg']) : null;
+    $cantidadSalida = isset($_POST['peso_kg']) && $_POST['peso_kg'] !== '' ? floatval($_POST['peso_kg']) : null;
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, inicio, fin, producto_id FROM ensamblaje WHERE id = :id",
+        "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id,
+                p.js_configuracion_empaquetado
+         FROM ensamblaje e
+         LEFT JOIN producto p ON p.id = e.producto_id
+         WHERE e.id = :id",
         ['id' => $id]
     );
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
     $ensamblaje = $existe[0];
 
+    $configEmpaquetado = json_decode($ensamblaje['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
+    $unidadSalidaId = !empty($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
+        ? intval($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
+        : null;
+
+    $unidadLabel = 'kg';
+    if ($unidadSalidaId) {
+        $u = executeQuery($conectar, "SELECT nombre_corto FROM unidad_medida WHERE id = :id", ['id' => $unidadSalidaId]);
+        if (!empty($u)) $unidadLabel = $u[0]['nombre_corto'];
+    }
+
     if (!empty($ensamblaje['deleted_at'])) responder(false, 'No puedes finalizar un ensamblaje inactivo.');
     if (empty($ensamblaje['inicio'])) responder(false, 'Primero debes iniciar el ensamblaje.');
     if (!empty($ensamblaje['fin'])) responder(false, 'Este ensamblaje ya fue finalizado.');
-    if ($pesoKg === null || $pesoKg <= 0) {
-        responder(false, 'Debes indicar el peso (kg) de salida de este armado para poder finalizarlo.');
+    if ($cantidadSalida === null || $cantidadSalida <= 0) {
+        responder(false, "Debes indicar la cantidad de salida ($unidadLabel) de este armado para poder finalizarlo.");
     }
 
     $conectar->beginTransaction();
@@ -1361,7 +1414,7 @@ function finalizarEnsamblaje(int $id)
         $cambios = [[
             'campo' => 'Fin de ensamblaje',
             'valor_antes' => '(en curso)',
-            'valor_despues' => "Finalizado ahora · {$pesoKg} kg",
+            'valor_despues' => "Finalizado ahora · {$cantidadSalida} {$unidadLabel}",
         ]];
         $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1370,16 +1423,18 @@ function finalizarEnsamblaje(int $id)
         executeNonQuery($conectar, "
             UPDATE ensamblaje SET
                 fin              = NOW(),
-                cantidad_peso_kg = :peso_kg,
+                cantidad_peso_kg = :cantidad_salida,
+                unidad_salida_id = :unidad_salida_id,
                 update_at        = NOW(),
                 js_usuario       = :js_session,
                 js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'id'           => $id,
-            'peso_kg'      => $pesoKg,
-            'js_session'   => $js_session,
-            'js_historial' => $js_historial,
+            'id'               => $id,
+            'cantidad_salida'  => $cantidadSalida,
+            'unidad_salida_id' => $unidadSalidaId,
+            'js_session'       => $js_session,
+            'js_historial'     => $js_historial,
         ]);
 
         $conectar->commit();
@@ -1390,7 +1445,6 @@ function finalizarEnsamblaje(int $id)
         responder(false, 'No se pudo finalizar el ensamblaje: ' . $e->getMessage());
     }
 }
-
 // Marca un ensamblaje YA FINALIZADO como complemento de otro producto
 // ($producto_objetivo_id). Solo guarda la intención en
 // ensamblaje.js_producto_emsamblado; NO toca ensamblaje_id_referido — ese
@@ -1522,6 +1576,107 @@ function pasarAEmpaquetado(int $id)
     ", ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]);
 
     responder(true, 'Ensamblaje enviado a empaquetado correctamente.');
+}
+
+// Fusiona el ensamblaje $origenId dentro de $destinoId: mueve todas sus
+// líneas activas de rel_ensamblaje_producto (producciones Y derivados,
+// ambas viven en la misma tabla) hacia el destino, transfiere también
+// cualquier complemento que el origen tuviera tomado (ensamblaje_id_referido
+// apuntando a él), y deja el origen inactivo como constancia histórica.
+// Reglas: mismo producto_id, origen no enviado a empaquetado ni marcado/
+// tomado como complemento de otra cosa, destino aún abierto (sin fin,
+// sin enviar a empaquetado, sin marcar como complemento).
+function fusionarEnsamblaje()
+{
+    $conectar  = conectar_oll_BD();
+    $origenId  = intval($_POST['origen_id'] ?? 0);
+    $destinoId = intval($_POST['destino_id'] ?? 0);
+
+    if (!$origenId) responder(false, 'ID de origen inválido.');
+    if (!$destinoId) responder(false, 'ID de destino inválido.');
+    if ($origenId === $destinoId) responder(false, 'No puedes fusionar un ensamblaje consigo mismo.');
+
+    $origenRows  = executeQuery($conectar, "SELECT * FROM ensamblaje WHERE id = :id", ['id' => $origenId]);
+    $destinoRows = executeQuery($conectar, "SELECT * FROM ensamblaje WHERE id = :id", ['id' => $destinoId]);
+    if (empty($origenRows))  responder(false, 'El ensamblaje de origen no existe.');
+    if (empty($destinoRows)) responder(false, 'El ensamblaje de destino no existe.');
+    $o = $origenRows[0];
+    $d = $destinoRows[0];
+
+    if (!empty($o['deleted_at'])) responder(false, 'El ensamblaje de origen ya está inactivo.');
+    if (!empty($d['deleted_at'])) responder(false, 'El ensamblaje de destino está inactivo.');
+    if ($o['producto_id'] != $d['producto_id']) responder(false, 'Solo puedes fusionar armados del mismo producto.');
+    if (!empty($o['enviado_empaquetado'])) responder(false, 'El armado de origen ya fue enviado a empaquetado; no puede fusionarse.');
+    if (!empty($o['js_producto_emsamblado'])) responder(false, 'El armado de origen ya fue marcado como complemento de otro producto; no puede fusionarse.');
+    if (!empty($o['ensamblaje_id_referido'])) responder(false, 'El armado de origen ya fue tomado como complemento dentro de otro armado; no puede fusionarse.');
+    if (!empty($d['fin'])) responder(false, 'El armado de destino ya fue finalizado; no puede recibir más líneas.');
+    if (!empty($d['enviado_empaquetado'])) responder(false, 'El armado de destino ya fue enviado a empaquetado.');
+    if (!empty($d['js_producto_emsamblado'])) responder(false, 'El armado de destino ya fue marcado como complemento de otro producto.');
+
+    $conectar->beginTransaction();
+    try {
+        // Mueve TODAS las líneas activas de origen -> destino (producciones
+        // y derivados viven en la misma tabla, un solo UPDATE cubre ambas).
+        executeNonQuery($conectar, "
+            UPDATE rel_ensamblaje_producto
+            SET ensamblaje_id = :destino_id, update_at = NOW()
+            WHERE ensamblaje_id = :origen_id AND deleted_at IS NULL
+        ", ['destino_id' => $destinoId, 'origen_id' => $origenId]);
+
+        // Transfiere también cualquier complemento que el origen tuviera
+        // tomado (ensamblaje_id_referido apuntando al origen) hacia el
+        // destino, en vez de dejarlo huérfano apuntando a un registro
+        // inactivo.
+        executeNonQuery($conectar, "
+            UPDATE ensamblaje
+            SET ensamblaje_id_referido = :destino_id, update_at = NOW()
+            WHERE ensamblaje_id_referido = :origen_id AND deleted_at IS NULL
+        ", ['destino_id' => $destinoId, 'origen_id' => $origenId]);
+
+        $pesoOrigenTxt = $o['cantidad_peso_kg'] !== null ? ($o['cantidad_peso_kg'] . ' kg') : 'sin peso registrado';
+
+        $movOrigen = obtenerMovimientoSesion('fusionar_origen', [[
+            'campo' => 'Fusión', 'valor_antes' => 'Activo',
+            'valor_despues' => "Fusionado dentro del ensamblaje #$destinoId (inactivado)",
+        ]]);
+        executeNonQuery($conectar, "
+            UPDATE ensamblaje SET
+                deleted_at   = NOW(),
+                update_at    = NOW(),
+                js_usuario   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id
+        ", [
+            'id'           => $origenId,
+            'js_session'   => json_encode($movOrigen, JSON_UNESCAPED_UNICODE),
+            'js_historial' => json_encode([$movOrigen], JSON_UNESCAPED_UNICODE),
+        ]);
+
+        $movDestino = obtenerMovimientoSesion('fusionar_destino', [[
+            'campo' => 'Fusión', 'valor_antes' => '(sin fusión)',
+            'valor_despues' => "Absorbió las líneas del ensamblaje #$origenId ($pesoOrigenTxt)",
+        ]]);
+        executeNonQuery($conectar, "
+            UPDATE ensamblaje SET
+                update_at    = NOW(),
+                js_usuario   = :js_session,
+                js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id
+        ", [
+            'id'           => $destinoId,
+            'js_session'   => json_encode($movDestino, JSON_UNESCAPED_UNICODE),
+            'js_historial' => json_encode([$movDestino], JSON_UNESCAPED_UNICODE),
+        ]);
+
+        recalcularResumenesEnsamblaje($conectar, $destinoId);
+
+        $conectar->commit();
+        responder(true, "Ensamblaje #$origenId fusionado dentro de #$destinoId correctamente.");
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error fusionando ensamblaje: " . $e->getMessage());
+        responder(false, 'No se pudo fusionar el ensamblaje: ' . $e->getMessage());
+    }
 }
 
 // =============================================================================

@@ -219,6 +219,13 @@ include("header.php");
     padding:6px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px;
 }
 .pc-ens-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
+
+.pc-btn-fusionar{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #475569;
+    background:#EEF1F5; color:#475569; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-fusionar:hover{ background:#475569; color:#fff; }
 </style>
 
 <div class="pc-card">
@@ -640,6 +647,7 @@ function tarjetaEnsamblajeHtml(e) {
     const puedeIniciar   = !e.deleted_at && !e.inicio;
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
+    const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
     const esDePrimera = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de primera';
     const puedeDecidirDestino = !e.deleted_at && e.fin && !productoEmsamblado && !e.enviado_empaquetado;
     const puedeComplementar = puedeDecidirDestino && esDePrimera;
@@ -665,8 +673,8 @@ function tarjetaEnsamblajeHtml(e) {
                 <span class="val">${e.sucursal_nombre ?? '-'}</span>
             </div>
             <div class="pc-ens-field">
-                <span class="lbl">Peso total</span>
-                <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} kg</span>
+                <span class="lbl">Cantidad de salida</span>
+                <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} ${e.unidad_salida_codigo || e.producto_unidad_ensamblaje_codigo || 'kg'}</span>
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Categoría material</span>
@@ -756,6 +764,11 @@ function tarjetaEnsamblajeHtml(e) {
                 <button type="button" class="pc-btn-empaquetado" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})" title="Enviar directo a empaquetado">
                     <i class="fa-solid fa-box"></i> A Empaquetado</button>
             ` : ''}
+            ${puedeFusionar
+                ? `<button type="button" class="pc-btn-fusionar" onclick="fusionarEnsamblajeAccion(${e.ensamblaje_id})" title="Fusionar con otro armado del mismo producto">
+                    <i class="fa-solid fa-code-merge"></i> Fusionar</button>`
+                : ''
+            }
             ${!e.deleted_at
                 ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
@@ -852,6 +865,65 @@ async function obtenerProductosParaComplementar(excluirId) {
     return json.success ? (json.productos || []) : [];
 }
 
+async function fusionarEnsamblajeAccion(origenId) {
+    const origen = ensamblajesCache.find(e => e.ensamblaje_id === origenId);
+    if (!origen) { Swal.fire('Error', 'No se encontró el ensamblaje de origen.', 'error'); return; }
+
+    // Candidatos: mismo producto, activos, aún abiertos (sin finalizar),
+    // sin enviar a empaquetado, sin marcar como complemento.
+    const candidatos = ensamblajesCache.filter(e =>
+        e.ensamblaje_id !== origenId &&
+        e.producto_id === origen.producto_id &&
+        !e.deleted_at &&
+        !e.fin &&
+        !e.enviado_empaquetado &&
+        !parseJsonObjetoColumna(e.js_producto_emsamblado)
+    );
+
+    if (candidatos.length === 0) {
+        Swal.fire('Aviso', 'No hay otro armado abierto (sin finalizar) del mismo producto para fusionar. Solo se puede fusionar hacia un armado que aún no haya sido finalizado.', 'warning');
+        return;
+    }
+
+    const opciones = candidatos.map(e =>
+        `<option value="${e.ensamblaje_id}">#${e.ensamblaje_id} · ${formatearCantidadEns(e.cantidad_peso_kg)} kg · ${e.inicio ? 'En curso' : 'Sin iniciar'}</option>`
+    ).join('');
+
+    const { value: destinoId } = await Swal.fire({
+        title: `Fusionar #${origenId} dentro de...`,
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">
+                   El armado #${origenId} quedará inactivo y sus producciones/derivados se moverán al armado que elijas.
+               </p>
+               <select id="swal-fusion-destino" class="form-select">
+                   <option value="">Selecciona un armado destino...</option>
+                   ${opciones}
+               </select>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Continuar',
+        cancelButtonText: 'Cancelar',
+        preConfirm: () => {
+            const val = document.getElementById('swal-fusion-destino').value;
+            if (!val) { Swal.showValidationMessage('Debes elegir un armado destino.'); return false; }
+            return val;
+        }
+    });
+    if (!destinoId) return;
+
+    const confirmacion = await Swal.fire({
+        title: '¿Confirmar fusión?',
+        text: `El armado #${origenId} quedará inactivo (como constancia) y sus líneas pasarán a formar parte de #${destinoId}. No se puede deshacer automáticamente.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, fusionar',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    const json = await llamarEnsamblaje('FUSIONARENSAMBLAJE', { origen_id: origenId, destino_id: destinoId });
+    if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
+    else { Swal.fire('Error', json.message, 'error'); }
+}
 async function marcarComplementoAccion(id) {
     const confirmacion = await Swal.fire({
         title: '¿Pasar este armado a Complementar?',
@@ -865,14 +937,19 @@ async function marcarComplementoAccion(id) {
 
     const productos = await obtenerProductosParaComplementar(id);
     if (!productos || productos.length === 0) {
-        Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre).', 'warning');
+        Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre, de la misma categoría de material).', 'warning');
         return;
     }
-    const opciones = productos.map(p => `<option value="${p.producto_id}">${p.codigo} - ${p.producto}</option>`).join('');
+    // Se muestra "Código - Descripción (Color)" para que el usuario elija
+    // el producto+color exacto al que va a complementar, ya que un mismo
+    // producto puede tener varios armados libres en colores distintos.
+    const opciones = productos.map(p =>
+        `<option value="${p.producto_id}">${p.codigo} - ${p.producto}${p.color_nombre ? ' (' + p.color_nombre + ')' : ''}</option>`
+    ).join('');
 
     const { value: productoObjetivoId } = await Swal.fire({
         title: 'Marcar como complemento',
-        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto final al que este armado ya finalizado va a complementar.</p>
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto y color final al que este armado ya finalizado va a complementar.</p>
                <select id="swal-complemento-producto" class="form-select">
                    <option value="">Selecciona un producto...</option>
                    ${opciones}
@@ -1347,22 +1424,28 @@ function iniciarEnsamblajeAccion(id) {
     });
 }
 
-// El controlador exige 'peso_kg' (>0) para finalizar: se pide con un
-// input numérico en el mismo diálogo de confirmación.
+// El controlador exige 'peso_kg' (nombre conservado por compatibilidad,
+// >0) para finalizar: se pide con un input numérico, mostrando la unidad
+// que el producto tiene configurada en Productos > Salida en Ensamblaje
+// (fallback a kg si el producto aún no tiene esa config).
 function finalizarEnsamblajeAccion(id) {
+    const e = ensamblajesCache.find(x => x.ensamblaje_id === id);
+    const unidadCodigo = e?.producto_unidad_ensamblaje_codigo || 'kg';
+    const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
+
     Swal.fire({
         title: '¿Finalizar el armado?',
-        html: 'Indica el peso (kg) de salida de este armado.',
+        html: `Indica la cantidad de salida (<b>${unidadCodigo}</b> · ${unidadNombre}) de este armado.`,
         icon: 'question',
         input: 'number',
         inputAttributes: { min: 0, step: '0.01' },
-        inputPlaceholder: 'Peso en kg',
+        inputPlaceholder: `Cantidad en ${unidadCodigo}`,
         showCancelButton: true,
         confirmButtonText: 'Sí, finalizar',
         cancelButtonText: 'Cancelar',
         inputValidator: (value) => {
             if (!value || parseFloat(value) <= 0) {
-                return 'Ingresa un peso válido mayor a 0.';
+                return 'Ingresa una cantidad válida mayor a 0.';
             }
         }
     }).then(async (result) => {
