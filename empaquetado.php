@@ -7,10 +7,13 @@ include("header.php");
 ?>
 
 <!--
-    empaquetado.php (REESCRITO 2026-07-30 v4)
+    empaquetado.php (REESCRITO 2026-07-30 v4 + tabs de navegación 2026-08-18)
 
     MODELO DE UI:
-    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO).
+    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
+       ahora con una barra de TABS por producto (estilo "Todos / Producto A / Producto B..."
+       con badge de conteo), filtrado 100% client-side sobre lo ya cargado —
+       no se vuelve a pedir al backend al cambiar de tab.
     2) Grid de producciones DIRECTAS a empaquetado, sin pasar por ensamblaje
        (LISTARPRODUCCIONESPARAEMPAQUETADO) — moldes/productos configurados
        con necesita_ensamblaje = 'no'.
@@ -87,6 +90,33 @@ include("header.php");
 /* ── Listado general ── */
 .pc-listado-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
 .pc-listado-filtros select, .pc-listado-filtros input[type="date"]{ max-width:180px; }
+
+/* ── NUEVO: barra de tabs por producto (estilo captura de referencia) ── */
+.pc-emp-tabsbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    flex-wrap:wrap; border-bottom:1px solid #eee7db; margin-bottom:16px; padding-bottom:0;
+}
+.pc-emp-tabs{
+    display:flex; align-items:center; gap:4px; overflow-x:auto; flex:1;
+    scrollbar-width:thin;
+}
+.pc-emp-tab{
+    display:flex; align-items:center; gap:8px; padding:10px 14px;
+    border:none; background:transparent; white-space:nowrap;
+    font-size:.86em; font-weight:600; color:#8a8578;
+    border-bottom:2px solid transparent; cursor:pointer; transition:.12s ease;
+}
+.pc-emp-tab:hover{ color:#3a3730; }
+.pc-emp-tab.activo{ color:#1f2937; border-bottom-color:#2F6FED; }
+.pc-emp-tab .tab-icono{ font-size:.9em; color:#b7b1a1; }
+.pc-emp-tab.activo .tab-icono{ color:#2F6FED; }
+.pc-emp-tab-count{
+    background:#f1efe9; color:#8a8578; border-radius:999px;
+    font-size:.78em; font-weight:700; padding:1px 8px; min-width:20px; text-align:center;
+}
+.pc-emp-tab.activo .pc-emp-tab-count{ background:#1f2937; color:#fff; }
+.pc-emp-tabs-right{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-bottom:10px; }
+.pc-emp-tabs-right input[type="text"]{ max-width:220px; }
 </style>
 
 <div class="pc-card">
@@ -94,13 +124,23 @@ include("header.php");
         <h2>Empaquetado</h2>
     </div>
 
-    <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
-        <br>
-        <input type="text" id="femp_texto" class="form-control" style="max-width:260px"
-               placeholder="Buscar por producto...">
-        <div class="form-check d-flex align-items-center gap-2" style="margin-left:4px;">
-            <input class="form-check-input" type="checkbox" id="femp_solo_sin">
-            <label class="form-check-label" for="femp_solo_sin" style="font-size:.85em;">Solo sin empaquetar aún</label>
+    <!-- Barra de tabs por producto: se genera dinámicamente en JS a partir
+         de lo que devuelve LISTARENSAMBLAJESPARAEMPAQUETADO. Cambiar de tab
+         NO vuelve a pedir al backend: filtra lo ya cargado en memoria. -->
+    <div class="pc-emp-tabsbar">
+        <div class="pc-emp-tabs" id="tabsEmpaquetado">
+            <button type="button" class="pc-emp-tab activo" data-tab="__todos__" onclick="seleccionarTabEmp('__todos__')">
+                <i class="fa-solid fa-grip"></i>
+                <span>Todos</span>
+                <span class="pc-emp-tab-count" id="tabCountTodos">0</span>
+            </button>
+        </div>
+        <div class="pc-emp-tabs-right">
+            <input type="text" id="femp_texto" class="form-control form-control-sm" placeholder="Buscar por producto...">
+            <div class="form-check d-flex align-items-center gap-2 m-0">
+                <input class="form-check-input" type="checkbox" id="femp_solo_sin">
+                <label class="form-check-label" for="femp_solo_sin" style="font-size:.85em;">Solo sin empaquetar</label>
+            </div>
         </div>
     </div>
 
@@ -252,6 +292,10 @@ let empOperariosCache = null;
 let bultosState = []; // [{tempId, valor}]
 let contadorBulto = 0;
 
+// ── NUEVO: estado de tabs por producto (100% client-side) ──
+let cacheFilasEmpaquetado = [];   // último resultado de LISTARENSAMBLAJESPARAEMPAQUETADO
+let tabActivoEmp = '__todos__';   // clave de tab activa (producto_codigo, o "__todos__")
+
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
     cargarProduccionesDirectasEmpaquetado();
@@ -344,12 +388,80 @@ async function cargarPendientesEmpaquetado() {
 
     if (!json.success) {
         grid.innerHTML = `<div class="pc-emp-empty">${json.message}</div>`;
+        cacheFilasEmpaquetado = [];
+        renderTabsEmp();
         return;
     }
 
-    const filas = json.ensamblajes || [];
+    cacheFilasEmpaquetado = json.ensamblajes || [];
+
+    // Si el producto de la tab activa ya no está presente (por el filtro de
+    // texto, por ejemplo), volvemos a "Todos" para no dejar la grilla vacía
+    // sin que el usuario entienda por qué.
+    if (tabActivoEmp !== '__todos__' && !cacheFilasEmpaquetado.some(f => claveTabEmp(f) === tabActivoEmp)) {
+        tabActivoEmp = '__todos__';
+    }
+
+    renderTabsEmp();
+    renderGridEmpaquetadoFiltrado();
+}
+
+// Clave estable para agrupar por producto en las tabs.
+function claveTabEmp(fila) {
+    return fila.producto_id != null ? `id:${fila.producto_id}` : `cod:${fila.producto_codigo ?? ''}`;
+}
+
+// Construye la barra de tabs (Todos + un tab por producto) a partir de
+// cacheFilasEmpaquetado. No dispara ningún fetch: solo pinta lo ya cargado.
+function renderTabsEmp() {
+    const cont = document.getElementById('tabsEmpaquetado');
+
+    const grupos = new Map(); // clave -> { label, count }
+    cacheFilasEmpaquetado.forEach(f => {
+        const clave = claveTabEmp(f);
+        const label = `${f.producto_codigo ?? ''} - ${f.producto_descripcion ?? 'Sin nombre'}`;
+        if (!grupos.has(clave)) grupos.set(clave, { label, count: 0 });
+        grupos.get(clave).count++;
+    });
+
+    // Orden alfabético por descripción de producto.
+    const tabs = [...grupos.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+
+    const tabTodosHtml = `
+        <button type="button" class="pc-emp-tab ${tabActivoEmp === '__todos__' ? 'activo' : ''}"
+                onclick="seleccionarTabEmp('__todos__')">
+            <i class="fa-solid fa-grip tab-icono"></i>
+            <span>Todos</span>
+            <span class="pc-emp-tab-count">${cacheFilasEmpaquetado.length}</span>
+        </button>`;
+
+    const tabsProductoHtml = tabs.map(([clave, info]) => `
+        <button type="button" class="pc-emp-tab ${tabActivoEmp === clave ? 'activo' : ''}"
+                onclick="seleccionarTabEmp('${clave}')" title="${info.label.replace(/"/g, '&quot;')}">
+            <i class="fa-solid fa-layer-group tab-icono"></i>
+            <span>${info.label}</span>
+            <span class="pc-emp-tab-count">${info.count}</span>
+        </button>`).join('');
+
+    cont.innerHTML = tabTodosHtml + tabsProductoHtml;
+}
+
+// Cambiar de tab es puramente local: no vuelve a pedir nada al backend.
+function seleccionarTabEmp(clave) {
+    tabActivoEmp = clave;
+    renderTabsEmp();
+    renderGridEmpaquetadoFiltrado();
+}
+
+// Pinta el grid aplicando el filtro de tab sobre lo ya cargado en cache.
+function renderGridEmpaquetadoFiltrado() {
+    const grid = document.getElementById('gridEmpaquetado');
+    const filas = tabActivoEmp === '__todos__'
+        ? cacheFilasEmpaquetado
+        : cacheFilasEmpaquetado.filter(f => claveTabEmp(f) === tabActivoEmp);
+
     if (filas.length === 0) {
-        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados todavía.</div>';
+        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados para este filtro.</div>';
         return;
     }
 

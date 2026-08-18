@@ -226,6 +226,51 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-fusionar:hover{ background:#475569; color:#fff; }
+
+/* ---------- TomSelect multi-operarios: chips compactas tipo "pill" ---------- */
+#ens_operarios_ids-ts-control{
+    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    min-height:42px; padding:6px 8px; border:1px solid #ced4da; border-radius:8px;
+    background:#fff;
+}
+.ts-wrapper.multi .ts-control{
+    padding:6px 8px !important;
+}
+.ts-wrapper.multi .ts-control > div{
+    display:inline-flex; align-items:center; gap:6px;
+    background:#EAF0FE !important; color:#1f2430 !important;
+    border:1px solid #cddafc !important; border-radius:999px !important;
+    padding:4px 6px 4px 4px !important; margin:2px !important;
+    font-size:.82em; font-weight:600; max-width:100%;
+}
+.ts-wrapper.multi .ts-control > div .pc-op-avatar{
+    width:20px; height:20px; border-radius:50%; flex:0 0 auto;
+    background:#2F6FED; color:#fff; font-size:.68em; font-weight:800;
+    display:flex; align-items:center; justify-content:center; text-transform:uppercase;
+}
+.ts-wrapper.multi .ts-control > div .pc-op-nombre{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px;
+}
+.ts-wrapper.multi .ts-control > div .remove{
+    border-left:none !important; color:#7d8aa8 !important; padding:0 2px !important;
+    margin-left:2px !important; font-size:1.05em; line-height:1;
+}
+.ts-wrapper.multi .ts-control > div .remove:hover{
+    color:#c94a4a !important; background:transparent !important;
+}
+.ts-wrapper.multi .ts-control input{
+    font-size:.85em !important;
+}
+.ts-dropdown{
+    border-radius:10px !important; border-color:#e2ddcd !important;
+    box-shadow:0 8px 20px rgba(0,0,0,.09) !important;
+}
+.ts-dropdown .option{
+    padding:8px 12px !important; font-size:.88em;
+}
+.ts-dropdown .option:hover, .ts-dropdown .active{
+    background:#EAF0FE !important;
+}
 </style>
 
 <div class="pc-card">
@@ -281,10 +326,8 @@ include("header.php");
                 </select>
             </div>
             <div class="col-md-4 mb-2">
-                <label class="form-label">Operario</label>
-                <select class="form-select" id="ens_operario_id">
-                    <option value="">Selecciona...</option>
-                </select>
+                <label class="form-label">Operarios que participaron *</label>
+                <select class="form-select" id="ens_operarios_ids" multiple></select>
             </div>
             <div class="col-md-3 mb-2">
                 <label class="form-label">Sucursal</label>
@@ -626,11 +669,15 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
         if (seleccion.sucursal_id) sSuc.value = seleccion.sucursal_id;
     
 
-    const sOp = document.getElementById('ens_operario_id');
-    sOp.innerHTML = '<option value="">Selecciona...</option>';
-    if (operario.success) operario.operario.forEach(o =>
-        sOp.insertAdjacentHTML('beforeend', `<option value="${o.id}">${o.nombre_completo}${o.cargo ? ' - ' + o.cargo : ''}</option>`));
-    if (seleccion.operario_id) sOp.value = seleccion.operario_id;
+    inicializarTomSelectOperariosEns();
+    tsOperariosEns.clearOptions();
+    tsOperariosEns.clear();
+    if (operario.success) operario.operario.forEach(o => {
+        tsOperariosEns.addOption({ id: o.id, nombre_completo: o.nombre_completo, cargo: o.cargo });
+    });
+    if (Array.isArray(seleccion.operario_ids) && seleccion.operario_ids.length > 0) {
+        tsOperariosEns.setValue(seleccion.operario_ids.map(String));
+    }
 }
 
 
@@ -664,9 +711,17 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
         </div>
         <div class="pc-ens-card-body">
-            <div class="pc-ens-field">
-                <span class="lbl">Operario</span>
-                <span class="val">${e.operario_nombre ?? '-'}</span>
+            <div class="pc-ens-field span-2">
+                <span class="lbl">Operarios</span>
+                <span class="val">
+                    ${parseJsonColumna(e.js_operarios).length > 0
+                        ? parseJsonColumna(e.js_operarios).map(o =>
+                            `<span class="badge-complemento" style="background:#EEF1F5;color:#475569;border-color:#d6dbe3;margin:2px 6px 2px 0;">
+                                <i class="fa-solid fa-user"></i> ${o.nombre_completo}
+                            </span>`
+                        ).join('')
+                        : '-'}
+                </span>
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Sucursal</span>
@@ -1169,6 +1224,46 @@ function agregarLineaDetalle(tipo, datos) {
     renderGridDetalle();
 }
 
+let tsOperariosEns = null;
+function inicializarTomSelectOperariosEns() {
+    if (tsOperariosEns) return;
+    tsOperariosEns = new TomSelect('#ens_operarios_ids', {
+        valueField: 'id',
+        labelField: 'nombre_completo',
+        searchField: ['nombre_completo'],
+        options: [],
+        plugins: ['remove_button'],
+        placeholder: 'Buscar y agregar operarios...',
+        render: {
+            option: function (data, escape) {
+                const iniciales = obtenerInicialesOperario(data.nombre_completo);
+                return `<div style="display:flex;align-items:center;gap:8px;">
+                    <span class="pc-op-avatar" style="width:24px;height:24px;border-radius:50%;background:#2F6FED;color:#fff;font-size:.7em;font-weight:800;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">${iniciales}</span>
+                    <div>
+                        <div>${escape(data.nombre_completo)}</div>
+                        ${data.cargo ? `<div class="text-muted small">${escape(data.cargo)}</div>` : ''}
+                    </div>
+                </div>`;
+            },
+            item: function (data, escape) {
+                const iniciales = obtenerInicialesOperario(data.nombre_completo);
+                return `<div>
+                    <span class="pc-op-avatar">${iniciales}</span>
+                    <span class="pc-op-nombre">${escape(data.nombre_completo)}</span>
+                </div>`;
+            },
+        }
+    });
+}
+
+// Toma las 2 primeras iniciales relevantes del nombre (ej. "FARROÑAN
+// SANTAMARIA ELAR DANIEL" -> "FS"), para el avatar circular de cada chip.
+function obtenerInicialesOperario(nombreCompleto) {
+    const partes = (nombreCompleto || '').trim().split(/\s+/).filter(Boolean);
+    if (partes.length === 0) return '?';
+    if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+    return (partes[0][0] + partes[1][0]).toUpperCase();
+}
 function quitarLineaDetalle(tempId) {
     ticketDetalleEns = ticketDetalleEns.filter(l => l.tempId !== tempId);
     renderTicketDetalle();
@@ -1229,6 +1324,7 @@ function limpiarFormularioEnsamblaje() {
     document.getElementById('ens_buscar_detalle').value = '';
     ensamblajeIdActual = 0;
     ticketDetalleEns = [];
+    if (tsOperariosEns) tsOperariosEns.clear(); // <-- nuevo
     tabDetalleActiva = 'produccion';
     document.getElementById('tab_producciones').classList.add('activa');
     document.getElementById('tab_derivados').classList.remove('activa');
@@ -1279,10 +1375,12 @@ async function abrirModalEditarEnsamblaje(id) {
 
     const e = json.ensamblaje;
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Editar ensamblaje #' + id;
+    const operariosVinculados = parseJsonColumna(e.js_operarios).map(o => o.operario_id);
+
     await cargarSelectsModalEns({
         producto_id: e.producto_id,
         color_id: e.color_id_actual,
-        operario_id: e.operario_id,
+        operario_ids: operariosVinculados,
         sucursal_id: e.sucursal,
     }, id);
 
@@ -1355,7 +1453,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     const params = {
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
-        operario_ortorgado: document.getElementById('ens_operario_id').value,
+        operarios: JSON.stringify(tsOperariosEns ? tsOperariosEns.getValue() : []),
         sucursal_id: document.getElementById('ens_sucursal_id').value,
         detalle: obtenerDetalleJsonEns(),
     };

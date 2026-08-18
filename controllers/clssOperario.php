@@ -528,6 +528,34 @@ function listarEtapasActivas()
     ");
     responder(true, 'OK', ['etapas' => $result]);
 }
+function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
+{
+    $idsOperario = array_values(array_unique(array_map('intval', $idsOperario)));
+    $idsOperario = array_filter($idsOperario, fn($id) => $id > 0);
+    if (empty($idsOperario)) return [];
+
+    $placeholders = [];
+    $params = [];
+    foreach ($idsOperario as $i => $id) {
+        $key = "op{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $id;
+    }
+
+    $sql = "SELECT id, nombre_completo, cargo FROM operario
+            WHERE id IN (" . implode(',', $placeholders) . ") AND activo = true";
+    $result = executeQuery($conectar, $sql, $params);
+
+    if (count($result) !== count($idsOperario)) {
+        throw new Exception('Uno o más operarios seleccionados no existen o están inactivos.');
+    }
+
+    return array_map(fn($o) => [
+        'operario_id'     => (int)$o['id'],
+        'nombre_completo' => $o['nombre_completo'],
+        'cargo'           => $o['cargo'],
+    ], $result);
+}
 
 // =============================================================================
 // CONSULTA EXTERNA DE DNI

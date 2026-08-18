@@ -292,11 +292,27 @@ function buscarProductosDisponiblesEnsamblaje()
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre_completo, cargo FROM operario WHERE activo = true ORDER BY nombre_completo";
-    $result = executeQuery($conectar, $sql, []);
+    $texto = trim($_POST['texto'] ?? '');
+
+    $where = [
+        "activo = true",
+        "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            WHERE et->>'nombre' ILIKE '%ENSAMBLA%'
+        )"
+    ];
+    $params = [];
+    if ($texto !== '') {
+        $where[] = "LOWER(nombre_completo) LIKE LOWER(:texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    $sql = "SELECT id, nombre_completo, cargo FROM operario
+            WHERE " . implode(' AND ', $where) . " ORDER BY nombre_completo";
+
+    $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
 }
-
 // Los derivados reales son filas de `material` con derivado = TRUE.
 // Si se pasa producto_id, se FILTRA de verdad usando material.js_producto
 // vía jsonb_array_elements + INNER JOIN LATERAL. Sin producto_id, se listan
@@ -663,11 +679,14 @@ function listarEnsamblajes()
         $params['texto'] = "%$texto%";
     }
     if ($producto_id !== '') {
-        $where[] = "e.producto_id = :producto_id";
-        $params['producto_id'] = $producto_id;
+    $where[] = "e.producto_id = :producto_id";
+    $params['producto_id'] = $producto_id;
     }
     if ($operario_id !== '') {
-        $where[] = "e.operario_ortorgado = :operario_id";
+        $where[] = "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_operarios, '[]'::jsonb)) AS op
+            WHERE (op->>'operario_id')::bigint = :operario_id
+        )";
         $params['operario_id'] = $operario_id;
     }
     if ($estado === 'activa') {
@@ -690,6 +709,7 @@ function listarEnsamblajes()
         p.codigo AS producto_codigo,
         p.descripcion AS producto_descripcion,
         e.operario_ortorgado AS operario_id,
+        e.js_operarios,
         o.nombre_completo AS operario_nombre,
         su.nombre AS sucursal_nombre,
         e.inicio,
@@ -738,6 +758,7 @@ function obtenerEnsamblaje($id)
             p.codigo AS producto_codigo,
             p.descripcion AS producto_descripcion,
             e.operario_ortorgado AS operario_id,
+            e.js_operarios,
             o.nombre_completo AS operario_nombre,
             e.sucursal,
             e.inicio,
@@ -769,7 +790,38 @@ function obtenerEnsamblaje($id)
 
     responder(true, 'OK', ['ensamblaje' => $ensamblaje[0]]);
 }
+// Valida y resuelve el equipo de operarios que participó en el armado.
+// Mismo patrón que resolverSucursales()/resolverEtapas() en
+// clssOperario.php: recibe ids, valida que existan y estén activos, y
+// devuelve el arreglo denormalizado listo para guardar en js_operarios.
+function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
+{
+    $idsOperario = array_values(array_unique(array_map('intval', $idsOperario)));
+    $idsOperario = array_filter($idsOperario, fn($id) => $id > 0);
+    if (empty($idsOperario)) return [];
 
+    $placeholders = [];
+    $params = [];
+    foreach ($idsOperario as $i => $id) {
+        $key = "op{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $id;
+    }
+
+    $sql = "SELECT id, nombre_completo, cargo FROM operario
+            WHERE id IN (" . implode(',', $placeholders) . ") AND activo = true";
+    $result = executeQuery($conectar, $sql, $params);
+
+    if (count($result) !== count($idsOperario)) {
+        throw new Exception('Uno o más operarios seleccionados no existen o están inactivos.');
+    }
+
+    return array_map(fn($o) => [
+        'operario_id'     => (int)$o['id'],
+        'nombre_completo' => $o['nombre_completo'],
+        'cargo'           => $o['cargo'],
+    ], $result);
+}
 function guardarEnsamblaje()
 {
     $conectar = conectar_oll_BD();
@@ -777,7 +829,8 @@ function guardarEnsamblaje()
     $id                  = intval($_POST['id'] ?? 0);
     $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $producto_id         = intval($_POST['producto_id'] ?? 0);
-    $operario_ortorgado  = !empty($_POST['operario_ortorgado']) ? intval($_POST['operario_ortorgado']) : null;
+    $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
+    if (!is_array($operariosInput)) $operariosInput = [];
     $detalleJson         = trim($_POST['detalle'] ?? '[]');
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
@@ -832,6 +885,14 @@ function guardarEnsamblaje()
         responder(false, 'Debes vincular al menos una producción finalizada, un derivado o un complemento a este ensamblaje.');
     }
 
+    try {
+        $operariosResueltos = resolverOperariosEnsamblaje($conectar, $operariosInput);
+    } catch (Throwable $e) {
+        responder(false, $e->getMessage());
+    }
+    $jsOperariosJson  = json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE);
+    $operarioRegistro = $operariosResueltos[0]['operario_id'] ?? null;
+
     $conectar->beginTransaction();
     try {
         if ($id === 0) {
@@ -847,17 +908,18 @@ function guardarEnsamblaje()
             $nuevoEnsamblaje = executeQuery($conectar, "
                 INSERT INTO ensamblaje (
                     producto_id, operario_ortorgado, sucursal,
-                    js_derivados_utilizados, js_moldes_utilizados,
+                    js_derivados_utilizados, js_moldes_utilizados, js_operarios,
                     created_at, js_usuario, js_historial
                 ) VALUES (
                     :producto_id, :operario_ortorgado, :sucursal_id,
-                    '[]'::jsonb, '[]'::jsonb,
+                    '[]'::jsonb, '[]'::jsonb, :js_operarios,
                     NOW(), :js_usuario, :js_historial
                 ) RETURNING id
             ", [
                 'producto_id'        => $producto_id,
-                'operario_ortorgado' => $operario_ortorgado,
+                'operario_ortorgado' => $operarioRegistro,
                 'sucursal_id'        => $sucursal_id,
+                'js_operarios'       => $jsOperariosJson,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
             ]);
@@ -971,14 +1033,16 @@ function guardarEnsamblaje()
                     producto_id         = :producto_id,
                     operario_ortorgado  = :operario_ortorgado,
                     sucursal             = :sucursal_id,
+                    js_operarios         = :js_operarios,
                     update_at           = NOW(),
                     js_usuario          = :js_usuario,
                     js_historial        = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
                 WHERE id = :id
             ", [
                 'producto_id'        => $producto_id,
-                'operario_ortorgado' => $operario_ortorgado,
+                'operario_ortorgado' => $operarioRegistro,
                 'sucursal_id'        => $sucursal_id,
+                'js_operarios'       => $jsOperariosJson,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
                 'id'                 => $id,
