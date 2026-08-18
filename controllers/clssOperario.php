@@ -4,7 +4,8 @@
  * controllers/clssOperario.php
  * Controlador del módulo de Operarios
  * Tabla real: operario (id, nombre_completo, cargo, dni, activo, created_at,
- *             updated_at, deleted_at, js_session, js_historial, js_sucursales)
+ *             updated_at, deleted_at, js_session, js_historial, js_sucursales,
+ *             js_etapas_relacionadas)
  *
  * Soft delete vía deleted_at (mismo patrón que 'orden_produccion' / 'moldes').
  * La columna 'activo' se mantiene sincronizada con deleted_at por
@@ -15,9 +16,11 @@
  *
  * js_sucursales (jsonb): arreglo denormalizado de las sucursales donde
  * trabaja el operario, ej: [{"sucursal_id":1,"nombre":"SUCURSAL 1"}].
- * El id es la fuente de verdad; 'nombre' es solo para no tener que hacer
- * join al listar. Se resincroniza completo en cada guardado (no se hace
- * merge parcial).
+ * js_etapas_relacionadas (jsonb): mismo patrón para las etapas en las que
+ * puede involucrarse el operario, ej: [{"etapa_id":1,"nombre":"PRODUCCIÓN"}].
+ * En ambos casos el id es la fuente de verdad; 'nombre' es solo para no
+ * tener que hacer join al listar. Se resincronizan completos en cada
+ * guardado (no se hace merge parcial).
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -55,6 +58,9 @@ function controladorOperario($accion)
             break;
         case 'BUSCARDNI':
             buscarDNI();
+            break;
+        case 'LISTARETAPASACTIVAS':
+            listarEtapasActivas();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -116,8 +122,6 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
 /**
  * Compara el arreglo de sucursales asignado antes/después y devuelve
  * una entrada de cambio legible (o null si no hubo diferencia).
- * $anteriorJson es el valor crudo de la columna js_sucursales (string|null).
- * $nuevasSucursales es el arreglo ya resuelto [{sucursal_id, nombre}, ...].
  */
 function compararSucursales(?string $anteriorJson, array $nuevasSucursales): ?array
 {
@@ -135,6 +139,30 @@ function compararSucursales(?string $anteriorJson, array $nuevasSucursales): ?ar
 
     return [
         'campo'         => 'Sucursales asignadas',
+        'valor_antes'   => $nombresAntes   ? implode(', ', $nombresAntes)   : '(ninguna)',
+        'valor_despues' => $nombresDespues ? implode(', ', $nombresDespues) : '(ninguna)',
+    ];
+}
+
+/**
+ * Mismo patrón que compararSucursales() pero para js_etapas_relacionadas.
+ */
+function compararEtapas(?string $anteriorJson, array $nuevasEtapas): ?array
+{
+    $anteriorArr = json_decode($anteriorJson ?? '[]', true) ?: [];
+
+    $nombresAntes   = array_column($anteriorArr, 'nombre');
+    $nombresDespues = array_column($nuevasEtapas, 'nombre');
+
+    sort($nombresAntes);
+    sort($nombresDespues);
+
+    if ($nombresAntes === $nombresDespues) {
+        return null;
+    }
+
+    return [
+        'campo'         => 'Etapas relacionadas',
         'valor_antes'   => $nombresAntes   ? implode(', ', $nombresAntes)   : '(ninguna)',
         'valor_despues' => $nombresDespues ? implode(', ', $nombresDespues) : '(ninguna)',
     ];
@@ -169,6 +197,34 @@ function resolverSucursales($conectar, array $idsSucursal): array
     ], $result);
 }
 
+/**
+ * Mismo patrón que resolverSucursales() pero contra la tabla etapa
+ * (usa deleted_at, no delete_at como sucursal).
+ */
+function resolverEtapas($conectar, array $idsEtapa): array
+{
+    $idsEtapa = array_values(array_unique(array_map('intval', $idsEtapa)));
+    $idsEtapa = array_filter($idsEtapa, fn($id) => $id > 0);
+    if (empty($idsEtapa)) return [];
+
+    $placeholders = [];
+    $params = [];
+    foreach ($idsEtapa as $i => $id) {
+        $key = "id{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $id;
+    }
+
+    $sql = "SELECT id, nombre FROM etapa
+            WHERE id IN (" . implode(',', $placeholders) . ") AND deleted_at IS NULL";
+    $result = executeQuery($conectar, $sql, $params);
+
+    return array_map(fn($e) => [
+        'etapa_id' => (int)$e['id'],
+        'nombre'   => $e['nombre'],
+    ], $result);
+}
+
 function registrarMovimiento($conectar, int $id, string $accion, array $cambios): void
 {
     $movimiento         = obtenerMovimientoSesion($accion, $cambios);
@@ -198,6 +254,7 @@ function listarOperarios()
     $texto       = trim($_POST['texto'] ?? '');
     $visibilidad = trim($_POST['visibilidad'] ?? 'activas'); // activas, eliminadas, todas
     $sucursal_id = intval($_POST['sucursal_id'] ?? 0);
+    $etapa_id    = intval($_POST['etapa_id'] ?? 0);
 
     $where  = ["1=1"];
     $params = [];
@@ -218,13 +275,20 @@ function listarOperarios()
         )";
         $params['sucursal_id'] = $sucursal_id;
     }
+    if ($etapa_id > 0) {
+        $where[] = "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            WHERE (et->>'etapa_id')::int = :etapa_id
+        )";
+        $params['etapa_id'] = $etapa_id;
+    }
 
     $sql = "SELECT * FROM operario
             WHERE " . implode(' AND ', $where) . "
             ORDER BY nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['operarios' => decodificarSucursalesFilas($result)]);
+    responder(true, 'OK', ['operarios' => decodificarJsonFilas($result)]);
 }
 
 function obtenerOperario($id)
@@ -234,23 +298,27 @@ function obtenerOperario($id)
 
     $result = executeQuery($conectar, "SELECT * FROM operario WHERE id = :id", ['id' => $id]);
     if (empty($result)) responder(false, 'Operario no encontrado.');
-    $filas = decodificarSucursalesFilas($result);
+    $filas = decodificarJsonFilas($result);
     responder(true, 'OK', ['operario' => $filas[0]]);
 }
 
 /**
- * executeQuery devuelve las columnas jsonb (js_sucursales, etc.) como
- * strings JSON crudos, no como arreglos PHP. Si no se decodifican antes
- * de json_encode() en responder(), llegan al frontend como un string con
- * JSON escapado en vez de un array, y {}.map() revienta en el navegador.
+ * executeQuery devuelve las columnas jsonb (js_sucursales,
+ * js_etapas_relacionadas, etc.) como strings JSON crudos, no como arreglos
+ * PHP. Si no se decodifican antes de json_encode() en responder(), llegan
+ * al frontend como un string con JSON escapado en vez de un array, y
+ * {}.map() revienta en el navegador.
  */
-function decodificarSucursalesFilas(array $filas): array
+function decodificarJsonFilas(array $filas): array
 {
+    $columnasJson = ['js_sucursales', 'js_etapas_relacionadas'];
     foreach ($filas as &$fila) {
-        if (isset($fila['js_sucursales']) && is_string($fila['js_sucursales'])) {
-            $fila['js_sucursales'] = json_decode($fila['js_sucursales'], true) ?: [];
-        } elseif (!isset($fila['js_sucursales'])) {
-            $fila['js_sucursales'] = [];
+        foreach ($columnasJson as $col) {
+            if (isset($fila[$col]) && is_string($fila[$col])) {
+                $fila[$col] = json_decode($fila[$col], true) ?: [];
+            } elseif (!isset($fila[$col])) {
+                $fila[$col] = [];
+            }
         }
     }
     unset($fila);
@@ -266,9 +334,12 @@ function guardarOperario()
     $cargo           = trim($_POST['cargo'] ?? '');
     $dni             = trim($_POST['dni'] ?? '');
 
-    // sucursales llega como JSON: "[1,3]" (ids seleccionados en el multi-select)
+    // sucursales/etapas llegan como JSON: "[1,3]" (ids seleccionados en el multi-select)
     $sucursalesInput = json_decode($_POST['sucursales'] ?? '[]', true);
     if (!is_array($sucursalesInput)) $sucursalesInput = [];
+
+    $etapasInput = json_decode($_POST['etapas'] ?? '[]', true);
+    if (!is_array($etapasInput)) $etapasInput = [];
 
     if (empty($nombre_completo)) responder(false, 'El nombre completo es obligatorio.');
     if ($dni !== '' && !preg_match('/^\d{8}$/', $dni)) {
@@ -287,6 +358,9 @@ function guardarOperario()
 
     $sucursalesResueltas = resolverSucursales($conectar, $sucursalesInput);
     $js_sucursales_json  = json_encode($sucursalesResueltas, JSON_UNESCAPED_UNICODE);
+
+    $etapasResueltas  = resolverEtapas($conectar, $etapasInput);
+    $js_etapas_json   = json_encode($etapasResueltas, JSON_UNESCAPED_UNICODE);
 
     $mapaCampos = [
         'nombre_completo' => 'Nombre completo',
@@ -309,6 +383,13 @@ function guardarOperario()
                 'valor_despues' => implode(', ', array_column($sucursalesResueltas, 'nombre')),
             ];
         }
+        if (!empty($etapasResueltas)) {
+            $cambios[] = [
+                'campo'         => 'Etapas relacionadas',
+                'valor_antes'   => '(ninguna)',
+                'valor_despues' => implode(', ', array_column($etapasResueltas, 'nombre')),
+            ];
+        }
 
         $movimiento         = obtenerMovimientoSesion('crear', $cambios);
         $js_session         = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -316,17 +397,18 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial, js_sucursales)
+                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
             VALUES
-                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales)
+                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
             RETURNING id
         ", [
-            'nombre_completo' => $datosNuevos['nombre_completo'],
-            'cargo'           => $datosNuevos['cargo'],
-            'dni'             => $datosNuevos['dni'],
-            'js_session'      => $js_session,
-            'js_historial'    => $js_historial_nuevo,
-            'js_sucursales'   => $js_sucursales_json,
+            'nombre_completo'         => $datosNuevos['nombre_completo'],
+            'cargo'                   => $datosNuevos['cargo'],
+            'dni'                     => $datosNuevos['dni'],
+            'js_session'              => $js_session,
+            'js_historial'            => $js_historial_nuevo,
+            'js_sucursales'           => $js_sucursales_json,
+            'js_etapas_relacionadas'  => $js_etapas_json,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Operario creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
@@ -346,28 +428,35 @@ function guardarOperario()
             $cambios[] = $cambioSucursales;
         }
 
+        $cambioEtapas = compararEtapas($registroAnterior['js_etapas_relacionadas'] ?? null, $etapasResueltas);
+        if ($cambioEtapas !== null) {
+            $cambios[] = $cambioEtapas;
+        }
+
         $movimiento         = obtenerMovimientoSesion('editar', $cambios);
         $js_session         = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial_nuevo = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         executeQuery($conectar, "
             UPDATE operario SET
-                nombre_completo = :nombre_completo,
-                cargo           = :cargo,
-                dni             = :dni,
-                js_sucursales   = :js_sucursales,
-                updated_at      = NOW(),
-                js_session      = :js_session,
-                js_historial    = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                nombre_completo         = :nombre_completo,
+                cargo                   = :cargo,
+                dni                     = :dni,
+                js_sucursales           = :js_sucursales,
+                js_etapas_relacionadas  = :js_etapas_relacionadas,
+                updated_at              = NOW(),
+                js_session              = :js_session,
+                js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
             WHERE id = :id
         ", [
-            'nombre_completo' => $datosNuevos['nombre_completo'],
-            'cargo'           => $datosNuevos['cargo'],
-            'dni'             => $datosNuevos['dni'],
-            'js_sucursales'   => $js_sucursales_json,
-            'id'              => $id,
-            'js_session'      => $js_session,
-            'js_historial'    => $js_historial_nuevo,
+            'nombre_completo'        => $datosNuevos['nombre_completo'],
+            'cargo'                  => $datosNuevos['cargo'],
+            'dni'                    => $datosNuevos['dni'],
+            'js_sucursales'          => $js_sucursales_json,
+            'js_etapas_relacionadas' => $js_etapas_json,
+            'id'                     => $id,
+            'js_session'             => $js_session,
+            'js_historial'           => $js_historial_nuevo,
         ]);
         responder(true, 'Operario actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
@@ -423,6 +512,21 @@ function reactivarOperario()
     registrarMovimiento($conectar, $id, 'reactivar', $cambios);
 
     responder(true, 'Operario reactivado correctamente.');
+}
+
+// =============================================================================
+// ETAPAS (solo lectura desde este controlador — soporte para el multi-select)
+// =============================================================================
+
+function listarEtapasActivas()
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery($conectar, "
+        SELECT id, nombre, orden FROM etapa
+        WHERE deleted_at IS NULL
+        ORDER BY orden
+    ");
+    responder(true, 'OK', ['etapas' => $result]);
 }
 
 // =============================================================================

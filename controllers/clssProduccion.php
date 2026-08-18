@@ -180,18 +180,32 @@ function buscarOperarios()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    $where = ["activo = true"];
+    // Solo operarios activos Y que tengan la etapa "Producción" asignada
+    // en su js_etapas_relacionadas (ver clssOperario.php -> resolverEtapas()).
+    // Se usa ILIKE '%PRODUC%' para cubrir "PRODUCCIÓN"/"PRODUCCION" sin
+    // depender de tildes. Si el nombre de la etapa en tu tabla `etapa` es
+    // distinto, ajusta este patrón.
+    $where = [
+        "activo = true",
+        "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            WHERE et->>'nombre' ILIKE '%PRODUC%'
+        )"
+    ];
     $params = [];
+
     if ($texto !== '') {
         $where[] = "(LOWER(nombre_completo) LIKE LOWER(:texto) OR dni LIKE :texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT id, nombre_completo, cargo, dni FROM operario WHERE " . implode(' AND ', $where) . " ORDER BY nombre_completo LIMIT 50";
+    $sql = "SELECT id, nombre_completo, cargo, dni FROM operario
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY nombre_completo LIMIT 50";
+
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
 }
-
 function buscarMaquinas()
 {
     $conectar = conectar_oll_BD();

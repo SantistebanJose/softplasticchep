@@ -27,6 +27,9 @@ include("header.php");
         <select id="fop_sucursal" class="form-select" style="max-width:220px">
             <option value="0">Todas las sucursales</option>
         </select>
+        <select id="fop_etapa" class="form-select" style="max-width:200px">
+            <option value="0">Todas las etapas</option>
+        </select>
     </div>
 
     <div class="pc-table-wrap pc-table-responsive-cards">
@@ -38,12 +41,13 @@ include("header.php");
                 <th>DNI</th>
                 <th>Cargo</th>
                 <th>Sucursales</th>
+                <th>Etapas</th>
                 <th>Estado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyOperarios">
-            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -83,6 +87,11 @@ include("header.php");
             <select id="op_sucursales" multiple placeholder="Selecciona una o más sucursales..."></select>
             <small class="text-muted">Opcional. Donde trabaja este operario.</small>
           </div>
+          <div class="mb-2">
+            <label class="form-label">Etapas</label>
+            <select id="op_etapas" multiple placeholder="Selecciona una o más etapas..."></select>
+            <small class="text-muted">Opcional. En qué etapas puede involucrarse (producción, ensamblaje, empaquetado).</small>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -104,18 +113,22 @@ const modalOperario = new bootstrap.Modal(document.getElementById('modalOperario
 let modoEdicionOperario = false;
 let operarioIdActual = 0;
 let tomSelectSucursales = null;
+let tomSelectEtapas = null;
 let sucursalesActivas = [];
+let etapasActivas = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
     inicializarTomSelectSucursales();
+    inicializarTomSelectEtapas();
 
     try {
         await cargarSucursalesActivas();
+        await cargarEtapasActivas();
         await cargarOperarios();
     } catch (err) {
         console.error('Error cargando operarios:', err);
         document.getElementById('tbodyOperarios').innerHTML =
-            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     }
 
     let debounceTimer = null;
@@ -125,6 +138,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('fop_estado').addEventListener('change', cargarOperarios);
     document.getElementById('fop_sucursal').addEventListener('change', cargarOperarios);
+    document.getElementById('fop_etapa').addEventListener('change', cargarOperarios);
 
     document.getElementById('btnBuscarDNI').addEventListener('click', buscarDNIOperario);
     document.getElementById('op_dni').addEventListener('keydown', (e) => {
@@ -134,6 +148,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function inicializarTomSelectSucursales() {
     tomSelectSucursales = new TomSelect('#op_sucursales', {
+        valueField: 'id',
+        labelField: 'nombre',
+        searchField: 'nombre',
+        options: [],
+        plugins: ['remove_button'],
+    });
+}
+
+function inicializarTomSelectEtapas() {
+    tomSelectEtapas = new TomSelect('#op_etapas', {
         valueField: 'id',
         labelField: 'nombre',
         searchField: 'nombre',
@@ -190,6 +214,22 @@ async function cargarSucursalesActivas() {
         sucursalesActivas.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 }
 
+async function cargarEtapasActivas() {
+    const json = await llamarOperario('LISTARETAPASACTIVAS');
+    if (!json.success) return;
+
+    etapasActivas = json.etapas || [];
+
+    // Poblar Tom Select del modal
+    tomSelectEtapas.clearOptions();
+    etapasActivas.forEach(e => tomSelectEtapas.addOption({ id: e.id, nombre: e.nombre }));
+
+    // Poblar filtro de la tabla
+    const selectFiltro = document.getElementById('fop_etapa');
+    selectFiltro.innerHTML = '<option value="0">Todas las etapas</option>' +
+        etapasActivas.map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
+}
+
 function badgeEstadoOperario(deletedAt) {
     return !deletedAt
         ? '<span class="badge bg-success">Activo</span>'
@@ -205,24 +245,34 @@ function badgesSucursales(jsSucursales) {
     return sucursales.map(s => `<span class="badge bg-light text-dark border">${s.nombre}</span>`).join(' ');
 }
 
+function badgesEtapas(jsEtapas) {
+    let etapas = jsEtapas || [];
+    if (typeof etapas === 'string') {
+        try { etapas = JSON.parse(etapas); } catch (e) { etapas = []; }
+    }
+    if (!Array.isArray(etapas) || etapas.length === 0) return '<span class="text-muted">-</span>';
+    return etapas.map(e => `<span class="badge bg-info-subtle text-dark border">${e.nombre}</span>`).join(' ');
+}
+
 async function cargarOperarios() {
     const params = {
         texto: document.getElementById('fop_texto').value.trim(),
         visibilidad: document.getElementById('fop_estado').value,
         sucursal_id: document.getElementById('fop_sucursal').value,
+        etapa_id: document.getElementById('fop_etapa').value,
     };
 
     const json = await llamarOperario('LISTAROPERARIOS', params);
     const tbody = document.getElementById('tbodyOperarios');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const operarios = json.operarios || [];
     if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay operarios registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay operarios registrados.</td></tr>';
         return;
     }
 
@@ -233,6 +283,7 @@ async function cargarOperarios() {
             <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo ?? '-'}</td>
             <td data-label="Sucursales">${badgesSucursales(o.js_sucursales)}</td>
+            <td data-label="Etapas">${badgesEtapas(o.js_etapas_relacionadas)}</td>
             <td data-label="Estado">${badgeEstadoOperario(o.deleted_at)}</td>
             <td data-label="Acciones" class="pc-td-acciones">
                 <button class="pc-icon-btn" onclick="abrirModalEditarOperario(${o.id})" title="Editar">
@@ -252,6 +303,7 @@ async function cargarOperarios() {
 function limpiarFormularioOperario() {
     document.getElementById('formOperario').reset();
     tomSelectSucursales.clear();
+    tomSelectEtapas.clear();
     operarioIdActual = 0;
 }
 
@@ -281,6 +333,12 @@ async function abrirModalEditarOperario(id) {
         try { sucursalesAsignadas = JSON.parse(sucursalesAsignadas); } catch (e) { sucursalesAsignadas = []; }
     }
     sucursalesAsignadas.forEach(s => tomSelectSucursales.addItem(s.sucursal_id, true));
+
+    let etapasAsignadas = o.js_etapas_relacionadas || [];
+    if (typeof etapasAsignadas === 'string') {
+        try { etapasAsignadas = JSON.parse(etapasAsignadas); } catch (e) { etapasAsignadas = []; }
+    }
+    etapasAsignadas.forEach(e => tomSelectEtapas.addItem(e.etapa_id, true));
 
     modalOperario.show();
 }
@@ -319,6 +377,7 @@ document.getElementById('formOperario').addEventListener('submit', async functio
         cargo: document.getElementById('op_cargo').value.trim(),
         dni: document.getElementById('op_dni').value.trim(),
         sucursales: JSON.stringify(tomSelectSucursales.getValue()),
+        etapas: JSON.stringify(tomSelectEtapas.getValue()),
     };
 
     const json = await llamarOperario('GUARDAROPERARIO', params);
