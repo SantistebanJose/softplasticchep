@@ -777,12 +777,17 @@ function renderListaMermas(p) {
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
-// Unidad configurada en el item del molde/producto para una etapa dada.
-// Si el avance no tiene item (molde sin configuración), cae a "kg".
 function unidadEtapa(p, campo) {
     const item = p && p.item ? p.item : null;
-    const val = item && item[campo] ? String(item[campo]).trim() : 'kg';
-    return val || 'kg';
+    if (item && item[campo]) return String(item[campo]).trim();
+    // Si falta específicamente la unidad de merma, se usa la de
+    // producción del mismo molde como mejor aproximación — es más
+    // seguro que asumir "kg" a ciegas cuando el molde en realidad se
+    // mide en otra unidad (ej. UND).
+    if (campo === 'salida_merma' && item && item['salida_produccion']) {
+        return String(item['salida_produccion']).trim();
+    }
+    return 'kg';
 }
 
 function esUnidadEntera(unidad) {
@@ -800,12 +805,14 @@ function necesitaEnsamblaje(p) {
     return String(item.necesita_ensamblaje).trim().toLowerCase() !== 'no';
 }
 
-// Ajusta los campos del modal de "Pasar a ensamblaje" (cantidad producida
-// + merma) según la unidad configurada en cada etapa para este molde.
 function aplicarUnidadesEtapaModal(p) {
+    // La cantidad producida y la merma SIEMPRE usan la unidad configurada
+    // en el propio molde ("Salida en Producción" / "Salida de Merma"),
+    // sin importar si el molde necesita ensamblaje o no. La unidad de
+    // "Salida en Empaquetado" es otra cosa: es la que usa el módulo de
+    // Empaquetado más adelante, no la que se registra aquí.
     const unidadProduccion = unidadEtapa(p, 'salida_produccion');
     const unidadMerma = unidadEtapa(p, 'salida_merma');
-
     const lbl = document.getElementById('lbl_cantidad_producida');
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     lbl.textContent = `Cantidad producida (${unidadProduccion}) *`;

@@ -309,6 +309,149 @@ function buscarLotesMaterial()
     responder(true, 'OK', ['lotes' => $result]);
 }
 
+/**
+ * Genera un ensamblaje "falso" (auto-generado) para un avance de
+ * producción cuyo molde NO requiere pasar por Ensamblaje
+ * (item.necesita_ensamblaje === 'no'). El registro queda ya iniciado,
+ * finalizado y enviado a empaquetado en el mismo instante, con una sola
+ * línea en rel_ensamblaje_producto apuntando a este avance — así el
+ * módulo de Empaquetado (que lee desde `ensamblaje`) lo detecta sin que
+ * nadie pase manualmente por COMPLEMENTAR / PASARAEMPAQUETADO.
+ *
+ * OJO: a propósito NO se incluye `proveniente` en el INSERT -> toma su
+ * valor DEFAULT de la tabla. Eso es lo que distingue este ensamblaje
+ * automático de uno real (guardarEnsamblaje() sí manda
+ * proveniente = 'produccion' explícito).
+ */
+function crearEnsamblajeAutomaticoParaProduccion(
+    $conectar,
+    int $produccionId,
+    int $productoId,
+    float $cantidadProducida,
+    ?int $unidadSalidaId
+): int {
+    // Reutiliza el operario del propio avance, igual que haría un
+    // ensamblaje armado a mano.
+    $prodRow = executeQuery(
+        $conectar,
+        "SELECT operario_id FROM produccion WHERE id = :id",
+        ['id' => $produccionId]
+    );
+    $operarioId = !empty($prodRow[0]['operario_id']) ? intval($prodRow[0]['operario_id']) : null;
+
+    $jsOperarios = '[]';
+    if ($operarioId) {
+        $op = executeQuery(
+            $conectar,
+            "SELECT id, nombre_completo, cargo FROM operario WHERE id = :id",
+            ['id' => $operarioId]
+        );
+        if (!empty($op)) {
+            $jsOperarios = json_encode([[
+                'operario_id'     => (int)$op[0]['id'],
+                'nombre_completo' => $op[0]['nombre_completo'],
+                'cargo'           => $op[0]['cargo'],
+            ]], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    $cambios = [[
+        'campo' => 'Ensamblaje automático',
+        'valor_antes' => '(no aplica)',
+        'valor_despues' => "Generado automáticamente desde producción #$produccionId (molde no requiere ensamblaje)",
+    ]];
+    $movimiento   = obtenerMovimientoSesion('crear_automatico', $cambios);
+    $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+    $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+    $nuevo = executeQuery($conectar, "
+        INSERT INTO ensamblaje (
+            producto_id, js_derivados_utilizados, js_moldes_utilizados,
+            js_operarios, operario_ortorgado,
+            inicio, fin, cantidad_peso_kg, unidad_salida_id,
+            enviado_empaquetado, fecha_envio_empaquetado,
+            created_at, js_usuario, js_historial, proveniente
+        ) VALUES (
+            :producto_id, '[]'::jsonb, '[]'::jsonb,
+            :js_operarios, :operario_id,
+            NOW(), NOW(), :cantidad_peso_kg, :unidad_salida_id,
+            TRUE, NOW(),
+            NOW(), :js_usuario, :js_historial, :proveniente
+        ) RETURNING id
+    ", [
+        'producto_id'       => $productoId,
+        'js_operarios'      => $jsOperarios,
+        'operario_id'       => $operarioId,
+        'cantidad_peso_kg'  => $cantidadProducida,
+        'unidad_salida_id'  => $unidadSalidaId,
+        'js_usuario'        => $js_session,
+        'js_historial'      => $js_historial,
+        'proveniente'       => 'directo_empaquetado',
+    ]);
+
+    $ensamblajeId = $nuevo[0]['id'] ?? null;
+    if (!$ensamblajeId) throw new Exception('No se pudo generar el ensamblaje automático.');
+
+    // Línea de detalle: mismo snapshot que usaría insertarLineasEnsamblaje()
+    // en clssEnsamblaje.php para una línea tipo 'produccion'.
+    $snapshotRows = executeQuery(
+        $conectar,
+        "SELECT
+             t1.id AS produccion_id,
+             mo.nombre AS molde_nombre,
+             t1.cantidad_producida_kg AS cantidad_kg,
+             t1.fecha_hora_fin,
+             split_part(t1.unico_molde_producto, '-', 2)::bigint AS producto_id,
+             t1.color_id,
+             co.nombre AS color_nombre_verif,
+             cm.nombre AS categoria_material_nombre_verif
+         FROM produccion t1
+         LEFT JOIN molde mo ON mo.id = t1.molde_id
+         LEFT JOIN color co ON co.id = t1.color_id
+         LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+         WHERE t1.id = :id",
+        ['id' => $produccionId]
+    );
+    $snapshot = json_encode($snapshotRows[0] ?? ['produccion_id' => $produccionId], JSON_UNESCAPED_UNICODE);
+    $categoriaMaterialId = $snapshotRows[0]['categoria_material_id'] ?? null;
+
+    executeNonQuery($conectar, "
+        INSERT INTO rel_ensamblaje_producto (
+            ensamblaje_id, molde_produccion_id, js_query_consulta_produccion, created_at
+        ) VALUES (
+            :ensamblaje_id, :produccion_id, :snapshot, NOW()
+        )
+    ", [
+        'ensamblaje_id' => $ensamblajeId,
+        'produccion_id' => $produccionId,
+        'snapshot'      => $snapshot,
+    ]);
+
+    // Recalculo simplificado (una sola línea, sin ambigüedad de categoría):
+    // no depende de recalcularResumenesEnsamblaje() de clssEnsamblaje.php
+    // a propósito, para no acoplar ambos controladores.
+    $moldeResumen = [[
+        'produccion_id' => $produccionId,
+        'molde_nombre'  => $snapshotRows[0]['molde_nombre'] ?? null,
+        'cantidad_kg'   => $cantidadProducida,
+        'categoria_material_id'     => $snapshotRows[0]['categoria_material_id'] ?? null,
+        'categoria_material_nombre' => $snapshotRows[0]['categoria_material_nombre_verif'] ?? null,
+    ]];
+
+    executeNonQuery($conectar, "
+        UPDATE ensamblaje SET
+            js_moldes_utilizados  = :moldes,
+            categoria_material_id = :categoria_material_id
+        WHERE id = :id
+    ", [
+        'id'                     => $ensamblajeId,
+        'moldes'                 => json_encode($moldeResumen, JSON_UNESCAPED_UNICODE),
+        'categoria_material_id'  => $categoriaMaterialId,
+    ]);
+
+    return $ensamblajeId;
+}
+
 // =============================================================================
 // PRODUCCIÓN (avances)
 // =============================================================================
@@ -374,13 +517,15 @@ function listarProducciones()
             cm.nombre AS categoria_material_nombre,
             su.nombre AS sucursal_nombre,
             pr.descripcion AS producto_descripcion,
+            pr.js_configuracion_empaquetado,
             COALESCE((
                 SELECT COUNT(*) FROM rel_produccion_material rpm
                 WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
             ), 0) AS items_count,
             cfg.item,
             cfg.item->>'salida_produccion' AS unidad_salida_produccion,
-            cfg.item->>'salida_merma'      AS unidad_salida_merma
+            cfg.item->>'salida_merma'      AS unidad_salida_merma,
+            x.item AS item_vivo
 
         FROM produccion pd
         LEFT JOIN operario op ON op.id = pd.operario_id
@@ -395,16 +540,25 @@ function listarProducciones()
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
-    $result = executeQuery($conectar, $sql, $params);
+        $result = executeQuery($conectar, $sql, $params);
 
         foreach ($result as &$fila) {
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
-            $fila['item'] = !empty($fila['item']) ? json_decode($fila['item'], true) : null;
+
+            $itemFoto = !empty($fila['js_configuracion_moment']) ? json_decode($fila['js_configuracion_moment'], true) : null;
+            $itemVivo = !empty($fila['item_vivo']) ? json_decode($fila['item_vivo'], true) : null;
+            $forzarVigente = empty($fila['enviado_ensamblaje']);
+            $fila['item'] = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
+            unset($fila['item_vivo']);
         }
         unset($fila);
 
+        // Corrige/asegura 'salida_produccion' y 'salida_merma' desde el ID
+        // real de unidad_medida, en una sola consulta batched.
+        $result = resolverUnidadesEtapaLote($conectar, $result);
+        $result = resolverConfigEmpaquetadoLote($conectar, $result); // <-- agregar
         responder(true, 'OK', ['producciones' => $result]);
     }
 function buscarCategoriasMaterial()
@@ -429,7 +583,8 @@ function obtenerProduccion($id)
                 cm.nombre AS categoria_material_nombre,
                 cfg.item,
                 cfg.item->>'salida_produccion' AS unidad_salida_produccion,
-                cfg.item->>'salida_merma'      AS unidad_salida_merma
+                cfg.item->>'salida_merma'      AS unidad_salida_merma,
+                x.item AS item_vivo
          FROM produccion pd
          LEFT JOIN operario op ON op.id = pd.operario_id
          LEFT JOIN maquina ma ON ma.id = pd.maquina_id
@@ -452,8 +607,11 @@ function obtenerProduccion($id)
     if (empty($produccion)) {
         responder(false, 'Registro de producción no encontrado.');
     }
-    $produccion[0]['item'] = !empty($produccion[0]['item']) ? json_decode($produccion[0]['item'], true) : null;
-
+    $itemFoto = !empty($produccion[0]['js_configuracion_moment']) ? json_decode($produccion[0]['js_configuracion_moment'], true) : null;
+    $itemVivo = !empty($produccion[0]['item_vivo']) ? json_decode($produccion[0]['item_vivo'], true) : null;
+    $forzarVigente = empty($produccion[0]['enviado_ensamblaje']);
+    $produccion[0]['item'] = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
+    unset($produccion[0]['item_vivo']);
     // Detalle con toda la info del lote de origen (se conserva para
     // trazabilidad interna, aunque el formulario ya no la muestre línea
     // por línea: el frontend agrupa estas filas por material_id).
@@ -508,49 +666,203 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
     ];
 }
 
+function mergeItemConConfigVigente(?array $itemFoto, ?array $itemVigente, bool $forzarVigente = false): ?array
+{
+    if ($itemVigente === null) return $itemFoto;
+    if ($itemFoto === null) return $itemVigente;
+
+    if ($forzarVigente) {
+        // Avance aún NO enviado a ensamblaje/empaquetado: la config
+        // vigente del molde/producto manda siempre (el usuario pudo
+        // haber corregido las unidades después de crear el avance).
+        // Solo se rellena desde la foto lo que ya no exista en la
+        // config vigente (ej. si el campo fue eliminado del molde).
+        foreach ($itemFoto as $campo => $valor) {
+            if (!array_key_exists($campo, $itemVigente) || $itemVigente[$campo] === null || $itemVigente[$campo] === '') {
+                $itemVigente[$campo] = $valor;
+            }
+        }
+        return $itemVigente;
+    }
+
+    // Avance YA enviado: se respeta el histórico, solo se rellenan
+    // campos que la foto nunca tuvo (compatibilidad con avances viejos).
+    foreach ($itemVigente as $campo => $valor) {
+        if (!array_key_exists($campo, $itemFoto) || $itemFoto[$campo] === null || $itemFoto[$campo] === '') {
+            $itemFoto[$campo] = $valor;
+        }
+    }
+    return $itemFoto;
+}
+
 /**
- * Devuelve el item de js_configuracion (producto.js_configuracion) del
- * molde asociado a un avance de producción, con las unidades de salida
- * configuradas por etapa (salida_produccion, salida_merma). Se deriva
- * en vivo desde unico_molde_producto — no se persiste por avance porque
- * la configuración del molde/producto es la fuente de verdad.
+ * Resuelve (o corrige) el texto de unidad ('KG', 'UND', etc.) de un item
+ * de configuración a partir de su *_unidad_medida_id real, en vez de
+ * confiar en el campo de texto plano ('salida_produccion' / 'salida_merma')
+ * que pudiera venir vacío o desactualizado desde el editor de producto.
+ * Así 'salida_merma' SIEMPRE respeta lo configurado, igual que
+ * 'salida_produccion' — mismo criterio, misma fuente de verdad (el ID).
  */
+function resolverUnidadesEtapaItem($conectar, ?array $item): ?array
+{
+    if (!$item) return $item;
+
+    $idProduccion = !empty($item['salida_produccion_unidad_medida_id']) ? intval($item['salida_produccion_unidad_medida_id']) : null;
+    $idMerma      = !empty($item['salida_merma_unidad_medida_id']) ? intval($item['salida_merma_unidad_medida_id']) : null;
+
+    $ids = array_values(array_unique(array_filter([$idProduccion, $idMerma])));
+    if (empty($ids)) return $item;
+
+    $placeholders = [];
+    $params = [];
+    foreach ($ids as $i => $uid) {
+        $key = "u$i";
+        $placeholders[] = ":$key";
+        $params[$key] = $uid;
+    }
+    $rows = executeQuery(
+        $conectar,
+        "SELECT id, UPPER(nombre_corto) AS nombre_corto FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+        $params
+    );
+    $porId = [];
+    foreach ($rows as $r) $porId[$r['id']] = $r['nombre_corto'];
+
+    if ($idProduccion && isset($porId[$idProduccion])) {
+        $item['salida_produccion'] = $porId[$idProduccion];
+    }
+    if ($idMerma && isset($porId[$idMerma])) {
+        $item['salida_merma'] = $porId[$idMerma];
+    }
+
+    return $item;
+}
+
+function resolverConfigEmpaquetadoLote($conectar, array $filas): array
+{
+    $idsUnicos = [];
+    foreach ($filas as $fila) {
+        if (empty($fila['js_configuracion_empaquetado'])) continue;
+        $cfg = json_decode($fila['js_configuracion_empaquetado'], true);
+        if (!empty($cfg['salida_empaquetado_unidad_medida_id'])) {
+            $idsUnicos[] = intval($cfg['salida_empaquetado_unidad_medida_id']);
+        }
+    }
+    $idsUnicos = array_values(array_unique($idsUnicos));
+    $porId = [];
+    if (!empty($idsUnicos)) {
+        $placeholders = [];
+        $params = [];
+        foreach ($idsUnicos as $i => $uid) {
+            $key = "u$i";
+            $placeholders[] = ":$key";
+            $params[$key] = $uid;
+        }
+        $rows = executeQuery(
+            $conectar,
+            "SELECT id, UPPER(nombre_corto) AS nombre_corto FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+            $params
+        );
+        foreach ($rows as $r) $porId[$r['id']] = $r['nombre_corto'];
+    }
+
+    foreach ($filas as &$fila) {
+        $cfg = !empty($fila['js_configuracion_empaquetado'])
+            ? json_decode($fila['js_configuracion_empaquetado'], true)
+            : [];
+        $uid = !empty($cfg['salida_empaquetado_unidad_medida_id']) ? intval($cfg['salida_empaquetado_unidad_medida_id']) : null;
+        $fila['config_empaquetado'] = [
+            'salida_empaquetado_unidad_medida_id' => $uid,
+            'salida_empaquetado' => $uid && isset($porId[$uid]) ? $porId[$uid] : 'KG',
+        ];
+        unset($fila['js_configuracion_empaquetado']); // ya no lo necesitas crudo
+    }
+    unset($fila);
+
+    return $filas;
+}
 /**
- * Devuelve el item de configuración de un avance. Prioriza la "foto"
- * guardada en produccion.js_configuracion_moment (fuente de verdad desde
- * que existe esa columna). Si el avance es anterior a este cambio y no
- * tiene foto guardada, cae al comportamiento viejo: derivarlo en vivo
- * desde producto.js_configuracion.
+ * Versión "batched" de resolverUnidadesEtapaItem() para listados: resuelve
+ * los textos de unidad de TODAS las filas con una sola consulta a
+ * unidad_medida (en vez de una consulta por fila -> evita N+1 en
+ * listarProducciones()).
  */
+function resolverUnidadesEtapaLote($conectar, array $filas): array
+{
+    $idsUnicos = [];
+    foreach ($filas as $fila) {
+        $item = $fila['item'] ?? null;
+        if (!$item) continue;
+        if (!empty($item['salida_produccion_unidad_medida_id'])) $idsUnicos[] = intval($item['salida_produccion_unidad_medida_id']);
+        if (!empty($item['salida_merma_unidad_medida_id']))      $idsUnicos[] = intval($item['salida_merma_unidad_medida_id']);
+    }
+    $idsUnicos = array_values(array_unique($idsUnicos));
+    if (empty($idsUnicos)) return $filas;
+
+    $placeholders = [];
+    $params = [];
+    foreach ($idsUnicos as $i => $uid) {
+        $key = "u$i";
+        $placeholders[] = ":$key";
+        $params[$key] = $uid;
+    }
+    $rows = executeQuery(
+        $conectar,
+        "SELECT id, UPPER(nombre_corto) AS nombre_corto FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+        $params
+    );
+    $porId = [];
+    foreach ($rows as $r) $porId[$r['id']] = $r['nombre_corto'];
+
+    foreach ($filas as &$fila) {
+        $item = $fila['item'] ?? null;
+        if (!$item) continue;
+        $idProd  = !empty($item['salida_produccion_unidad_medida_id']) ? intval($item['salida_produccion_unidad_medida_id']) : null;
+        $idMerma = !empty($item['salida_merma_unidad_medida_id']) ? intval($item['salida_merma_unidad_medida_id']) : null;
+        if ($idProd && isset($porId[$idProd]))   $item['salida_produccion'] = $porId[$idProd];
+        if ($idMerma && isset($porId[$idMerma])) $item['salida_merma']      = $porId[$idMerma];
+        $fila['item'] = $item;
+    }
+    unset($fila);
+
+    return $filas;
+}
+
 function obtenerItemConfigProduccion($conectar, int $produccionId): ?array
 {
     $rows = executeQuery($conectar, "
-        SELECT js_configuracion_moment, molde_id, unico_molde_producto
+        SELECT js_configuracion_moment, molde_id, unico_molde_producto, enviado_ensamblaje
         FROM produccion
         WHERE id = :id
     ", ['id' => $produccionId]);
 
     if (empty($rows)) return null;
 
+    $itemFoto = null;
     if (!empty($rows[0]['js_configuracion_moment'])) {
-        $item = json_decode($rows[0]['js_configuracion_moment'], true);
-        if (is_array($item)) return $item;
+        $decoded = json_decode($rows[0]['js_configuracion_moment'], true);
+        if (is_array($decoded)) $itemFoto = $decoded;
     }
 
-    // Fallback (avances viejos sin foto guardada)
-    $partes = explode('-', $rows[0]['unico_molde_producto'] ?? '');
+    $partes     = explode('-', $rows[0]['unico_molde_producto'] ?? '');
     $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
-    return obtenerItemConfigProductoMolde($conectar, $productoId, (int) $rows[0]['molde_id']);
+    $itemVivo   = obtenerItemConfigProductoMolde($conectar, $productoId, (int) $rows[0]['molde_id']);
+
+    $forzarVigente = empty($rows[0]['enviado_ensamblaje']);
+    $item = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
+
+    return resolverUnidadesEtapaItem($conectar, $item);
 }
-/**
- * Unidad de salida configurada para una etapa ('salida_produccion' o
- * 'salida_merma'). Si el molde no tiene configuración, cae a 'KG'
- * (comportamiento previo).
- */
 function obtenerUnidadEtapa(?array $item, string $campo): string
 {
     if ($item && !empty($item[$campo])) {
         return strtoupper(trim($item[$campo]));
+    }
+    // Igual que en el frontend: si falta la unidad de merma puntual,
+    // se hereda la unidad de producción del mismo molde en vez de
+    // asumir KG por defecto.
+    if ($campo === 'salida_merma' && $item && !empty($item['salida_produccion'])) {
+        return strtoupper(trim($item['salida_produccion']));
     }
     return 'KG';
 }
@@ -985,9 +1297,6 @@ function reactivarProduccion()
     }
 }
 
-// Marca el avance como enviado a ensamblaje: guarda la cantidad producida
-// (kg reales de salida, distinto de `cantidad` que son los kg insertados
-// en máquina) y sella fecha_envio_ensamblaje/enviado_ensamblaje.
 function enviarAEnsamblaje()
 {
     $conectar = conectar_oll_BD();
@@ -997,24 +1306,28 @@ function enviarAEnsamblaje()
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
-    $item = obtenerItemConfigProduccion($conectar, $id);
-    $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
+    $existe = executeQuery(
+        $conectar,
+        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto
+         FROM produccion WHERE id = :id",
+        ['id' => $id]
+    );
+    if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
 
-    // El destino (ensamblaje o empaquetado) sale de la foto de configuración
-    // guardada en el avance. La columna/flujo de datos es el mismo
-    // (enviado_ensamblaje, fecha_envio_ensamblaje); solo cambia la etiqueta.
+    $item = obtenerItemConfigProduccion($conectar, $id);
     $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
     $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
+
+    // La cantidad producida SIEMPRE se registra en la unidad de "Salida en
+    // Producción" configurada en el molde — sea que el destino final sea
+    // Ensamblaje o directo a Empaquetado. La unidad de "Salida en
+    // Empaquetado" no aplica en este paso.
+    $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
 
     if ($unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
         responder(false, "La cantidad producida debe ser un número entero (unidad configurada: $unidadProduccion).");
     }
-    $existe = executeQuery(
-        $conectar,
-        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje FROM produccion WHERE id = :id",
-        ['id' => $id]
-    );
-    if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
+
     if (!empty($existe[0]['deleted_at'])) responder(false, "No puedes enviar a $destino un registro inactivo.");
     if (empty($existe[0]['fecha_hora_fin'])) responder(false, 'Primero debes finalizar la corrida.');
     if (!empty($existe[0]['enviado_ensamblaje'])) responder(false, "Este avance ya fue enviado a $destino.");
@@ -1028,44 +1341,57 @@ function enviarAEnsamblaje()
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-    executeNonQuery($conectar, "
-        UPDATE produccion SET
-            cantidad_producida_kg   = :cantidad_producida,
-            fecha_envio_ensamblaje  = NOW(),
-            enviado_ensamblaje      = true,
-            updated_at              = NOW(),
-            js_session              = :js_session,
-            js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-        WHERE id = :id
-    ", [
-        'id'                  => $id,
-        'cantidad_producida'  => $cantidadProducida,
-        'js_session'          => $js_session,
-        'js_historial'        => $js_historial,
-    ]);
+    $conectar->beginTransaction();
+    try {
+        executeNonQuery($conectar, "
+            UPDATE produccion SET
+                cantidad_producida_kg   = :cantidad_producida,
+                fecha_envio_ensamblaje  = NOW(),
+                enviado_ensamblaje      = true,
+                js_configuracion_moment = :js_config_final,
+                updated_at              = NOW(),
+                js_session              = :js_session,
+                js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+            WHERE id = :id
+        ", [
+            'id'                 => $id,
+            'cantidad_producida' => $cantidadProducida,
+            'js_config_final'    => json_encode($item, JSON_UNESCAPED_UNICODE),
+            'js_session'         => $js_session,
+            'js_historial'       => $js_historial,
+        ]);
+        $ensamblajeAutoId = null;
+                if ($destino === 'empaquetado') {
+            $partes = explode('-', $existe[0]['unico_molde_producto'] ?? '');
+            $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
+            if ($productoId <= 0) {
+                throw new Exception('No se pudo determinar el producto de este avance para generar el ensamblaje automático.');
+            }
 
-    responder(true, "Avance enviado a $destino correctamente.", ['id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino]);
+            // $cantidadProducida ya viene en la unidad de "Salida en
+            // Producción" del molde (ver arriba), así que el ensamblaje
+            // automático debe registrar esa misma unidad — no la de
+            // "Salida en Empaquetado" del producto.
+            $unidadSalidaId = !empty($item['salida_produccion_unidad_medida_id'])
+                ? intval($item['salida_produccion_unidad_medida_id'])
+                : null;
+
+            $ensamblajeAutoId = crearEnsamblajeAutomaticoParaProduccion(
+                $conectar, $id, $productoId, $cantidadProducida, $unidadSalidaId
+            );
+        }
+
+        $conectar->commit();
+        responder(true, "Avance enviado a $destino correctamente.", [
+            'id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino,
+            'ensamblaje_id_automatico' => $ensamblajeAutoId,
+        ]);
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error enviando a $destino: " . $e->getMessage());
+        responder(false, "No se pudo enviar a $destino: " . $e->getMessage());
+    }
 }
-// Registra un lote de merma para este avance:
-//  1) Inserta una fila en `merma` (fuente de verdad, una fila por registro).
-//  2) Además agrega la misma entrada al array jsonb
-//     produccion.js_cantidades_merma, como copia redundante — sirve para
-//     mostrar el total de merma en las cards del listado sin tener que
-//     hacer join/subconsulta contra `merma` cada vez.
-//
-// El color de la merma es INDEPENDIENTE del color propio del avance: se
-// elige (opcional) UN color de la lista completa de colores activos — por
-// ejemplo, si la mezcla resultante corresponde visualmente a un color ya
-// existente en el catálogo (ej. "MORADO" al mezclar rojo+azul) — y/o se
-// escribe una descripción libre en "merma" (ej. "Antiguo color",
-// "combinación de ambos colores", "purga"). Se exige al menos uno de los
-// dos. `producion_id` solo indica en qué avance se registró (trazabilidad
-// de cuándo/dónde), no que el material perdido sea "del color de ese
-// avance".
-//
-// Cada entrada del jsonb lleva su propio "id" (el id real de la fila en
-// `merma`), para poder identificarla/referenciarla individualmente más
-// adelante (editar, anular, etc.) sin depender de su posición en el array.
 function registrarMerma()
 {
     $conectar = conectar_oll_BD();
@@ -1077,16 +1403,13 @@ function registrarMerma()
 
     if (!$id) responder(false, 'ID inválido.');
 
-    $item = obtenerItemConfigProduccion($conectar, $id);
+        $item = obtenerItemConfigProduccion($conectar, $id);
+
+    // La merma SIEMPRE se registra en la unidad de "Salida de Merma"
+    // configurada en el propio molde, independientemente de si ese molde
+    // necesita ensamblaje o pasa directo a empaquetado.
     $unidadMedida = obtenerUnidadEtapa($item, 'salida_merma');
 
-    // FIX: antes, por falta de llaves en el `if ($cantidadMerma <= 0)`,
-    // este último responder() se ejecutaba SIEMPRE (con cantidad válida o
-    // no), porque solo el `if` anidado de "número entero" quedaba dentro
-    // del bloque condicional. Por eso el modal mostraba "La cantidad de
-    // merma debe ser mayor a 0" incluso al ingresar un valor correcto.
-    // Ahora cada validación tiene su propio bloque con llaves y se evalúa
-    // de forma independiente.
     if ($cantidadMerma <= 0) {
         responder(false, 'La cantidad de merma debe ser mayor a 0.');
     }
@@ -1101,7 +1424,6 @@ function registrarMerma()
     if (empty($actual)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($actual[0]['deleted_at'])) responder(false, 'No puedes registrar merma en un avance inactivo.');
 
-    // Trae nombre + rgb de todos los colores seleccionados
     $colores = [];
     if (!empty($coloresIds)) {
         $placeholders = [];
@@ -1141,7 +1463,7 @@ function registrarMerma()
             'usuario'       => $_SESSION['nombre_usuario'] ?? 'Sistema',
             'cantidad'      => $cantidadMerma,
             'unidad_medida' => $unidadMedida,
-            'colores'       => $colores, // [{color_id,nombre,rgb}, ...] — puede venir vacío si es solo nota libre
+            'colores'       => $colores,
         ];
         $jsNuevaEntrada = json_encode($nuevaEntrada, JSON_UNESCAPED_UNICODE);
 
@@ -1172,7 +1494,6 @@ function registrarMerma()
         responder(false, 'No se pudo registrar la merma: ' . $e->getMessage());
     }
 }
-
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
 function iniciarCorrida(int $id)

@@ -904,16 +904,17 @@ function guardarEnsamblaje()
             $movimiento   = obtenerMovimientoSesion('crear', $cambios);
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+            $proveniente = "produccion";
 
-            $nuevoEnsamblaje = executeQuery($conectar, "
+            $nuevoEnsamblaje = executeQuery($conectar, " 
                 INSERT INTO ensamblaje (
                     producto_id, operario_ortorgado, sucursal,
                     js_derivados_utilizados, js_moldes_utilizados, js_operarios,
-                    created_at, js_usuario, js_historial
+                    created_at, js_usuario, js_historial, proveniente
                 ) VALUES (
                     :producto_id, :operario_ortorgado, :sucursal_id,
                     '[]'::jsonb, '[]'::jsonb, :js_operarios,
-                    NOW(), :js_usuario, :js_historial
+                    NOW(), :js_usuario, :js_historial, :proveniente
                 ) RETURNING id
             ", [
                 'producto_id'        => $producto_id,
@@ -922,6 +923,7 @@ function guardarEnsamblaje()
                 'js_operarios'       => $jsOperariosJson,
                 'js_usuario'         => $js_session,
                 'js_historial'       => $js_historial,
+                'proveniente'        => $proveniente,
             ]);
             $ensamblajeId = $nuevoEnsamblaje[0]['id'] ?? null;
             if (!$ensamblajeId) throw new Exception('No se pudo crear el registro de ensamblaje.');

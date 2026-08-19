@@ -1,6 +1,11 @@
 <?php
 ob_start();
 
+// Evita que notices/warnings/deprecated se impriman en el output y rompan el JSON
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
@@ -161,6 +166,7 @@ function obtenerProducto($id)
     }
 
     $detalleLegible = function ($uid) use ($unidadesDetalle) {
+        if ($uid === null || $uid === '') return null;
         return isset($unidadesDetalle[$uid])
             ? $unidadesDetalle[$uid]['nombre_corto'] . ' - ' . $unidadesDetalle[$uid]['nombre']
             : null;
