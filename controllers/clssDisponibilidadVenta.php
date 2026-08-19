@@ -3,12 +3,25 @@
 /**
  * controllers/clssDisponibilidadVenta.php
  * Reporte de Disponibilidad de Venta: stock empaquetado y aún no vendido,
- * agrupado por producto + color, normalizado a la unidad base cuando
- * corresponde (mismo patrón de equivalencia que clssEmpaquetado.php).
+ * agrupado por producto + color.
  *
- * Color: se deriva vía produccion.unico_molde_producto (split_part), NO
- * existe color_id directo en empaquetado. Ver nota en el chat sobre el
- * caso de un producto con más de un color histórico.
+ * REESCRITO (2026-08-19): el color YA NO se deriva del historial de
+ * producción del producto (producto_color vía `produccion`). Ese enfoque
+ * duplicaba la disponibilidad completa del producto por cada color que
+ * hubiera producido alguna vez, y además dejó de tener sentido desde que
+ * Empaquetado soporta MEZCLA DE COLORES por bulto: un mismo registro de
+ * empaquetado puede combinar varios colores/orígenes.
+ *
+ * Ahora el color se lee directo de rel_empaquetado_origen (fuente real
+ * de qué colores componen cada registro de empaquetado, ya en unidades
+ * base — ver clssEmpaquetado.php). Se agrupa por producto + color sumando
+ * rel_empaquetado_origen.cantidad de los registros activos y no vendidos.
+ *
+ * FALLBACK LEGACY: registros de empaquetado anteriores al modelo de
+ * mezcla (sin ninguna fila activa en rel_empaquetado_origen) no tienen
+ * color por línea. Para esos, se usa cantidad_tota * equivalencia (mismo
+ * cálculo que el reporte usaba antes) bajo un color "Sin color (registro
+ * legado)", en vez de perderlos silenciosamente del reporte.
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -54,6 +67,15 @@ function buscarColoresDV()
     responderDV(true, 'OK', ['colores' => $result]);
 }
 
+// REESCRITO (2026-08-19 v2): un registro de empaquetado que combina más
+// de un color YA NO se reparte entre cada color individual (eso sugería
+// que cada color se podía vender por separado, cuando en realidad el
+// paquete se vende completo, tal cual se armó). Ahora se clasifica en
+// una de tres categorías por registro:
+//   - 1 solo color en rel_empaquetado_origen -> ese color real.
+//   - 2+ colores distintos -> "Mezcla" (color_id_efectivo = -1, sentinel).
+//   - 0 líneas activas (registro legado, sin rel_empaquetado_origen) ->
+//     "Sin color (registro legado)".
 function listarDisponibilidadVenta()
 {
     $conectar        = conectar_oll_BD();
@@ -61,60 +83,82 @@ function listarDisponibilidadVenta()
     $colorId         = trim($_POST['color_id'] ?? '');
     $incluirVendidos = ($_POST['incluir_vendidos'] ?? '0') === '1';
 
-    $whereEmp = ["t1.deleted_at IS NULL"];
-    $params   = [];
+    $whereDetalle = ["dc.deleted_at IS NULL"];
+    $params       = [];
 
     if (!$incluirVendidos) {
-        $whereEmp[] = "t1.pasado_venta IS NULL";
+        $whereDetalle[] = "dc.pasado_venta IS NULL";
     }
     if ($texto !== '') {
-        $whereEmp[] = "(LOWER(pc.producto_codigo) LIKE LOWER(:texto) OR LOWER(pc.producto) LIKE LOWER(:texto))";
+        $whereDetalle[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($colorId !== '') {
-        $whereEmp[] = "pc.color_id = :color_id";
+        // El filtro de color solo aplica a colores reales (nunca matchea
+        // "Mezcla" ni "Sin color", que usan sentinels -1 / NULL).
+        $whereDetalle[] = "dc.color_id_efectivo = :color_id";
         $params['color_id'] = $colorId;
     }
 
-    $sql = "WITH producto_color AS (
-                SELECT DISTINCT
-                    t2.id AS producto_id,
-                    t2.codigo AS producto_codigo,
-                    t2.descripcion AS producto,
-                    t4.id AS color_id,
-                    t4.nombre AS color
-                FROM produccion t3
-                JOIN producto t2 ON t2.id::varchar = split_part(t3.unico_molde_producto, '-', 2)
-                JOIN color t4 ON t4.id = t3.color_id
-                WHERE t4.deleted_at IS NULL
-            )
+    $sql = "
+        WITH color_stats AS (
+            -- Por registro: cuántos colores distintos tiene y cuánto suma
+            -- en total (ya en unidades base). MIN(color_id) solo se usa
+            -- cuando colores_distintos = 1 (en ese caso es EL color).
             SELECT
-                pc.producto_id,
-                pc.producto_codigo,
-                pc.producto,
-                pc.color_id,
-                pc.color,
-                COUNT(t1.id) AS registros_count,
-                COALESCE(SUM(
-                    CASE WHEN um.unidad_base_id IS NOT NULL
-                         THEN t1.cantidad_tota * um.equivalencia
-                         ELSE t1.cantidad_tota
-                    END
-                ), 0) AS cantidad_disponible,
-                MIN(COALESCE(ub.nombre_corto, um.nombre_corto)) AS unidad_corto
-            FROM producto_color pc
-            JOIN empaquetado t1 ON t1.producto_id = pc.producto_id
-            JOIN unidad_medida um ON um.id = t1.unidad_medida
-            LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
-            WHERE " . implode(' AND ', $whereEmp) . "
-            GROUP BY pc.producto_id, pc.producto_codigo, pc.producto, pc.color_id, pc.color
-            HAVING COALESCE(SUM(
-                CASE WHEN um.unidad_base_id IS NOT NULL
-                     THEN t1.cantidad_tota * um.equivalencia
-                     ELSE t1.cantidad_tota
-                END
-            ), 0) > 0
-            ORDER BY pc.producto, pc.color";
+                reo.empaquetado_id,
+                COUNT(DISTINCT reo.color_id) AS colores_distintos,
+                SUM(reo.cantidad) AS cantidad_base_total,
+                MIN(reo.color_id) AS unico_color_id
+            FROM rel_empaquetado_origen reo
+            WHERE reo.deleted_at IS NULL
+            GROUP BY reo.empaquetado_id
+        ),
+        detalle AS (
+            SELECT
+                emp.id AS empaquetado_id,
+                emp.producto_id,
+                emp.pasado_venta,
+                emp.deleted_at,
+                CASE
+                    WHEN cs.colores_distintos IS NULL THEN NULL   -- legado
+                    WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
+                    ELSE -1                                        -- mezcla
+                END AS color_id_efectivo,
+                COALESCE(
+                    cs.cantidad_base_total,
+                    emp.cantidad_tota * COALESCE(um.equivalencia, 1)  -- fallback legado
+                ) AS cantidad_base
+            FROM empaquetado emp
+            LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
+            JOIN unidad_medida um ON um.id = emp.unidad_medida
+        )
+        SELECT
+            dc.producto_id,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto,
+            dc.color_id_efectivo AS color_id,
+            CASE
+                WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
+                WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
+                ELSE co.nombre
+            END AS color,
+            COUNT(*) AS registros_count,
+            SUM(dc.cantidad_base) AS cantidad_disponible,
+            MIN(COALESCE(ub.nombre_corto, um.nombre_corto)) AS unidad_corto
+        FROM detalle dc
+        JOIN producto p ON p.id = dc.producto_id
+        JOIN empaquetado emp2 ON emp2.id = dc.empaquetado_id
+        JOIN unidad_medida um ON um.id = emp2.unidad_medida
+        LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
+        LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
+        WHERE " . implode(' AND ', $whereDetalle) . "
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre
+        HAVING SUM(dc.cantidad_base) > 0
+        ORDER BY p.descripcion,
+                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END, -- Mezcla al final de cada producto
+                 co.nombre NULLS LAST
+    ";
 
     $result = executeQuery($conectar, $sql, $params);
     responderDV(true, 'OK', ['disponibilidad' => $result]);

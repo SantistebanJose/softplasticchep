@@ -13,16 +13,9 @@ include("header.php");
 .pc-dv-tabla td{ padding:9px 12px; border-bottom:1px dashed #eee2c8; vertical-align:top; }
 .pc-dv-tabla tr:last-child td{ border-bottom:none; }
 .pc-dv-color-dot{ display:inline-block; width:10px; height:10px; border-radius:50%; background:#ccc; margin-right:6px; vertical-align:middle; }
-.pc-dv-color-dot.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 2px, #fff 2px, #fff 4px); border:1px solid #bbb; }
 .pc-dv-cantidad{ font-weight:700; color:#2F6FED; }
 .pc-dv-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
 .pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:220px; }
-.pc-dv-legado{ font-style:italic; color:#9a9585; }
-
-.pc-dv-color-dot.mezcla{
-    background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg);
-}
-.pc-dv-mezcla-texto{ font-weight:600; color:#3a3730; }
 </style>
 
 <div class="pc-card">
@@ -113,29 +106,14 @@ async function cargarDisponibilidadVenta() {
         return;
     }
 
-    tbody.innerHTML = filas.map(f => {
-        const esLegado = f.color_id === null || f.color_id === undefined;
-        const esMezcla = f.color_id === -1;
-
-        let dotClase = 'pc-dv-color-dot';
-        let colorTexto = f.color ?? '-';
-
-        if (esLegado) {
-            dotClase += ' sin-color';
-            colorTexto = `<span class="pc-dv-legado">${colorTexto}</span>`;
-        } else if (esMezcla) {
-            dotClase += ' mezcla';
-            colorTexto = `<span class="pc-dv-mezcla-texto">${colorTexto}</span>`;
-        }
-
-        return `
+    tbody.innerHTML = filas.map(f => `
         <tr>
             <td><b>${f.producto_codigo ?? ''}</b> - ${f.producto ?? '-'}</td>
-            <td><span class="${dotClase}"></span>${colorTexto}</td>
+            <td><span class="pc-dv-color-dot"></span>${f.color ?? '-'}</td>
             <td>${f.registros_count ?? 0}</td>
             <td class="pc-dv-cantidad">${formatearCantidadDV(f.cantidad_disponible)} ${f.unidad_corto ?? ''}</td>
-        </tr>`;
-    }).join('');
+        </tr>
+    `).join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

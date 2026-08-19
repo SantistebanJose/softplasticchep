@@ -1,27 +1,25 @@
 <?php
 $pageTitle    = 'Empaquetado';
-$pageSubtitle = 'Registro de empaquetado de ensamblajes finalizados';
+$pageSubtitle = 'Registro de empaquetado por producto (con mezcla de colores)';
 $activePage = 'empaquetado';
 
 include("header.php");
 ?>
 
 <!--
-    empaquetado.php (REESCRITO 2026-07-30 v4 + tabs de navegación 2026-08-18)
+    empaquetado.php (REESCRITO 2026-08-18 v5 — mezcla de colores por bulto)
 
-    MODELO DE UI:
-    1) Grid de ensamblajes FINALIZADOS (LISTARENSAMBLAJESPARAEMPAQUETADO),
-       ahora con una barra de TABS por producto (estilo "Todos / Producto A / Producto B..."
-       con badge de conteo), filtrado 100% client-side sobre lo ya cargado —
-       no se vuelve a pedir al backend al cambiar de tab.
-    2) Grid de producciones DIRECTAS a empaquetado, sin pasar por ensamblaje
-       (LISTARPRODUCCIONESPARAEMPAQUETADO) — moldes/productos configurados
-       con necesita_ensamblaje = 'no'.
-    3) Modal compartido: recibe (ensamblajeId, productoLabel, produccionId).
-       Ambos ids son mutuamente excluyentes; uno de los dos siempre es 0.
-    4) Tabla de "Registros de empaquetado" (histórico general, ambos
-       orígenes), con columna "Origen" que distingue Ensamblaje/Producción
-       vía el campo origen_tipo que devuelve el backend.
+    CAMBIO DE MODELO respecto a v4:
+    - El modal ya NO se abre por un ensamblaje/producción puntual: se abre
+      por PRODUCTO. Dentro, cada bulto puede combinar cantidades tomadas de
+      varios orígenes (ensamblajes y/o producciones directas) de distinto
+      color, siempre que el producto sea el mismo.
+    - BUSCARORIGENESDISPONIBLES trae, por producto, cada origen con su
+      color y su disponible restante (ya descontado lo consumido).
+    - CREAREMPAQUETADO recibe producto_id + bultos[].colores[] en vez de
+      ensamblaje_id/produccion_id sueltos.
+    - La edición (EDITAREMPAQUETADO) solo toca cabecera (unidad, operario,
+      sucursal): la mezcla de colores es de solo lectura una vez creada.
 -->
 
 <style>
@@ -59,12 +57,8 @@ include("header.php");
     transition:.12s ease;
 }
 .pc-btn-empaquetar:hover{ background:#2F6FED; color:#fff; }
-.pc-btn-empaquetar--hecho{
-    background:#fff; color:#2F6FED; border:1px solid #2F6FED;
-}
-.pc-btn-empaquetar--hecho:hover{ background:#2F6FED; color:#fff; }
 
-/* ── Tabla de registros (dentro del modal y en el listado general) ── */
+/* ── Tabla de registros ── */
 .pc-emp-tabla-wrap{ max-height:260px; overflow-y:auto; border:1px solid #eee7db; border-radius:10px; margin-bottom:16px; }
 .pc-emp-tabla{ width:100%; font-size:.85em; border-collapse:collapse; }
 .pc-emp-tabla th{ position:sticky; top:0; background:#fdfcfa; text-align:left; padding:8px 10px; border-bottom:1px solid #eee7db; font-size:.78em; color:#8a8578; text-transform:uppercase; }
@@ -76,9 +70,12 @@ include("header.php");
 .pc-icon-btn{ border:1px solid #eee2c8; background:#fff; border-radius:8px; padding:5px 8px; color:#6b6656; }
 .pc-icon-btn:hover{ background:#fdfcfa; }
 
-/* ── Bultos dinámicos ── */
-.pc-bulto-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-.pc-bulto-row input{ flex:1; }
+/* ── Bultos con mezcla de colores ── */
+.pc-bulto-card{ border:1px solid #eee2c8; border-radius:10px; padding:10px 12px; margin-bottom:10px; background:#fffefb; }
+.pc-bulto-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:.85em; font-weight:700; color:#3a3730; }
+.pc-color-row{ display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+.pc-color-row select{ flex:2; min-width:0; }
+.pc-color-row input{ flex:1; min-width:0; }
 .pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1em; flex:0 0 auto; }
 .pc-bultos-total{
     display:flex; justify-content:space-between; align-items:center;
@@ -86,20 +83,18 @@ include("header.php");
     font-size:.9em; margin-top:6px;
 }
 .pc-bultos-total b{ color:#2F6FED; font-size:1.05em; }
+.pc-origenes-readonly{ background:#fdfcfa; border:1px solid #eee7db; border-radius:10px; padding:10px 12px; font-size:.85em; color:#6b6656; line-height:1.6; }
 
 /* ── Listado general ── */
 .pc-listado-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
 .pc-listado-filtros select, .pc-listado-filtros input[type="date"]{ max-width:180px; }
 
-/* ── NUEVO: barra de tabs por producto (estilo captura de referencia) ── */
+/* ── Tabs por producto ── */
 .pc-emp-tabsbar{
     display:flex; align-items:center; justify-content:space-between; gap:16px;
     flex-wrap:wrap; border-bottom:1px solid #eee7db; margin-bottom:16px; padding-bottom:0;
 }
-.pc-emp-tabs{
-    display:flex; align-items:center; gap:4px; overflow-x:auto; flex:1;
-    scrollbar-width:thin;
-}
+.pc-emp-tabs{ display:flex; align-items:center; gap:4px; overflow-x:auto; flex:1; scrollbar-width:thin; }
 .pc-emp-tab{
     display:flex; align-items:center; gap:8px; padding:10px 14px;
     border:none; background:transparent; white-space:nowrap;
@@ -124,9 +119,6 @@ include("header.php");
         <h2>Empaquetado</h2>
     </div>
 
-    <!-- Barra de tabs por producto: se genera dinámicamente en JS a partir
-         de lo que devuelve LISTARENSAMBLAJESPARAEMPAQUETADO. Cambiar de tab
-         NO vuelve a pedir al backend: filtra lo ya cargado en memoria. -->
     <div class="pc-emp-tabsbar">
         <div class="pc-emp-tabs" id="tabsEmpaquetado">
             <button type="button" class="pc-emp-tab activo" data-tab="__todos__" onclick="seleccionarTabEmp('__todos__')">
@@ -193,13 +185,13 @@ include("header.php");
                 </tr>
             </thead>
             <tbody id="tablaListadoGeneralEmp">
-                <tr><td colspan="8" class="text-center text-muted">Cargando...</td></tr>
+                <tr><td colspan="9" class="text-center text-muted">Cargando...</td></tr>
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- Modal por ensamblaje/producción: lista de registros + alta/edición -->
+<!-- Modal por PRODUCTO: lista de registros + alta/edición con mezcla de colores -->
 <div class="modal fade" id="modalEmpaquetado" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -233,12 +225,14 @@ include("header.php");
         <h6 class="mb-2" id="formEmpTitulo"><i class="fa-solid fa-plus"></i> Nuevo registro de empaquetado</h6>
         <form id="formEmpaquetado">
             <input type="hidden" id="emp_id" value="0">
-            <input type="hidden" id="emp_ensamblaje_id" value="0">
-            <input type="hidden" id="emp_produccion_id" value="0">
+            <input type="hidden" id="emp_producto_id" value="0">
             <div class="row">
                 <div class="col-md-4 mb-2">
                     <label class="form-label">Unidad de medida *</label>
                     <select class="form-select" id="emp_unidad_medida" required></select>
+                    <small class="text-muted" id="avisoUnidadEmpaquetado" style="display:none;">
+                        Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí y configúrala en Productos para la próxima vez.
+                    </small>
                 </div>
                 <div class="col-md-4 mb-2">
                     <label class="form-label">Operario *</label>
@@ -250,16 +244,23 @@ include("header.php");
                 </div>
             </div>
 
-            <label class="form-label">Unidades Paquetes *</label>
-            <div id="listaBultos"></div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarFilaBulto()">
-                <i class="fa-solid fa-plus"></i> Agregar Paquete
-            </button>
-
-            <div class="pc-bultos-total">
-                <span><span id="bultosCount">0</span> paquete(s)</span>
-                <span>Total: <b id="bultosTotal">0</b></span>
+            <!-- Bloque de bultos: solo visible al CREAR. Cada bulto puede
+                 mezclar cantidades de varios orígenes/colores del mismo
+                 producto. -->
+            <div id="bloqueBultos">
+                <label class="form-label">Unidades Paquetes (mezcla de colores) *</label>
+                <div id="listaBultos"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarBulto()">
+                    <i class="fa-solid fa-plus"></i> Agregar Paquete
+                </button>
+                <div class="pc-bultos-total">
+                    <span><span id="bultosCount">0</span> paquete(s)</span>
+                    <span>Total: <b id="bultosTotal">0</b></span>
+                </div>
             </div>
+
+            <!-- Bloque de solo lectura: visible al EDITAR (la mezcla ya no se toca) -->
+            <div id="bloqueOrigenesReadonly" style="display:none;"></div>
 
             <div class="d-flex gap-2 mt-3">
                 <button type="submit" class="btn btn-primary btn-sm">
@@ -282,19 +283,19 @@ include("header.php");
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
 const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
 
-// ── Estado del modal: ensamblajeId y produccionId son mutuamente
-// excluyentes — solo uno de los dos es > 0 en cada apertura. ──
-let empEnsamblajeIdActual = 0;
-let empProduccionIdActual = 0;
+// ── Estado del modal: ahora keyado por PRODUCTO, no por origen puntual ──
+let empProductoIdActual = 0;
 let empIdEnEdicion = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
-let bultosState = []; // [{tempId, valor}]
+let origenesDisponiblesCache = []; // BUSCARORIGENESDISPONIBLES del producto actual
+let bultosState = [];  // [{tempId, colores:[{tempColorId, origen_tipo, origen_id, color_id, color_nombre, cantidad}]}]
 let contadorBulto = 0;
+let contadorColorRow = 0;
 
-// ── NUEVO: estado de tabs por producto (100% client-side) ──
-let cacheFilasEmpaquetado = [];   // último resultado de LISTARENSAMBLAJESPARAEMPAQUETADO
-let tabActivoEmp = '__todos__';   // clave de tab activa (producto_codigo, o "__todos__")
+// ── Tabs por producto (100% client-side) ──
+let cacheFilasEmpaquetado = [];
+let tabActivoEmp = '__todos__';
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
@@ -327,7 +328,6 @@ function limpiarFiltrosListado() {
     cargarListadoGeneralEmp();
 }
 
-// ── Llamada genérica al controlador ─────────────────────────────────────────
 async function llamarEmpaquetado(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
     const resp = await fetch(CONTROLADOR_EMPAQUETADO, {
@@ -357,7 +357,6 @@ function formatearFechaHoraLegibleEmp(fechaIso) {
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
 }
 
-// Columnas jsonb pueden llegar como string o ya decodificadas según el driver.
 function parseJsonColumnaEmp(v) {
     if (!v) return [];
     if (typeof v === 'string') {
@@ -366,12 +365,22 @@ function parseJsonColumnaEmp(v) {
     return Array.isArray(v) ? v : [];
 }
 
-// Texto "(= 96 UND)" cuando la unidad tiene conversión a base; vacío si no.
 function textoEquivalenteEmp(r) {
     if (r.unidad_base_id && r.cantidad_tota_en_base != null) {
         return ` <span class="text-muted" style="font-size:.85em;">(= ${formatearCantidadEmp(r.cantidad_tota_en_base)} ${r.unidad_base_corto ?? ''})</span>`;
     }
     return '';
+}
+
+// Texto compacto del detalle de un registro: "12 (VERDE: 6, AZUL: 6) + 8 (ROJO: 8)"
+function textoBultosDetalle(bultos) {
+    if (!bultos || bultos.length === 0) return '-';
+    return bultos.map(b => {
+        const colores = (b.colores || [])
+            .map(c => `${c.color_nombre ?? 'Sin color'}: ${formatearCantidadEmp(c.cantidad)}`)
+            .join(', ');
+        return `${formatearCantidadEmp(b.cantidad)}${colores ? ` (${colores})` : ''}`;
+    }).join(' + ');
 }
 
 // =============================================================================
@@ -395,9 +404,6 @@ async function cargarPendientesEmpaquetado() {
 
     cacheFilasEmpaquetado = json.ensamblajes || [];
 
-    // Si el producto de la tab activa ya no está presente (por el filtro de
-    // texto, por ejemplo), volvemos a "Todos" para no dejar la grilla vacía
-    // sin que el usuario entienda por qué.
     if (tabActivoEmp !== '__todos__' && !cacheFilasEmpaquetado.some(f => claveTabEmp(f) === tabActivoEmp)) {
         tabActivoEmp = '__todos__';
     }
@@ -406,17 +412,14 @@ async function cargarPendientesEmpaquetado() {
     renderGridEmpaquetadoFiltrado();
 }
 
-// Clave estable para agrupar por producto en las tabs.
 function claveTabEmp(fila) {
     return fila.producto_id != null ? `id:${fila.producto_id}` : `cod:${fila.producto_codigo ?? ''}`;
 }
 
-// Construye la barra de tabs (Todos + un tab por producto) a partir de
-// cacheFilasEmpaquetado. No dispara ningún fetch: solo pinta lo ya cargado.
 function renderTabsEmp() {
     const cont = document.getElementById('tabsEmpaquetado');
 
-    const grupos = new Map(); // clave -> { label, count }
+    const grupos = new Map();
     cacheFilasEmpaquetado.forEach(f => {
         const clave = claveTabEmp(f);
         const label = `${f.producto_codigo ?? ''} - ${f.producto_descripcion ?? 'Sin nombre'}`;
@@ -424,7 +427,6 @@ function renderTabsEmp() {
         grupos.get(clave).count++;
     });
 
-    // Orden alfabético por descripción de producto.
     const tabs = [...grupos.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
 
     const tabTodosHtml = `
@@ -446,14 +448,12 @@ function renderTabsEmp() {
     cont.innerHTML = tabTodosHtml + tabsProductoHtml;
 }
 
-// Cambiar de tab es puramente local: no vuelve a pedir nada al backend.
 function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
     renderTabsEmp();
     renderGridEmpaquetadoFiltrado();
 }
 
-// Pinta el grid aplicando el filtro de tab sobre lo ya cargado en cache.
 function renderGridEmpaquetadoFiltrado() {
     const grid = document.getElementById('gridEmpaquetado');
     const filas = tabActivoEmp === '__todos__'
@@ -461,15 +461,11 @@ function renderGridEmpaquetadoFiltrado() {
         : cacheFilasEmpaquetado.filter(f => claveTabEmp(f) === tabActivoEmp);
 
     if (filas.length === 0) {
-        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados para este filtro.</div>';
+        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados con disponible para este filtro.</div>';
         return;
     }
 
     grid.innerHTML = filas.map(e => {
-        const yaEmpaquetado = (e.empaquetados_count ?? 0) > 0;
-        const btnClase  = yaEmpaquetado ? 'pc-btn-empaquetar pc-btn-empaquetar--hecho' : 'pc-btn-empaquetar';
-        const btnIcono  = yaEmpaquetado ? 'fa-solid fa-eye' : 'fa-solid fa-box';
-        const btnTexto  = yaEmpaquetado ? 'Ver empaquetado' : 'Empaquetar';
         const productoLabel = `${(e.producto_codigo ?? '')} - ${(e.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
         return `
         <div class="pc-emp-card">
@@ -485,12 +481,12 @@ function renderGridEmpaquetadoFiltrado() {
                     <span class="val">${formatearCantidadEmp(e.cantidad_peso_kg)} ${e.unidad_salida_codigo || 'kg'}</span>
                 </div>
                 <div class="pc-emp-field">
-                    <span class="lbl">Registros de empaquetado</span>
-                    <span class="val">${e.empaquetados_count ?? 0}</span>
+                    <span class="lbl">Disponible</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_disponible)}</span>
                 </div>
                 <div class="pc-emp-field span-2">
-                    <span class="lbl">Total ya empaquetado</span>
-                    <span class="val">${formatearCantidadEmp(e.cantidad_total_empaquetada)}</span>
+                    <span class="lbl">Ya empaquetado</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_total_empaquetada)} · ${e.empaquetados_count ?? 0} registro(s)</span>
                 </div>
                 <div class="pc-emp-field span-2">
                     <span class="lbl">Finalizado</span>
@@ -498,9 +494,9 @@ function renderGridEmpaquetadoFiltrado() {
                 </div>
             </div>
             <div class="pc-emp-card-foot">
-                <button type="button" class="${btnClase}"
-                        onclick="abrirModalEmpaquetado(${e.ensamblaje_id}, '${productoLabel}')">
-                    <i class="${btnIcono}"></i> ${btnTexto}
+                <button type="button" class="pc-btn-empaquetar"
+                        onclick="abrirModalEmpaquetado(${e.producto_id}, '${productoLabel}')">
+                    <i class="fa-solid fa-box"></i> Empaquetar
                 </button>
             </div>
         </div>
@@ -509,7 +505,7 @@ function renderGridEmpaquetadoFiltrado() {
 }
 
 // =============================================================================
-// GRID DE PRODUCCIONES DIRECTAS (sin ensamblaje)
+// GRID DE PRODUCCIONES DIRECTAS
 // =============================================================================
 
 async function cargarProduccionesDirectasEmpaquetado() {
@@ -527,15 +523,11 @@ async function cargarProduccionesDirectasEmpaquetado() {
 
     const filas = json.producciones || [];
     if (filas.length === 0) {
-        grid.innerHTML = '<div class="pc-emp-empty">No hay producciones directas pendientes de empaquetar.</div>';
+        grid.innerHTML = '<div class="pc-emp-empty">No hay producciones directas con disponible pendiente de empaquetar.</div>';
         return;
     }
 
     grid.innerHTML = filas.map(pd => {
-        const yaEmpaquetado = (pd.empaquetados_count ?? 0) > 0;
-        const btnClase  = yaEmpaquetado ? 'pc-btn-empaquetar pc-btn-empaquetar--hecho' : 'pc-btn-empaquetar';
-        const btnIcono  = yaEmpaquetado ? 'fa-solid fa-eye' : 'fa-solid fa-box';
-        const btnTexto  = yaEmpaquetado ? 'Ver empaquetado' : 'Empaquetar';
         const productoLabel = `${(pd.producto_codigo ?? '')} - ${(pd.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
         return `
         <div class="pc-emp-card">
@@ -551,12 +543,12 @@ async function cargarProduccionesDirectasEmpaquetado() {
                     <span class="val">${pd.molde_nombre ?? '-'} · ${pd.color_nombre ?? '-'}</span>
                 </div>
                 <div class="pc-emp-field">
-                    <span class="lbl">Producido</span>
-                    <span class="val">${formatearCantidadEmp(pd.cantidad_producida_kg)}</span>
+                    <span class="lbl">Disponible</span>
+                    <span class="val">${formatearCantidadEmp(pd.cantidad_disponible)}</span>
                 </div>
                 <div class="pc-emp-field span-2">
-                    <span class="lbl">Registros de empaquetado</span>
-                    <span class="val">${pd.empaquetados_count ?? 0}</span>
+                    <span class="lbl">Ya empaquetado</span>
+                    <span class="val">${formatearCantidadEmp(pd.cantidad_total_empaquetada)} · ${pd.empaquetados_count ?? 0} registro(s)</span>
                 </div>
                 <div class="pc-emp-field span-2">
                     <span class="lbl">Finalizado</span>
@@ -564,9 +556,9 @@ async function cargarProduccionesDirectasEmpaquetado() {
                 </div>
             </div>
             <div class="pc-emp-card-foot">
-                <button type="button" class="${btnClase}"
-                        onclick="abrirModalEmpaquetado(0, '${productoLabel}', ${pd.produccion_id})">
-                    <i class="${btnIcono}"></i> ${btnTexto}
+                <button type="button" class="pc-btn-empaquetar"
+                        onclick="abrirModalEmpaquetado(${pd.producto_id}, '${productoLabel}')">
+                    <i class="fa-solid fa-box"></i> Empaquetar
                 </button>
             </div>
         </div>`;
@@ -574,12 +566,12 @@ async function cargarProduccionesDirectasEmpaquetado() {
 }
 
 // =============================================================================
-// LISTADO GENERAL (debajo de los grids)
+// LISTADO GENERAL
 // =============================================================================
 
 async function cargarListadoGeneralEmp() {
     const tbody = document.getElementById('tablaListadoGeneralEmp');
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
     const params = {
         texto: document.getElementById('femp_texto').value.trim(),
@@ -589,32 +581,30 @@ async function cargarListadoGeneralEmp() {
     };
     const json = await llamarEmpaquetado('LISTARTODOSEMPAQUETADOS', params);
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger">${json.message}</td></tr>`;
         return;
     }
 
     const registros = json.empaquetados || [];
     if (registros.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No hay registros de empaquetado con estos filtros.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No hay registros de empaquetado con estos filtros.</td></tr>';
         return;
     }
 
     tbody.innerHTML = registros.map(r => {
         const bultos = parseJsonColumnaEmp(r.js_cantidades);
-        const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
+        const bultosTexto = textoBultosDetalle(bultos);
         const vendido = !!r.pasado_venta;
         const productoLabel = `${(r.producto_codigo ?? '')} - ${(r.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
-        const esProduccion = r.origen_tipo === 'produccion';
-        const origenTexto  = esProduccion ? `Producción #${r.produccion_id}` : `Ensamblaje #${r.emsamblaje_id}`;
-        const onclickAbrir = esProduccion
-            ? `abrirModalEmpaquetado(0, '${productoLabel}', ${r.produccion_id})`
-            : `abrirModalEmpaquetado(${r.emsamblaje_id}, '${productoLabel}')`;
+        const origenTexto = r.origen_tipo === 'mixto' ? 'Mixto'
+            : r.origen_tipo === 'produccion' ? 'Producción directa'
+            : r.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : '-';
         return `
         <tr>
             <td>${origenTexto}</td>
             <td>${r.producto_codigo ?? ''} - ${r.producto_descripcion ?? '-'}</td>
             <td>${r.sucursal_nombre ?? '-'}</td>
-            <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
+            <td class="bultos-detalle">${bultosTexto}</td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
             <td>${r.operario_nombre ?? '-'}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
@@ -623,7 +613,7 @@ async function cargarListadoGeneralEmp() {
                 : '<span class="badge bg-success">Disponible</span>'}</td>
             <td>
                 <button type="button" class="pc-icon-btn" title="Abrir"
-                        onclick="${onclickAbrir}">
+                        onclick="abrirModalEmpaquetado(${r.producto_id}, '${productoLabel}')">
                     <i class="fa-solid fa-box-open"></i>
                 </button>
             </td>
@@ -655,59 +645,70 @@ async function cargarSelectsFormEmp() {
         obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
     ]);
     const sUnidad = document.getElementById('emp_unidad_medida');
-    if (unidades.length === 0) {
-        sUnidad.innerHTML = '<option value="">(sin unidades disponibles - revisar consola)</option>';
-        console.error('BUSCARUNIDADESMEDIDA no devolvió unidades. Revisa la respuesta del servidor.');
-    } else {
-        sUnidad.innerHTML = '<option value="">Selecciona...</option>' +
-            unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
-    }
+    sUnidad.innerHTML = unidades.length
+        ? '<option value="">Selecciona...</option>' + unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('')
+        : '<option value="">(sin unidades disponibles - revisar consola)</option>';
+
     const sSuc = document.getElementById('emp_sucursal_id');
-        sSuc.innerHTML = '<option value="">Selecciona...</option>' +
-            (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
-    
+    sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 
     const sOp = document.getElementById('emp_operario_id');
-    if (operarios.length === 0) {
-        sOp.innerHTML = '<option value="">(sin operarios disponibles - revisar consola)</option>';
-    } else {
-        sOp.innerHTML = '<option value="">Selecciona...</option>' +
-            operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('');
-    }
+    sOp.innerHTML = operarios.length
+        ? '<option value="">Selecciona...</option>' + operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('')
+        : '<option value="">(sin operarios disponibles - revisar consola)</option>';
 }
 
+let unidadEmpaquetadoProductoActual = null;
+
+async function cargarOrigenesDisponibles(productoId) {
+    const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
+    if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
+    origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
+    unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
+}
+function aplicarUnidadEmpaquetadoFija() {
+    const sUnidad = document.getElementById('emp_unidad_medida');
+    const aviso = document.getElementById('avisoUnidadEmpaquetado');
+
+    if (unidadEmpaquetadoProductoActual && unidadEmpaquetadoProductoActual.id) {
+        sUnidad.innerHTML = `<option value="${unidadEmpaquetadoProductoActual.id}" selected>
+            ${unidadEmpaquetadoProductoActual.nombre} (${unidadEmpaquetadoProductoActual.nombre_corto})
+        </option>`;
+        sUnidad.disabled = true;
+        aviso.style.display = 'none';
+    } else {
+        // Producto sin "Salida en Empaquetado" configurada: fallback
+        // editable (ya trae la lista completa cargada por cargarSelectsFormEmp)
+        sUnidad.disabled = false;
+        aviso.style.display = 'block';
+    }
+}
 // =============================================================================
 // MODAL: lista de registros + formulario
 // =============================================================================
 
-// ensamblajeId y produccionId son mutuamente excluyentes: pasa 0 en el que
-// no aplique. Si produccionId > 0, ensamblajeId debe venir en 0 (y viceversa).
-async function abrirModalEmpaquetado(ensamblajeId, productoLabel, produccionId = 0) {
-    empEnsamblajeIdActual = ensamblajeId || 0;
-    empProduccionIdActual = produccionId || 0;
+async function abrirModalEmpaquetado(productoId, productoLabel) {
+    empProductoIdActual = productoId;
 
-    const etiquetaOrigen = empEnsamblajeIdActual
-        ? `Empaquetar #${empEnsamblajeIdActual}`
-        : `Empaquetar (Producción #${empProduccionIdActual})`;
-    document.getElementById('modalEmpaquetadoTitulo').textContent = `${etiquetaOrigen} — ${productoLabel}`;
-    document.getElementById('emp_ensamblaje_id').value = empEnsamblajeIdActual;
-    document.getElementById('emp_produccion_id').value = empProduccionIdActual;
+    document.getElementById('modalEmpaquetadoTitulo').textContent = `Empaquetar — ${productoLabel}`;
+    document.getElementById('emp_producto_id').value = empProductoIdActual;
 
-    cancelarEdicionEmp(); // resetea el formulario a modo "nuevo"
-    await cargarSelectsFormEmp();
+    cancelarEdicionEmp(); // resetea a modo "nuevo" (bloqueBultos visible, 1 bulto vacío)
+    await Promise.all([
+        cargarSelectsFormEmp(),
+        cargarOrigenesDisponibles(productoId),
+    ]);
+    aplicarUnidadEmpaquetadoFija(); // fija/bloquea la unidad según config del producto
+    renderBultos(); // re-render con el cache de orígenes ya cargado
     await cargarRegistrosEmp();
 
     modalEmpaquetado.show();
 }
-
 async function cargarRegistrosEmp() {
     const tbody = document.getElementById('tablaRegistrosEmp');
     tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
-    const json = await llamarEmpaquetado('LISTAREMPAQUETADOS', {
-        ensamblaje_id: empEnsamblajeIdActual,
-        produccion_id: empProduccionIdActual,
-    });
+    const json = await llamarEmpaquetado('LISTAREMPAQUETADOSPORPRODUCTO', { producto_id: empProductoIdActual });
     if (!json.success) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${json.message}</td></tr>`;
         return;
@@ -715,17 +716,17 @@ async function cargarRegistrosEmp() {
 
     const registros = json.empaquetados || [];
     if (registros.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay registros de empaquetado para este origen.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay registros de empaquetado para este producto.</td></tr>';
         return;
     }
 
     tbody.innerHTML = registros.map(r => {
         const bultos = parseJsonColumnaEmp(r.js_cantidades);
-        const bultosTexto = bultos.map(b => formatearCantidadEmp(b.cantidad)).join(' + ') || '-';
+        const bultosTexto = textoBultosDetalle(bultos);
         const vendido = !!r.pasado_venta;
         return `
         <tr>
-            <td class="bultos-detalle">${bultosTexto} <span class="text-muted">(${bultos.length})</span></td>
+            <td class="bultos-detalle">${bultosTexto}</td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
             <td>${r.operario_nombre ?? '-'}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
@@ -744,45 +745,172 @@ async function cargarRegistrosEmp() {
     }).join('');
 }
 
-// ── Bultos dinámicos ───────────────────────────────────────────────────────
-function renderBultos() {
-    const cont = document.getElementById('listaBultos');
-    cont.innerHTML = bultosState.map(b => `
-        <div class="pc-bulto-row" id="bulto_${b.tempId}">
-            <input type="number" min="0.0001" step="0.0001" class="form-control form-control-sm"
-                   value="${b.valor}" oninput="actualizarBulto(${b.tempId}, this.value)" placeholder="Cantidad">
-            <button type="button" class="pc-bulto-remove" onclick="quitarFilaBulto(${b.tempId})" title="Quitar">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
-    `).join('');
-    actualizarResumenBultos();
+// ── Bultos con mezcla de colores ────────────────────────────────────────────
+
+function claveOrigen(tipo, id) { return `${tipo}:${id}`; }
+
+// Cuánto de un origen ya está comprometido en los bultos armados (client-side)
+function cantidadComprometidaOrigen(tipo, id) {
+    let total = 0;
+    bultosState.forEach(b => b.colores.forEach(c => {
+        if (c.origen_tipo === tipo && c.origen_id === id) total += (parseFloat(c.cantidad) || 0);
+    }));
+    return total;
 }
 
-function agregarFilaBulto(valorInicial = '') {
-    bultosState.push({ tempId: ++contadorBulto, valor: valorInicial });
-    renderBultos();
+function disponibleRestanteOrigen(tipo, id, excluirTempColorId = null) {
+    const o = origenesDisponiblesCache.find(x => x.origen_tipo === tipo && x.origen_id == id);
+    if (!o) return 0;
+    let comprometido = 0;
+    bultosState.forEach(b => b.colores.forEach(c => {
+        if (c.origen_tipo === tipo && c.origen_id === id && c.tempColorId !== excluirTempColorId) {
+            comprometido += (parseFloat(c.cantidad) || 0);
+        }
+    }));
+    return (parseFloat(o.disponible) || 0) - comprometido;
 }
 
-function quitarFilaBulto(tempId) {
+function totalBulto(bulto) {
+    return bulto.colores.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
+}
+
+function agregarBulto() {
+    bultosState.push({ tempId: ++contadorBulto, colores: [] });
+    agregarColorABulto(bultosState[bultosState.length - 1].tempId);
+}
+
+function quitarBulto(tempId) {
     bultosState = bultosState.filter(b => b.tempId !== tempId);
     renderBultos();
 }
 
-function actualizarBulto(tempId, valor) {
-    const b = bultosState.find(x => x.tempId === tempId);
-    if (b) b.valor = valor;
+function agregarColorABulto(bultoTempId) {
+    const bulto = bultosState.find(b => b.tempId === bultoTempId);
+    if (!bulto) return;
+    bulto.colores.push({ tempColorId: ++contadorColorRow, origen_tipo: '', origen_id: 0, color_id: null, color_nombre: '', cantidad: '' });
+    renderBultos();
+}
+
+function quitarColorDeBulto(bultoTempId, tempColorId) {
+    const bulto = bultosState.find(b => b.tempId === bultoTempId);
+    if (!bulto) return;
+    bulto.colores = bulto.colores.filter(c => c.tempColorId !== tempColorId);
+    renderBultos();
+}
+
+function actualizarOrigenColor(bultoTempId, tempColorId, valorSelect) {
+    const bulto = bultosState.find(b => b.tempId === bultoTempId);
+    if (!bulto) return;
+    const fila = bulto.colores.find(c => c.tempColorId === tempColorId);
+    if (!fila) return;
+    if (!valorSelect) {
+        fila.origen_tipo = ''; fila.origen_id = 0; fila.color_id = null; fila.color_nombre = '';
+    } else {
+        const [tipo, id] = valorSelect.split(':');
+        const o = origenesDisponiblesCache.find(x => x.origen_tipo === tipo && x.origen_id == id);
+        fila.origen_tipo = tipo; fila.origen_id = parseInt(id, 10);
+        fila.color_id = o ? o.color_id : null;
+        fila.color_nombre = o ? o.color_nombre : '';
+    }
+    renderBultos();
+}
+
+function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
+    const bulto = bultosState.find(b => b.tempId === bultoTempId);
+    if (!bulto) return;
+    const fila = bulto.colores.find(c => c.tempColorId === tempColorId);
+    if (fila) fila.cantidad = valor;
+    actualizarResumenBultos(); // solo el total; no re-renderiza para no perder el foco del input
+}
+
+function renderBultos() {
+    const cont = document.getElementById('listaBultos');
+    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
+        : null;
+
+    if (bultosState.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">Agrega al menos un bulto.</div>';
+        actualizarResumenBultos();
+        return;
+    }
+
+    cont.innerHTML = bultosState.map((b, idx) => {
+        const total = totalBulto(b);
+        const excedido = capacidad !== null && total > capacidad + 0.0001;
+        const textoTotal = capacidad !== null
+            ? `total: ${formatearCantidadEmp(total)} / ${formatearCantidadEmp(capacidad)}`
+            : `total: ${formatearCantidadEmp(total)}`;
+
+        const filasColores = b.colores.map(c => {
+            const valorActual = c.origen_tipo ? claveOrigen(c.origen_tipo, c.origen_id) : '';
+            const opciones = origenesDisponiblesCache.map(o => {
+                const clave = claveOrigen(o.origen_tipo, o.origen_id);
+                const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
+                const deshabilitado = restante <= 0.0001 && clave !== valorActual;
+                const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+                return `<option value="${clave}" ${clave === valorActual ? 'selected' : ''} ${deshabilitado ? 'disabled' : ''}>
+                    ${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)})
+                </option>`;
+            }).join('');
+
+            // Tope del input: lo más restrictivo entre lo disponible del
+            // origen elegido y lo que le queda de espacio al bulto según
+            // la capacidad de la unidad de empaquetado.
+            const restanteOrigenActual = c.origen_tipo ? disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) : null;
+            const espacioRestanteBulto = capacidad !== null ? Math.max(0, capacidad - (total - (parseFloat(c.cantidad) || 0))) : null;
+            const topes = [restanteOrigenActual, espacioRestanteBulto].filter(v => v !== null && v !== undefined);
+            const maxInput = topes.length > 0 ? Math.min(...topes) : null;
+
+            return `
+            <div class="pc-color-row">
+                <select class="form-select form-select-sm" onchange="actualizarOrigenColor(${b.tempId}, ${c.tempColorId}, this.value)">
+                    <option value="">Selecciona color/origen...</option>
+                    ${opciones}
+                </select>
+                <input type="number" min="0.0001" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} class="form-control form-control-sm"
+                       placeholder="Cantidad" value="${c.cantidad}"
+                       oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
+                <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="pc-bulto-card" style="${excedido ? 'border-color:#c94a4a;' : ''}">
+            <div class="pc-bulto-card-head" style="${excedido ? 'color:#c94a4a;' : ''}">
+                <span>Bulto ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
+                <button type="button" class="pc-bulto-remove" onclick="quitarBulto(${b.tempId})" title="Quitar bulto">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+            ${filasColores}
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="agregarColorABulto(${b.tempId})">
+                <i class="fa-solid fa-plus"></i> Agregar color a este bulto
+            </button>
+        </div>`;
+    }).join('');
     actualizarResumenBultos();
 }
 
 function actualizarResumenBultos() {
-    const total = bultosState.reduce((s, b) => s + (parseFloat(b.valor) || 0), 0);
+    const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
     document.getElementById('bultosTotal').textContent = formatearCantidadEmp(total);
 }
 
 function obtenerBultosJsonEmp() {
-    return JSON.stringify(bultosState.map(b => parseFloat(b.valor) || 0).filter(v => v > 0));
+    const bultos = bultosState.map(b => ({
+        colores: b.colores
+            .filter(c => c.origen_tipo && c.origen_id && parseFloat(c.cantidad) > 0)
+            .map(c => ({
+                origen_tipo: c.origen_tipo, origen_id: c.origen_id,
+                color_id: c.color_id, color_nombre: c.color_nombre,
+                cantidad: parseFloat(c.cantidad),
+            })),
+    })).filter(b => b.colores.length > 0);
+    return JSON.stringify(bultos);
 }
 
 const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
@@ -813,7 +941,12 @@ function cancelarEdicionEmp() {
     document.getElementById('btnCancelarEdicionEmp').style.display = 'none';
     empIdEnEdicion = 0;
     bultosState = [];
-    agregarFilaBulto();
+
+    document.getElementById('bloqueBultos').style.display = 'block';
+    document.getElementById('bloqueOrigenesReadonly').style.display = 'none';
+
+    aplicarUnidadEmpaquetadoFija(); // re-fija la unidad de empaquetado (modo "nuevo")
+    agregarBulto();
 }
 
 async function editarRegistroEmp(id) {
@@ -825,13 +958,20 @@ async function editarRegistroEmp(id) {
     document.getElementById('emp_id').value = id;
     document.getElementById('emp_unidad_medida').value = r.unidad_medida;
     document.getElementById('emp_operario_id').value = r.operario_id;
-    document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id}`;
+    document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';
+    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id} (solo unidad / operario / sucursal)`;
     document.getElementById('btnCancelarEdicionEmp').style.display = 'inline-block';
 
-    const bultos = parseJsonColumnaEmp(r.js_cantidades);
-    bultosState = bultos.map(b => ({ tempId: ++contadorBulto, valor: b.cantidad }));
-    if (bultosState.length === 0) agregarFilaBulto();
-    renderBultos();
+    // La composición de colores es inmutable en edición: se muestra de solo lectura.
+    document.getElementById('bloqueBultos').style.display = 'none';
+    const origenes = parseJsonColumnaEmp(r.js_origenes);
+    const bloqueRO = document.getElementById('bloqueOrigenesReadonly');
+    bloqueRO.style.display = 'block';
+    bloqueRO.innerHTML = origenes.length
+        ? '<div class="pc-origenes-readonly"><b>Composición (no editable):</b><br>' +
+          origenes.map(o => `${o.color_nombre ?? 'Sin color'} — ${o.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : 'Producción'} #${o.origen_id}: ${formatearCantidadEmp(o.cantidad)}`).join('<br>') +
+          '<br><small class="text-muted">Para corregir la mezcla, elimina este registro y crea uno nuevo.</small></div>'
+        : '<div class="pc-origenes-readonly">Sin detalle de origen (registro legacy).</div>';
 
     document.getElementById('formEmpaquetado').scrollIntoView({ behavior: 'smooth' });
 }
@@ -839,39 +979,72 @@ async function editarRegistroEmp(id) {
 document.getElementById('formEmpaquetado').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    const bultosJson = obtenerBultosJsonEmp();
-    if (JSON.parse(bultosJson).length === 0) {
-        Swal.fire('Falta información', 'Agrega al menos un bulto con cantidad mayor a 0.', 'warning');
-        return;
+    let accion, params;
+
+    if (empIdEnEdicion > 0) {
+        accion = 'EDITAREMPAQUETADO';
+        params = {
+            id: empIdEnEdicion,
+            unidad_medida: document.getElementById('emp_unidad_medida').value,
+            operario_id: document.getElementById('emp_operario_id').value,
+            sucursal_id: document.getElementById('emp_sucursal_id').value,
+        };
+    } else {
+        const bultosJson = obtenerBultosJsonEmp();
+        const bultosParsed = JSON.parse(bultosJson);
+        if (bultosParsed.length === 0) {
+            Swal.fire('Falta información', 'Agrega al menos un bulto con un color/origen y cantidad mayor a 0.', 'warning');
+            return;
+        }
+
+        // Validación en cliente (espejo de la validación real del backend):
+        // ningún bulto puede superar la capacidad de la unidad de
+        // empaquetado. Se permite quedar por debajo (paquete parcial).
+        const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+            ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
+            : null;
+        if (capacidad !== null) {
+            const totalesExcedidos = bultosParsed
+                .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
+                .filter(b => b.total > capacidad + 0.0001);
+            if (totalesExcedidos.length > 0) {
+                const detalle = totalesExcedidos.map(b => `Bulto ${b.idx}: ${formatearCantidadEmp(b.total)}`).join(', ');
+                Swal.fire('Bulto excede la capacidad',
+                    `${detalle} — la capacidad de ${unidadEmpaquetadoProductoActual.nombre} es ${formatearCantidadEmp(capacidad)}. Ajusta las cantidades.`,
+                    'warning');
+                return;
+            }
+        }
+
+        accion = 'CREAREMPAQUETADO';
+        params = {
+            producto_id: empProductoIdActual,
+            operario_id: document.getElementById('emp_operario_id').value,
+            sucursal_id: document.getElementById('emp_sucursal_id').value,
+            bultos: bultosJson,
+        };
+        // Nota: ya no se manda unidad_medida — el backend la deriva del
+        // producto (obtenerUnidadEmpaquetadoProducto) y la revalida ahí.
     }
 
-    const params = {
-        id: empIdEnEdicion,
-        ensamblaje_id: empEnsamblajeIdActual,
-        produccion_id: empProduccionIdActual,
-        unidad_medida: document.getElementById('emp_unidad_medida').value,
-        operario_id: document.getElementById('emp_operario_id').value,
-        sucursal_id: document.getElementById('emp_sucursal_id').value,
-        bultos: bultosJson,
-    };
-
-    const accion = empIdEnEdicion > 0 ? 'EDITAREMPAQUETADO' : 'CREAREMPAQUETADO';
     const json = await llamarEmpaquetado(accion, params);
 
     if (json.success) {
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 2200 });
         cancelarEdicionEmp();
         await Promise.all([
+            cargarOrigenesDisponibles(empProductoIdActual),
             cargarPendientesEmpaquetado(),
             cargarProduccionesDirectasEmpaquetado(),
             cargarListadoGeneralEmp(),
+            cargarRegistrosEmp(),
         ]);
-        modalEmpaquetado.hide();
+        aplicarUnidadEmpaquetadoFija(); // por si cambió algo tras recargar orígenes
+        renderBultos(); // refresca disponibles restantes tras el consumo recién guardado
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
-
 function eliminarRegistroEmp(id) {
     Swal.fire({
         title: '¿Eliminar este registro de empaquetado?',
@@ -886,11 +1059,13 @@ function eliminarRegistroEmp(id) {
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
             if (empIdEnEdicion === id) cancelarEdicionEmp();
             await Promise.all([
+                cargarOrigenesDisponibles(empProductoIdActual),
                 cargarRegistrosEmp(),
                 cargarPendientesEmpaquetado(),
                 cargarProduccionesDirectasEmpaquetado(),
                 cargarListadoGeneralEmp(),
             ]);
+            renderBultos();
         } else {
             Swal.fire('Error', json.message, 'error');
         }
