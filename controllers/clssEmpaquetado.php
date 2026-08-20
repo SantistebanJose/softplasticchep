@@ -4,6 +4,10 @@
  * controllers/clssEmpaquetado.php
  * Controlador del módulo de Empaquetado
  *
+ * ACTUALIZADO (2026-08-19): los orígenes disponibles ahora también
+ * devuelven color.rgb como color_hex, para que el frontend pinte los
+ * sacos con su color real en vez de una paleta aproximada por nombre.
+ *
  * ACTUALIZADO (2026-08-18): soporte de MEZCLA DE COLORES por bulto.
  * empaquetado.emsamblaje_id / empaquetado.produccion_id quedan como
  * columnas LEGACY (de solo lectura, de registros viejos de un único
@@ -173,6 +177,11 @@ function buscarUnidadesMedida()
 // empaquetado configurada para el producto (producto.js_configuracion_
 // empaquetado.salida_empaquetado_unidad_medida_id), para que el frontend
 // la cargue sola en el formulario en vez de pedírsela al operario.
+//
+// FIX (color_hex): se agregó co.rgb AS color_hex al subselect de color,
+// para que la grilla visual de sacos pinte el swatch con el color real
+// del catálogo (columna color.rgb, sincronizada con material.rgb cuando
+// el color viene de un tinte) en vez de solo mostrar el nombre.
 function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
 {
     if (!$productoId) responder(false, 'Debes indicar el producto.');
@@ -184,14 +193,14 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             e.id AS origen_id,
             e.cantidad_peso_kg AS cantidad_total,
             e.unidad_salida_id,
-            col.color_id, col.color_nombre,
+            col.color_id, col.color_nombre, col.color_hex,
             e.cantidad_peso_kg - COALESCE((
                 SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
                 WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
             ), 0) AS disponible
         FROM ensamblaje e
         LEFT JOIN LATERAL (
-            SELECT pd.color_id, co.nombre AS color_nombre
+            SELECT pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex
             FROM rel_ensamblaje_producto rep
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
             LEFT JOIN color co ON co.id = pd.color_id
@@ -201,42 +210,32 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
         WHERE e.producto_id = :producto_id
           AND e.deleted_at IS NULL AND e.fin IS NOT NULL
           AND e.ensamblaje_id_referido IS NULL
-
-        UNION ALL
-
-        -- Producciones directas (necesita_ensamblaje = 'no') del mismo producto.
-        -- FIX: antes no se validaba necesita_ensamblaje aquí.
-        SELECT
-            'produccion' AS origen_tipo,
-            pd.id AS origen_id,
-            pd.cantidad_producida_kg AS cantidad_total,
-            NULL AS unidad_salida_id,
-            pd.color_id, co.nombre AS color_nombre,
-            pd.cantidad_producida_kg - COALESCE((
-                SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
-                WHERE reo.produccion_id = pd.id AND reo.deleted_at IS NULL
-            ), 0) AS disponible
-        FROM produccion pd
-        LEFT JOIN color co ON co.id = pd.color_id
-        INNER JOIN producto prd ON prd.id = split_part(pd.unico_molde_producto, '-', 2)::bigint
-        LEFT JOIN molde mo2 ON mo2.id = pd.molde_id
-        LEFT JOIN LATERAL jsonb_array_elements(prd.js_configuracion) AS x(item)
-            ON (x.item->>'molde_id')::bigint = mo2.id
-        LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
-        WHERE prd.id = :producto_id2
-          AND pd.deleted_at IS NULL AND pd.enviado_ensamblaje = TRUE
-          AND COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'
     ";
-    $result = executeQuery($conectar, $sql, ['producto_id' => $productoId, 'producto_id2' => $productoId]);
+        $result = executeQuery($conectar, $sql, ['producto_id' => $productoId]);
 
     // Filtra los que ya no tienen nada disponible (redondeo)
     $result = array_values(array_filter($result, fn($r) => (float)$r['disponible'] > 0.0001));
 
     $unidadEmpaquetado = obtenerUnidadEmpaquetadoProducto($conectar, $productoId);
+    $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
+
+    // Si el producto requiere conversión kg -> unidades (ej. Pinza Palanita),
+    // el "disponible" se muestra en unidades (redondeado hacia ABAJO, para
+    // nunca prometer más de lo que en la práctica hay). Se conserva el
+    // valor original en kg como disponible_kg, por si se necesita auditar.
+    if ($reglas['conversion_peso_a_unidad'] && $reglas['peso_unitario_g']) {
+        foreach ($result as &$r) {
+            $r['disponible_kg'] = $r['disponible'];
+            $r['disponible'] = floor(($r['disponible'] * 1000) / $reglas['peso_unitario_g']);
+        }
+        unset($r);
+        $result = array_values(array_filter($result, fn($r) => (float)$r['disponible'] > 0.0001));
+    }
 
     responder(true, 'OK', [
         'origenes' => $result,
-        'unidad_empaquetado' => $unidadEmpaquetado, // null si el producto no la tiene configurada
+        'unidad_empaquetado' => $unidadEmpaquetado,
+        'reglas_empaquetado' => $reglas,
     ]);
 }
 // FIX: excluir "ya empaquetados" ahora se calcula contra
@@ -420,7 +419,7 @@ function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
                 SELECT jsonb_agg(jsonb_build_object(
                     'origen_tipo', CASE WHEN reo.ensamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END,
                     'origen_id', COALESCE(reo.ensamblaje_id, reo.produccion_id),
-                    'color_id', reo.color_id, 'color_nombre', co2.nombre,
+                    'color_id', reo.color_id, 'color_nombre', co2.nombre, 'color_hex', co2.rgb,
                     'cantidad', reo.cantidad
                 ))
                 FROM rel_empaquetado_origen reo
@@ -463,7 +462,7 @@ function listarEmpaquetadosPorProducto(int $productoId)
                 SELECT jsonb_agg(jsonb_build_object(
                     'origen_tipo', CASE WHEN reo.ensamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END,
                     'origen_id', COALESCE(reo.ensamblaje_id, reo.produccion_id),
-                    'color_id', reo.color_id, 'color_nombre', co2.nombre,
+                    'color_id', reo.color_id, 'color_nombre', co2.nombre, 'color_hex', co2.rgb,
                     'cantidad', reo.cantidad
                 ))
                 FROM rel_empaquetado_origen reo
@@ -531,7 +530,7 @@ function listarTodosEmpaquetados()
                 SELECT jsonb_agg(jsonb_build_object(
                     'origen_tipo', CASE WHEN reo.ensamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END,
                     'origen_id', COALESCE(reo.ensamblaje_id, reo.produccion_id),
-                    'color_id', reo.color_id, 'color_nombre', co2.nombre,
+                    'color_id', reo.color_id, 'color_nombre', co2.nombre, 'color_hex', co2.rgb,
                     'cantidad', reo.cantidad
                 ))
                 FROM rel_empaquetado_origen reo
@@ -579,7 +578,7 @@ function obtenerEmpaquetado(int $id)
                 SELECT jsonb_agg(jsonb_build_object(
                     'origen_tipo', CASE WHEN reo.ensamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END,
                     'origen_id', COALESCE(reo.ensamblaje_id, reo.produccion_id),
-                    'color_id', reo.color_id, 'color_nombre', co2.nombre,
+                    'color_id', reo.color_id, 'color_nombre', co2.nombre, 'color_hex', co2.rgb,
                     'cantidad', reo.cantidad
                 ))
                 FROM rel_empaquetado_origen reo
@@ -595,31 +594,12 @@ function obtenerEmpaquetado(int $id)
     responder(true, 'OK', ['empaquetado' => $result[0]]);
 }
 
-// FIX: se agregaron las validaciones que faltaban (producto/unidad/
-// operario/sucursal), se corrige el guardado de color_id por línea de
-// origen (antes se perdía), y se calcula el movimiento de sesión UNA sola
-// vez (antes se llamaba dos veces con timestamps distintos).
-//
-// FIX (unidad de empaquetado): la unidad ya NO se confía del frontend.
-// Se deriva siempre de producto.js_configuracion_empaquetado — mismo
-// criterio que Producción/Ensamblaje usan para sus unidades de salida.
-//
-// FIX (cantidad_tota): se guarda expresada en la unidad de empaquetado
-// (ej. cantidad de PAQUETES X36 UND), NO en unidades base. Las lecturas
-// (listarEmpaquetadosPorProducto, listarTodosEmpaquetados, etc.) ya
-// asumen esta semántica (cantidad_tota * equivalencia = total en base).
-//
-// FIX (capacidad de bulto): un bulto no puede sumar más que la capacidad
-// de la unidad de empaquetado (equivalencia). Sí se permite sumar menos
-// (paquete parcial/sobrante), que es un caso real cuando la cantidad
-// ensamblada no es múltiplo exacto de la capacidad del paquete.
 function crearEmpaquetado()
 {
     $conectar = conectar_oll_BD();
     $productoId   = intval($_POST['producto_id'] ?? 0);
     $operarioId   = intval($_POST['operario_id'] ?? 0);
     $sucursalId   = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
-    $bultosJson   = trim($_POST['bultos'] ?? '[]');
 
     if (!$productoId) responder(false, 'Debes indicar el producto.');
     if (!$operarioId) responder(false, 'Debes indicar el operario.');
@@ -642,6 +622,20 @@ function crearEmpaquetado()
         if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
     }
 
+    $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
+    if ($reglas['conversion_peso_a_unidad'] && empty($reglas['peso_unitario_g'])) {
+        responder(false, 'Este producto requiere conversión de kg a unidades para empaquetar, pero no tiene configurado el "Peso unitario (g)". Complétalo en el módulo de Productos antes de continuar.');
+    }
+
+    // Productos con mezcla al azar (ej. Pinza Palanita): flujo distinto,
+    // ver crearEmpaquetadoMezcla(). No usan bultos con color manual porque
+    // la máquina mezcla los colores sin que el operario pueda controlarlo.
+    if ($reglas['conversion_peso_a_unidad']) {
+        crearEmpaquetadoMezcla($conectar, $productoId, $operarioId, $sucursalId, $unidadMedida, $unidadEmpaquetado, $reglas);
+        return;
+    }
+
+    $bultosJson = trim($_POST['bultos'] ?? '[]');
     $bultosEntrada = json_decode($bultosJson, true);
     if (!is_array($bultosEntrada) || empty($bultosEntrada)) {
         responder(false, 'Debes registrar al menos un bulto.');
@@ -649,28 +643,31 @@ function crearEmpaquetado()
 
     $conectar->beginTransaction();
     try {
-        // 1) Aplanar el detalle de colores de todos los bultos, sumando
-        //    total por bulto y consumo total por origen (con su color_id).
-        //    $cantidadTotal queda en UNIDADES BASE (ej. UND, KG) — es lo
-        //    que se compara contra "disponible" de cada origen en el
-        //    paso 2, y se convierte a la unidad de empaquetado más abajo
-        //    antes de guardar la cabecera.
         $bultosLimpios    = [];
-        $consumoPorOrigen = []; // "tipo:id" => ['cantidad' => n, 'color_id' => x]
+        $consumoPorOrigen = [];
         $cantidadTotal    = 0;
 
-        foreach ($bultosEntrada as $b) {
+        foreach ($bultosEntrada as $idxBulto => $b) {
             $detalle = is_array($b['colores'] ?? null) ? $b['colores'] : [];
             $totalBulto = 0;
             $detalleLimpio = [];
+
             foreach ($detalle as $d) {
                 $cant = floatval($d['cantidad'] ?? 0);
                 if ($cant <= 0) continue;
+
+                if ($reglas['granularidad_color'] > 1 && fmod($cant, $reglas['granularidad_color']) > 0.0001) {
+                    throw new Exception(
+                        "La cantidad de color debe ser múltiplo de {$reglas['granularidad_color']} (docena) — recibido: $cant."
+                    );
+                }
+
                 $tipo = ($d['origen_tipo'] ?? '') === 'produccion' ? 'produccion' : 'ensamblaje';
                 $oid  = intval($d['origen_id'] ?? 0);
                 if (!$oid) continue;
 
                 $totalBulto += $cant;
+
                 $detalleLimpio[] = [
                     'origen_tipo' => $tipo, 'origen_id' => $oid,
                     'color_id' => $d['color_id'] ?? null, 'color_nombre' => $d['color_nombre'] ?? null,
@@ -684,12 +681,24 @@ function crearEmpaquetado()
             }
             if ($totalBulto <= 0) continue;
 
-            // FIX: un bulto no puede exceder la capacidad de la unidad de
-            // empaquetado (ej. no se pueden meter 40 und en un PAQUETE X36
-            // UND). Sí se permite que quede por debajo (paquete parcial).
+            if ($reglas['modo_distribucion_color'] === 'uniforme') {
+                $nColores = count($detalleLimpio);
+                if ($nColores > 1 && fmod($totalBulto, $nColores) < 0.0001) {
+                    $esperadoPorColor = $totalBulto / $nColores;
+                    foreach ($detalleLimpio as $linea) {
+                        if (abs($linea['cantidad'] - $esperadoPorColor) > 0.0001) {
+                            throw new Exception(
+                                "El bulto " . ($idxBulto + 1) . " debe repartirse parejo entre colores ($esperadoPorColor c/u), "
+                                . "pero \"{$linea['color_nombre']}\" tiene {$linea['cantidad']}."
+                            );
+                        }
+                    }
+                }
+            }
+
             if ($equivalenciaCapacidad > 0 && $totalBulto > $equivalenciaCapacidad + 0.0001) {
                 throw new Exception(
-                    "El bulto " . (count($bultosLimpios) + 1) . " suma " . $totalBulto
+                    "El bulto " . ($idxBulto + 1) . " suma " . $totalBulto
                     . ", pero la capacidad de {$unidadEmpaquetado['nombre']} es {$equivalenciaCapacidad}. "
                     . "Divide el excedente en otro bulto."
                 );
@@ -700,14 +709,10 @@ function crearEmpaquetado()
         }
         if (empty($bultosLimpios)) throw new Exception('No hay bultos válidos: agrega al menos un color con cantidad mayor a 0 en cada bulto.');
 
-        // Conversión de cantidad_tota: de unidades base a unidad de empaquetado.
         $cantidadTotalEnUnidad = $equivalenciaCapacidad > 0
             ? round($cantidadTotal / $equivalenciaCapacidad, 4)
-            : $cantidadTotal; // unidad sin equivalencia definida: no hay conversión que hacer
+            : $cantidadTotal;
 
-        // 2) Revalidar disponibilidad real (no confiar en lo que mandó el
-        //    frontend: evita condiciones de carrera entre dos operarios).
-        //    Se compara en UNIDADES BASE, igual que antes.
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);
             if ($tipo === 'ensamblaje') {
@@ -729,7 +734,6 @@ function crearEmpaquetado()
             }
         }
 
-        // 3) Insertar cabecera
         $movimiento   = obtenerMovimientoSesionEmp('crear', [[
             'campo' => 'Empaquetado', 'valor_antes' => '(nuevo)',
             'valor_despues' => count($bultosLimpios) . " bulto(s), total $cantidadTotal, " . count($consumoPorOrigen) . " origen(es)",
@@ -754,8 +758,6 @@ function crearEmpaquetado()
         $empaquetadoId = $nuevo[0]['id'] ?? null;
         if (!$empaquetadoId) throw new Exception('No se pudo crear el registro de empaquetado.');
 
-        // 4) Insertar el detalle de consumo por origen (con color_id, antes faltaba)
-        //    Cantidades en unidades base — descuentan disponibilidad real.
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);
             executeNonQuery($conectar, "
@@ -776,6 +778,147 @@ function crearEmpaquetado()
     } catch (Throwable $e) {
         $conectar->rollBack();
         error_log("Error creando empaquetado: " . $e->getMessage());
+        responder(false, 'No se pudo guardar: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Flujo de empaquetado para productos que se mezclan al azar en máquina
+ * (ej. Pinza Palanita): el operario registra cuántos KG de cada
+ * saco/color entraron a la mezcla (consumo real, exacto) y cuántas
+ * bolsas salieron de la máquina. NO se inventa un reparto de colores por
+ * bolsa — eso lo decide la máquina y nadie lo cuenta a mano.
+ */
+function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioId, ?int $sucursalId, int $unidadMedida, array $unidadEmpaquetado, array $reglas): void
+{
+    $origenesJson     = trim($_POST['mezcla_origenes'] ?? '[]');
+    $bolsasProducidas = floatval($_POST['bolsas_producidas'] ?? 0);
+
+    if ($bolsasProducidas <= 0) responder(false, 'Debes indicar cuántas bolsas se produjeron.');
+    if (floor($bolsasProducidas) != $bolsasProducidas) responder(false, 'La cantidad de bolsas debe ser un número entero.');
+
+    $origenesEntrada = json_decode($origenesJson, true);
+    if (!is_array($origenesEntrada) || empty($origenesEntrada)) {
+        responder(false, 'Debes indicar al menos un saco/color usado en la mezcla, con su cantidad en kg.');
+    }
+
+    $conectar->beginTransaction();
+    try {
+        $consumoPorOrigen = []; // "tipo:id" => ['cantidad_kg', 'color_id', 'color_nombre']
+        $kgTotal = 0;
+
+        foreach ($origenesEntrada as $o) {
+            $cantKg = floatval($o['cantidad_kg'] ?? 0);
+            if ($cantKg <= 0) continue;
+            $tipo = ($o['origen_tipo'] ?? '') === 'produccion' ? 'produccion' : 'ensamblaje';
+            $oid  = intval($o['origen_id'] ?? 0);
+            if (!$oid) continue;
+
+            $clave = "$tipo:$oid";
+            if (!isset($consumoPorOrigen[$clave])) {
+                $consumoPorOrigen[$clave] = [
+                    'cantidad_kg'  => 0,
+                    'color_id'     => $o['color_id'] ?? null,
+                    'color_nombre' => $o['color_nombre'] ?? null,
+                ];
+            }
+            $consumoPorOrigen[$clave]['cantidad_kg'] += $cantKg;
+            $kgTotal += $cantKg;
+        }
+        if (empty($consumoPorOrigen)) throw new Exception('No hay orígenes válidos en la mezcla: agrega al menos un color con kg mayor a 0.');
+
+        // Revalida disponibilidad real en KG (unidad nativa del origen —
+        // sin conversión, porque el operario ya ingresó directo en kg).
+        foreach ($consumoPorOrigen as $clave => $info) {
+            [$tipo, $oid] = explode(':', $clave);
+            if ($tipo === 'ensamblaje') {
+                $fila = executeQuery($conectar, "
+                    SELECT e.cantidad_peso_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
+                        WHERE ensamblaje_id = e.id AND deleted_at IS NULL), 0) AS disponible
+                    FROM ensamblaje e WHERE e.id = :id AND e.deleted_at IS NULL AND e.fin IS NOT NULL
+                ", ['id' => $oid]);
+            } else {
+                $fila = executeQuery($conectar, "
+                    SELECT pd.cantidad_producida_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
+                        WHERE produccion_id = pd.id AND deleted_at IS NULL), 0) AS disponible
+                    FROM produccion pd WHERE pd.id = :id AND pd.deleted_at IS NULL
+                ", ['id' => $oid]);
+            }
+            if (empty($fila)) throw new Exception("El origen $tipo #$oid ya no existe, está inactivo o no ha finalizado.");
+            if ($info['cantidad_kg'] > (float)$fila[0]['disponible'] + 0.0001) {
+                throw new Exception("No queda suficiente disponible en $tipo #$oid (disponible: {$fila[0]['disponible']} kg, pedido: {$info['cantidad_kg']} kg).");
+            }
+        }
+
+        // Cálculo teórico (informativo, no bloqueante): sirve para
+        // detectar mermas anormales de la máquina, no para invalidar el registro.
+        $unidadesTeoricas = ($kgTotal * 1000) / $reglas['peso_unitario_g'];
+        $bolsasTeoricas   = $unidadesTeoricas / 144;
+        $diferenciaPct    = $bolsasTeoricas > 0 ? abs($bolsasProducidas - $bolsasTeoricas) / $bolsasTeoricas * 100 : null;
+
+        $movimiento = obtenerMovimientoSesionEmp('crear_mezcla', [[
+            'campo' => 'Empaquetado (mezcla)', 'valor_antes' => '(nuevo)',
+            'valor_despues' => "$bolsasProducidas bolsas producidas, {$kgTotal} kg mezclados de " . count($consumoPorOrigen) . " origen(es)"
+                . ($diferenciaPct !== null ? " — teórico: " . round($bolsasTeoricas, 1) . " bolsas, diferencia: " . round($diferenciaPct, 1) . "%" : ""),
+        ]]);
+        $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+        $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+        $mezclaDetalle = [[
+            'cantidad' => $bolsasProducidas,
+            'colores'  => array_values(array_map(function ($clave, $info) {
+                [$tipo, $oid] = explode(':', $clave);
+                return [
+                    'origen_tipo' => $tipo, 'origen_id' => (int)$oid,
+                    'color_id' => $info['color_id'], 'color_nombre' => $info['color_nombre'],
+                    'cantidad_kg' => $info['cantidad_kg'],
+                ];
+            }, array_keys($consumoPorOrigen), $consumoPorOrigen)),
+            'kg_total_mezclados'        => $kgTotal,
+            'bolsas_teoricas_estimadas' => round($bolsasTeoricas, 2),
+        ]];
+
+        $nuevo = executeQuery($conectar, "
+            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, sucursal,
+                cantidad_tota, js_cantidades, created_at, js_session, js_historial)
+            VALUES (:producto_id, :unidad_medida, :operario_id, :sucursal_id,
+                :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
+            RETURNING id
+        ", [
+            'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
+            'operario_id'   => $operarioId, 'sucursal_id' => $sucursalId,
+            'cantidad_tota' => $bolsasProducidas,
+            'js_cantidades' => json_encode($mezclaDetalle, JSON_UNESCAPED_UNICODE),
+            'js_session'    => $js_session,
+            'js_historial'  => $js_historial,
+        ]);
+        $empaquetadoId = $nuevo[0]['id'] ?? null;
+        if (!$empaquetadoId) throw new Exception('No se pudo crear el registro de empaquetado.');
+
+        foreach ($consumoPorOrigen as $clave => $info) {
+            [$tipo, $oid] = explode(':', $clave);
+            executeNonQuery($conectar, "
+                INSERT INTO rel_empaquetado_origen
+                    (empaquetado_id, ensamblaje_id, produccion_id, color_id, cantidad, created_at)
+                VALUES (:eid, :ens, :prod, :color_id, :cant, NOW())
+            ", [
+                'eid'      => $empaquetadoId,
+                'ens'      => $tipo === 'ensamblaje' ? $oid : null,
+                'prod'     => $tipo === 'produccion' ? $oid : null,
+                'color_id' => $info['color_id'],
+                'cant'     => $info['cantidad_kg'], // en KG, unidad real del origen
+            ]);
+        }
+
+        $conectar->commit();
+        responder(true, 'Empaquetado (mezcla) registrado correctamente.', [
+            'id' => $empaquetadoId,
+            'bolsas_teoricas_estimadas' => round($bolsasTeoricas, 2),
+            'diferencia_pct' => $diferenciaPct !== null ? round($diferenciaPct, 1) : null,
+        ]);
+    } catch (Throwable $e) {
+        $conectar->rollBack();
+        error_log("Error creando empaquetado (mezcla): " . $e->getMessage());
         responder(false, 'No se pudo guardar: ' . $e->getMessage());
     }
 }
@@ -1034,4 +1177,24 @@ function obtenerUnidadEmpaquetadoProducto($conectar, int $productoId): ?array
         FROM unidad_medida WHERE id = :id AND deleted_at IS NULL
     ", ['id' => $rows[0]['unidad_id']]);
     return $unidad[0] ?? null;
+}
+// Reglas de empaquetado configuradas por producto (ver clssProductos.php ->
+// guardarConfigProducto()). Viven en el mismo js_configuracion_empaquetado.
+function obtenerReglasEmpaquetadoProducto($conectar, int $productoId): array
+{
+    $rows = executeQuery($conectar, "
+        SELECT js_configuracion_empaquetado, peso_unitario_g
+        FROM producto WHERE id = :id
+    ", ['id' => $productoId]);
+
+    $cfg = !empty($rows[0]['js_configuracion_empaquetado'])
+        ? json_decode($rows[0]['js_configuracion_empaquetado'], true)
+        : [];
+
+    return [
+        'modo_distribucion_color'  => $cfg['modo_distribucion_color'] ?? 'libre',
+        'granularidad_color'       => intval($cfg['granularidad_color'] ?? 1),
+        'conversion_peso_a_unidad' => !empty($cfg['conversion_peso_a_unidad']),
+        'peso_unitario_g'          => !empty($rows[0]['peso_unitario_g']) ? floatval($rows[0]['peso_unitario_g']) : null,
+    ];
 }

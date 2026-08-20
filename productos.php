@@ -276,6 +276,42 @@ include("header.php");
             <select class="form-select" id="config_salida_ensamblaje"></select>
         </div>
 
+        <div class="config-venta-block">
+            <label class="form-label mb-1">Distribución de colores por bulto</label>
+            <select class="form-select" id="config_modo_distribucion_color" required>
+                <option value="libre">Libre (el operario decide las cantidades)</option>
+                <option value="uniforme">Uniforme (misma cantidad por color)</option>
+            </select>
+        </div>
+
+        <div class="config-venta-block">
+            <label class="form-label mb-1">Granularidad de color</label>
+            <select class="form-select" id="config_granularidad_color" required>
+                <option value="1">Por unidad</option>
+                <option value="12">Por docena (12 unidades)</option>
+            </select>
+        </div>
+
+        <div class="config-venta-block">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="config_conversion_peso_a_unidad">
+                <label class="form-check-label" for="config_conversion_peso_a_unidad">
+                    Requiere conversión de peso (kg) a unidad al empaquetar
+                </label>
+            </div>
+            <small class="text-muted" id="avisoPesoUnitarioFaltante" style="display:none; color:#c94a4a !important;">
+                ⚠ Este producto no tiene "Peso unitario (g)" configurado. Edítalo en los datos generales antes de activar esta opción.
+            </small>
+        </div>
+
+
+
+
+        <div class="config-venta-block" id="bloque_salidaens_producto" style="display:none;">
+            <label class="form-label mb-1">Salida en Ensamblaje</label>
+            <select class="form-select" id="config_salida_ensamblaje"></select>
+        </div>
+
           <ul class="nav nav-tabs" id="configNavTabs" role="tablist"></ul>
           <div class="tab-content" id="configTabContent"></div>
         </div>
@@ -301,7 +337,7 @@ const modalConfigProducto = new bootstrap.Modal(document.getElementById('modalCo
 
 let unidadesCache  = [];
 let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
-
+let productoPesoUnitarioActual = null; // NUEVO: peso_unitario_g del producto que se está configurando
 document.addEventListener('DOMContentLoaded', () => {
     cargarUnidades()
         .then(cargarProductos)
@@ -324,6 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('f_estado').addEventListener('change', cargarProductos);
 });
 
+document.getElementById('config_conversion_peso_a_unidad').addEventListener('change', actualizarAvisoPesoUnitario);
 
 // ── Llamada genérica a un controlador (por defecto, el de Productos) ────────
 async function llamar(accion, params = {}, controlador = CONTROLADOR) {
@@ -560,12 +597,21 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
 
     const configActual      = jsonProd.producto.js_configuracion || [];
     const configVentaActual = jsonProd.producto.js_configuracion_empaquetado || {};
+    productoPesoUnitarioActual = jsonProd.producto.peso_unitario_g || null; // NUEVO
+
     document.getElementById('config_producto_id').value = productoId;
     document.getElementById('configProductoTitulo').textContent = `Configuración — ${productoDescripcion}`;
 
     llenarSelectUnidades('config_se_vende_por', configVentaActual.se_vende_por_unidad_medida_id);
     llenarSelectUnidades('config_salida_empaquetado', configVentaActual.salida_empaquetado_unidad_medida_id);
     llenarSelectUnidades('config_salida_ensamblaje', configVentaActual.salida_ensamblaje_unidad_medida_id);
+
+    // NUEVO: reglas de empaquetado por producto
+    document.getElementById('config_modo_distribucion_color').value = configVentaActual.modo_distribucion_color || 'libre';
+    document.getElementById('config_granularidad_color').value = configVentaActual.granularidad_color || 1;
+    document.getElementById('config_conversion_peso_a_unidad').checked = !!configVentaActual.conversion_peso_a_unidad;
+    actualizarAvisoPesoUnitario();
+
     construirTabsConfiguracion(moldesDelProducto, configActual);
     toggleSalidaEnsamblajeProducto();
     modalConfigProducto.show();
@@ -647,6 +693,11 @@ function toggleSalidaEnsamblajeProducto() {
     document.getElementById('bloque_salidaens_producto').style.display = algunSi ? 'block' : 'none';
 }
 
+function actualizarAvisoPesoUnitario() {
+    const checkbox = document.getElementById('config_conversion_peso_a_unidad');
+    const aviso = document.getElementById('avisoPesoUnitarioFaltante');
+    aviso.style.display = (checkbox.checked && !productoPesoUnitarioActual) ? 'block' : 'none';
+}
 
 document.getElementById('formConfigProducto').addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -675,6 +726,15 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     configuracionVenta.salida_empaquetado_unidad_medida_id = parseInt(empaqSel.value, 10);
     configuracionVenta.salida_empaquetado = empaqOpt.textContent.split(' - ')[0].trim().toLowerCase();
 
+    // NUEVO: reglas de empaquetado por producto
+    const requiereConversion = document.getElementById('config_conversion_peso_a_unidad').checked;
+    if (requiereConversion && !productoPesoUnitarioActual) {
+        Swal.fire('Falta información', 'Este producto requiere "Peso unitario (g)" configurado antes de activar la conversión de peso a unidad. Edítalo primero desde el botón "Editar" del producto.', 'warning');
+        return;
+    }
+    configuracionVenta.modo_distribucion_color = document.getElementById('config_modo_distribucion_color').value;
+    configuracionVenta.granularidad_color = parseInt(document.getElementById('config_granularidad_color').value, 10);
+    configuracionVenta.conversion_peso_a_unidad = requiereConversion;
     // ── Configuración por molde ──────────────────────────────────────────
     const panes = document.querySelectorAll('#configTabContent .tab-pane');
     const configuraciones = [];

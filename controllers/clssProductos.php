@@ -324,6 +324,28 @@ function guardarConfigProducto()
     if (empty($configuracionEmpaquetado['salida_empaquetado_unidad_medida_id'])) {
         responder(false, 'Falta "Salida en Empaquetado" para el producto.');
     }
+    if (empty($configuracionEmpaquetado['salida_empaquetado_unidad_medida_id'])) {
+        responder(false, 'Falta "Salida en Empaquetado" para el producto.');
+    }
+
+    // NUEVO: reglas de empaquetado por producto (distribución de colores,
+    // granularidad y conversión peso->unidad). Mismo patrón que el resto de
+    // configuracionEmpaquetado: vive en producto.js_configuracion_empaquetado.
+    $modoDistribucion = $configuracionEmpaquetado['modo_distribucion_color'] ?? 'libre';
+    if (!in_array($modoDistribucion, ['libre', 'uniforme'], true)) {
+        responder(false, 'Modo de distribución de colores inválido.');
+    }
+    $granularidadColor = intval($configuracionEmpaquetado['granularidad_color'] ?? 1);
+    if (!in_array($granularidadColor, [1, 12], true)) {
+        responder(false, 'Granularidad de color inválida (debe ser 1 o 12).');
+    }
+    $requiereConversionPeso = !empty($configuracionEmpaquetado['conversion_peso_a_unidad']);
+    if ($requiereConversionPeso) {
+        $prodPeso = executeQuery($conectar, "SELECT peso_unitario_g FROM producto WHERE id = :id", ['id' => $producto_id]);
+        if (empty($prodPeso[0]['peso_unitario_g'])) {
+            responder(false, 'Este producto requiere conversión de peso a unidad en Empaquetado, pero no tiene "Peso unitario (g)" configurado. Complétalo en los datos generales del producto primero.');
+        }
+    }
 
     // "Salida en Ensamblaje" también es a nivel producto (el ensamblaje
     // arma el producto terminado a partir de varios moldes, así que la

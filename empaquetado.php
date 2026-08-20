@@ -6,21 +6,7 @@ $activePage = 'empaquetado';
 include("header.php");
 ?>
 
-<!--
-    empaquetado.php (REESCRITO 2026-08-18 v5 — mezcla de colores por bulto)
 
-    CAMBIO DE MODELO respecto a v4:
-    - El modal ya NO se abre por un ensamblaje/producción puntual: se abre
-      por PRODUCTO. Dentro, cada bulto puede combinar cantidades tomadas de
-      varios orígenes (ensamblajes y/o producciones directas) de distinto
-      color, siempre que el producto sea el mismo.
-    - BUSCARORIGENESDISPONIBLES trae, por producto, cada origen con su
-      color y su disponible restante (ya descontado lo consumido).
-    - CREAREMPAQUETADO recibe producto_id + bultos[].colores[] en vez de
-      ensamblaje_id/produccion_id sueltos.
-    - La edición (EDITAREMPAQUETADO) solo toca cabecera (unidad, operario,
-      sucursal): la mezcla de colores es de solo lectura una vez creada.
--->
 
 <style>
 .pc-emp-grid{
@@ -112,6 +98,45 @@ include("header.php");
 .pc-emp-tab.activo .pc-emp-tab-count{ background:#1f2937; color:#fff; }
 .pc-emp-tabs-right{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-bottom:10px; }
 .pc-emp-tabs-right input[type="text"]{ max-width:220px; }
+
+/* ── Estación visual de sacos/colores (mezcla y bultos) ── */
+.pc-estacion{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start; }
+@media (max-width:760px){ .pc-estacion{ grid-template-columns:1fr; } }
+.pc-estacion-hint{ font-size:.78em; color:#9a9585; margin:0 0 8px; }
+.pc-sacos-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); gap:10px; }
+.pc-saco-card{
+    border:1px solid #eee2c8; border-radius:12px; padding:9px; background:#fff;
+    cursor:pointer; transition:.12s ease; text-align:left; position:relative;
+}
+.pc-saco-card:hover{ border-color:#2F6FED; box-shadow:0 3px 10px rgba(0,0,0,.06); }
+.pc-saco-card.agotado{ opacity:.45; cursor:not-allowed; pointer-events:none; }
+.pc-saco-card .swatch{ width:100%; height:34px; border-radius:8px; }
+.pc-saco-card .nombre{ font-size:.8em; font-weight:700; margin:7px 0 1px; color:#3a3730; }
+.pc-saco-card .origen{ font-size:.72em; color:#9a9585; }
+.pc-saco-card .disp{ font-size:.72em; color:#6b6656; margin-top:2px; }
+.pc-saco-card .en-mezcla{
+    position:absolute; top:6px; right:6px; background:#2F6FED; color:#fff;
+    font-size:.68em; font-weight:700; border-radius:999px; padding:1px 7px;
+}
+.pc-mezcla-panel{ background:#fffefb; border:1px solid #eee7db; border-radius:12px; padding:12px 14px; }
+.pc-mezcla-panel-titulo{ font-size:.78em; color:#9a9585; margin:0 0 8px; text-transform:uppercase; letter-spacing:.03em; }
+.pc-mezcla-lista{ display:flex; flex-direction:column; gap:6px; min-height:32px; }
+.pc-mezcla-fila{ display:flex; align-items:center; gap:8px; font-size:.85em; }
+.pc-mezcla-fila .swatch-mini{ width:14px; height:14px; border-radius:4px; flex:0 0 auto; border:1px solid rgba(0,0,0,.08); }
+.pc-mezcla-fila .nombre{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-mezcla-fila input{ width:76px; flex:0 0 auto; }
+.pc-paquete-box{ margin-top:12px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:10px; padding:10px 12px; }
+.pc-paquete-box .fila{ display:flex; justify-content:space-between; align-items:center; font-size:.85em; }
+.pc-paquete-barra{ height:8px; background:#f1efe9; border-radius:4px; margin-top:8px; overflow:hidden; }
+.pc-paquete-barra > div{ height:100%; background:#2F6FED; transition:width .15s ease; }
+.pc-swatch-picker{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:5px; }
+.pc-swatch-chip{
+    width:24px; height:24px; border-radius:7px; border:2px solid transparent;
+    cursor:pointer; padding:0; position:relative;
+}
+.pc-swatch-chip:hover{ border-color:#b7b1a1; }
+.pc-swatch-chip.activo{ border-color:#2F6FED; }
+.pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
 </style>
 
 <div class="pc-card">
@@ -141,15 +166,7 @@ include("header.php");
     </div>
 </div>
 
-<div class="pc-card mt-3">
-    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2>Producciones directas a empaquetar</h2>
-        <small class="text-muted">Moldes/productos configurados sin ensamblaje</small>
-    </div>
-    <div class="pc-emp-grid" id="gridProduccionesDirectas">
-        <div class="pc-emp-empty">Cargando...</div>
-    </div>
-</div>
+
 
 <div class="pc-card mt-3">
     <div class="pc-card-header">
@@ -258,6 +275,46 @@ include("header.php");
                     <span>Total: <b id="bultosTotal">0</b></span>
                 </div>
             </div>
+            <div id="bloqueMezcla" style="display:none;">
+                <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
+                <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Puedes ajustar el kg exacto después.</p>
+                <div class="pc-estacion">
+                    <div>
+                        <div class="pc-sacos-grid" id="sacosMezclaGrid"></div>
+                    </div>
+                    <div class="pc-mezcla-panel">
+                        <p class="pc-mezcla-panel-titulo">Mezcla actual</p>
+                        <div class="pc-mezcla-lista" id="listaMezclaOrigenes"></div>
+
+                        <div class="pc-paquete-box">
+                            <div class="fila">
+                                <span>Kg totales mezclados</span>
+                                <b id="mezclaKgTotal">0</b>
+                            </div>
+                            <div class="fila mt-2">
+                                <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
+                                <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:110px;"
+                                    id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
+                            </div>
+                            <div class="fila mt-2" style="font-size:.8em;">
+                                <span class="text-muted">Estimado teórico</span>
+                                <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
+                            </div>
+                            <div class="fila mt-2" style="font-size:.78em; color:#9a9585;">
+                                <span>Paquete de 24 bolsas</span>
+                                <span id="mezclaPaqueteFrac">0 / 24</span>
+                            </div>
+                            <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
+                            <div class="text-muted mt-1" style="font-size:.75em;">
+                                ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="agregarOrigenMezcla()">
+                    <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
+                </button>
+            </div>
 
             <!-- Bloque de solo lectura: visible al EDITAR (la mezcla ya no se toca) -->
             <div id="bloqueOrigenesReadonly" style="display:none;"></div>
@@ -290,6 +347,9 @@ let empUnidadesCache = null;
 let empOperariosCache = null;
 let origenesDisponiblesCache = []; // BUSCARORIGENESDISPONIBLES del producto actual
 let bultosState = [];  // [{tempId, colores:[{tempColorId, origen_tipo, origen_id, color_id, color_nombre, cantidad}]}]
+let mezclaOrigenes = [];
+let contadorMezclaOrigen = 0;
+let bolsasProducidasValor = '';
 let contadorBulto = 0;
 let contadorColorRow = 0;
 
@@ -299,7 +359,6 @@ let tabActivoEmp = '__todos__';
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
-    cargarProduccionesDirectasEmpaquetado();
     cargarListadoGeneralEmp();
 
     let debounceTimer = null;
@@ -307,20 +366,18 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
             cargarPendientesEmpaquetado();
-            cargarProduccionesDirectasEmpaquetado();
             cargarListadoGeneralEmp();
         }, 350);
     });
     document.getElementById('femp_solo_sin').addEventListener('change', () => {
         cargarPendientesEmpaquetado();
-        cargarProduccionesDirectasEmpaquetado();
+        
     });
 
     ['flist_estado', 'flist_fecha_desde', 'flist_fecha_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarListadoGeneralEmp);
     });
 });
-
 function limpiarFiltrosListado() {
     document.getElementById('flist_estado').value = '';
     document.getElementById('flist_fecha_desde').value = '';
@@ -376,11 +433,39 @@ function textoEquivalenteEmp(r) {
 function textoBultosDetalle(bultos) {
     if (!bultos || bultos.length === 0) return '-';
     return bultos.map(b => {
+        if (b.kg_total_mezclados !== undefined) {
+            const colores = (b.colores || [])
+                .map(c => `${c.color_nombre ?? 'Sin color'}: ${formatearCantidadEmp(c.cantidad_kg)} kg`)
+                .join(', ');
+            return `${formatearCantidadEmp(b.cantidad)} bolsas (mezcla — ${colores})`;
+        }
         const colores = (b.colores || [])
             .map(c => `${c.color_nombre ?? 'Sin color'}: ${formatearCantidadEmp(c.cantidad)}`)
             .join(', ');
         return `${formatearCantidadEmp(b.cantidad)}${colores ? ` (${colores})` : ''}`;
     }).join(' + ');
+}
+
+// ── Colores: hex real del backend (color.rgb) con degradado a una paleta
+// fija por nombre, para que los sacos siempre se vean distinguibles aunque
+// el color aún no tenga rgb configurado en el catálogo. ──
+const PALETA_COLOR_FALLBACK = {
+    'VERDE': '#639922', 'AZUL': '#378ADD', 'CELESTE': '#5DB8E8', 'ROJO': '#E24B4A',
+    'AMARILLO': '#EF9F27', 'NARANJA': '#D85A30', 'MORADO': '#7F77DD', 'VIOLETA': '#7F77DD',
+    'ROSADO': '#D4537E', 'ROSA': '#D4537E', 'NEGRO': '#2C2C2A', 'BLANCO': '#D3D1C7',
+    'GRIS': '#888780', 'MARRON': '#712B13', 'CAFE': '#712B13', 'TURQUESA': '#1D9E75',
+    'PLOMO': '#5F5E5A', 'BEIGE': '#B4B2A9',
+};
+function colorHexPara(colorNombre, colorHexBD) {
+    if (colorHexBD) return colorHexBD.startsWith('#') ? colorHexBD : `#${colorHexBD}`;
+    const clave = String(colorNombre ?? '').trim().toUpperCase();
+    if (PALETA_COLOR_FALLBACK[clave]) return PALETA_COLOR_FALLBACK[clave];
+    // Degradado determinístico (mismo nombre = mismo color) para
+    // nombres que no están en la paleta fija (ej. "Pruebas").
+    let hash = 0;
+    for (let i = 0; i < clave.length; i++) hash = clave.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 45%, 55%)`;
 }
 
 // =============================================================================
@@ -505,67 +590,6 @@ function renderGridEmpaquetadoFiltrado() {
 }
 
 // =============================================================================
-// GRID DE PRODUCCIONES DIRECTAS
-// =============================================================================
-
-async function cargarProduccionesDirectasEmpaquetado() {
-    const params = {
-        texto: document.getElementById('femp_texto').value.trim(),
-        solo_sin_empaquetar: document.getElementById('femp_solo_sin').checked ? '1' : '0',
-    };
-    const json = await llamarEmpaquetado('LISTARPRODUCCIONESPARAEMPAQUETADO', params);
-    const grid = document.getElementById('gridProduccionesDirectas');
-
-    if (!json.success) {
-        grid.innerHTML = `<div class="pc-emp-empty">${json.message}</div>`;
-        return;
-    }
-
-    const filas = json.producciones || [];
-    if (filas.length === 0) {
-        grid.innerHTML = '<div class="pc-emp-empty">No hay producciones directas con disponible pendiente de empaquetar.</div>';
-        return;
-    }
-
-    grid.innerHTML = filas.map(pd => {
-        const productoLabel = `${(pd.producto_codigo ?? '')} - ${(pd.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
-        return `
-        <div class="pc-emp-card">
-            <div class="pc-emp-card-head">
-                <div class="titulo">
-                    <span class="id">Producción #${pd.produccion_id}</span>
-                    <span class="producto-titulo">${pd.producto_codigo ?? ''} - ${pd.producto_descripcion ?? '-'}</span>
-                </div>
-            </div>
-            <div class="pc-emp-card-body">
-                <div class="pc-emp-field">
-                    <span class="lbl">Molde / Color</span>
-                    <span class="val">${pd.molde_nombre ?? '-'} · ${pd.color_nombre ?? '-'}</span>
-                </div>
-                <div class="pc-emp-field">
-                    <span class="lbl">Disponible</span>
-                    <span class="val">${formatearCantidadEmp(pd.cantidad_disponible)}</span>
-                </div>
-                <div class="pc-emp-field span-2">
-                    <span class="lbl">Ya empaquetado</span>
-                    <span class="val">${formatearCantidadEmp(pd.cantidad_total_empaquetada)} · ${pd.empaquetados_count ?? 0} registro(s)</span>
-                </div>
-                <div class="pc-emp-field span-2">
-                    <span class="lbl">Finalizado</span>
-                    <span class="val">${formatearFechaHoraLegibleEmp(pd.fecha_hora_fin)}</span>
-                </div>
-            </div>
-            <div class="pc-emp-card-foot">
-                <button type="button" class="pc-btn-empaquetar"
-                        onclick="abrirModalEmpaquetado(${pd.producto_id}, '${productoLabel}')">
-                    <i class="fa-solid fa-box"></i> Empaquetar
-                </button>
-            </div>
-        </div>`;
-    }).join('');
-}
-
-// =============================================================================
 // LISTADO GENERAL
 // =============================================================================
 
@@ -659,13 +683,16 @@ async function cargarSelectsFormEmp() {
 }
 
 let unidadEmpaquetadoProductoActual = null;
+let reglasEmpaquetadoActuales = null; // NUEVO
 
 async function cargarOrigenesDisponibles(productoId) {
     const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
     if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
     origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
+    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null; // NUEVO
 }
+
 function aplicarUnidadEmpaquetadoFija() {
     const sUnidad = document.getElementById('emp_unidad_medida');
     const aviso = document.getElementById('avisoUnidadEmpaquetado');
@@ -699,7 +726,7 @@ async function abrirModalEmpaquetado(productoId, productoLabel) {
         cargarOrigenesDisponibles(productoId),
     ]);
     aplicarUnidadEmpaquetadoFija(); // fija/bloquea la unidad según config del producto
-    renderBultos(); // re-render con el cache de orígenes ya cargado
+    inicializarBloqueFormulario();
     await cargarRegistrosEmp();
 
     modalEmpaquetado.show();
@@ -779,11 +806,221 @@ function agregarBulto() {
     agregarColorABulto(bultosState[bultosState.length - 1].tempId);
 }
 
+function esModoMezcla() {
+    return !!(reglasEmpaquetadoActuales && reglasEmpaquetadoActuales.conversion_peso_a_unidad);
+}
+
+function agregarOrigenMezcla() {
+    mezclaOrigenes.push({ tempId: ++contadorMezclaOrigen, origen_tipo: '', origen_id: 0, color_id: null, color_nombre: '', cantidad_kg: '' });
+    renderMezcla();
+}
+
+function quitarOrigenMezcla(tempId) {
+    mezclaOrigenes = mezclaOrigenes.filter(o => o.tempId !== tempId);
+    renderMezcla();
+}
+
+function disponibleKgOrigen(tipo, id, excluirTempId = null) {
+    const o = origenesDisponiblesCache.find(x => x.origen_tipo === tipo && x.origen_id == id);
+    if (!o) return 0;
+    const dispKgBase = o.disponible_kg !== undefined ? parseFloat(o.disponible_kg) : parseFloat(o.disponible);
+    let comprometido = 0;
+    mezclaOrigenes.forEach(m => {
+        if (m.origen_tipo === tipo && m.origen_id === id && m.tempId !== excluirTempId) {
+            comprometido += (parseFloat(m.cantidad_kg) || 0);
+        }
+    });
+    return dispKgBase - comprometido;
+}
+
+// Toca un saco en la grilla visual: si ya está en la mezcla, le suma todo
+// lo que le queda disponible; si no está, lo agrega con su disponible
+// completo. El operario después ajusta el número exacto en el panel.
+function tocarSacoMezcla(origenTipo, origenId) {
+    const o = origenesDisponiblesCache.find(x => x.origen_tipo === origenTipo && x.origen_id == origenId);
+    if (!o) return;
+    const restante = disponibleKgOrigen(origenTipo, origenId);
+    if (restante <= 0.0001) return;
+
+    let fila = mezclaOrigenes.find(m => m.origen_tipo === origenTipo && m.origen_id == origenId);
+    if (!fila) {
+        fila = { tempId: ++contadorMezclaOrigen, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10), color_id: o.color_id, color_nombre: o.color_nombre, cantidad_kg: '' };
+        mezclaOrigenes.push(fila);
+    }
+    const actual = parseFloat(fila.cantidad_kg) || 0;
+    fila.cantidad_kg = Math.round((actual + restante) * 10000) / 10000;
+    renderMezcla();
+}
+
+function actualizarOrigenMezcla(tempId, valorSelect) {
+    const fila = mezclaOrigenes.find(m => m.tempId === tempId);
+    if (!fila) return;
+    if (!valorSelect) {
+        fila.origen_tipo = ''; fila.origen_id = 0; fila.color_id = null; fila.color_nombre = '';
+    } else {
+        const [tipo, id] = valorSelect.split(':');
+        const o = origenesDisponiblesCache.find(x => x.origen_tipo === tipo && x.origen_id == id);
+        fila.origen_tipo = tipo; fila.origen_id = parseInt(id, 10);
+        fila.color_id = o ? o.color_id : null;
+        fila.color_nombre = o ? o.color_nombre : '';
+    }
+    renderMezcla();
+}
+
+function actualizarCantidadKgMezcla(tempId, valor) {
+    const fila = mezclaOrigenes.find(m => m.tempId === tempId);
+    if (fila) fila.cantidad_kg = valor;
+    actualizarResumenMezcla();
+}
+
+function actualizarBolsasProducidas(valor) {
+    bolsasProducidasValor = valor;
+    actualizarResumenMezcla();
+}
+
+function actualizarResumenMezcla() {
+    const kgTotal = mezclaOrigenes.reduce((s, m) => s + (parseFloat(m.cantidad_kg) || 0), 0);
+    document.getElementById('mezclaKgTotal').textContent = formatearCantidadEmp(kgTotal);
+
+    const pesoUnitG = reglasEmpaquetadoActuales?.peso_unitario_g;
+    const elTeorico = document.getElementById('mezclaBolsasTeoricas');
+    const elDiff = document.getElementById('mezclaDiferenciaBadge');
+    const elPaquetes = document.getElementById('mezclaPaquetesEstimados');
+
+    elPaquetes.textContent = formatearCantidadEmp((parseFloat(bolsasProducidasValor) || 0) / 24);
+
+    const bolsas = parseFloat(bolsasProducidasValor) || 0;
+    const frac = Math.min(bolsas, 24);
+    document.getElementById('mezclaPaqueteFrac').textContent = `${Math.round(frac)} / 24`;
+    document.getElementById('mezclaPaqueteBarra').style.width = ((frac / 24) * 100) + '%';
+
+    if (pesoUnitG && kgTotal > 0) {
+        const bolsasTeoricas = (kgTotal * 1000) / pesoUnitG / 144;
+        elTeorico.textContent = formatearCantidadEmp(bolsasTeoricas);
+        const declarado = parseFloat(bolsasProducidasValor) || 0;
+        if (declarado > 0 && bolsasTeoricas > 0) {
+            const diffPct = Math.abs(declarado - bolsasTeoricas) / bolsasTeoricas * 100;
+            elDiff.style.display = 'inline-block';
+            if (diffPct > 20) {
+                elDiff.className = 'badge bg-danger';
+                elDiff.textContent = `⚠ Difiere ${diffPct.toFixed(0)}% de lo esperado`;
+            } else if (diffPct > 8) {
+                elDiff.className = 'badge bg-warning text-dark';
+                elDiff.textContent = `Difiere ${diffPct.toFixed(0)}% de lo esperado`;
+            } else {
+                elDiff.className = 'badge bg-success';
+                elDiff.textContent = `Dentro de lo esperado`;
+            }
+        } else {
+            elDiff.style.display = 'none';
+        }
+    } else {
+        elTeorico.textContent = '-';
+        elDiff.style.display = 'none';
+    }
+}
+
+// Grilla de sacos disponibles (tarjetas de color) para la mezcla al azar.
+function renderSacosMezclaGrid() {
+    const cont = document.getElementById('sacosMezclaGrid');
+    if (!cont) return;
+
+    if (origenesDisponiblesCache.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">No hay sacos disponibles para este producto.</div>';
+        return;
+    }
+
+    cont.innerHTML = origenesDisponiblesCache.map(o => {
+        const restante = disponibleKgOrigen(o.origen_tipo, o.origen_id);
+        const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
+        const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
+        const agotado = restante <= 0.0001;
+        const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+        const hex = colorHexPara(o.color_nombre, o.color_hex);
+        return `
+        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
+                onclick="tocarSacoMezcla('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar a la mezcla">
+            ${enMezclaKg > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(enMezclaKg)} kg</span>` : ''}
+            <div class="swatch" style="background:${hex};"></div>
+            <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
+            <p class="origen">${origenLabel}</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
+        </button>`;
+    }).join('');
+}
+
+function renderMezcla() {
+    renderSacosMezclaGrid();
+
+    const cont = document.getElementById('listaMezclaOrigenes');
+    if (!cont) return;
+
+    const filasConValor = mezclaOrigenes.filter(m => m.origen_tipo || parseFloat(m.cantidad_kg) > 0);
+
+    if (filasConValor.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">Toca un saco a la izquierda para empezar a mezclar.</div>';
+        actualizarResumenMezcla();
+        return;
+    }
+
+    cont.innerHTML = filasConValor.map(m => {
+        const hex = m.origen_tipo ? colorHexPara(m.color_nombre, (origenesDisponiblesCache.find(x => x.origen_tipo === m.origen_tipo && x.origen_id == m.origen_id) || {}).color_hex) : '#d3d1c7';
+        const maxKg = m.origen_tipo ? disponibleKgOrigen(m.origen_tipo, m.origen_id, m.tempId) + (parseFloat(m.cantidad_kg) || 0) : null;
+        const origenLabel = m.origen_tipo ? (m.origen_tipo === 'ensamblaje' ? `Ensamblaje #${m.origen_id}` : `Producción #${m.origen_id}`) : 'Sin asignar';
+        return `
+        <div class="pc-mezcla-fila">
+            <span class="swatch-mini" style="background:${hex};"></span>
+            <span class="nombre" title="${m.color_nombre ?? 'Sin color'} · ${origenLabel}">${m.color_nombre ?? 'Sin color'} · ${origenLabel}</span>
+            <input type="number" min="0.0001" step="0.0001" ${maxKg !== null ? `max="${maxKg}"` : ''} class="form-control form-control-sm"
+                   placeholder="Kg" value="${m.cantidad_kg}"
+                   oninput="actualizarCantidadKgMezcla(${m.tempId}, this.value)">
+            <button type="button" class="pc-bulto-remove" onclick="quitarOrigenMezcla(${m.tempId})" title="Quitar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>`;
+    }).join('');
+    actualizarResumenMezcla();
+}
+
+function inicializarBloqueFormulario() {
+    const modoMezcla = esModoMezcla();
+    document.getElementById('bloqueBultos').style.display = modoMezcla ? 'none' : 'block';
+    document.getElementById('bloqueMezcla').style.display = modoMezcla ? 'block' : 'none';
+
+    if (modoMezcla) {
+        renderMezcla();
+    } else {
+        if (bultosState.length === 0) agregarBulto(); else renderBultos();
+    }
+}
+
 function quitarBulto(tempId) {
     bultosState = bultosState.filter(b => b.tempId !== tempId);
     renderBultos();
 }
+function distribuirParejoBulto(bultoTempId) {
+    const bulto = bultosState.find(b => b.tempId === bultoTempId);
+    if (!bulto) return;
 
+    const colores = bulto.colores.filter(c => c.origen_tipo && c.origen_id);
+    if (colores.length < 2) return;
+
+    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
+    if (!capacidad) return;
+
+    // Reparto base: capacidad / nColores, redondeado hacia abajo al
+    // múltiplo de granularidad más cercano.
+    const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
+
+    colores.forEach(c => {
+        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) + (parseFloat(c.cantidad) || 0);
+        c.cantidad = Math.min(base, restante); // nunca más de lo disponible real de ese origen
+    });
+
+    renderBultos();
+}
 function agregarColorABulto(bultoTempId) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
@@ -815,6 +1052,14 @@ function actualizarOrigenColor(bultoTempId, tempColorId, valorSelect) {
     renderBultos();
 }
 
+// Atajo visual: tocar la pastilla de color de un origen concreto hace lo
+// mismo que elegirlo en el <select> de esa fila, sin tener que abrir el
+// desplegable. El <select> se mantiene debajo por accesibilidad y para
+// ver el disponible exacto de cada origen en texto.
+function elegirColorEnFilaBulto(bultoTempId, tempColorId, origenTipo, origenId) {
+    actualizarOrigenColor(bultoTempId, tempColorId, claveOrigen(origenTipo, origenId));
+}
+
 function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
@@ -828,6 +1073,8 @@ function renderBultos() {
     const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
         ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
         : null;
+    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1; // NUEVO
+    const stepInput = granularidad > 1 ? granularidad : 0.0001; // NUEVO
 
     if (bultosState.length === 0) {
         cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">Agrega al menos un bulto.</div>';
@@ -844,6 +1091,19 @@ function renderBultos() {
 
         const filasColores = b.colores.map(c => {
             const valorActual = c.origen_tipo ? claveOrigen(c.origen_tipo, c.origen_id) : '';
+
+            // Pastillas de color: acceso rápido a cada origen disponible.
+            const swatchesHtml = origenesDisponiblesCache.map(o => {
+                const clave = claveOrigen(o.origen_tipo, o.origen_id);
+                const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
+                const deshabilitado = restante <= 0.0001 && clave !== valorActual;
+                const hex = colorHexPara(o.color_nombre, o.color_hex);
+                const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+                return `<button type="button" class="pc-swatch-chip ${clave === valorActual ? 'activo' : ''} ${deshabilitado ? 'agotado' : ''}"
+                    style="background:${hex};" title="${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)})"
+                    onclick="elegirColorEnFilaBulto(${b.tempId}, ${c.tempColorId}, '${o.origen_tipo}', ${o.origen_id})"></button>`;
+            }).join('');
+
             const opciones = origenesDisponiblesCache.map(o => {
                 const clave = claveOrigen(o.origen_tipo, o.origen_id);
                 const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
@@ -863,17 +1123,20 @@ function renderBultos() {
             const maxInput = topes.length > 0 ? Math.min(...topes) : null;
 
             return `
-            <div class="pc-color-row">
-                <select class="form-select form-select-sm" onchange="actualizarOrigenColor(${b.tempId}, ${c.tempColorId}, this.value)">
-                    <option value="">Selecciona color/origen...</option>
-                    ${opciones}
-                </select>
-                <input type="number" min="0.0001" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} class="form-control form-control-sm"
-                       placeholder="Cantidad" value="${c.cantidad}"
-                       oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
-                <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
+            <div class="mb-2">
+                <div class="pc-swatch-picker">${swatchesHtml}</div>
+                <div class="pc-color-row">
+                    <select class="form-select form-select-sm" onchange="actualizarOrigenColor(${b.tempId}, ${c.tempColorId}, this.value)">
+                        <option value="">Selecciona color/origen...</option>
+                        ${opciones}
+                    </select>
+                    <input type="number" min="0.0001" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} class="form-control form-control-sm"
+                           placeholder="Cantidad" value="${c.cantidad}"
+                           oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
+                    <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
             </div>`;
         }).join('');
 
@@ -881,9 +1144,15 @@ function renderBultos() {
         <div class="pc-bulto-card" style="${excedido ? 'border-color:#c94a4a;' : ''}">
             <div class="pc-bulto-card-head" style="${excedido ? 'color:#c94a4a;' : ''}">
                 <span>Bulto ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
-                <button type="button" class="pc-bulto-remove" onclick="quitarBulto(${b.tempId})" title="Quitar bulto">
-                    <i class="fa-solid fa-trash"></i>
-                </button>
+                <div>
+                    ${reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme' && b.colores.length > 1 ? `
+                        <button type="button" class="btn btn-sm btn-outline-primary" style="margin-right:6px;" onclick="distribuirParejoBulto(${b.tempId})">
+                            <i class="fa-solid fa-scale-balanced"></i> Repartir parejo
+                        </button>` : ''}
+                    <button type="button" class="pc-bulto-remove" onclick="quitarBulto(${b.tempId})" title="Quitar bulto">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
             </div>
             ${filasColores}
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="agregarColorABulto(${b.tempId})">
@@ -933,7 +1202,6 @@ async function obtenerSucursalesEmp() {
     return empSucursalesCache;
 }
 
-// ── Alta / edición ─────────────────────────────────────────────────────────
 function cancelarEdicionEmp() {
     document.getElementById('formEmpaquetado').reset();
     document.getElementById('emp_id').value = '0';
@@ -941,12 +1209,13 @@ function cancelarEdicionEmp() {
     document.getElementById('btnCancelarEdicionEmp').style.display = 'none';
     empIdEnEdicion = 0;
     bultosState = [];
+    mezclaOrigenes = [];
+    bolsasProducidasValor = '';
 
-    document.getElementById('bloqueBultos').style.display = 'block';
     document.getElementById('bloqueOrigenesReadonly').style.display = 'none';
 
-    aplicarUnidadEmpaquetadoFija(); // re-fija la unidad de empaquetado (modo "nuevo")
-    agregarBulto();
+    aplicarUnidadEmpaquetadoFija();
+    inicializarBloqueFormulario();
 }
 
 async function editarRegistroEmp(id) {
@@ -964,12 +1233,13 @@ async function editarRegistroEmp(id) {
 
     // La composición de colores es inmutable en edición: se muestra de solo lectura.
     document.getElementById('bloqueBultos').style.display = 'none';
+    document.getElementById('bloqueMezcla').style.display = 'none'; // NUEVO
     const origenes = parseJsonColumnaEmp(r.js_origenes);
     const bloqueRO = document.getElementById('bloqueOrigenesReadonly');
     bloqueRO.style.display = 'block';
     bloqueRO.innerHTML = origenes.length
         ? '<div class="pc-origenes-readonly"><b>Composición (no editable):</b><br>' +
-          origenes.map(o => `${o.color_nombre ?? 'Sin color'} — ${o.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : 'Producción'} #${o.origen_id}: ${formatearCantidadEmp(o.cantidad)}`).join('<br>') +
+          origenes.map(o => `<span class="swatch-mini" style="display:inline-block; width:12px; height:12px; border-radius:4px; margin-right:6px; vertical-align:-1px; background:${colorHexPara(o.color_nombre, o.color_hex)};"></span>${o.color_nombre ?? 'Sin color'} — ${o.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : 'Producción'} #${o.origen_id}: ${formatearCantidadEmp(o.cantidad)}`).join('<br>') +
           '<br><small class="text-muted">Para corregir la mezcla, elimina este registro y crea uno nuevo.</small></div>'
         : '<div class="pc-origenes-readonly">Sin detalle de origen (registro legacy).</div>';
 
@@ -989,6 +1259,30 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             operario_id: document.getElementById('emp_operario_id').value,
             sucursal_id: document.getElementById('emp_sucursal_id').value,
         };
+    } else if (esModoMezcla()) {
+        const origenesValidos = mezclaOrigenes.filter(m => m.origen_tipo && m.origen_id && parseFloat(m.cantidad_kg) > 0);
+        if (origenesValidos.length === 0) {
+            Swal.fire('Falta información', 'Toca al menos un saco/color y verifica que tenga kg mayor a 0.', 'warning');
+            return;
+        }
+        const bolsas = parseInt(bolsasProducidasValor, 10);
+        if (!bolsas || bolsas <= 0) {
+            Swal.fire('Falta información', 'Indica cuántas bolsas se produjeron.', 'warning');
+            return;
+        }
+
+        accion = 'CREAREMPAQUETADO';
+        params = {
+            producto_id: empProductoIdActual,
+            operario_id: document.getElementById('emp_operario_id').value,
+            sucursal_id: document.getElementById('emp_sucursal_id').value,
+            mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
+                origen_tipo: m.origen_tipo, origen_id: m.origen_id,
+                color_id: m.color_id, color_nombre: m.color_nombre,
+                cantidad_kg: parseFloat(m.cantidad_kg),
+            }))),
+            bolsas_producidas: bolsas,
+        };
     } else {
         const bultosJson = obtenerBultosJsonEmp();
         const bultosParsed = JSON.parse(bultosJson);
@@ -997,9 +1291,6 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             return;
         }
 
-        // Validación en cliente (espejo de la validación real del backend):
-        // ningún bulto puede superar la capacidad de la unidad de
-        // empaquetado. Se permite quedar por debajo (paquete parcial).
         const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
             ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
             : null;
@@ -1016,6 +1307,35 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             }
         }
 
+        const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
+        if (granularidad > 1) {
+            for (const b of bultosParsed) {
+                for (const c of b.colores) {
+                    if (c.cantidad % granularidad !== 0) {
+                        Swal.fire('Cantidad inválida', `Cada color debe ser múltiplo de ${granularidad} (docena) — revisa las cantidades ingresadas.`, 'warning');
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme') {
+            for (let i = 0; i < bultosParsed.length; i++) {
+                const b = bultosParsed[i];
+                const n = b.colores.length;
+                if (n < 2) continue;
+                const total = b.colores.reduce((s, c) => s + c.cantidad, 0);
+                if (total % n === 0) {
+                    const esperado = total / n;
+                    const desparejo = b.colores.some(c => c.cantidad !== esperado);
+                    if (desparejo) {
+                        Swal.fire('Reparto desparejo', `El bulto ${i + 1} debe repartirse parejo entre colores (${esperado} c/u).`, 'warning');
+                        return;
+                    }
+                }
+            }
+        }
+
         accion = 'CREAREMPAQUETADO';
         params = {
             producto_id: empProductoIdActual,
@@ -1023,8 +1343,6 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             sucursal_id: document.getElementById('emp_sucursal_id').value,
             bultos: bultosJson,
         };
-        // Nota: ya no se manda unidad_medida — el backend la deriva del
-        // producto (obtenerUnidadEmpaquetadoProducto) y la revalida ahí.
     }
 
     const json = await llamarEmpaquetado(accion, params);
@@ -1035,16 +1353,16 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
         await Promise.all([
             cargarOrigenesDisponibles(empProductoIdActual),
             cargarPendientesEmpaquetado(),
-            cargarProduccionesDirectasEmpaquetado(),
             cargarListadoGeneralEmp(),
             cargarRegistrosEmp(),
         ]);
-        aplicarUnidadEmpaquetadoFija(); // por si cambió algo tras recargar orígenes
-        renderBultos(); // refresca disponibles restantes tras el consumo recién guardado
+        aplicarUnidadEmpaquetadoFija();
+        inicializarBloqueFormulario();
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
+
 function eliminarRegistroEmp(id) {
     Swal.fire({
         title: '¿Eliminar este registro de empaquetado?',
@@ -1062,10 +1380,9 @@ function eliminarRegistroEmp(id) {
                 cargarOrigenesDisponibles(empProductoIdActual),
                 cargarRegistrosEmp(),
                 cargarPendientesEmpaquetado(),
-                cargarProduccionesDirectasEmpaquetado(),
                 cargarListadoGeneralEmp(),
             ]);
-            renderBultos();
+            if (esModoMezcla()) renderMezcla(); else renderBultos();
         } else {
             Swal.fire('Error', json.message, 'error');
         }
