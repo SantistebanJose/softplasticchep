@@ -137,6 +137,9 @@ include("header.php");
 .pc-swatch-chip:hover{ border-color:#b7b1a1; }
 .pc-swatch-chip.activo{ border-color:#2F6FED; }
 .pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
+
+/* ── Estación de armado inline (nueva) ── */
+.pc-estacion-vacia{ text-align:center; color:#9a9585; padding:34px 12px; font-size:.9em; }
 </style>
 
 <div class="pc-card">
@@ -166,6 +169,108 @@ include("header.php");
     </div>
 </div>
 
+<!-- ═══════════════ ESTACIÓN DE ARMADO (inline, reemplaza al modal para crear registros) ═══════════════ -->
+
+<div class="pc-card mt-3" id="estacionVaciaCard">
+    <div class="pc-estacion-vacia">
+        <i class="fa-solid fa-hand-pointer" style="font-size:1.4em; display:block; margin-bottom:8px;"></i>
+        Selecciona un producto en las pestañas de arriba para empezar a armar un paquete.
+    </div>
+</div>
+
+<div class="pc-card mt-3" id="estacionArmadoCard" style="display:none;">
+    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 id="estacionArmadoTitulo">Armar paquete</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="abrirModalRegistrosProducto()">
+            <i class="fa-solid fa-list"></i> Ver registros de este producto
+        </button>
+    </div>
+
+    <form id="formEstacionArmado">
+        <input type="hidden" id="est_producto_id" value="0">
+        <div class="row">
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Unidad de medida *</label>
+                <select class="form-select" id="est_unidad_medida" required></select>
+                <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
+                    Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí y configúrala en Productos para la próxima vez.
+                </small>
+            </div>
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Operario *</label>
+                <select class="form-select" id="est_operario_id" required></select>
+            </div>
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Sucursal</label>
+                <select class="form-select" id="est_sucursal_id"></select>
+            </div>
+        </div>
+
+        <!-- Modo BULTO (docena / unidad por color, con reparto uniforme) -->
+        <div id="bloqueBultos">
+            <label class="form-label">Paquetes (toca un saco para agregar) *</label>
+            <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Puedes ajustar la cantidad exacta abajo.</p>
+            <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:14px;"></div>
+
+            <div id="listaBultos"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarBulto()">
+                <i class="fa-solid fa-plus"></i> Agregar Paquete
+            </button>
+            <div class="pc-bultos-total">
+                <span><span id="bultosCount">0</span> paquete(s)</span>
+                <span>Total: <b id="bultosTotal">0</b></span>
+            </div>
+        </div>
+
+        <!-- Modo MEZCLA (kg mezclados → bolsas de 144 → paquetes de 24 bolsas) -->
+        <div id="bloqueMezcla" style="display:none;">
+            <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
+            <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Puedes ajustar el kg exacto después.</p>
+            <div class="pc-estacion">
+                <div>
+                    <div class="pc-sacos-grid" id="sacosMezclaGrid"></div>
+                </div>
+                <div class="pc-mezcla-panel">
+                    <p class="pc-mezcla-panel-titulo">Mezcla actual</p>
+                    <div class="pc-mezcla-lista" id="listaMezclaOrigenes"></div>
+
+                    <div class="pc-paquete-box">
+                        <div class="fila">
+                            <span>Kg totales mezclados</span>
+                            <b id="mezclaKgTotal">0</b>
+                        </div>
+                        <div class="fila mt-2">
+                            <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
+                            <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:110px;"
+                                id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
+                        </div>
+                        <div class="fila mt-2" style="font-size:.8em;">
+                            <span class="text-muted">Estimado teórico</span>
+                            <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
+                        </div>
+                        <div class="fila mt-2" style="font-size:.78em; color:#9a9585;">
+                            <span>Paquete de 24 bolsas</span>
+                            <span id="mezclaPaqueteFrac">0 / 24</span>
+                        </div>
+                        <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
+                        <div class="text-muted mt-1" style="font-size:.75em;">
+                            ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="agregarOrigenMezcla()">
+                <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
+            </button>
+        </div>
+
+        <div class="d-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i class="fa-solid fa-floppy-disk"></i> Guardar paquete
+            </button>
+        </div>
+    </form>
+</div>
 
 
 <div class="pc-card mt-3">
@@ -208,12 +313,13 @@ include("header.php");
     </div>
 </div>
 
-<!-- Modal por PRODUCTO: lista de registros + alta/edición con mezcla de colores -->
+<!-- Modal por PRODUCTO: SOLO lista de registros + edición (unidad/operario/sucursal) + eliminación.
+     La creación de registros nuevos ahora vive en la Estación de armado, en la página principal. -->
 <div class="modal fade" id="modalEmpaquetado" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="modalEmpaquetadoTitulo">Empaquetar</h5>
+        <h5 class="modal-title" id="modalEmpaquetadoTitulo">Registros</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -237,97 +343,38 @@ include("header.php");
             </table>
         </div>
 
-        <hr>
-
-        <h6 class="mb-2" id="formEmpTitulo"><i class="fa-solid fa-plus"></i> Nuevo registro de empaquetado</h6>
-        <form id="formEmpaquetado">
-            <input type="hidden" id="emp_id" value="0">
-            <input type="hidden" id="emp_producto_id" value="0">
-            <div class="row">
-                <div class="col-md-4 mb-2">
-                    <label class="form-label">Unidad de medida *</label>
-                    <select class="form-select" id="emp_unidad_medida" required></select>
-                    <small class="text-muted" id="avisoUnidadEmpaquetado" style="display:none;">
-                        Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí y configúrala en Productos para la próxima vez.
-                    </small>
-                </div>
-                <div class="col-md-4 mb-2">
-                    <label class="form-label">Operario *</label>
-                    <select class="form-select" id="emp_operario_id" required></select>
-                </div>
-                <div class="col-md-4 mb-2">
-                    <label class="form-label">Sucursal</label>
-                    <select class="form-select" id="emp_sucursal_id"></select>
-                </div>
-            </div>
-
-            <!-- Bloque de bultos: solo visible al CREAR. Cada bulto puede
-                 mezclar cantidades de varios orígenes/colores del mismo
-                 producto. -->
-            <div id="bloqueBultos">
-                <label class="form-label">Unidades Paquetes (mezcla de colores) *</label>
-                <div id="listaBultos"></div>
-                <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="agregarBulto()">
-                    <i class="fa-solid fa-plus"></i> Agregar Paquete
-                </button>
-                <div class="pc-bultos-total">
-                    <span><span id="bultosCount">0</span> paquete(s)</span>
-                    <span>Total: <b id="bultosTotal">0</b></span>
-                </div>
-            </div>
-            <div id="bloqueMezcla" style="display:none;">
-                <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
-                <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Puedes ajustar el kg exacto después.</p>
-                <div class="pc-estacion">
-                    <div>
-                        <div class="pc-sacos-grid" id="sacosMezclaGrid"></div>
+        <div id="bloqueEdicionRegistro" style="display:none;">
+            <hr>
+            <h6 class="mb-2" id="formEmpTitulo"><i class="fa-solid fa-pen"></i> Editando registro</h6>
+            <form id="formEditarEmp">
+                <input type="hidden" id="emp_id" value="0">
+                <div class="row">
+                    <div class="col-md-4 mb-2">
+                        <label class="form-label">Unidad de medida *</label>
+                        <select class="form-select" id="emp_unidad_medida" required></select>
                     </div>
-                    <div class="pc-mezcla-panel">
-                        <p class="pc-mezcla-panel-titulo">Mezcla actual</p>
-                        <div class="pc-mezcla-lista" id="listaMezclaOrigenes"></div>
-
-                        <div class="pc-paquete-box">
-                            <div class="fila">
-                                <span>Kg totales mezclados</span>
-                                <b id="mezclaKgTotal">0</b>
-                            </div>
-                            <div class="fila mt-2">
-                                <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
-                                <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:110px;"
-                                    id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
-                            </div>
-                            <div class="fila mt-2" style="font-size:.8em;">
-                                <span class="text-muted">Estimado teórico</span>
-                                <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
-                            </div>
-                            <div class="fila mt-2" style="font-size:.78em; color:#9a9585;">
-                                <span>Paquete de 24 bolsas</span>
-                                <span id="mezclaPaqueteFrac">0 / 24</span>
-                            </div>
-                            <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
-                            <div class="text-muted mt-1" style="font-size:.75em;">
-                                ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
-                            </div>
-                        </div>
+                    <div class="col-md-4 mb-2">
+                        <label class="form-label">Operario *</label>
+                        <select class="form-select" id="emp_operario_id" required></select>
+                    </div>
+                    <div class="col-md-4 mb-2">
+                        <label class="form-label">Sucursal</label>
+                        <select class="form-select" id="emp_sucursal_id"></select>
                     </div>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="agregarOrigenMezcla()">
-                    <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
-                </button>
-            </div>
 
-            <!-- Bloque de solo lectura: visible al EDITAR (la mezcla ya no se toca) -->
-            <div id="bloqueOrigenesReadonly" style="display:none;"></div>
+                <div id="bloqueOrigenesReadonly" style="display:none;"></div>
 
-            <div class="d-flex gap-2 mt-3">
-                <button type="submit" class="btn btn-primary btn-sm">
-                    <i class="fa-solid fa-floppy-disk"></i> Guardar
-                </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelarEdicionEmp" style="display:none;" onclick="cancelarEdicionEmp()">
-                    Cancelar edición
-                </button>
-            </div>
-        </form>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar cambios
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cancelarEdicionEmp()">
+                        Cancelar
+                    </button>
+                </div>
+            </form>
+        </div>
 
       </div>
     </div>
@@ -340,18 +387,23 @@ include("header.php");
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
 const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
 
-// ── Estado del modal: ahora keyado por PRODUCTO, no por origen puntual ──
-let empProductoIdActual = 0;
-let empIdEnEdicion = 0;
+// ── Estado de la ESTACIÓN DE ARMADO (creación de registros, inline en la página principal) ──
+let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
-let origenesDisponiblesCache = []; // BUSCARORIGENESDISPONIBLES del producto actual
+let origenesDisponiblesCache = []; // BUSCARORIGENESDISPONIBLES del producto de la estación activa
+let unidadEmpaquetadoProductoActual = null;
+let reglasEmpaquetadoActuales = null;
 let bultosState = [];  // [{tempId, colores:[{tempColorId, origen_tipo, origen_id, color_id, color_nombre, cantidad}]}]
 let mezclaOrigenes = [];
 let contadorMezclaOrigen = 0;
 let bolsasProducidasValor = '';
 let contadorBulto = 0;
 let contadorColorRow = 0;
+
+// ── Estado del MODAL (solo listado / edición / eliminación de registros ya guardados) ──
+let modalProductoIdActual = 0;
+let empIdEnEdicion = 0;
 
 // ── Tabs por producto (100% client-side) ──
 let cacheFilasEmpaquetado = [];
@@ -371,7 +423,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('femp_solo_sin').addEventListener('change', () => {
         cargarPendientesEmpaquetado();
-        
     });
 
     ['flist_estado', 'flist_fecha_desde', 'flist_fecha_hasta'].forEach(id => {
@@ -469,7 +520,7 @@ function colorHexPara(colorNombre, colorHexBD) {
 }
 
 // =============================================================================
-// GRID DE ENSAMBLAJES FINALIZADOS
+// GRID DE ENSAMBLAJES FINALIZADOS + TABS + ESTACIÓN DE ARMADO
 // =============================================================================
 
 async function cargarPendientesEmpaquetado() {
@@ -484,6 +535,7 @@ async function cargarPendientesEmpaquetado() {
         grid.innerHTML = `<div class="pc-emp-empty">${json.message}</div>`;
         cacheFilasEmpaquetado = [];
         renderTabsEmp();
+        actualizarEstacionArmado();
         return;
     }
 
@@ -495,6 +547,7 @@ async function cargarPendientesEmpaquetado() {
 
     renderTabsEmp();
     renderGridEmpaquetadoFiltrado();
+    actualizarEstacionArmado();
 }
 
 function claveTabEmp(fila) {
@@ -537,6 +590,15 @@ function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
     renderTabsEmp();
     renderGridEmpaquetadoFiltrado();
+    actualizarEstacionArmado();
+}
+
+// Atajo desde la tarjeta de un ensamblaje: selecciona la pestaña de su
+// producto y lleva la vista a la estación de armado.
+function irAEstacion(clave) {
+    seleccionarTabEmp(clave);
+    const el = document.getElementById('estacionArmadoCard');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderGridEmpaquetadoFiltrado() {
@@ -551,7 +613,6 @@ function renderGridEmpaquetadoFiltrado() {
     }
 
     grid.innerHTML = filas.map(e => {
-        const productoLabel = `${(e.producto_codigo ?? '')} - ${(e.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
         return `
         <div class="pc-emp-card">
             <div class="pc-emp-card-head">
@@ -580,13 +641,61 @@ function renderGridEmpaquetadoFiltrado() {
             </div>
             <div class="pc-emp-card-foot">
                 <button type="button" class="pc-btn-empaquetar"
-                        onclick="abrirModalEmpaquetado(${e.producto_id}, '${productoLabel}')">
+                        onclick="irAEstacion('${claveTabEmp(e)}')">
                     <i class="fa-solid fa-box"></i> Empaquetar
                 </button>
             </div>
         </div>
     `;
     }).join('');
+}
+
+// ── Estación de armado: se activa/actualiza según la pestaña de producto elegida ──
+async function actualizarEstacionArmado() {
+    const estCard = document.getElementById('estacionArmadoCard');
+    const vacCard = document.getElementById('estacionVaciaCard');
+
+    if (tabActivoEmp === '__todos__') {
+        estCard.style.display = 'none';
+        vacCard.style.display = 'block';
+        estacionProductoIdActual = 0;
+        return;
+    }
+
+    const fila = cacheFilasEmpaquetado.find(f => claveTabEmp(f) === tabActivoEmp);
+    if (!fila) {
+        estCard.style.display = 'none';
+        vacCard.style.display = 'block';
+        estacionProductoIdActual = 0;
+        return;
+    }
+
+    const productoId = fila.producto_id;
+    const label = `${fila.producto_codigo ?? ''} - ${fila.producto_descripcion ?? ''}`;
+
+    vacCard.style.display = 'none';
+    estCard.style.display = 'block';
+    document.getElementById('estacionArmadoTitulo').textContent = `Armar paquete — ${label}`;
+    document.getElementById('est_producto_id').value = productoId;
+
+    // Ya está cargado este producto: no recargar (evita perder lo que el operario ya armó)
+    if (estacionProductoIdActual === productoId) return;
+
+    await cargarEstacionParaProducto(productoId);
+}
+
+async function cargarEstacionParaProducto(productoId) {
+    estacionProductoIdActual = productoId;
+    bultosState = [];
+    mezclaOrigenes = [];
+    bolsasProducidasValor = '';
+
+    await Promise.all([
+        cargarSelectsEstacion(),
+        cargarOrigenesDisponibles(productoId),
+    ]);
+    aplicarUnidadEmpaquetadoFija();
+    inicializarBloqueFormulario();
 }
 
 // =============================================================================
@@ -636,7 +745,7 @@ async function cargarListadoGeneralEmp() {
                 ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
                 : '<span class="badge bg-success">Disponible</span>'}</td>
             <td>
-                <button type="button" class="pc-icon-btn" title="Abrir"
+                <button type="button" class="pc-icon-btn" title="Ver registros"
                         onclick="abrirModalEmpaquetado(${r.producto_id}, '${productoLabel}')">
                     <i class="fa-solid fa-box-open"></i>
                 </button>
@@ -664,7 +773,27 @@ async function obtenerOperariosEmp() {
     return empOperariosCache;
 }
 
-async function cargarSelectsFormEmp() {
+// Selects de la ESTACIÓN DE ARMADO (creación de registros nuevos)
+async function cargarSelectsEstacion() {
+    const [unidades, operarios, sucursales] = await Promise.all([
+        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
+    ]);
+    const sUnidad = document.getElementById('est_unidad_medida');
+    sUnidad.innerHTML = unidades.length
+        ? '<option value="">Selecciona...</option>' + unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('')
+        : '<option value="">(sin unidades disponibles - revisar consola)</option>';
+
+    const sSuc = document.getElementById('est_sucursal_id');
+    sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+
+    const sOp = document.getElementById('est_operario_id');
+    sOp.innerHTML = operarios.length
+        ? '<option value="">Selecciona...</option>' + operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('')
+        : '<option value="">(sin operarios disponibles - revisar consola)</option>';
+}
+
+// Selects del MODAL de edición (registros ya existentes)
+async function cargarSelectsModalEdicion() {
     const [unidades, operarios, sucursales] = await Promise.all([
         obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
     ]);
@@ -682,20 +811,17 @@ async function cargarSelectsFormEmp() {
         : '<option value="">(sin operarios disponibles - revisar consola)</option>';
 }
 
-let unidadEmpaquetadoProductoActual = null;
-let reglasEmpaquetadoActuales = null; // NUEVO
-
 async function cargarOrigenesDisponibles(productoId) {
     const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
     if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
     origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
-    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null; // NUEVO
+    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
 }
 
 function aplicarUnidadEmpaquetadoFija() {
-    const sUnidad = document.getElementById('emp_unidad_medida');
-    const aviso = document.getElementById('avisoUnidadEmpaquetado');
+    const sUnidad = document.getElementById('est_unidad_medida');
+    const aviso = document.getElementById('avisoUnidadEstacion');
 
     if (unidadEmpaquetadoProductoActual && unidadEmpaquetadoProductoActual.id) {
         sUnidad.innerHTML = `<option value="${unidadEmpaquetadoProductoActual.id}" selected>
@@ -705,37 +831,37 @@ function aplicarUnidadEmpaquetadoFija() {
         aviso.style.display = 'none';
     } else {
         // Producto sin "Salida en Empaquetado" configurada: fallback
-        // editable (ya trae la lista completa cargada por cargarSelectsFormEmp)
+        // editable (ya trae la lista completa cargada por cargarSelectsEstacion)
         sUnidad.disabled = false;
         aviso.style.display = 'block';
     }
 }
 // =============================================================================
-// MODAL: lista de registros + formulario
+// MODAL: SOLO listado de registros + edición + eliminación
 // =============================================================================
 
 async function abrirModalEmpaquetado(productoId, productoLabel) {
-    empProductoIdActual = productoId;
-
-    document.getElementById('modalEmpaquetadoTitulo').textContent = `Empaquetar — ${productoLabel}`;
-    document.getElementById('emp_producto_id').value = empProductoIdActual;
-
-    cancelarEdicionEmp(); // resetea a modo "nuevo" (bloqueBultos visible, 1 bulto vacío)
-    await Promise.all([
-        cargarSelectsFormEmp(),
-        cargarOrigenesDisponibles(productoId),
-    ]);
-    aplicarUnidadEmpaquetadoFija(); // fija/bloquea la unidad según config del producto
-    inicializarBloqueFormulario();
+    modalProductoIdActual = productoId;
+    document.getElementById('modalEmpaquetadoTitulo').textContent = `Registros — ${productoLabel}`;
+    cancelarEdicionEmp();
+    await cargarSelectsModalEdicion();
     await cargarRegistrosEmp();
-
     modalEmpaquetado.show();
 }
+
+// Atajo desde la estación de armado: abre el modal para el producto activo.
+function abrirModalRegistrosProducto() {
+    if (!estacionProductoIdActual) return;
+    const fila = cacheFilasEmpaquetado.find(f => f.producto_id === estacionProductoIdActual);
+    const label = fila ? `${fila.producto_codigo ?? ''} - ${fila.producto_descripcion ?? ''}` : 'Producto';
+    abrirModalEmpaquetado(estacionProductoIdActual, label);
+}
+
 async function cargarRegistrosEmp() {
     const tbody = document.getElementById('tablaRegistrosEmp');
     tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
-    const json = await llamarEmpaquetado('LISTAREMPAQUETADOSPORPRODUCTO', { producto_id: empProductoIdActual });
+    const json = await llamarEmpaquetado('LISTAREMPAQUETADOSPORPRODUCTO', { producto_id: modalProductoIdActual });
     if (!json.success) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${json.message}</td></tr>`;
         return;
@@ -833,9 +959,9 @@ function disponibleKgOrigen(tipo, id, excluirTempId = null) {
     return dispKgBase - comprometido;
 }
 
-// Toca un saco en la grilla visual: si ya está en la mezcla, le suma todo
-// lo que le queda disponible; si no está, lo agrega con su disponible
-// completo. El operario después ajusta el número exacto en el panel.
+// Toca un saco en la grilla visual (modo MEZCLA): si ya está en la mezcla,
+// le suma todo lo que le queda disponible; si no está, lo agrega con su
+// disponible completo. El operario después ajusta el número exacto.
 function tocarSacoMezcla(origenTipo, origenId) {
     const o = origenesDisponiblesCache.find(x => x.origen_tipo === origenTipo && x.origen_id == origenId);
     if (!o) return;
@@ -850,6 +976,57 @@ function tocarSacoMezcla(origenTipo, origenId) {
     const actual = parseFloat(fila.cantidad_kg) || 0;
     fila.cantidad_kg = Math.round((actual + restante) * 10000) / 10000;
     renderMezcla();
+}
+
+// Toca un saco en la grilla visual (modo BULTO/docena): lo agrega o le suma
+// una unidad de "granularidad" (ej. 1 docena) al paquete actual, respetando
+// la capacidad del paquete y el disponible del saco. Si el paquete actual
+// ya está lleno, abre uno nuevo automáticamente.
+function tocarSacoBulto(origenTipo, origenId) {
+    if (bultosState.length === 0) agregarBulto();
+    let bulto = bultosState[bultosState.length - 1];
+
+    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
+    const incremento = granularidad > 1 ? granularidad : 1;
+
+    if (capacidad !== null && totalBulto(bulto) >= capacidad - 0.0001) {
+        agregarBulto();
+        bulto = bultosState[bultosState.length - 1];
+    }
+
+    let fila = bulto.colores.find(c => c.origen_tipo === origenTipo && c.origen_id == origenId);
+    const restanteOrigen = disponibleRestanteOrigen(origenTipo, origenId, fila ? fila.tempColorId : null);
+    if (restanteOrigen <= 0.0001) return;
+
+    const espacioBulto = capacidad !== null
+        ? Math.max(0, capacidad - totalBulto(bulto) + (fila ? (parseFloat(fila.cantidad) || 0) : 0))
+        : Infinity;
+    const aAgregar = Math.min(incremento, restanteOrigen, espacioBulto);
+    if (aAgregar <= 0) return;
+
+    if (!fila) {
+        const o = origenesDisponiblesCache.find(x => x.origen_tipo === origenTipo && x.origen_id == origenId);
+        // Reutiliza la fila vacía que deja agregarBulto()/agregarColorABulto()
+        const filaVacia = bulto.colores.find(c => !c.origen_tipo);
+        if (filaVacia) {
+            filaVacia.origen_tipo = origenTipo;
+            filaVacia.origen_id = parseInt(origenId, 10);
+            filaVacia.color_id = o ? o.color_id : null;
+            filaVacia.color_nombre = o ? o.color_nombre : '';
+            filaVacia.cantidad = aAgregar;
+        } else {
+            bulto.colores.push({
+                tempColorId: ++contadorColorRow, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10),
+                color_id: o ? o.color_id : null, color_nombre: o ? o.color_nombre : '', cantidad: aAgregar,
+            });
+        }
+    } else {
+        fila.cantidad = (parseFloat(fila.cantidad) || 0) + aAgregar;
+    }
+
+    renderBultos();
 }
 
 function actualizarOrigenMezcla(tempId, valorSelect) {
@@ -945,6 +1122,34 @@ function renderSacosMezclaGrid() {
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}</p>
             <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
+        </button>`;
+    }).join('');
+}
+
+// Grilla de sacos disponibles (modo BULTO/docena): tocar agrega al paquete actual.
+function renderSacosBultoGrid() {
+    const cont = document.getElementById('sacosBultoGrid');
+    if (!cont) return;
+
+    if (origenesDisponiblesCache.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">No hay sacos disponibles para este producto.</div>';
+        return;
+    }
+
+    cont.innerHTML = origenesDisponiblesCache.map(o => {
+        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
+        const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
+        const agotado = restante <= 0.0001;
+        const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+        const hex = colorHexPara(o.color_nombre, o.color_hex);
+        return `
+        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
+                onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
+            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
+            <div class="swatch" style="background:${hex};"></div>
+            <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
+            <p class="origen">${origenLabel}</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
         </button>`;
     }).join('');
 }
@@ -1069,12 +1274,13 @@ function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
 }
 
 function renderBultos() {
+    renderSacosBultoGrid();
+
     const cont = document.getElementById('listaBultos');
     const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
         ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
         : null;
-    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1; // NUEVO
-    const stepInput = granularidad > 1 ? granularidad : 0.0001; // NUEVO
+    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
 
     if (bultosState.length === 0) {
         cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">Agrega al menos un bulto.</div>';
@@ -1202,64 +1408,16 @@ async function obtenerSucursalesEmp() {
     return empSucursalesCache;
 }
 
-function cancelarEdicionEmp() {
-    document.getElementById('formEmpaquetado').reset();
-    document.getElementById('emp_id').value = '0';
-    document.getElementById('formEmpTitulo').innerHTML = '<i class="fa-solid fa-plus"></i> Nuevo registro de empaquetado';
-    document.getElementById('btnCancelarEdicionEmp').style.display = 'none';
-    empIdEnEdicion = 0;
-    bultosState = [];
-    mezclaOrigenes = [];
-    bolsasProducidasValor = '';
+// =============================================================================
+// FORMULARIO: ESTACIÓN DE ARMADO (crear registro nuevo)
+// =============================================================================
 
-    document.getElementById('bloqueOrigenesReadonly').style.display = 'none';
-
-    aplicarUnidadEmpaquetadoFija();
-    inicializarBloqueFormulario();
-}
-
-async function editarRegistroEmp(id) {
-    const json = await llamarEmpaquetado('OBTENEREMPAQUETADO', { id });
-    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
-
-    const r = json.empaquetado;
-    empIdEnEdicion = id;
-    document.getElementById('emp_id').value = id;
-    document.getElementById('emp_unidad_medida').value = r.unidad_medida;
-    document.getElementById('emp_operario_id').value = r.operario_id;
-    document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';
-    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id} (solo unidad / operario / sucursal)`;
-    document.getElementById('btnCancelarEdicionEmp').style.display = 'inline-block';
-
-    // La composición de colores es inmutable en edición: se muestra de solo lectura.
-    document.getElementById('bloqueBultos').style.display = 'none';
-    document.getElementById('bloqueMezcla').style.display = 'none'; // NUEVO
-    const origenes = parseJsonColumnaEmp(r.js_origenes);
-    const bloqueRO = document.getElementById('bloqueOrigenesReadonly');
-    bloqueRO.style.display = 'block';
-    bloqueRO.innerHTML = origenes.length
-        ? '<div class="pc-origenes-readonly"><b>Composición (no editable):</b><br>' +
-          origenes.map(o => `<span class="swatch-mini" style="display:inline-block; width:12px; height:12px; border-radius:4px; margin-right:6px; vertical-align:-1px; background:${colorHexPara(o.color_nombre, o.color_hex)};"></span>${o.color_nombre ?? 'Sin color'} — ${o.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : 'Producción'} #${o.origen_id}: ${formatearCantidadEmp(o.cantidad)}`).join('<br>') +
-          '<br><small class="text-muted">Para corregir la mezcla, elimina este registro y crea uno nuevo.</small></div>'
-        : '<div class="pc-origenes-readonly">Sin detalle de origen (registro legacy).</div>';
-
-    document.getElementById('formEmpaquetado').scrollIntoView({ behavior: 'smooth' });
-}
-
-document.getElementById('formEmpaquetado').addEventListener('submit', async function (e) {
+document.getElementById('formEstacionArmado').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    let accion, params;
+    let params;
 
-    if (empIdEnEdicion > 0) {
-        accion = 'EDITAREMPAQUETADO';
-        params = {
-            id: empIdEnEdicion,
-            unidad_medida: document.getElementById('emp_unidad_medida').value,
-            operario_id: document.getElementById('emp_operario_id').value,
-            sucursal_id: document.getElementById('emp_sucursal_id').value,
-        };
-    } else if (esModoMezcla()) {
+    if (esModoMezcla()) {
         const origenesValidos = mezclaOrigenes.filter(m => m.origen_tipo && m.origen_id && parseFloat(m.cantidad_kg) > 0);
         if (origenesValidos.length === 0) {
             Swal.fire('Falta información', 'Toca al menos un saco/color y verifica que tenga kg mayor a 0.', 'warning');
@@ -1271,11 +1429,10 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             return;
         }
 
-        accion = 'CREAREMPAQUETADO';
         params = {
-            producto_id: empProductoIdActual,
-            operario_id: document.getElementById('emp_operario_id').value,
-            sucursal_id: document.getElementById('emp_sucursal_id').value,
+            producto_id: estacionProductoIdActual,
+            operario_id: document.getElementById('est_operario_id').value,
+            sucursal_id: document.getElementById('est_sucursal_id').value,
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1336,28 +1493,98 @@ document.getElementById('formEmpaquetado').addEventListener('submit', async func
             }
         }
 
-        accion = 'CREAREMPAQUETADO';
         params = {
-            producto_id: empProductoIdActual,
-            operario_id: document.getElementById('emp_operario_id').value,
-            sucursal_id: document.getElementById('emp_sucursal_id').value,
+            producto_id: estacionProductoIdActual,
+            operario_id: document.getElementById('est_operario_id').value,
+            sucursal_id: document.getElementById('est_sucursal_id').value,
             bultos: bultosJson,
         };
     }
 
-    const json = await llamarEmpaquetado(accion, params);
+    const json = await llamarEmpaquetado('CREAREMPAQUETADO', params);
+
+    if (json.success) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 2200 });
+
+        const productoRecienUsado = estacionProductoIdActual;
+        await Promise.all([
+            cargarPendientesEmpaquetado(),
+            cargarListadoGeneralEmp(),
+        ]);
+        // Recarga forzada de la estación (disponibles cambiaron)
+        estacionProductoIdActual = 0;
+        tabActivoEmp = tabActivoEmp; // conserva la pestaña actual
+        await cargarEstacionParaProducto(productoRecienUsado);
+
+        // Si el modal de registros de este producto está abierto, refrescarlo también
+        if (modalProductoIdActual === productoRecienUsado) {
+            await cargarRegistrosEmp();
+        }
+    } else {
+        Swal.fire('Error', json.message, 'error');
+    }
+});
+
+// =============================================================================
+// FORMULARIO: MODAL DE EDICIÓN (registros ya existentes)
+// =============================================================================
+
+function cancelarEdicionEmp() {
+    document.getElementById('formEditarEmp').reset();
+    document.getElementById('emp_id').value = '0';
+    document.getElementById('bloqueEdicionRegistro').style.display = 'none';
+    document.getElementById('bloqueOrigenesReadonly').style.display = 'none';
+    empIdEnEdicion = 0;
+}
+
+async function editarRegistroEmp(id) {
+    await cargarSelectsModalEdicion();
+
+    const json = await llamarEmpaquetado('OBTENEREMPAQUETADO', { id });
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+
+    const r = json.empaquetado;
+    empIdEnEdicion = id;
+    document.getElementById('emp_id').value = id;
+    document.getElementById('emp_unidad_medida').value = r.unidad_medida;
+    document.getElementById('emp_operario_id').value = r.operario_id;
+    document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';
+    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id} (solo unidad / operario / sucursal)`;
+
+    // La composición de colores es inmutable en edición: se muestra de solo lectura.
+    const origenes = parseJsonColumnaEmp(r.js_origenes);
+    const bloqueRO = document.getElementById('bloqueOrigenesReadonly');
+    bloqueRO.style.display = 'block';
+    bloqueRO.innerHTML = origenes.length
+        ? '<div class="pc-origenes-readonly"><b>Composición (no editable):</b><br>' +
+          origenes.map(o => `<span class="swatch-mini" style="display:inline-block; width:12px; height:12px; border-radius:4px; margin-right:6px; vertical-align:-1px; background:${colorHexPara(o.color_nombre, o.color_hex)};"></span>${o.color_nombre ?? 'Sin color'} — ${o.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : 'Producción'} #${o.origen_id}: ${formatearCantidadEmp(o.cantidad)}`).join('<br>') +
+          '<br><small class="text-muted">Para corregir la mezcla, elimina este registro y crea uno nuevo desde la estación de armado.</small></div>'
+        : '<div class="pc-origenes-readonly">Sin detalle de origen (registro legacy).</div>';
+
+    document.getElementById('bloqueEdicionRegistro').style.display = 'block';
+    document.getElementById('bloqueEdicionRegistro').scrollIntoView({ behavior: 'smooth' });
+}
+
+document.getElementById('formEditarEmp').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    if (empIdEnEdicion <= 0) return;
+
+    const params = {
+        id: empIdEnEdicion,
+        unidad_medida: document.getElementById('emp_unidad_medida').value,
+        operario_id: document.getElementById('emp_operario_id').value,
+        sucursal_id: document.getElementById('emp_sucursal_id').value,
+    };
+
+    const json = await llamarEmpaquetado('EDITAREMPAQUETADO', params);
 
     if (json.success) {
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 2200 });
         cancelarEdicionEmp();
         await Promise.all([
-            cargarOrigenesDisponibles(empProductoIdActual),
-            cargarPendientesEmpaquetado(),
-            cargarListadoGeneralEmp(),
             cargarRegistrosEmp(),
+            cargarListadoGeneralEmp(),
         ]);
-        aplicarUnidadEmpaquetadoFija();
-        inicializarBloqueFormulario();
     } else {
         Swal.fire('Error', json.message, 'error');
     }
@@ -1376,13 +1603,21 @@ function eliminarRegistroEmp(id) {
         if (json.success) {
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 });
             if (empIdEnEdicion === id) cancelarEdicionEmp();
+
+            const productoAfectado = modalProductoIdActual;
             await Promise.all([
-                cargarOrigenesDisponibles(empProductoIdActual),
                 cargarRegistrosEmp(),
                 cargarPendientesEmpaquetado(),
                 cargarListadoGeneralEmp(),
             ]);
-            if (esModoMezcla()) renderMezcla(); else renderBultos();
+
+            // Si la estación de armado activa es del mismo producto, refrescar
+            // sus disponibles (la eliminación libera cantidad).
+            if (estacionProductoIdActual === productoAfectado) {
+                await cargarOrigenesDisponibles(productoAfectado);
+                aplicarUnidadEmpaquetadoFija();
+                if (esModoMezcla()) renderMezcla(); else renderBultos();
+            }
         } else {
             Swal.fire('Error', json.message, 'error');
         }
