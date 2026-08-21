@@ -9,6 +9,41 @@ include("header.php");
 
 
 <style>
+.pc-emp-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
+    gap:14px; margin-top:4px;
+}
+.pc-emp-card{
+    border:1px solid #e7e4dd; border-radius:14px; background:#fff;
+    overflow:hidden; display:flex; flex-direction:column;
+    transition:box-shadow .12s ease, transform .12s ease;
+}
+.pc-emp-card:hover{ box-shadow:0 6px 16px rgba(0,0,0,.08); transform:translateY(-1px); }
+.pc-emp-card-head{
+    padding:10px 14px; background:#fdfcfa; border-bottom:1px solid #eee7db;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+}
+.pc-emp-card-head .titulo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.pc-emp-card-head .id{ font-size:.72em; color:#9a9585; font-weight:600; }
+.pc-emp-card-head .producto-titulo{ font-weight:700; font-size:.95em; }
+.pc-emp-card-body{ padding:12px 14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; flex:1; }
+.pc-emp-field{ min-width:0; }
+.pc-emp-field .lbl{ font-size:.68em; text-transform:uppercase; letter-spacing:.03em; color:#9a9585; display:block; margin-bottom:1px; }
+.pc-emp-field .val{ font-size:.85em; color:#3a3730; font-weight:600; overflow-wrap:break-word; }
+.pc-emp-field.span-2{ grid-column:1/-1; }
+.pc-emp-card-foot{
+    padding:8px 14px; border-top:1px solid #eee7db; background:#fffefb;
+    display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.pc-emp-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
+
+.pc-btn-empaquetar{
+    padding:7px 12px; font-size:.8em; border-radius:8px; border:1px solid #2F6FED;
+    background:#EAF0FE; color:#2F6FED; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+    transition:.12s ease;
+}
+.pc-btn-empaquetar:hover{ background:#2F6FED; color:#fff; }
+
 /* ── Tabla de registros ── */
 .pc-emp-tabla-wrap{ max-height:260px; overflow-y:auto; border:1px solid #eee7db; border-radius:10px; margin-bottom:16px; }
 .pc-emp-tabla{ width:100%; font-size:.85em; border-collapse:collapse; }
@@ -79,7 +114,6 @@ include("header.php");
 .pc-saco-card .nombre{ font-size:.8em; font-weight:700; margin:7px 0 1px; color:#3a3730; }
 .pc-saco-card .origen{ font-size:.72em; color:#9a9585; }
 .pc-saco-card .disp{ font-size:.72em; color:#6b6656; margin-top:2px; }
-.pc-saco-card .meta{ font-size:.64em; color:#b7b1a1; margin:2px 0 0; line-height:1.3; }
 .pc-saco-card .en-mezcla{
     position:absolute; top:6px; right:6px; background:#2F6FED; color:#fff;
     font-size:.68em; font-weight:700; border-radius:999px; padding:1px 7px;
@@ -103,15 +137,6 @@ include("header.php");
 .pc-swatch-chip:hover{ border-color:#b7b1a1; }
 .pc-swatch-chip.activo{ border-color:#2F6FED; }
 .pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
-
-/* ── Chips de operarios (selección múltiple) ── */
-.pc-operario-chips-wrap{ display:flex; flex-wrap:wrap; gap:6px; min-height:34px; align-items:flex-start; padding-top:2px; }
-.pc-operario-chip{
-    border:1px solid #eee2c8; background:#fff; border-radius:999px; padding:5px 12px;
-    font-size:.82em; cursor:pointer; color:#3a3730; transition:.12s ease; white-space:nowrap;
-}
-.pc-operario-chip:hover{ border-color:#2F6FED; }
-.pc-operario-chip.activo{ background:#2F6FED; border-color:#2F6FED; color:#fff; font-weight:600; }
 
 /* ── Estación de armado inline (nueva) ── */
 .pc-estacion-vacia{ text-align:center; color:#9a9585; padding:34px 12px; font-size:.9em; }
@@ -139,6 +164,9 @@ include("header.php");
         </div>
     </div>
 
+    <div class="pc-emp-grid" id="gridEmpaquetado">
+        <div class="pc-emp-empty">Cargando...</div>
+    </div>
 </div>
 
 <!-- ═══════════════ ESTACIÓN DE ARMADO (inline, reemplaza al modal para crear registros) ═══════════════ -->
@@ -168,11 +196,11 @@ include("header.php");
                     Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí y configúrala en Productos para la próxima vez.
                 </small>
             </div>
-            <div class="col-md-5 mb-2">
-                <label class="form-label">Operarios *</label>
-                <div id="est_operarios_chips" class="pc-operario-chips-wrap"></div>
+            <div class="col-md-4 mb-2">
+                <label class="form-label">Operario *</label>
+                <select class="form-select" id="est_operario_id" required></select>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Sucursal</label>
                 <select class="form-select" id="est_sucursal_id"></select>
             </div>
@@ -272,7 +300,7 @@ include("header.php");
                     <th>Sucursal</th>
                     <th>Unidades Paquetes</th>
                     <th>Total</th>
-                    <th>Operarios</th>
+                    <th>Operario</th>
                     <th>Fecha</th>
                     <th>Estado</th>
                     <th></th>
@@ -285,7 +313,7 @@ include("header.php");
     </div>
 </div>
 
-<!-- Modal por PRODUCTO: SOLO lista de registros + edición (unidad/operarios/sucursal) + eliminación.
+<!-- Modal por PRODUCTO: SOLO lista de registros + edición (unidad/operario/sucursal) + eliminación.
      La creación de registros nuevos ahora vive en la Estación de armado, en la página principal. -->
 <div class="modal fade" id="modalEmpaquetado" tabindex="-1">
   <div class="modal-dialog modal-lg">
@@ -303,7 +331,7 @@ include("header.php");
                     <tr>
                         <th>Unidades Paquetes</th>
                         <th>Total</th>
-                        <th>Operarios</th>
+                        <th>Operario</th>
                         <th>Fecha</th>
                         <th>Estado</th>
                         <th></th>
@@ -325,11 +353,11 @@ include("header.php");
                         <label class="form-label">Unidad de medida *</label>
                         <select class="form-select" id="emp_unidad_medida" required></select>
                     </div>
-                    <div class="col-md-5 mb-2">
-                        <label class="form-label">Operarios *</label>
-                        <div id="emp_operarios_chips" class="pc-operario-chips-wrap"></div>
+                    <div class="col-md-4 mb-2">
+                        <label class="form-label">Operario *</label>
+                        <select class="form-select" id="emp_operario_id" required></select>
                     </div>
-                    <div class="col-md-3 mb-2">
+                    <div class="col-md-4 mb-2">
                         <label class="form-label">Sucursal</label>
                         <select class="form-select" id="emp_sucursal_id"></select>
                     </div>
@@ -372,12 +400,10 @@ let contadorMezclaOrigen = 0;
 let bolsasProducidasValor = '';
 let contadorBulto = 0;
 let contadorColorRow = 0;
-let estOperariosSeleccionados = []; // ids de operario elegidos en la estación de armado
 
 // ── Estado del MODAL (solo listado / edición / eliminación de registros ya guardados) ──
 let modalProductoIdActual = 0;
 let empIdEnEdicion = 0;
-let empOperariosSeleccionados = []; // ids de operario elegidos en la edición
 
 // ── Tabs por producto (100% client-side) ──
 let cacheFilasEmpaquetado = [];
@@ -471,16 +497,6 @@ function textoBultosDetalle(bultos) {
     }).join(' + ');
 }
 
-// Texto de operarios de un registro: usa js_operarios (varios) con fallback
-// a operario_nombre (registros legacy de un solo operario).
-function textoOperariosEmp(r) {
-    const lista = parseJsonColumnaEmp(r.js_operarios);
-    if (lista.length > 0) {
-        return lista.map(o => o.nombre_completo).join(', ');
-    }
-    return r.operario_nombre ?? '-';
-}
-
 // ── Colores: hex real del backend (color.rgb) con degradado a una paleta
 // fija por nombre, para que los sacos siempre se vean distinguibles aunque
 // el color aún no tenga rgb configurado en el catálogo. ──
@@ -504,39 +520,6 @@ function colorHexPara(colorNombre, colorHexBD) {
 }
 
 // =============================================================================
-// OPERARIOS (chips de selección múltiple, compartidos por estación y modal)
-// =============================================================================
-
-// Pinta la lista de operarios como chips togglables dentro de containerId.
-// seleccionados: array de ids ya elegidos. toggleFnName: nombre (string) de
-// la función global a invocar en el onclick de cada chip.
-function renderOperariosChips(containerId, seleccionados, toggleFnName) {
-    const cont = document.getElementById(containerId);
-    if (!cont) return;
-    if (!empOperariosCache || empOperariosCache.length === 0) {
-        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">(sin operarios disponibles para esta etapa - revisar consola)</div>';
-        return;
-    }
-    cont.innerHTML = empOperariosCache.map(o => `
-        <button type="button" class="pc-operario-chip ${seleccionados.includes(o.id) ? 'activo' : ''}"
-                onclick="${toggleFnName}(${o.id})">
-            ${o.nombre_completo}
-        </button>`).join('');
-}
-
-function toggleOperarioEstacion(id) {
-    const i = estOperariosSeleccionados.indexOf(id);
-    if (i >= 0) estOperariosSeleccionados.splice(i, 1); else estOperariosSeleccionados.push(id);
-    renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
-}
-
-function toggleOperarioModalEdicion(id) {
-    const i = empOperariosSeleccionados.indexOf(id);
-    if (i >= 0) empOperariosSeleccionados.splice(i, 1); else empOperariosSeleccionados.push(id);
-    renderOperariosChips('emp_operarios_chips', empOperariosSeleccionados, 'toggleOperarioModalEdicion');
-}
-
-// =============================================================================
 // GRID DE ENSAMBLAJES FINALIZADOS + TABS + ESTACIÓN DE ARMADO
 // =============================================================================
 
@@ -546,9 +529,10 @@ async function cargarPendientesEmpaquetado() {
         solo_sin_empaquetar: document.getElementById('femp_solo_sin').checked ? '1' : '0',
     };
     const json = await llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', params);
+    const grid = document.getElementById('gridEmpaquetado');
 
     if (!json.success) {
-        console.error('Error LISTARENSAMBLAJESPARAEMPAQUETADO:', json.message);
+        grid.innerHTML = `<div class="pc-emp-empty">${json.message}</div>`;
         cacheFilasEmpaquetado = [];
         renderTabsEmp();
         actualizarEstacionArmado();
@@ -562,6 +546,7 @@ async function cargarPendientesEmpaquetado() {
     }
 
     renderTabsEmp();
+    renderGridEmpaquetadoFiltrado();
     actualizarEstacionArmado();
 }
 
@@ -604,16 +589,65 @@ function renderTabsEmp() {
 function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
     renderTabsEmp();
+    renderGridEmpaquetadoFiltrado();
     actualizarEstacionArmado();
 }
 
-// Info adicional (ya empaquetado / fecha de finalización) de un origen tipo
-// "ensamblaje", cruzando con el cache de ensamblajes usado para los tabs.
-// Los origenes tipo "produccion" no tienen equivalente en ese cache (esa
-// lista solo trae ensamblajes), así que para esos se omite silenciosamente.
-function infoEnsamblajeOrigen(origenTipo, origenId) {
-    if (origenTipo !== 'ensamblaje') return null;
-    return cacheFilasEmpaquetado.find(f => f.ensamblaje_id === origenId) || null;
+// Atajo desde la tarjeta de un ensamblaje: selecciona la pestaña de su
+// producto y lleva la vista a la estación de armado.
+function irAEstacion(clave) {
+    seleccionarTabEmp(clave);
+    const el = document.getElementById('estacionArmadoCard');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderGridEmpaquetadoFiltrado() {
+    const grid = document.getElementById('gridEmpaquetado');
+    const filas = tabActivoEmp === '__todos__'
+        ? cacheFilasEmpaquetado
+        : cacheFilasEmpaquetado.filter(f => claveTabEmp(f) === tabActivoEmp);
+
+    if (filas.length === 0) {
+        grid.innerHTML = '<div class="pc-emp-empty">No hay ensamblajes finalizados con disponible para este filtro.</div>';
+        return;
+    }
+
+    grid.innerHTML = filas.map(e => {
+        return `
+        <div class="pc-emp-card">
+            <div class="pc-emp-card-head">
+                <div class="titulo">
+                    <span class="id">Ensamblaje #${e.ensamblaje_id}</span>
+                    <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</span>
+                </div>
+            </div>
+            <div class="pc-emp-card-body">
+                <div class="pc-emp-field">
+                    <span class="lbl">Cantidad ensamblada</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_peso_kg)} ${e.unidad_salida_codigo || 'kg'}</span>
+                </div>
+                <div class="pc-emp-field">
+                    <span class="lbl">Disponible</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_disponible)}</span>
+                </div>
+                <div class="pc-emp-field span-2">
+                    <span class="lbl">Ya empaquetado</span>
+                    <span class="val">${formatearCantidadEmp(e.cantidad_total_empaquetada)} · ${e.empaquetados_count ?? 0} registro(s)</span>
+                </div>
+                <div class="pc-emp-field span-2">
+                    <span class="lbl">Finalizado</span>
+                    <span class="val">${formatearFechaHoraLegibleEmp(e.fin)}</span>
+                </div>
+            </div>
+            <div class="pc-emp-card-foot">
+                <button type="button" class="pc-btn-empaquetar"
+                        onclick="irAEstacion('${claveTabEmp(e)}')">
+                    <i class="fa-solid fa-box"></i> Empaquetar
+                </button>
+            </div>
+        </div>
+    `;
+    }).join('');
 }
 
 // ── Estación de armado: se activa/actualiza según la pestaña de producto elegida ──
@@ -705,7 +739,7 @@ async function cargarListadoGeneralEmp() {
             <td>${r.sucursal_nombre ?? '-'}</td>
             <td class="bultos-detalle">${bultosTexto}</td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
-            <td>${textoOperariosEmp(r)}</td>
+            <td>${r.operario_nombre ?? '-'}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
             <td>${vendido
                 ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
@@ -739,7 +773,7 @@ async function obtenerOperariosEmp() {
     return empOperariosCache;
 }
 
-// Selects/chips de la ESTACIÓN DE ARMADO (creación de registros nuevos)
+// Selects de la ESTACIÓN DE ARMADO (creación de registros nuevos)
 async function cargarSelectsEstacion() {
     const [unidades, operarios, sucursales] = await Promise.all([
         obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
@@ -752,11 +786,13 @@ async function cargarSelectsEstacion() {
     const sSuc = document.getElementById('est_sucursal_id');
     sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 
-    estOperariosSeleccionados = [];
-    renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
+    const sOp = document.getElementById('est_operario_id');
+    sOp.innerHTML = operarios.length
+        ? '<option value="">Selecciona...</option>' + operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('')
+        : '<option value="">(sin operarios disponibles - revisar consola)</option>';
 }
 
-// Selects/chips del MODAL de edición (registros ya existentes)
+// Selects del MODAL de edición (registros ya existentes)
 async function cargarSelectsModalEdicion() {
     const [unidades, operarios, sucursales] = await Promise.all([
         obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
@@ -769,8 +805,10 @@ async function cargarSelectsModalEdicion() {
     const sSuc = document.getElementById('emp_sucursal_id');
     sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 
-    empOperariosSeleccionados = [];
-    renderOperariosChips('emp_operarios_chips', empOperariosSeleccionados, 'toggleOperarioModalEdicion');
+    const sOp = document.getElementById('emp_operario_id');
+    sOp.innerHTML = operarios.length
+        ? '<option value="">Selecciona...</option>' + operarios.map(o => `<option value="${o.id}">${o.nombre_completo}</option>`).join('')
+        : '<option value="">(sin operarios disponibles - revisar consola)</option>';
 }
 
 async function cargarOrigenesDisponibles(productoId) {
@@ -843,7 +881,7 @@ async function cargarRegistrosEmp() {
         <tr>
             <td class="bultos-detalle">${bultosTexto}</td>
             <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
-            <td>${textoOperariosEmp(r)}</td>
+            <td>${r.operario_nombre ?? '-'}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
             <td>${vendido
                 ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
@@ -1076,11 +1114,6 @@ function renderSacosMezclaGrid() {
         const agotado = restante <= 0.0001;
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoEnsamblajeOrigen(o.origen_tipo, o.origen_id);
-        const metaHtml = infoExtra
-            ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fin)}</p>`
-            : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
                 onclick="tocarSacoMezcla('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar a la mezcla">
@@ -1089,7 +1122,6 @@ function renderSacosMezclaGrid() {
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}</p>
             <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
-            ${metaHtml}
         </button>`;
     }).join('');
 }
@@ -1110,11 +1142,6 @@ function renderSacosBultoGrid() {
         const agotado = restante <= 0.0001;
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoEnsamblajeOrigen(o.origen_tipo, o.origen_id);
-        const metaHtml = infoExtra
-            ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fin)}</p>`
-            : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
                 onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
@@ -1123,7 +1150,6 @@ function renderSacosBultoGrid() {
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}</p>
             <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
-            ${metaHtml}
         </button>`;
     }).join('');
 }
@@ -1389,11 +1415,6 @@ async function obtenerSucursalesEmp() {
 document.getElementById('formEstacionArmado').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    if (estOperariosSeleccionados.length === 0) {
-        Swal.fire('Falta información', 'Selecciona al menos un operario.', 'warning');
-        return;
-    }
-
     let params;
 
     if (esModoMezcla()) {
@@ -1410,7 +1431,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
 
         params = {
             producto_id: estacionProductoIdActual,
-            operarios: JSON.stringify(estOperariosSeleccionados),
+            operario_id: document.getElementById('est_operario_id').value,
             sucursal_id: document.getElementById('est_sucursal_id').value,
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
@@ -1494,7 +1515,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
 
         params = {
             producto_id: estacionProductoIdActual,
-            operarios: JSON.stringify(estOperariosSeleccionados),
+            operario_id: document.getElementById('est_operario_id').value,
             sucursal_id: document.getElementById('est_sucursal_id').value,
             bultos: bultosJson,
         };
@@ -1534,9 +1555,6 @@ function cancelarEdicionEmp() {
     document.getElementById('bloqueEdicionRegistro').style.display = 'none';
     document.getElementById('bloqueOrigenesReadonly').style.display = 'none';
     empIdEnEdicion = 0;
-    empOperariosSeleccionados = [];
-    const cont = document.getElementById('emp_operarios_chips');
-    if (cont) cont.innerHTML = '';
 }
 
 async function editarRegistroEmp(id) {
@@ -1549,14 +1567,9 @@ async function editarRegistroEmp(id) {
     empIdEnEdicion = id;
     document.getElementById('emp_id').value = id;
     document.getElementById('emp_unidad_medida').value = r.unidad_medida;
+    document.getElementById('emp_operario_id').value = r.operario_id;
     document.getElementById('emp_sucursal_id').value = r.sucursal ?? '';
-    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id} (solo unidad / operarios / sucursal)`;
-
-    const operariosDelRegistro = parseJsonColumnaEmp(r.js_operarios);
-    empOperariosSeleccionados = operariosDelRegistro.length > 0
-        ? operariosDelRegistro.map(o => o.operario_id)
-        : (r.operario_id ? [r.operario_id] : []); // fallback para registros legacy
-    renderOperariosChips('emp_operarios_chips', empOperariosSeleccionados, 'toggleOperarioModalEdicion');
+    document.getElementById('formEmpTitulo').innerHTML = `<i class="fa-solid fa-pen"></i> Editando registro #${id} (solo unidad / operario / sucursal)`;
 
     // La composición de colores es inmutable en edición: se muestra de solo lectura.
     const origenes = parseJsonColumnaEmp(r.js_origenes);
@@ -1576,15 +1589,10 @@ document.getElementById('formEditarEmp').addEventListener('submit', async functi
     e.preventDefault();
     if (empIdEnEdicion <= 0) return;
 
-    if (empOperariosSeleccionados.length === 0) {
-        Swal.fire('Falta información', 'Selecciona al menos un operario.', 'warning');
-        return;
-    }
-
     const params = {
         id: empIdEnEdicion,
         unidad_medida: document.getElementById('emp_unidad_medida').value,
-        operarios: JSON.stringify(empOperariosSeleccionados),
+        operario_id: document.getElementById('emp_operario_id').value,
         sucursal_id: document.getElementById('emp_sucursal_id').value,
     };
 

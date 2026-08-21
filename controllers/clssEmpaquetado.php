@@ -4,6 +4,16 @@
  * controllers/clssEmpaquetado.php
  * Controlador del módulo de Empaquetado
  *
+ * ACTUALIZADO (2026-08-21): soporte de MÚLTIPLES OPERARIOS por registro de
+ * empaquetado. empaquetado.js_operarios (jsonb) guarda el arreglo
+ * denormalizado [{"operario_id":n,"nombre_completo":"..."}], mismo patrón
+ * que js_sucursales/js_etapas_relacionadas en clssOperario.php.
+ * empaquetado.operario_id se mantiene como columna LEGACY (NOT NULL): se
+ * sigue llenando con el primer operario del arreglo por compatibilidad,
+ * pero la fuente de verdad para "quiénes participaron" es js_operarios.
+ * Los operarios seleccionables deben estar activos y pertenecer a la etapa
+ * de empaquetado (etapa.id = 3), validado en resolverOperariosEmpaquetado().
+ *
  * ACTUALIZADO (2026-08-19): los orígenes disponibles ahora también
  * devuelven color.rgb como color_hex, para que el frontend pinte los
  * sacos con su color real en vez de una paleta aproximada por nombre.
@@ -26,7 +36,7 @@
  * Se recalcula en vivo en cada consulta (no se cachea en ninguna columna).
  *
  * EDICIÓN: editarEmpaquetado() es DELIBERADAMENTE LIMITADA a cabecera
- * (unidad_medida, operario_id, sucursal). NUNCA toca rel_empaquetado_origen
+ * (unidad_medida, operarios, sucursal). NUNCA toca rel_empaquetado_origen
  * ni la mezcla de colores. Si hay que corregir la mezcla: eliminar el
  * registro (libera el consumo) y crear uno nuevo.
  *
@@ -34,7 +44,9 @@
  *   empaquetado (id, producto_id -> producto,
  *                emsamblaje_id -> ensamblaje [LEGACY, ya no se llena],
  *                produccion_id -> produccion [LEGACY, ya no se llena],
- *                unidad_medida -> unidad_medida, operario_id -> operario,
+ *                unidad_medida -> unidad_medida,
+ *                operario_id -> operario [LEGACY, primer operario de js_operarios],
+ *                js_operarios [array de operarios que participaron, ver arriba],
  *                sucursal -> sucursal,
  *                pasado_venta [timestamp, NULL = aún no pasó a venta],
  *                venta_id_ref [FUTURO],
@@ -386,6 +398,64 @@ function listarProduccionesParaEmpaquetado()
 }
 
 // =============================================================================
+// OPERARIOS (múltiples por registro de empaquetado)
+// =============================================================================
+
+// Valida los ids de operario contra la tabla operario: deben estar activos y
+// pertenecer a la etapa de empaquetado (id 3, mismo id fijo que usa
+// buscarOperarios()). Devuelve el array denormalizado listo para js_operarios.
+// Lanza Exception si algún id no existe / está inactivo / no pertenece a la etapa.
+function resolverOperariosEmpaquetado($conectar, array $idsOperario): array
+{
+    $idsOperario = array_values(array_unique(array_map('intval', $idsOperario)));
+    $idsOperario = array_filter($idsOperario, fn($id) => $id > 0);
+    if (empty($idsOperario)) return [];
+
+    $placeholders = [];
+    $params = [];
+    foreach ($idsOperario as $i => $id) {
+        $key = "op{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $id;
+    }
+
+    $etapaId = 3; // EPAQUETADO
+    $sql = "SELECT id, nombre_completo FROM operario
+            WHERE id IN (" . implode(',', $placeholders) . ")
+              AND activo = true
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+                  WHERE (et->>'etapa_id')::int = {$etapaId}
+              )";
+    $result = executeQuery($conectar, $sql, $params);
+
+    if (count($result) !== count($idsOperario)) {
+        throw new Exception('Uno o más operarios seleccionados no existen, están inactivos o no están asignados a la etapa de empaquetado.');
+    }
+
+    return array_map(fn($o) => [
+        'operario_id'     => (int)$o['id'],
+        'nombre_completo' => $o['nombre_completo'],
+    ], $result);
+}
+
+// executeQuery devuelve columnas jsonb como string JSON crudo, no como
+// arreglo PHP. Mismo patrón que decodificarJsonFilas() en clssOperario.php.
+// Se aplica a cualquier resultado que incluya emp.js_operarios en el SELECT.
+function decodificarJsOperarios(array $filas): array
+{
+    foreach ($filas as &$fila) {
+        if (isset($fila['js_operarios']) && is_string($fila['js_operarios'])) {
+            $fila['js_operarios'] = json_decode($fila['js_operarios'], true) ?: [];
+        } elseif (!isset($fila['js_operarios'])) {
+            $fila['js_operarios'] = [];
+        }
+    }
+    unset($fila);
+    return $filas;
+}
+
+// =============================================================================
 // EMPAQUETADO
 // =============================================================================
 
@@ -406,7 +476,7 @@ function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
         SELECT
             emp.id, emp.producto_id, emp.emsamblaje_id, emp.produccion_id, emp.unidad_medida,
             emp.cantidad_tota, emp.js_cantidades,
-            emp.operario_id, emp.pasado_venta, emp.venta_id_ref,
+            emp.operario_id, emp.js_operarios, emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
             um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto,
             um.equivalencia, um.unidad_base_id,
@@ -434,7 +504,7 @@ function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
         ORDER BY emp.created_at DESC
     ", ['origen_id' => $origenId]);
 
-    responder(true, 'OK', ['empaquetados' => $result]);
+    responder(true, 'OK', ['empaquetados' => decodificarJsOperarios($result)]);
 }
 
 // Historial real de un PRODUCTO (fuente de verdad del flujo actual): trae
@@ -449,7 +519,7 @@ function listarEmpaquetadosPorProducto(int $productoId)
         SELECT
             emp.id, emp.producto_id, emp.unidad_medida,
             emp.cantidad_tota, emp.js_cantidades,
-            emp.operario_id, emp.pasado_venta, emp.venta_id_ref,
+            emp.operario_id, emp.js_operarios, emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
             um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto,
             um.equivalencia, um.unidad_base_id,
@@ -477,7 +547,7 @@ function listarEmpaquetadosPorProducto(int $productoId)
         ORDER BY emp.created_at DESC
     ", ['producto_id' => $productoId]);
 
-    responder(true, 'OK', ['empaquetados' => $result]);
+    responder(true, 'OK', ['empaquetados' => decodificarJsOperarios($result)]);
 }
 
 // Listado GENERAL para la tabla que vive debajo de los grids.
@@ -517,7 +587,7 @@ function listarTodosEmpaquetados()
             emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
             p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
             emp.cantidad_tota, emp.js_cantidades,
-            emp.operario_id, op.nombre_completo AS operario_nombre,
+            emp.operario_id, emp.js_operarios, op.nombre_completo AS operario_nombre,
             su.nombre AS sucursal_nombre,
             emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
@@ -564,7 +634,7 @@ function listarTodosEmpaquetados()
         LIMIT 300";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['empaquetados' => $result]);
+    responder(true, 'OK', ['empaquetados' => decodificarJsOperarios($result)]);
 }
 
 function obtenerEmpaquetado(int $id)
@@ -591,18 +661,30 @@ function obtenerEmpaquetado(int $id)
     ", ['id' => $id]);
 
     if (empty($result)) responder(false, 'Registro de empaquetado no encontrado o inactivo.');
-    responder(true, 'OK', ['empaquetado' => $result[0]]);
+    $filas = decodificarJsOperarios($result);
+    responder(true, 'OK', ['empaquetado' => $filas[0]]);
 }
 
 function crearEmpaquetado()
 {
     $conectar = conectar_oll_BD();
     $productoId   = intval($_POST['producto_id'] ?? 0);
-    $operarioId   = intval($_POST['operario_id'] ?? 0);
     $sucursalId   = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
 
     if (!$productoId) responder(false, 'Debes indicar el producto.');
-    if (!$operarioId) responder(false, 'Debes indicar el operario.');
+
+    // Varios operarios pueden participar en un mismo registro de empaquetado.
+    // Llega como JSON: "[3,7,12]" (ids seleccionados en la estación de armado).
+    $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
+    if (!is_array($operariosInput) || empty($operariosInput)) {
+        responder(false, 'Debes indicar al menos un operario.');
+    }
+    try {
+        $operariosResueltos = resolverOperariosEmpaquetado($conectar, $operariosInput);
+    } catch (Throwable $e) {
+        responder(false, $e->getMessage());
+    }
+    $operarioIdPrimario = $operariosResueltos[0]['operario_id']; // legacy: columna operario_id sigue NOT NULL
 
     $producto = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id AND activo = true", ['id' => $productoId]);
     if (empty($producto)) responder(false, 'El producto indicado no existe o está inactivo.');
@@ -613,9 +695,6 @@ function crearEmpaquetado()
     }
     $unidadMedida = (int) $unidadEmpaquetado['id'];
     $equivalenciaCapacidad = (float)($unidadEmpaquetado['equivalencia'] ?? 0);
-
-    $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operarioId]);
-    if (empty($operario)) responder(false, 'El operario indicado no existe o está inactivo.');
 
     if ($sucursalId !== null) {
         $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
@@ -631,7 +710,7 @@ function crearEmpaquetado()
     // ver crearEmpaquetadoMezcla(). No usan bultos con color manual porque
     // la máquina mezcla los colores sin que el operario pueda controlarlo.
     if ($reglas['conversion_peso_a_unidad']) {
-        crearEmpaquetadoMezcla($conectar, $productoId, $operarioId, $sucursalId, $unidadMedida, $unidadEmpaquetado, $reglas);
+        crearEmpaquetadoMezcla($conectar, $productoId, $operarioIdPrimario, $operariosResueltos, $sucursalId, $unidadMedida, $unidadEmpaquetado, $reglas);
         return;
     }
 
@@ -734,22 +813,25 @@ function crearEmpaquetado()
             }
         }
 
+        $operariosTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
         $movimiento   = obtenerMovimientoSesionEmp('crear', [[
             'campo' => 'Empaquetado', 'valor_antes' => '(nuevo)',
-            'valor_despues' => count($bultosLimpios) . " bulto(s), total $cantidadTotal, " . count($consumoPorOrigen) . " origen(es)",
+            'valor_despues' => count($bultosLimpios) . " bulto(s), total $cantidadTotal, " . count($consumoPorOrigen) . " origen(es), operarios: $operariosTexto",
         ]]);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $nuevo = executeQuery($conectar, "
-            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, sucursal,
+            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
                 cantidad_tota, js_cantidades, created_at, js_session, js_historial)
-            VALUES (:producto_id, :unidad_medida, :operario_id, :sucursal_id,
+            VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
                 :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
-            'operario_id'   => $operarioId, 'sucursal_id' => $sucursalId,
+            'operario_id'   => $operarioIdPrimario,
+            'js_operarios'  => json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE),
+            'sucursal_id'   => $sucursalId,
             'cantidad_tota' => $cantidadTotalEnUnidad,
             'js_cantidades' => json_encode($bultosLimpios, JSON_UNESCAPED_UNICODE),
             'js_session'    => $js_session,
@@ -788,8 +870,11 @@ function crearEmpaquetado()
  * saco/color entraron a la mezcla (consumo real, exacto) y cuántas
  * bolsas salieron de la máquina. NO se inventa un reparto de colores por
  * bolsa — eso lo decide la máquina y nadie lo cuenta a mano.
+ *
+ * $operarioIdPrimario y $operariosResueltos vienen ya resueltos desde
+ * crearEmpaquetado() (múltiples operarios pueden participar).
  */
-function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioId, ?int $sucursalId, int $unidadMedida, array $unidadEmpaquetado, array $reglas): void
+function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrimario, array $operariosResueltos, ?int $sucursalId, int $unidadMedida, array $unidadEmpaquetado, array $reglas): void
 {
     $origenesJson     = trim($_POST['mezcla_origenes'] ?? '[]');
     $bolsasProducidas = floatval($_POST['bolsas_producidas'] ?? 0);
@@ -856,9 +941,10 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioId, ?in
         $bolsasTeoricas   = $unidadesTeoricas / 144;
         $diferenciaPct    = $bolsasTeoricas > 0 ? abs($bolsasProducidas - $bolsasTeoricas) / $bolsasTeoricas * 100 : null;
 
+        $operariosTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
         $movimiento = obtenerMovimientoSesionEmp('crear_mezcla', [[
             'campo' => 'Empaquetado (mezcla)', 'valor_antes' => '(nuevo)',
-            'valor_despues' => "$bolsasProducidas bolsas producidas, {$kgTotal} kg mezclados de " . count($consumoPorOrigen) . " origen(es)"
+            'valor_despues' => "$bolsasProducidas bolsas producidas, {$kgTotal} kg mezclados de " . count($consumoPorOrigen) . " origen(es), operarios: $operariosTexto"
                 . ($diferenciaPct !== null ? " — teórico: " . round($bolsasTeoricas, 1) . " bolsas, diferencia: " . round($diferenciaPct, 1) . "%" : ""),
         ]]);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -879,14 +965,16 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioId, ?in
         ]];
 
         $nuevo = executeQuery($conectar, "
-            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, sucursal,
+            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
                 cantidad_tota, js_cantidades, created_at, js_session, js_historial)
-            VALUES (:producto_id, :unidad_medida, :operario_id, :sucursal_id,
+            VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
                 :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
-            'operario_id'   => $operarioId, 'sucursal_id' => $sucursalId,
+            'operario_id'   => $operarioIdPrimario,
+            'js_operarios'  => json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE),
+            'sucursal_id'   => $sucursalId,
             'cantidad_tota' => $bolsasProducidas,
             'js_cantidades' => json_encode($mezclaDetalle, JSON_UNESCAPED_UNICODE),
             'js_session'    => $js_session,
@@ -922,7 +1010,8 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioId, ?in
         responder(false, 'No se pudo guardar: ' . $e->getMessage());
     }
 }
-// Edición LIMITADA a cabecera (unidad_medida, operario, sucursal). NUNCA
+
+// Edición LIMITADA a cabecera (unidad_medida, operarios, sucursal). NUNCA
 // toca rel_empaquetado_origen ni la mezcla de colores. Corregir la mezcla
 // = eliminar este registro (libera el consumo) y crear uno nuevo.
 function editarEmpaquetado()
@@ -932,12 +1021,23 @@ function editarEmpaquetado()
     $id           = intval($_POST['id'] ?? 0);
     $sucursalId   = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $unidadMedida = intval($_POST['unidad_medida'] ?? 0);
-    $operarioId   = intval($_POST['operario_id'] ?? 0);
 
     if (!$id) responder(false, 'ID inválido.');
     if (!$sucursalId) responder(false, 'Debes indicar la sucursal.');
     if (!$unidadMedida) responder(false, 'Debes indicar la unidad de medida.');
-    if (!$operarioId) responder(false, 'Debes indicar el operario.');
+
+    // Varios operarios pueden participar en un mismo registro de empaquetado.
+    // Llega como JSON: "[3,7,12]" (ids seleccionados en el modal de edición).
+    $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
+    if (!is_array($operariosInput) || empty($operariosInput)) {
+        responder(false, 'Debes indicar al menos un operario.');
+    }
+    try {
+        $operariosResueltos = resolverOperariosEmpaquetado($conectar, $operariosInput);
+    } catch (Throwable $e) {
+        responder(false, $e->getMessage());
+    }
+    $operarioIdPrimario = $operariosResueltos[0]['operario_id']; // legacy: columna operario_id sigue NOT NULL
 
     $actual = executeQuery($conectar, "SELECT * FROM empaquetado WHERE id = :id AND deleted_at IS NULL", ['id' => $id]);
     if (empty($actual)) responder(false, 'Registro de empaquetado no encontrado o inactivo.');
@@ -959,16 +1059,21 @@ function editarEmpaquetado()
     $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedida]);
     if (empty($unidad)) responder(false, 'La unidad de medida indicada no existe o está inactiva.');
 
-    $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operarioId]);
-    if (empty($operario)) responder(false, 'El operario indicado no existe o está inactivo.');
-
     $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
     if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
 
+    // Texto legible para el log de auditoría: nombres de operarios antes/después
+    // en vez de un solo id como se hacía antes con operario_id.
+    $operariosAntesArr = json_decode($actual[0]['js_operarios'] ?? '[]', true) ?: [];
+    $operariosAntesTexto = !empty($operariosAntesArr)
+        ? implode(', ', array_column($operariosAntesArr, 'nombre_completo'))
+        : "operario #{$actual[0]['operario_id']}"; // fallback para registros legacy sin js_operarios
+    $operariosDespuesTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
+
     $cambios = [[
         'campo' => 'Empaquetado (cabecera)',
-        'valor_antes' => "unidad #{$actual[0]['unidad_medida']}, operario #{$actual[0]['operario_id']}, sucursal #{$actual[0]['sucursal']}",
-        'valor_despues' => "unidad #$unidadMedida, operario #$operarioId, sucursal #$sucursalId",
+        'valor_antes' => "unidad #{$actual[0]['unidad_medida']}, operarios: $operariosAntesTexto, sucursal #{$actual[0]['sucursal']}",
+        'valor_despues' => "unidad #$unidadMedida, operarios: $operariosDespuesTexto, sucursal #$sucursalId",
     ]];
     $movimiento   = obtenerMovimientoSesionEmp('editar', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -978,6 +1083,7 @@ function editarEmpaquetado()
         UPDATE empaquetado SET
             unidad_medida = :unidad_medida,
             operario_id   = :operario_id,
+            js_operarios  = :js_operarios,
             sucursal      = :sucursal_id,
             update_at     = NOW(),
             js_session    = :js_session,
@@ -985,7 +1091,8 @@ function editarEmpaquetado()
         WHERE id = :id
     ", [
         'unidad_medida' => $unidadMedida,
-        'operario_id'   => $operarioId,
+        'operario_id'   => $operarioIdPrimario,
+        'js_operarios'  => json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE),
         'sucursal_id'   => $sucursalId,
         'js_session'    => $js_session,
         'js_historial'  => $js_historial,
