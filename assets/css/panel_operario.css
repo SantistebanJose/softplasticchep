@@ -1,0 +1,184 @@
+.pc-op-panel-shell {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #eef1f8 0%, #e6eaf4 100%);
+  padding: 28px 32px 40px;
+  display: flex;
+  flex-direction: column;
+}
+
+.pc-op-brand-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 36px;
+}
+
+.pc-op-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pc-op-brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--pc-navy);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+}
+
+.pc-op-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.pc-op-brand-name {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--pc-navy);
+}
+
+.pc-op-brand-tag {
+  font-size: 12px;
+  color: var(--pc-muted);
+  font-style: italic;
+}
+
+.pc-op-panel-logout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--pc-surface);
+  color: var(--pc-navy);
+  border: 1px solid var(--pc-border);
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pc-op-panel-greeting {
+  margin-bottom: 30px;
+}
+
+.pc-op-panel-hello {
+  display: block;
+  color: var(--pc-muted);
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.pc-op-panel-hello i {
+  color: #f0a500;
+}
+
+.pc-op-panel-greeting h1 {
+  color: var(--pc-navy);
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 26px;
+  margin: 0;
+}
+
+.pc-op-panel-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+  align-content: start;
+}
+
+.pc-op-panel-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 240px;
+  border-radius: 20px;
+  color: #fff;
+  text-decoration: none;
+  overflow: hidden;
+  box-shadow: 0 16px 34px rgba(12, 28, 51, 0.16);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.pc-op-panel-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 55%);
+  pointer-events: none;
+}
+
+.pc-op-panel-btn:active {
+  transform: scale(0.96);
+  box-shadow: 0 8px 18px rgba(12, 28, 51, 0.18);
+}
+
+.pc-op-panel-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  margin-bottom: 4px;
+}
+
+.pc-op-panel-label {
+  font-family: 'Poppins', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pc-op-panel-sub {
+  font-size: 13px;
+  opacity: 0.85;
+  text-align: center;
+  padding: 0 20px;
+}
+
+.pc-op-panel-btn.q-blue   { background: linear-gradient(160deg, #2f6fed, #1c4fc2); }
+.pc-op-panel-btn.q-navy   { background: linear-gradient(160deg, #16215c, #0b1538); }
+.pc-op-panel-btn.q-amber  { background: linear-gradient(160deg, #f0a500, #c67c00); }
+
+@media (max-width: 720px) {
+  .pc-op-panel-shell {
+    padding: 22px 18px 30px;
+  }
+  .pc-op-panel-grid {
+    grid-template-columns: 1fr;
+  }
+  .pc-op-panel-btn {
+    min-height: 130px;
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 0 20px;
+    text-align: left;
+  }
+  .pc-op-panel-icon {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+    margin-bottom: 0;
+  }
+  .pc-op-panel-sub {
+    text-align: left;
+    padding: 0;
+  }
+}
