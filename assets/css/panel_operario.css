@@ -23,17 +23,11 @@
   width: 46px;
   height: 46px;
   border-radius: 14px;
-  background: var(--pc-navy);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Poppins', sans-serif;
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.5px;
+  background: #fff;
+  border: 1px solid var(--pc-border);
+  object-fit: contain;
+  padding: 4px;
 }
-
 .pc-op-brand-text {
   display: flex;
   flex-direction: column;

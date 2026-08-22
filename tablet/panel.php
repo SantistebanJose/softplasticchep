@@ -26,7 +26,7 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
 
     <header class="pc-op-brand-bar">
         <div class="pc-op-brand">
-            <div class="pc-op-brand-mark">PC</div>
+            <img src="../assets/img/logo.png" alt="Plásticos Chepito" class="pc-op-brand-mark">
             <div class="pc-op-brand-text">
                 <span class="pc-op-brand-name">Plásticos Chepito</span>
                 <span class="pc-op-brand-tag">Hecho a mano, hecho para durar</span>
