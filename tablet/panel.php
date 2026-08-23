@@ -9,6 +9,12 @@ if (empty($_SESSION['operario_id'])) {
 
 $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
+
+// NUEVO: solo se ofrecen los accesos a los módulos cuya etapa tiene asignada.
+$puedeProduccion  = operarioTieneEtapa('PRODUC');
+$puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
+$puedeEmpaquetado = operarioTieneEtapa('EMPAQUET');
+$tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -43,22 +49,39 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
     </div>
 
     <div class="pc-op-panel-grid">
+        <?php if ($puedeProduccion): ?>
         <a href="produccion.php" class="pc-op-panel-btn q-blue">
             <div class="pc-op-panel-icon"><i class="fa-solid fa-industry"></i></div>
             <span class="pc-op-panel-label">Producción</span>
             <span class="pc-op-panel-sub">Registra tu avance de moldeado</span>
         </a>
+        <?php endif; ?>
+
+        <?php if ($puedeEnsamblaje): ?>
         <a href="ensamblaje.php" class="pc-op-panel-btn q-navy">
             <div class="pc-op-panel-icon"><i class="fa-solid fa-puzzle-piece"></i></div>
             <span class="pc-op-panel-label">Ensamblaje</span>
             <span class="pc-op-panel-sub">Arma y une las piezas</span>
         </a>
+        <?php endif; ?>
+
+        <?php if ($puedeEmpaquetado): ?>
         <a href="empaquetado.php" class="pc-op-panel-btn q-amber">
             <div class="pc-op-panel-icon"><i class="fa-solid fa-box-open"></i></div>
             <span class="pc-op-panel-label">Empaquetado</span>
             <span class="pc-op-panel-sub">Prepara sacos y bultos</span>
         </a>
+        <?php endif; ?>
     </div>
+
+    <?php if (!$tieneAlgunAcceso): ?>
+    <div class="pc-op-panel-greeting" style="margin-top:20px;">
+        <span class="pc-op-panel-hello" style="color:#c94a4a;">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            No tienes ninguna etapa asignada todavía. Pide a un administrador que te configure el acceso.
+        </span>
+    </div>
+    <?php endif; ?>
 
 </div>
 </body>
