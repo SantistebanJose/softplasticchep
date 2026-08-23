@@ -49,3 +49,39 @@ body { background: #f4f6fb; }
   .pc-prod-grid { grid-template-columns: 1fr; }
   .pc-mat-grid { grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); }
 }
+
+
+/* ===== Fix: modal debía verse fullscreen y sólido, se veía "sangrado" ===== */
+.pc-modal-tablet .modal-dialog {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+}
+
+.pc-modal-tablet .modal-content {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background: #ffffff;
+  opacity: 1;
+}
+
+.pc-modal-tablet .modal-body {
+  background: #ffffff;
+  overflow-y: auto;
+  max-height: calc(100vh - 130px); /* deja espacio para header + footer del modal */
+  padding: 20px 24px;
+}
+
+.pc-modal-tablet .modal-header,
+.pc-modal-tablet .modal-footer {
+  background: #ffffff;
+  position: sticky;
+  z-index: 2;
+}
+.pc-modal-tablet .modal-header { top: 0; }
+.pc-modal-tablet .modal-footer { bottom: 0; }
+
+/* Backdrop bien oscuro y opaco, para que nunca "transparente" el fondo */
+.modal-backdrop.show { opacity: 0.6 !important; }

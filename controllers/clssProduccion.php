@@ -275,14 +275,20 @@ function buscarMaterialesProduccion()
         $params['texto'] = "%$texto%";
     }
 
-    // m.color distingue un tinte (true) de un material normal (false); m.rgb
-    // trae el color real del tinte para pintar su card con ese color en vez
-    // de uno "hasheado" por nombre. El frontend arma las pestañas
-    // Materiales / Tintes a partir de este campo.
-    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color, m.rgb,
+    // Fallback de color para tintes: si material.rgb viene vacío (caso
+    // frecuente: el rgb real vive en la tabla `color`, no en `material`),
+    // se busca por coincidencia de nombre. Los tintes suelen llamarse
+    // "TINTE <COLOR>" (ej. "TINTE AZUL"), así que se compara el nombre del
+    // material (sin el prefijo "TINTE ") contra color.nombre. Si tu
+    // convención de nombres es distinta, ajusta el ON de este LEFT JOIN.
+    $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color,
+                   COALESCE(NULLIF(TRIM(m.rgb), ''), co.rgb) AS rgb,
                    u.nombre_corto AS unidad_corto
             FROM material m
             LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
+            LEFT JOIN color co ON m.color = true
+                AND co.deleted_at IS NULL
+                AND UPPER(TRIM(co.nombre)) = UPPER(TRIM(REGEXP_REPLACE(m.nombre, '^TINTE\\s+', '', 'i')))
             WHERE " . implode(' AND ', $where) . " ORDER BY m.nombre LIMIT 100";
 
     $result = executeQuery($conectar, $sql, $params);

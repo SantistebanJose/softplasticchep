@@ -193,8 +193,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 </div>
 
 <!-- Modal Crear/Editar -->
-<div class="modal fade" id="modalProduccion" tabindex="-1">
-  <div class="modal-dialog modal-fullscreen-lg-down modal-xl">
+<div class="modal fade pc-modal-tablet" id="modalProduccion" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
       <form id="formProduccion">
         <div class="modal-header">
@@ -318,8 +318,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 </div>
 
 <!-- Modal Cantidad producida / merma -->
-<div class="modal fade" id="modalCantidadEnsamblaje" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+<div class="modal fade pc-modal-tablet" id="modalCantidadEnsamblaje" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
       <form id="formCantidadEnsamblaje">
         <div class="modal-header">
@@ -582,15 +582,44 @@ const PALETA_RESINA = [
     { color: '#7C3AED', bg: '#F1EAFD' }, { color: '#0E9488', bg: '#E2F5F3' },
 ];
 const ICONOS_MATERIAL = ['fa-cube', 'fa-flask', 'fa-layer-group', 'fa-industry', 'fa-vial', 'fa-box-open', 'fa-recycle', 'fa-weight-hanging'];
+// Normaliza cualquier formato de color que venga de la BD (hex con/sin #,
+// hex de 3 dígitos, "rgb(r,g,b)", o "r,g,b" plano) a un hex de 6 dígitos
+// consistente, para que el swatch del tinte SIEMPRE coincida con su color real.
+function normalizarColorHex(valor) {
+    if (!valor) return null;
+    const v = String(valor).trim();
+
+    if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase();
+    if (/^[0-9a-f]{6}$/i.test(v)) return ('#' + v).toLowerCase();
+
+    if (/^#[0-9a-f]{3}$/i.test(v)) {
+        const r = v[1], g = v[2], b = v[3];
+        return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+
+    const toHex = n => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, '0');
+
+    const rgbFn = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+    if (rgbFn) return `#${toHex(rgbFn[1])}${toHex(rgbFn[2])}${toHex(rgbFn[3])}`;
+
+    const csv = v.match(/^(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})$/);
+    if (csv) return `#${toHex(csv[1])}${toHex(csv[2])}${toHex(csv[3])}`;
+
+    return null; // formato no reconocido -> se usará el color por hash como respaldo
+}
+
 function estiloMaterial(material) {
     const nombre = material.nombre || '';
     let hash = 0;
     for (let i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) >>> 0;
     const icono = esTinte(material) ? 'fa-droplet' : ICONOS_MATERIAL[hash % ICONOS_MATERIAL.length];
-    if (esTinte(material) && material.rgb) return { color: material.rgb, bg: material.rgb + '22', icono };
+
+    if (esTinte(material)) {
+        const hex = normalizarColorHex(material.rgb);
+        if (hex) return { color: hex, bg: hex + '22', icono };
+    }
     return { ...PALETA_RESINA[hash % PALETA_RESINA.length], icono };
 }
-
 async function obtenerCategoriasMaterialProd() {
     if (categoriasMaterialProdCache) return categoriasMaterialProdCache;
     const json = await llamarProduccion('BUSCARCATEGORIASMATERIAL');
