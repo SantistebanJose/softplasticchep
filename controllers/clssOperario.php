@@ -3,9 +3,15 @@
 /**
  * controllers/clssOperario.php
  * Controlador del módulo de Operarios
- * Tabla real: operario (id, nombre_completo, cargo, dni, activo, created_at,
+ * Tabla real: operario (id, nombre_completo, cargo_id, dni, activo, created_at,
  *             updated_at, deleted_at, js_session, js_historial, js_sucursales,
  *             js_etapas_relacionadas)
+ *
+ * cargo_id (int, FK -> cargo.id): reemplaza a la antigua columna de texto
+ * libre 'cargo'. La tabla 'cargo' sigue el mismo patrón de 'etapa'
+ * (id, nombre, orden, deleted_at). listarOperarios()/obtenerOperario()
+ * hacen LEFT JOIN contra 'cargo' para devolver 'cargo_nombre' junto al id,
+ * así el frontend no tiene que resolverlo aparte.
  *
  * Soft delete vía deleted_at (mismo patrón que 'orden_produccion' / 'moldes').
  * La columna 'activo' se mantiene sincronizada con deleted_at por
@@ -55,6 +61,9 @@ function controladorOperario($accion)
             break;
         case 'REACTIVAROPERARIO':
             reactivarOperario();
+            break;
+        case 'LISTARCARGOS':
+            listarCargos();
             break;
         case 'BUSCARDNI':
             buscarDNI();
@@ -117,6 +126,22 @@ function compararCambios(array $anterior, array $nuevo, array $mapaCampos): arra
         }
     }
     return $cambios;
+}
+
+/**
+ * Lista los cargos activos (tabla 'cargo'), mismo patrón que
+ * listarEtapasActivas(). Usada para poblar el <select> del modal
+ * y el filtro de la tabla si en algún momento se agrega.
+ */
+function listarCargos()
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery($conectar, "
+        SELECT id, nombre FROM cargo
+        WHERE deleted_at IS NULL
+        ORDER BY orden
+    ");
+    responder(true, 'OK', ['cargos' => $result]);
 }
 
 /**
@@ -260,32 +285,38 @@ function listarOperarios()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(nombre_completo) LIKE LOWER(:texto) OR LOWER(cargo) LIKE LOWER(:texto))";
+        // Ahora 'cargo' es una tabla aparte (join como 'c'), no una columna
+        // de operario -> se busca por o.nombre_completo o c.nombre.
+        $where[] = "(LOWER(o.nombre_completo) LIKE LOWER(:texto) OR LOWER(c.nombre) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($visibilidad === 'eliminadas') {
-        $where[] = "deleted_at IS NOT NULL";
+        $where[] = "o.deleted_at IS NOT NULL";
     } elseif ($visibilidad !== 'todas') {
-        $where[] = "deleted_at IS NULL";
+        $where[] = "o.deleted_at IS NULL";
     }
     if ($sucursal_id > 0) {
         $where[] = "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(js_sucursales, '[]'::jsonb)) AS suc
+            SELECT 1 FROM jsonb_array_elements(COALESCE(o.js_sucursales, '[]'::jsonb)) AS suc
             WHERE (suc->>'sucursal_id')::int = :sucursal_id
         )";
         $params['sucursal_id'] = $sucursal_id;
     }
     if ($etapa_id > 0) {
         $where[] = "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            SELECT 1 FROM jsonb_array_elements(COALESCE(o.js_etapas_relacionadas, '[]'::jsonb)) AS et
             WHERE (et->>'etapa_id')::int = :etapa_id
         )";
         $params['etapa_id'] = $etapa_id;
     }
 
-    $sql = "SELECT * FROM operario
+    // LEFT JOIN contra cargo para traer el nombre a mostrar en la tabla,
+    // sin obligar al frontend a resolverlo aparte.
+    $sql = "SELECT o.*, c.nombre AS cargo_nombre
+            FROM operario o
+            LEFT JOIN cargo c ON c.id = o.cargo_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY nombre_completo";
+            ORDER BY o.nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operarios' => decodificarJsonFilas($result)]);
@@ -296,7 +327,12 @@ function obtenerOperario($id)
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
-    $result = executeQuery($conectar, "SELECT * FROM operario WHERE id = :id", ['id' => $id]);
+    $result = executeQuery($conectar, "
+        SELECT o.*, c.nombre AS cargo_nombre
+        FROM operario o
+        LEFT JOIN cargo c ON c.id = o.cargo_id
+        WHERE o.id = :id
+    ", ['id' => $id]);
     if (empty($result)) responder(false, 'Operario no encontrado.');
     $filas = decodificarJsonFilas($result);
     responder(true, 'OK', ['operario' => $filas[0]]);
@@ -331,7 +367,7 @@ function guardarOperario()
 
     $id              = intval($_POST['id'] ?? 0);
     $nombre_completo = trim($_POST['nombre_completo'] ?? '');
-    $cargo           = trim($_POST['cargo'] ?? '');
+    $cargo_id        = intval($_POST['cargo_id'] ?? 0) ?: null;
     $dni             = trim($_POST['dni'] ?? '');
 
     // sucursales/etapas llegan como JSON: "[1,3]" (ids seleccionados en el multi-select)
@@ -364,13 +400,13 @@ function guardarOperario()
 
     $mapaCampos = [
         'nombre_completo' => 'Nombre completo',
-        'cargo'           => 'Cargo',
+        'cargo_id'        => 'Cargo',
         'dni'             => 'DNI',
     ];
 
     $datosNuevos = [
         'nombre_completo' => $nombre_completo,
-        'cargo'           => $cargo !== '' ? $cargo : null,
+        'cargo_id'        => $cargo_id,
         'dni'             => $dni !== '' ? $dni : null,
     ];
 
@@ -397,13 +433,13 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo, dni, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
+                (nombre_completo, cargo_id, dni, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
             VALUES
-                (:nombre_completo, :cargo, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
+                (:nombre_completo, :cargo_id, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
             RETURNING id
         ", [
             'nombre_completo'         => $datosNuevos['nombre_completo'],
-            'cargo'                   => $datosNuevos['cargo'],
+            'cargo_id'                => $datosNuevos['cargo_id'],
             'dni'                     => $datosNuevos['dni'],
             'js_session'              => $js_session,
             'js_historial'            => $js_historial_nuevo,
@@ -440,7 +476,7 @@ function guardarOperario()
         executeQuery($conectar, "
             UPDATE operario SET
                 nombre_completo         = :nombre_completo,
-                cargo                   = :cargo,
+                cargo_id                = :cargo_id,
                 dni                     = :dni,
                 js_sucursales           = :js_sucursales,
                 js_etapas_relacionadas  = :js_etapas_relacionadas,
@@ -450,7 +486,7 @@ function guardarOperario()
             WHERE id = :id
         ", [
             'nombre_completo'        => $datosNuevos['nombre_completo'],
-            'cargo'                  => $datosNuevos['cargo'],
+            'cargo_id'               => $datosNuevos['cargo_id'],
             'dni'                    => $datosNuevos['dni'],
             'js_sucursales'          => $js_sucursales_json,
             'js_etapas_relacionadas' => $js_etapas_json,
@@ -528,6 +564,7 @@ function listarEtapasActivas()
     ");
     responder(true, 'OK', ['etapas' => $result]);
 }
+
 function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
 {
     $idsOperario = array_values(array_unique(array_map('intval', $idsOperario)));
@@ -542,8 +579,11 @@ function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
         $params[$key] = $id;
     }
 
-    $sql = "SELECT id, nombre_completo, cargo FROM operario
-            WHERE id IN (" . implode(',', $placeholders) . ") AND activo = true";
+    // 'cargo' ya no es columna de operario -> se resuelve con JOIN a cargo.
+    $sql = "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+            FROM operario o
+            LEFT JOIN cargo c ON c.id = o.cargo_id
+            WHERE o.id IN (" . implode(',', $placeholders) . ") AND o.activo = true";
     $result = executeQuery($conectar, $sql, $params);
 
     if (count($result) !== count($idsOperario)) {

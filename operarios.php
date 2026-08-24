@@ -80,7 +80,9 @@ include("header.php");
           </div>
           <div class="mb-2">
             <label class="form-label">Cargo</label>
-            <input type="text" class="form-control" id="op_cargo" placeholder="Opcional">
+            <select id="op_cargo" class="form-select">
+                <option value="">Selecciona un cargo</option>
+            </select>
           </div>
           <div class="mb-2">
             <label class="form-label">Sucursales</label>
@@ -116,12 +118,14 @@ let tomSelectSucursales = null;
 let tomSelectEtapas = null;
 let sucursalesActivas = [];
 let etapasActivas = [];
+let cargosActivos = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
     inicializarTomSelectSucursales();
     inicializarTomSelectEtapas();
 
     try {
+        await cargarCargosActivos();
         await cargarSucursalesActivas();
         await cargarEtapasActivas();
         await cargarOperarios();
@@ -196,6 +200,15 @@ async function llamarSucursal(accion, params = {}) {
         console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
         throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
     }
+}
+
+async function cargarCargosActivos() {
+    const json = await llamarOperario('LISTARCARGOS');
+    if (!json.success) return;
+    cargosActivos = json.cargos || [];
+    document.getElementById('op_cargo').innerHTML =
+        '<option value="">Selecciona un cargo</option>' +
+        cargosActivos.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 }
 
 async function cargarSucursalesActivas() {
@@ -281,7 +294,7 @@ async function cargarOperarios() {
             <td data-label="#">${o.id}</td>
             <td data-label="Nombre completo">${o.nombre_completo}</td>
             <td data-label="DNI">${o.dni ?? '-'}</td>
-            <td data-label="Cargo">${o.cargo ?? '-'}</td>
+            <td data-label="Cargo">${o.cargo_nombre ?? '-'}</td>
             <td data-label="Sucursales">${badgesSucursales(o.js_sucursales)}</td>
             <td data-label="Etapas">${badgesEtapas(o.js_etapas_relacionadas)}</td>
             <td data-label="Estado">${badgeEstadoOperario(o.deleted_at)}</td>
@@ -325,7 +338,7 @@ async function abrirModalEditarOperario(id) {
     const o = json.operario;
     document.getElementById('modalOperarioTitulo').textContent = 'Editar operario #' + id;
     document.getElementById('op_nombre_completo').value = o.nombre_completo;
-    document.getElementById('op_cargo').value = o.cargo ?? '';
+    document.getElementById('op_cargo').value = o.cargo_id ?? '';
     document.getElementById('op_dni').value = o.dni ?? '';
 
     let sucursalesAsignadas = o.js_sucursales || [];
@@ -374,7 +387,7 @@ document.getElementById('formOperario').addEventListener('submit', async functio
     const params = {
         id: operarioIdActual,
         nombre_completo: document.getElementById('op_nombre_completo').value.trim(),
-        cargo: document.getElementById('op_cargo').value.trim(),
+        cargo_id: document.getElementById('op_cargo').value,
         dni: document.getElementById('op_dni').value.trim(),
         sucursales: JSON.stringify(tomSelectSucursales.getValue()),
         etapas: JSON.stringify(tomSelectEtapas.getValue()),
