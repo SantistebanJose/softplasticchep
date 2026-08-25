@@ -180,28 +180,27 @@ function buscarOperarios()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    // Solo operarios activos Y que tengan la etapa "Producción" asignada
-    // en su js_etapas_relacionadas (ver clssOperario.php -> resolverEtapas()).
-    // Se usa ILIKE '%PRODUC%' para cubrir "PRODUCCIÓN"/"PRODUCCION" sin
-    // depender de tildes. Si el nombre de la etapa en tu tabla `etapa` es
-    // distinto, ajusta este patrón.
+    // cargo ya no es columna de operario -> se resuelve con JOIN a cargo,
+    // igual que en clssOperario.php (resolverOperariosEnsamblaje / listarOperarios).
     $where = [
-        "activo = true",
+        "o.activo = true",
         "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            SELECT 1 FROM jsonb_array_elements(COALESCE(o.js_etapas_relacionadas, '[]'::jsonb)) AS et
             WHERE et->>'nombre' ILIKE '%PRODUC%'
         )"
     ];
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(nombre_completo) LIKE LOWER(:texto) OR dni LIKE :texto)";
+        $where[] = "(LOWER(o.nombre_completo) LIKE LOWER(:texto) OR o.dni LIKE :texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT id, nombre_completo, cargo, dni FROM operario
+    $sql = "SELECT o.id, o.nombre_completo, c.nombre AS cargo, o.dni
+            FROM operario o
+            LEFT JOIN cargo c ON c.id = o.cargo_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY nombre_completo LIMIT 50";
+            ORDER BY o.nombre_completo LIMIT 50";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
@@ -315,20 +314,6 @@ function buscarLotesMaterial()
     responder(true, 'OK', ['lotes' => $result]);
 }
 
-/**
- * Genera un ensamblaje "falso" (auto-generado) para un avance de
- * producción cuyo molde NO requiere pasar por Ensamblaje
- * (item.necesita_ensamblaje === 'no'). El registro queda ya iniciado,
- * finalizado y enviado a empaquetado en el mismo instante, con una sola
- * línea en rel_ensamblaje_producto apuntando a este avance — así el
- * módulo de Empaquetado (que lee desde `ensamblaje`) lo detecta sin que
- * nadie pase manualmente por COMPLEMENTAR / PASARAEMPAQUETADO.
- *
- * OJO: a propósito NO se incluye `proveniente` en el INSERT -> toma su
- * valor DEFAULT de la tabla. Eso es lo que distingue este ensamblaje
- * automático de uno real (guardarEnsamblaje() sí manda
- * proveniente = 'produccion' explícito).
- */
 function crearEnsamblajeAutomaticoParaProduccion(
     $conectar,
     int $produccionId,
@@ -336,8 +321,6 @@ function crearEnsamblajeAutomaticoParaProduccion(
     float $cantidadProducida,
     ?int $unidadSalidaId
 ): int {
-    // Reutiliza el operario del propio avance, igual que haría un
-    // ensamblaje armado a mano.
     $prodRow = executeQuery(
         $conectar,
         "SELECT operario_id FROM produccion WHERE id = :id",
@@ -347,9 +330,13 @@ function crearEnsamblajeAutomaticoParaProduccion(
 
     $jsOperarios = '[]';
     if ($operarioId) {
+        // cargo ya no es columna de operario -> se resuelve con JOIN a cargo.
         $op = executeQuery(
             $conectar,
-            "SELECT id, nombre_completo, cargo FROM operario WHERE id = :id",
+            "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+             FROM operario o
+             LEFT JOIN cargo c ON c.id = o.cargo_id
+             WHERE o.id = :id",
             ['id' => $operarioId]
         );
         if (!empty($op)) {
@@ -657,6 +644,22 @@ function obtenerIpCliente(): string
 }
 
 
+function verificarPropietarioOperario($conectar, int $produccionId): void
+{
+    if (empty($_SESSION['operario_id'])) return; // request de admin, sin restricción
+
+    $fila = executeQuery(
+        $conectar,
+        "SELECT operario_id FROM produccion WHERE id = :id",
+        ['id' => $produccionId]
+    );
+    if (empty($fila)) return; // el propio flujo de cada acción ya valida "no encontrado"
+
+    if ((int)($fila[0]['operario_id'] ?? 0) !== (int)$_SESSION['operario_id']) {
+        responder(false, 'No puedes modificar un avance de producción que no es tuyo.');
+    }
+}
+
 function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
     return [
@@ -877,24 +880,34 @@ function guardarProduccion()
 {
     $conectar = conectar_oll_BD();
 
-    $id                 = intval($_POST['id'] ?? 0);
+    $id = intval($_POST['id'] ?? 0);
+
+    if (!empty($_SESSION['operario_id'])) {
+        $operario_id = intval($_SESSION['operario_id']);
+        $chk = executeQuery($conectar, "
+            SELECT id FROM operario
+            WHERE id = :id AND activo = true
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+                  WHERE et->>'nombre' ILIKE '%PRODUC%'
+              )
+        ", ['id' => $operario_id]);
+        if (empty($chk)) {
+            responder(false, 'Tu usuario ya no tiene acceso al módulo de Producción. Contacta a un administrador.');
+        }
+    } else {
+        $operario_id = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
+    }
+
     $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
-    $operario_id        = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
-    $maquina_id         = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
+    $maquina_id  = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
     $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $color_id           = intval($_POST['color_id'] ?? 0);
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
 
-    // ── "Foto" de configuración (js_configuracion_moment) ───────────────────
-    // Es la fuente de verdad histórica de ESTE avance: no debe recalcularse
-    // solo porque el usuario editó, por ejemplo, la observación. Solo se
-    // vuelve a tomar la foto cuando:
-    //   a) es un registro nuevo, o
-    //   b) el registro nunca tuvo foto guardada (avance viejo, fallback), o
-    //   c) el molde/producto seleccionado cambió respecto al valor guardado.
-    // En cualquier otro caso se conserva tal cual la foto ya persistida.
+    
     $partesUnico = explode('-', $unico_molde);
     $productoIdParaConfig = isset($partesUnico[1]) ? intval($partesUnico[1]) : 0;
 
@@ -1038,6 +1051,9 @@ function guardarProduccion()
             // ── EDICIÓN ──────────────────────────────────────────────────────
             $actual = executeQuery($conectar, "SELECT * FROM produccion WHERE id = :id", ['id' => $id]);
             if (empty($actual)) throw new Exception('Registro de producción no encontrado.');
+            if (!empty($_SESSION['operario_id']) && (int)$actual[0]['operario_id'] !== (int)$_SESSION['operario_id']) {
+                throw new Exception('No puedes editar un avance de producción que no es tuyo.');
+            }
             if (!empty($actual[0]['deleted_at'])) {
                 throw new Exception('No puedes editar un registro inactivo. Reactívalo primero.');
             }
@@ -1189,6 +1205,8 @@ function eliminarProduccion()
     $id = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
+    verificarPropietarioOperario($conectar, $id);
+
     $existe = executeQuery($conectar, "SELECT id, deleted_at FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($existe[0]['deleted_at'])) responder(false, 'Este registro ya estaba inactivo.');
@@ -1312,6 +1330,8 @@ function enviarAEnsamblaje()
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
+    verificarPropietarioOperario($conectar, $id);
+
     $existe = executeQuery(
         $conectar,
         "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto
@@ -1324,10 +1344,6 @@ function enviarAEnsamblaje()
     $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
     $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
 
-    // La cantidad producida SIEMPRE se registra en la unidad de "Salida en
-    // Producción" configurada en el molde — sea que el destino final sea
-    // Ensamblaje o directo a Empaquetado. La unidad de "Salida en
-    // Empaquetado" no aplica en este paso.
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
 
     if ($unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
@@ -1367,17 +1383,13 @@ function enviarAEnsamblaje()
             'js_historial'       => $js_historial,
         ]);
         $ensamblajeAutoId = null;
-                if ($destino === 'empaquetado') {
+        if ($destino === 'empaquetado') {
             $partes = explode('-', $existe[0]['unico_molde_producto'] ?? '');
             $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
             if ($productoId <= 0) {
                 throw new Exception('No se pudo determinar el producto de este avance para generar el ensamblaje automático.');
             }
 
-            // $cantidadProducida ya viene en la unidad de "Salida en
-            // Producción" del molde (ver arriba), así que el ensamblaje
-            // automático debe registrar esa misma unidad — no la de
-            // "Salida en Empaquetado" del producto.
             $unidadSalidaId = !empty($item['salida_produccion_unidad_medida_id'])
                 ? intval($item['salida_produccion_unidad_medida_id'])
                 : null;
@@ -1398,6 +1410,7 @@ function enviarAEnsamblaje()
         responder(false, "No se pudo enviar a $destino: " . $e->getMessage());
     }
 }
+
 function registrarMerma()
 {
     $conectar = conectar_oll_BD();
@@ -1409,11 +1422,10 @@ function registrarMerma()
 
     if (!$id) responder(false, 'ID inválido.');
 
-        $item = obtenerItemConfigProduccion($conectar, $id);
+    verificarPropietarioOperario($conectar, $id);
 
-    // La merma SIEMPRE se registra en la unidad de "Salida de Merma"
-    // configurada en el propio molde, independientemente de si ese molde
-    // necesita ensamblaje o pasa directo a empaquetado.
+    $item = obtenerItemConfigProduccion($conectar, $id);
+
     $unidadMedida = obtenerUnidadEtapa($item, 'salida_merma');
 
     if ($cantidadMerma <= 0) {
@@ -1507,6 +1519,8 @@ function iniciarCorrida(int $id)
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
+    verificarPropietarioOperario($conectar, $id);
+
     $existe = executeQuery($conectar, "SELECT id, deleted_at, fecha_hora_inicio FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($existe[0]['deleted_at'])) responder(false, 'No puedes iniciar la corrida de un registro inactivo.');
@@ -1530,12 +1544,13 @@ function iniciarCorrida(int $id)
 
     responder(true, 'Corrida iniciada.');
 }
-
 // Marca el fin real de la corrida con la hora del servidor.
 function finalizarCorrida(int $id)
 {
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
+
+    verificarPropietarioOperario($conectar, $id);
 
     $existe = executeQuery($conectar, "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
@@ -1561,7 +1576,6 @@ function finalizarCorrida(int $id)
 
     responder(true, 'Corrida finalizada.');
 }
-
 // =============================================================================
 // HELPER
 // =============================================================================

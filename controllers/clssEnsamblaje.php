@@ -295,20 +295,22 @@ function buscarOperarios()
     $texto = trim($_POST['texto'] ?? '');
 
     $where = [
-        "activo = true",
+        "o.activo = true",
         "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            SELECT 1 FROM jsonb_array_elements(COALESCE(o.js_etapas_relacionadas, '[]'::jsonb)) AS et
             WHERE et->>'nombre' ILIKE '%ENSAMBLA%'
         )"
     ];
     $params = [];
     if ($texto !== '') {
-        $where[] = "LOWER(nombre_completo) LIKE LOWER(:texto)";
+        $where[] = "LOWER(o.nombre_completo) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT id, nombre_completo, cargo FROM operario
-            WHERE " . implode(' AND ', $where) . " ORDER BY nombre_completo";
+    $sql = "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+            FROM operario o
+            LEFT JOIN cargo c ON c.id = o.cargo_id
+            WHERE " . implode(' AND ', $where) . " ORDER BY o.nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
@@ -808,8 +810,10 @@ function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
         $params[$key] = $id;
     }
 
-    $sql = "SELECT id, nombre_completo, cargo FROM operario
-            WHERE id IN (" . implode(',', $placeholders) . ") AND activo = true";
+    $sql = "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+        FROM operario o
+        LEFT JOIN cargo c ON c.id = o.cargo_id
+        WHERE o.id IN (" . implode(',', $placeholders) . ") AND o.activo = true";
     $result = executeQuery($conectar, $sql, $params);
 
     if (count($result) !== count($idsOperario)) {
@@ -840,7 +844,7 @@ function guardarEnsamblaje()
     if (empty($producto)) responder(false, 'El producto seleccionado no existe o está inactivo.');
 
     if ($operario_ortorgado !== null) {
-        $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operario_ortorgado]);
+    $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operario_ortorgado]);
         if (empty($operario)) responder(false, 'El operario seleccionado no existe o está inactivo.');
     }
     if ($sucursal_id !== null) {

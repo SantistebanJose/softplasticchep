@@ -7,7 +7,7 @@ if (empty($_SESSION['operario_id'])) {
     exit;
 }
 
-exigirAccesoEtapa('ENSAMBLA', 'Ensamblaje'); // <-- falta esta línea
+exigirAccesoEtapa('PRODUC', 'Producción');
 
 $operarioId     = (int) $_SESSION['operario_id'];
 $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';

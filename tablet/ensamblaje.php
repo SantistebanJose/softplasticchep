@@ -16,12 +16,11 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Ensamblaje · Plásticos Chepito</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
@@ -49,9 +48,14 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     --resina-4:#D97706; --resina-4-bg:#FDF1E0;
     --resina-5:#7C3AED; --resina-5-bg:#F1EAFD;
     --resina-6:#0E9488; --resina-6-bg:#E2F5F3;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
 }
 
-/* ---------- Stat row (igual patrón que Producción) ---------- */
+/* =========================================================================
+   LISTADO PRINCIPAL
+   ========================================================================= */
 .pc-stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
 .pc-stat-chip{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:14px; display:flex; align-items:center; gap:10px; }
 .pc-stat-chip .ico{ width:38px; height:38px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:16px; }
@@ -63,7 +67,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-stat-chip.s-purple .ico{ background:#F1EAFD; color:#7C3AED; }
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
-/* ---------- Pestañas de producto ---------- */
 .pc-tabs-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px; }
 .pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; }
 .pc-tab-item{ display:flex; align-items:center; gap:8px; padding:12px 4px 14px 4px; border:none; background:none; cursor:pointer; font-size:1em; font-weight:600; color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap; }
@@ -71,7 +74,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
 .pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
 
-/* ---------- Agrupación por producto ("escalera") ---------- */
 .pc-ens-group{ margin-bottom:26px; }
 .pc-ens-group-header{ display:flex; align-items:center; gap:10px; margin:4px 0 12px 0; }
 .pc-ens-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
@@ -82,7 +84,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-ens-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
 
-/* ---------- Cards de ensamblaje (touch) ---------- */
 .pc-ens-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:16px; margin-top:4px; }
 .pc-ens-card{ border:1px solid #ece9e1; border-radius:16px; background:#fff; padding:18px; display:flex; flex-direction:column; gap:10px; }
 .pc-ens-card-top{ display:flex; align-items:center; gap:8px; }
@@ -94,7 +95,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-ens-card.estado-curso .pc-ens-estado-txt{ color:#0B4DA6; }
 .pc-ens-card.estado-fin .pc-ens-estado-txt{ color:#16A34A; }
 .pc-ens-card-spacer{ flex:1; }
-.pc-ens-edit-btn{ border:none; background:none; color:#c3beae; padding:9px; font-size:1.05em; cursor:pointer; border-radius:8px; }
+.pc-ens-edit-btn{ border:none; background:none; color:#c3beae; padding:10px; font-size:1.05em; cursor:pointer; border-radius:8px; min-width:44px; min-height:44px; }
 .pc-ens-edit-btn:active{ color:#2F6FED; background:#EAF0FE; }
 .pc-ens-title{ font-size:1.2em; font-weight:700; color:#1f2430; line-height:1.25; }
 .pc-ens-meta{ font-size:.87em; color:#9a9585; line-height:1.4; }
@@ -111,7 +112,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-ens-corrida-line{ font-size:.85em; color:#9a9585; display:flex; align-items:center; gap:6px; }
 .pc-ens-corrida-line b{ color:#5c5947; font-weight:600; }
 .pc-ens-card-foot{ display:flex; align-items:center; gap:8px; padding-top:12px; margin-top:2px; border-top:1px solid #f1efe8; flex-wrap:wrap; }
-.pc-ens-ghost-btn{ border:none; background:#f6f4ee; color:#5c5947; font-size:.87em; font-weight:600; padding:11px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
+.pc-ens-ghost-btn{ border:none; background:#f6f4ee; color:#5c5947; font-size:.87em; font-weight:600; padding:12px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:48px; }
 .pc-ens-ghost-btn.success{ color:#16A34A; background:#E8F7EE; }
 .pc-ens-ghost-btn.warn{ color:#D97706; background:#FDF1E0; }
 .pc-ens-ghost-btn.purple{ color:#7C3AED; background:#F1EAFD; }
@@ -122,18 +123,86 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 @keyframes pc-flash-bg{ 0%{ background:#FFF6DC; box-shadow:0 0 0 2px #F5D98A inset; } 100%{ background:#fff; box-shadow:none; } }
 @keyframes pc-pulse-blue{ 0%{ box-shadow:0 0 0 0 rgba(11,77,166,.6); } 70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); } 100%{ box-shadow:0 0 0 0 rgba(11,77,166,0); } }
 
-/* ---------- Panel de selección + ticket (modal) ---------- */
-.pc-mat-layout{ display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start; }
-@media (max-width: 900px){ .pc-mat-layout{ grid-template-columns:1fr; } }
-.pc-mat-panel, .pc-tk-panel{ border:1px solid #e7e4dd; border-radius:14px; background:#fdfcfa; overflow:hidden; }
-.pc-mat-panel-head, .pc-tk-panel-head{ padding:12px 14px; border-bottom:1px solid #eee7db; display:flex; justify-content:space-between; align-items:center; background:#fffefb; }
-.pc-mat-panel-head h6, .pc-tk-panel-head h6{ margin:0; font-weight:700; font-size:1em; }
-.pc-mat-search{ padding:10px 12px 0 12px; }
-.pc-mat-tabs{ display:flex; gap:6px; padding:10px 12px 0 12px; }
-.pc-mat-tab{ flex:1; border:1px solid #e2ddcd; background:#fff; border-radius:10px; padding:11px 10px; font-size:.88em; font-weight:700; color:#8a8578; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; min-height:44px; }
+/* Encabezado de la tarjeta principal: título a la izquierda, sin botón (se movió a FAB) */
+.pc-card-header-ens{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.pc-card-header-ens .subt{ color:#9a9585; font-size:.9em; margin-top:2px; }
+
+/* Botón flotante — alcance de pulgar sosteniendo la tablet con ambas manos */
+.pc-fab-nuevo{
+    position:fixed; right:calc(22px + var(--safe-r)); bottom:calc(22px + var(--safe-b));
+    z-index:1040; border:none; border-radius:999px; background:#152238; color:#fff;
+    padding:16px 24px; font-weight:700; font-size:1em; display:flex; align-items:center; gap:10px;
+    box-shadow:0 10px 24px rgba(21,34,56,.28); cursor:pointer;
+}
+.pc-fab-nuevo:active{ transform:scale(.96); }
+.pc-fab-nuevo i{ font-size:1.05em; }
+
+/* =========================================================================
+   FORMULARIO DE ENSAMBLAJE — pensado 100% para tablet
+   Nada de <select>: todo son cards ya abiertas, tocables directamente.
+   ========================================================================= */
+.pc-modal-tablet .modal-content{ background:#fbfaf7; }
+.pc-ens-form-body{ display:flex; flex-direction:column; gap:14px; padding-bottom:6px; height:100%; }
+
+/* Barra superior compacta: sucursal + operarios, simétrica en dos mitades */
+.pc-ens-topbar{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.pc-ens-topbar-group{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px 14px; }
+.pc-ens-topbar-group > label{ display:block; font-size:.78em; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:#8a8578; margin-bottom:8px; }
+
+.pc-chip-toggle-row{ display:flex; flex-wrap:wrap; gap:8px; }
+.pc-chip-toggle{ border:1px solid #e2ddcd; background:#fff; color:#5c5947; font-weight:600; font-size:.9em; padding:10px 16px; border-radius:999px; cursor:pointer; min-height:44px; }
+.pc-chip-toggle.activo{ background:#152238; border-color:#152238; color:#fff; }
+.pc-chip-toggle:active{ transform:scale(.96); }
+
+.pc-op-chips-selected{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.pc-op-chip{ display:inline-flex; align-items:center; gap:8px; background:#EAF0FE; border:1px solid #cddafc; border-radius:999px; padding:6px 8px 6px 6px; }
+.pc-op-chip .pc-op-avatar{ width:26px; height:26px; border-radius:50%; background:#2F6FED; color:#fff; font-size:.72em; font-weight:800; display:flex; align-items:center; justify-content:center; text-transform:uppercase; flex:0 0 auto; }
+.pc-op-chip .nom{ font-size:.88em; font-weight:600; color:#1f2430; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-op-chip .quitar{ border:none; background:none; color:#7d8aa8; padding:4px; font-size:1em; line-height:1; }
+.pc-op-chip .quitar:active{ color:#c94a4a; }
+.pc-op-chip-add{ border:1.5px dashed #c7c2b3; background:none; color:#5c5947; font-weight:700; font-size:.88em; padding:9px 14px; border-radius:999px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
+.pc-op-chip-add:active{ transform:scale(.96); }
+
+/* Rejilla principal: 3 paneles simétricos visibles a la vez en horizontal */
+.pc-ens-main-grid{
+    flex:1; min-height:0; display:grid;
+    grid-template-columns: 1fr; grid-template-rows:auto auto auto;
+    gap:14px;
+}
+@media (min-width:880px) and (orientation:landscape){
+    .pc-ens-main-grid{ grid-template-columns: 280px 1fr 320px; grid-template-rows:1fr; }
+}
+/* Landscape ancho (tablet apaisada grande): panel central un poco más generoso */
+@media (min-width:1180px) and (orientation:landscape){
+    .pc-ens-main-grid{ grid-template-columns: 300px 1fr 340px; }
+}
+
+.pc-panel{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.pc-panel-head{ padding:12px 14px; border-bottom:1px solid #eee7db; background:#fffefb; flex:0 0 auto; }
+.pc-panel-head h6{ margin:0; font-weight:700; font-size:1em; display:flex; align-items:center; gap:8px; }
+.pc-panel-search{ padding:10px 12px 0 12px; flex:0 0 auto; }
+.pc-panel-body-scroll{ flex:1; min-height:180px; overflow-y:auto; padding:12px; }
+
+/* Panel producto: cards ya abiertas, sin combo */
+.pc-prod-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
+@media (min-width:880px) and (orientation:landscape){ .pc-prod-grid{ grid-template-columns:1fr; } }
+@media (max-width:879px), (orientation:portrait){ .pc-prod-grid{ grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); } }
+.pc-prod-card{ position:relative; text-align:left; border:1.5px solid #eae6da; border-radius:12px; background:#fff; padding:12px; display:flex; align-items:center; gap:10px; cursor:pointer; min-height:64px; }
+.pc-prod-card:active{ transform:scale(.98); }
+.pc-prod-card.activo{ border-color:#2F6FED; background:#EAF0FE; }
+.pc-prod-card .pellet{ width:36px; height:36px; border-radius:10px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:1em; }
+.pc-prod-card .cuerpo{ min-width:0; }
+.pc-prod-card .nom{ font-weight:700; font-size:.92em; color:#1f2430; line-height:1.25; }
+.pc-prod-card .disp{ font-size:.78em; color:#8a8578; margin-top:2px; }
+.pc-prod-card .check{ position:absolute; top:8px; right:8px; color:#2F6FED; font-size:1em; opacity:0; }
+.pc-prod-card.activo .check{ opacity:1; }
+
+/* Panel vincular: tabs internos simétricos */
+.pc-mat-tabs{ display:flex; gap:6px; padding:10px 12px 0 12px; flex:0 0 auto; }
+.pc-mat-tab{ flex:1; border:1px solid #e2ddcd; background:#fff; border-radius:10px; padding:12px 8px; font-size:.85em; font-weight:700; color:#8a8578; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; min-height:48px; }
 .pc-mat-tab.activo{ background:#152238; border-color:#152238; color:#fff; }
-.pc-mat-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:10px; padding:12px; max-height:420px; overflow-y:auto; }
-.pc-mat-card{ position:relative; border:1px solid #eae6da; border-radius:12px; background:#fff; padding:12px 10px 10px 10px; cursor:pointer; text-align:left; }
+.pc-mat-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(170px,1fr)); gap:10px; }
+.pc-mat-card{ position:relative; border:1px solid #eae6da; border-radius:12px; background:#fff; padding:12px 10px 10px 10px; cursor:pointer; text-align:left; min-height:104px; }
 .pc-mat-card:active{ transform:scale(0.96); }
 .pc-mat-card:disabled, .pc-mat-card.ya-agregada{ opacity:.4; cursor:not-allowed; }
 .pc-mat-card .pellet{ width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:1em; margin-bottom:8px; }
@@ -142,50 +211,54 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-mat-card .meta b{ color:#4a4636; }
 .pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.92em; padding:22px 8px; }
 
-.pc-tk-list{ list-style:none; margin:0; padding:0; max-height:420px; overflow-y:auto; }
+/* Panel ticket */
+.pc-tk-list{ list-style:none; margin:0; padding:0; }
 .pc-tk-item{ border-bottom:1px dashed #eee2c8; padding:12px; display:flex; gap:10px; align-items:flex-start; }
 .pc-tk-item:last-child{ border-bottom:none; }
-.pc-tk-item .pellet-sm{ width:28px; height:28px; border-radius:8px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:.85em; margin-top:2px; }
+.pc-tk-item .pellet-sm{ width:30px; height:30px; border-radius:8px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:.85em; margin-top:2px; }
 .pc-tk-item .cuerpo{ flex:1; min-width:0; }
 .pc-tk-item .nombre{ font-weight:600; font-size:.92em; }
 .pc-tk-item .lote-info{ font-size:.78em; color:#8a8578; margin-top:1px; }
-.pc-tk-remove{ border:none; background:none; color:#c94a4a; font-size:1.05em; align-self:flex-start; padding:6px; }
+.pc-tk-remove{ border:none; background:none; color:#c94a4a; font-size:1.15em; align-self:flex-start; padding:8px; min-width:40px; min-height:40px; }
 .pc-tk-empty{ text-align:center; color:#9a9585; font-size:.92em; padding:28px 12px; }
 .pc-tk-empty i{ font-size:1.7em; display:block; margin-bottom:6px; opacity:.5; }
-.pc-tk-resumen{ display:flex; align-items:center; gap:12px; padding:14px; border-top:1px solid #eee7db; background:linear-gradient(0deg,#fffaf0,#fffefb); }
+.pc-tk-resumen{ display:flex; align-items:center; gap:12px; padding:14px; border-top:1px solid #eee7db; background:linear-gradient(0deg,#fffaf0,#fffefb); flex:0 0 auto; }
 .pc-tk-resumen-icon{ width:38px; height:38px; border-radius:10px; flex:0 0 auto; background:#EAF0FE; color:#2F6FED; display:flex; align-items:center; justify-content:center; font-size:1em; }
 .pc-tk-resumen-texto{ display:flex; flex-direction:column; gap:1px; min-width:0; }
 .pc-tk-resumen-texto .total{ font-size:1em; color:#3a3730; }
 .pc-tk-resumen-texto .total b{ font-size:1.2em; color:#2F6FED; }
 .pc-tk-resumen-texto .detalle{ font-size:.8em; color:#8a8578; }
 
-/* ---------- TomSelect multi-operarios: chips grandes tipo "pill" ---------- */
-.ts-wrapper.multi .ts-control{ padding:8px !important; min-height:52px; }
-.ts-wrapper.multi .ts-control > div{
-    display:inline-flex; align-items:center; gap:6px;
-    background:#EAF0FE !important; color:#1f2430 !important;
-    border:1px solid #cddafc !important; border-radius:999px !important;
-    padding:6px 8px 6px 5px !important; margin:3px !important;
-    font-size:.9em; font-weight:600; max-width:100%;
-}
-.ts-wrapper.multi .ts-control > div .pc-op-avatar{
-    width:24px; height:24px; border-radius:50%; flex:0 0 auto;
-    background:#2F6FED; color:#fff; font-size:.72em; font-weight:800;
-    display:flex; align-items:center; justify-content:center; text-transform:uppercase;
-}
-.ts-wrapper.multi .ts-control > div .pc-op-nombre{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px; }
-.ts-wrapper.multi .ts-control > div .remove{ border-left:none !important; color:#7d8aa8 !important; padding:0 4px !important; margin-left:2px !important; font-size:1.15em; line-height:1; }
-.ts-wrapper.multi .ts-control > div .remove:active{ color:#c94a4a !important; }
-.ts-dropdown{ border-radius:10px !important; border-color:#e2ddcd !important; box-shadow:0 8px 20px rgba(0,0,0,.09) !important; }
-.ts-dropdown .option{ padding:12px !important; font-size:.95em; }
+/* Drawer de operarios: reemplaza al panel de vincular mientras está abierto */
+.pc-op-drawer{ display:none; }
+.pc-op-drawer.abierto{ display:flex; }
+.pc-op-drawer .pc-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.pc-op-drawer-cerrar{ border:none; background:#152238; color:#fff; font-weight:700; font-size:.85em; padding:9px 16px; border-radius:999px; min-height:40px; }
+.pc-op-picker-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:10px; }
+.pc-op-picker-card{ border:1.5px solid #eae6da; border-radius:12px; background:#fff; padding:12px; display:flex; align-items:center; gap:10px; cursor:pointer; text-align:left; min-height:60px; position:relative; }
+.pc-op-picker-card:active{ transform:scale(.97); }
+.pc-op-picker-card.activo{ border-color:#2F6FED; background:#EAF0FE; }
+.pc-op-picker-card .pc-op-avatar{ width:32px; height:32px; border-radius:50%; background:#2F6FED; color:#fff; font-size:.78em; font-weight:800; display:flex; align-items:center; justify-content:center; text-transform:uppercase; flex:0 0 auto; }
+.pc-op-picker-card .cuerpo{ min-width:0; }
+.pc-op-picker-card .nom{ font-weight:600; font-size:.9em; color:#1f2430; }
+.pc-op-picker-card .cargo{ font-size:.78em; color:#8a8578; }
+.pc-op-picker-card .check{ position:absolute; top:8px; right:8px; color:#2F6FED; opacity:0; }
+.pc-op-picker-card.activo .check{ opacity:1; }
+
+/* Pie del formulario: dos zonas simétricas, una para cada pulgar */
+.pc-ens-footer{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px calc(14px + var(--safe-l)) calc(14px + var(--safe-b)) 14px !important; }
+.pc-ens-footer .btn{ min-height:54px; font-size:1.02em; font-weight:700; border-radius:12px; }
+
+/* Requisito de vínculo, discreto arriba del panel central en pantallas angostas */
+.pc-ens-requisito{ font-size:.78em; color:#9a9585; padding:0 2px; }
 </style>
 
-<div class="pc-card" style="margin:20px;">
-    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2>Ensamblaje</h2>
-        <button class="pc-btn pc-btn-primary pc-btn-lg" onclick="abrirModalCrearEnsamblaje()">
-            <i class="fa-solid fa-plus"></i> Registrar ensamblaje
-        </button>
+<div class="pc-card" style="margin:20px; margin-bottom:110px;">
+    <div class="pc-card-header pc-card-header-ens">
+        <div>
+            <h2>Ensamblaje</h2>
+            <div class="subt">Toca "+ Registrar" para armar un nuevo ensamblaje.</div>
+        </div>
     </div>
     <br>
     <div class="pc-stat-row" id="statRowEnsamblaje"></div>
@@ -199,90 +272,121 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     </div>
 </div>
 
+<!-- Botón flotante de acción principal, al alcance del pulgar -->
+<button type="button" class="pc-fab-nuevo" onclick="abrirModalCrearEnsamblaje()">
+    <i class="fa-solid fa-plus"></i> Registrar ensamblaje
+</button>
+
 <!-- Modal Crear/Editar -->
 <div class="modal fade pc-modal-tablet" id="modalEnsamblaje" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
-      <form id="formEnsamblaje">
+      <form id="formEnsamblaje" class="d-flex flex-column" style="height:100%;">
         <div class="modal-header">
           <h5 class="modal-title" id="modalEnsamblajeTitulo">Registrar ensamblaje</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="modal-body">
 
-        <div class="row">
-            <div class="col-md-5 mb-3">
-                <label class="form-label">Producto a ensamblar *</label>
-                <select class="form-select form-select-lg" id="ens_producto_id" required onchange="cambioProductoEnsamblaje()">
-                    <option value="">Selecciona un producto...</option>
-                </select>
-            </div>
-            <div class="col-md-4 mb-3">
-                <label class="form-label">Operarios que participaron *</label>
-                <select class="form-select form-select-lg" id="ens_operarios_ids" multiple></select>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Sucursal</label>
-                <select class="form-select form-select-lg" id="ens_sucursal_id">
-                    <option value="">Selecciona...</option>
-                </select>
-            </div>
-        </div>
+        <div class="modal-body pc-ens-form-body">
 
-          <hr>
-
-          <div class="mb-2 d-flex justify-content-between align-items-center flex-wrap gap-1">
-            <label class="form-label mb-0">Vinculados a este armado *</label>
-            <span class="form-text mb-0">Al menos una producción finalizada, un derivado o un complemento.</span>
-          </div>
-
-          <div class="pc-mat-layout">
-            <div class="pc-mat-panel">
-                <div class="pc-mat-panel-head">
-                    <h6><i class="fa-solid fa-diagram-project"></i> Elige qué vincular</h6>
-                </div>
-                <div class="pc-mat-tabs">
-                    <button type="button" class="pc-mat-tab activo" id="tab_producciones" onclick="cambiarTabDetalle('produccion')">
-                        <i class="fa-solid fa-industry"></i> Producciones
-                    </button>
-                    <button type="button" class="pc-mat-tab" id="tab_derivados" onclick="cambiarTabDetalle('derivado')">
-                        <i class="fa-solid fa-flask"></i> Derivados
-                    </button>
-                    <button type="button" class="pc-mat-tab" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
-                        <i class="fa-solid fa-puzzle-piece"></i> Complemento
-                    </button>
-                </div>
-                <div class="pc-mat-search">
-                    <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
-                </div>
-                <div class="pc-mat-grid" id="ens_detalle_grid">
-                    <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
-                </div>
-            </div>
-
-            <div class="pc-tk-panel">
-                <div class="pc-tk-panel-head">
-                    <h6><i class="fa-solid fa-receipt"></i> Ticket de este armado</h6>
-                </div>
-                <ul class="pc-tk-list" id="ens_ticket_list">
-                    <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de la izquierda para empezar.</li>
-                </ul>
-                <div class="pc-tk-resumen">
-                    <div class="pc-tk-resumen-icon"><i class="fa-solid fa-layer-group"></i></div>
-                    <div class="pc-tk-resumen-texto">
-                        <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
-                        <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
-                        <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
+            <!-- Barra superior: sucursal (chips) + operarios (chips + agregar) -->
+            <div class="pc-ens-topbar">
+                <div class="pc-ens-topbar-group">
+                    <label>Sucursal</label>
+                    <div class="pc-chip-toggle-row" id="ens_sucursal_chips">
+                        <span class="pc-ens-requisito">Cargando sucursales...</span>
                     </div>
                 </div>
-                <div class="form-text" style="padding:0 14px 10px 14px;">
-                    El peso real de salida de este armado se registrará al pulsar <b>Finalizar</b> desde la card del listado.
+                <div class="pc-ens-topbar-group">
+                    <label>Operarios que participaron *</label>
+                    <div class="pc-op-chips-selected" id="ens_operarios_chips"></div>
                 </div>
             </div>
-          </div>
+
+            <div class="pc-ens-requisito">
+                <i class="fa-solid fa-circle-info"></i>
+                Vincula al menos una producción finalizada, un derivado o un complemento.
+            </div>
+
+            <!-- Rejilla de 3 paneles: Producto · Vincular (o drawer de operarios) · Ticket -->
+            <div class="pc-ens-main-grid">
+
+                <!-- Panel 1: Producto — cards ya abiertas, sin combo -->
+                <div class="pc-panel pc-panel-producto">
+                    <div class="pc-panel-head"><h6><i class="fa-solid fa-box"></i> Producto a ensamblar</h6></div>
+                    <div class="pc-panel-search">
+                        <input type="text" id="ens_buscar_producto" class="form-control form-control-lg" placeholder="Buscar producto...">
+                    </div>
+                    <div class="pc-panel-body-scroll">
+                        <div class="pc-prod-grid" id="ens_producto_grid">
+                            <div class="pc-mat-empty">Cargando productos...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel 2a: Vincular producciones / derivados / complementos -->
+                <div class="pc-panel pc-panel-vincular" id="pc_panel_vincular">
+                    <div class="pc-mat-tabs">
+                        <button type="button" class="pc-mat-tab activo" id="tab_producciones" onclick="cambiarTabDetalle('produccion')">
+                            <i class="fa-solid fa-industry"></i> Producciones
+                        </button>
+                        <button type="button" class="pc-mat-tab" id="tab_derivados" onclick="cambiarTabDetalle('derivado')">
+                            <i class="fa-solid fa-flask"></i> Derivados
+                        </button>
+                        <button type="button" class="pc-mat-tab" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
+                            <i class="fa-solid fa-puzzle-piece"></i> Complemento
+                        </button>
+                    </div>
+                    <div class="pc-panel-search">
+                        <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
+                    </div>
+                    <div class="pc-panel-body-scroll">
+                        <div class="pc-mat-grid" id="ens_detalle_grid">
+                            <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel 2b: Drawer de selección de operarios (ocupa el mismo espacio que "Vincular") -->
+                <div class="pc-panel pc-op-drawer" id="pc_panel_operarios_drawer">
+                    <div class="pc-panel-head">
+                        <h6><i class="fa-solid fa-users"></i> Elige quién participó</h6>
+                        <button type="button" class="pc-op-drawer-cerrar" onclick="cerrarPickerOperarios()">Listo</button>
+                    </div>
+                    <div class="pc-panel-search">
+                        <input type="text" id="ens_buscar_operario" class="form-control form-control-lg" placeholder="Buscar operario...">
+                    </div>
+                    <div class="pc-panel-body-scroll">
+                        <div class="pc-op-picker-grid" id="ens_operario_picker_grid">
+                            <div class="pc-mat-empty">Cargando operarios...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel 3: Ticket de este armado -->
+                <div class="pc-panel pc-panel-ticket">
+                    <div class="pc-panel-head"><h6><i class="fa-solid fa-receipt"></i> Ticket de este armado</h6></div>
+                    <div class="pc-panel-body-scroll" style="padding:0;">
+                        <ul class="pc-tk-list" id="ens_ticket_list">
+                            <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de en medio para empezar.</li>
+                        </ul>
+                    </div>
+                    <div class="pc-tk-resumen">
+                        <div class="pc-tk-resumen-icon"><i class="fa-solid fa-layer-group"></i></div>
+                        <div class="pc-tk-resumen-texto">
+                            <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
+                            <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
+                            <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
 
         </div>
-        <div class="modal-footer">
+
+        <!-- Pie: dos zonas simétricas, una por pulgar, al sostener la tablet con ambas manos -->
+        <div class="modal-footer pc-ens-footer">
           <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-primary btn-lg">Guardar</button>
         </div>
@@ -293,7 +397,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
@@ -311,7 +414,13 @@ let productosDisponiblesEnsCache = null;
 let ensamblajesCache = [];
 let productoTabActivoEns = null;
 let sucursalesEnsCache = null;
-let tsOperariosEns = null;
+
+// ── Estado de selección "en cards" (reemplaza a los <select>) ──────────
+let productoSeleccionadoEns = { producto_id: null, color_id: null };
+let productosGridDataEns = [];   // productos ya cargados para el picker
+let sucursalSeleccionadaEns = ''; // id de sucursal o ''
+let operariosCatalogoEns = [];    // catálogo completo de operarios
+let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarEnsamblajes().catch(err => {
@@ -324,6 +433,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('ens_buscar_detalle').addEventListener('input', () => {
         clearTimeout(debounceDetalle);
         debounceDetalle = setTimeout(renderGridDetalle, 300);
+    });
+
+    let debounceProducto = null;
+    document.getElementById('ens_buscar_producto').addEventListener('input', () => {
+        clearTimeout(debounceProducto);
+        debounceProducto = setTimeout(() => renderProductoGridEns(), 250);
+    });
+
+    let debounceOperario = null;
+    document.getElementById('ens_buscar_operario').addEventListener('input', () => {
+        clearTimeout(debounceOperario);
+        debounceOperario = setTimeout(() => renderOperarioPickerGrid(), 250);
     });
 
     iniciarAutoRefreshEns();
@@ -436,7 +557,17 @@ function categoriaMaterialTicketActual() {
     return new Set(cats).size === 1 ? cats[0] : null;
 }
 
-// ── Selects auxiliares del modal ────────────────────────────────────────
+function obtenerInicialesOperarioEns(nombreCompleto) {
+    const partes = (nombreCompleto || '').trim().split(/\s+/).filter(Boolean);
+    if (partes.length === 0) return '?';
+    if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+    return (partes[0][0] + partes[1][0]).toUpperCase();
+}
+
+// =============================================================================
+// PANEL 1: PRODUCTO — cards ya abiertas (sin combo)
+// =============================================================================
+
 async function obtenerProductosDisponiblesEns(incluirEnsamblajeId = 0) {
     if (!incluirEnsamblajeId) {
         if (productosDisponiblesEnsCache && productosDisponiblesEnsCache.length > 0) return productosDisponiblesEnsCache;
@@ -448,43 +579,139 @@ async function obtenerProductosDisponiblesEns(incluirEnsamblajeId = 0) {
     return json.success ? json.productos : [];
 }
 
-function inicializarTomSelectOperariosEns() {
-    if (tsOperariosEns) return;
-    tsOperariosEns = new TomSelect('#ens_operarios_ids', {
-        valueField: 'id',
-        labelField: 'nombre_completo',
-        searchField: ['nombre_completo'],
-        options: [],
-        plugins: ['remove_button'],
-        placeholder: 'Buscar y agregar operarios...',
-        render: {
-            option: function (data, escape) {
-                const iniciales = obtenerInicialesOperarioEns(data.nombre_completo);
-                return `<div style="display:flex;align-items:center;gap:8px;">
-                    <span class="pc-op-avatar" style="width:26px;height:26px;border-radius:50%;background:#2F6FED;color:#fff;font-size:.72em;font-weight:800;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">${iniciales}</span>
-                    <div>
-                        <div>${escape(data.nombre_completo)}</div>
-                        ${data.cargo ? `<div class="text-muted small">${escape(data.cargo)}</div>` : ''}
-                    </div>
-                </div>`;
-            },
-            item: function (data, escape) {
-                const iniciales = obtenerInicialesOperarioEns(data.nombre_completo);
-                return `<div>
-                    <span class="pc-op-avatar">${iniciales}</span>
-                    <span class="pc-op-nombre">${escape(data.nombre_completo)}</span>
-                </div>`;
-            },
-        }
-    });
-}
-function obtenerInicialesOperarioEns(nombreCompleto) {
-    const partes = (nombreCompleto || '').trim().split(/\s+/).filter(Boolean);
-    if (partes.length === 0) return '?';
-    if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-    return (partes[0][0] + partes[1][0]).toUpperCase();
+function renderProductoGridEns() {
+    const cont = document.getElementById('ens_producto_grid');
+    const filtro = (document.getElementById('ens_buscar_producto').value || '').trim().toLowerCase();
+    const lista = filtro
+        ? productosGridDataEns.filter(p => (p.productoformato || '').toLowerCase().includes(filtro))
+        : productosGridDataEns;
+
+    if (lista.length === 0) {
+        cont.innerHTML = '<div class="pc-mat-empty">No se encontraron productos.</div>';
+        return;
+    }
+
+    cont.innerHTML = lista.map(p => {
+        const est = estiloPorNombre(p.productoformato || '');
+        const activo = productoSeleccionadoEns.producto_id == p.producto_id && productoSeleccionadoEns.color_id == p.color_id;
+        return `
+        <button type="button" class="pc-prod-card ${activo ? 'activo' : ''}"
+                style="--card-color:${est.color};--card-bg:${est.bg};"
+                onclick="seleccionarProductoEns('${p.producto_id}','${p.color_id ?? ''}')">
+            <span class="pellet"><i class="fa-solid fa-box"></i></span>
+            <span class="cuerpo">
+                <span class="nom">${p.productoformato}</span>
+                <span class="disp">${p.disponibles} disponible(s)</span>
+            </span>
+            <i class="fa-solid fa-circle-check check"></i>
+        </button>`;
+    }).join('');
 }
 
+function seleccionarProductoEns(productoId, colorId) {
+    productoSeleccionadoEns = { producto_id: productoId, color_id: colorId || null };
+    renderProductoGridEns();
+    cambioProductoEnsamblaje();
+}
+
+function obtenerProductoIdSeleccionadoEns() {
+    return productoSeleccionadoEns.producto_id || '';
+}
+
+function cambioProductoEnsamblaje() {
+    renderGridDetalle();
+}
+
+// =============================================================================
+// BARRA SUPERIOR: sucursal (chips) + operarios (chips + drawer)
+// =============================================================================
+
+function renderSucursalChipsEns(sucursales) {
+    const cont = document.getElementById('ens_sucursal_chips');
+    if (!sucursales || sucursales.length === 0) {
+        cont.innerHTML = '<span class="pc-ens-requisito">No hay sucursales activas.</span>';
+        return;
+    }
+    cont.innerHTML = sucursales.map(s => `
+        <button type="button" class="pc-chip-toggle ${sucursalSeleccionadaEns == s.id ? 'activo' : ''}"
+                onclick="seleccionarSucursalEns('${s.id}')">${s.nombre}</button>
+    `).join('');
+}
+function seleccionarSucursalEns(id) {
+    sucursalSeleccionadaEns = (sucursalSeleccionadaEns == id) ? '' : id; // toca de nuevo para des-seleccionar
+    renderSucursalChipsEns(sucursalesEnsCache || []);
+}
+
+function renderOperariosChipsEns() {
+    const cont = document.getElementById('ens_operarios_chips');
+    const chips = operariosSeleccionadosEns.map(o => `
+        <span class="pc-op-chip">
+            <span class="pc-op-avatar">${obtenerInicialesOperarioEns(o.nombre_completo)}</span>
+            <span class="nom">${o.nombre_completo}</span>
+            <button type="button" class="quitar" onclick="quitarOperarioEns(${o.id})" title="Quitar"><i class="fa-solid fa-xmark"></i></button>
+        </span>
+    `).join('');
+    cont.innerHTML = chips + `
+        <button type="button" class="pc-op-chip-add" onclick="abrirPickerOperarios()">
+            <i class="fa-solid fa-plus"></i> Agregar
+        </button>`;
+}
+
+function quitarOperarioEns(id) {
+    operariosSeleccionadosEns = operariosSeleccionadosEns.filter(o => o.id != id);
+    renderOperariosChipsEns();
+    renderOperarioPickerGrid();
+}
+
+function abrirPickerOperarios() {
+    document.getElementById('pc_panel_vincular').style.display = 'none';
+    document.getElementById('pc_panel_operarios_drawer').classList.add('abierto');
+    renderOperarioPickerGrid();
+}
+function cerrarPickerOperarios() {
+    document.getElementById('pc_panel_operarios_drawer').classList.remove('abierto');
+    document.getElementById('pc_panel_vincular').style.display = '';
+}
+
+function renderOperarioPickerGrid() {
+    const cont = document.getElementById('ens_operario_picker_grid');
+    const filtro = (document.getElementById('ens_buscar_operario').value || '').trim().toLowerCase();
+    const lista = filtro
+        ? operariosCatalogoEns.filter(o => (o.nombre_completo || '').toLowerCase().includes(filtro))
+        : operariosCatalogoEns;
+
+    if (lista.length === 0) {
+        cont.innerHTML = '<div class="pc-mat-empty">No se encontraron operarios.</div>';
+        return;
+    }
+
+    cont.innerHTML = lista.map(o => {
+        const activo = operariosSeleccionadosEns.some(sel => sel.id == o.id);
+        return `
+        <button type="button" class="pc-op-picker-card ${activo ? 'activo' : ''}" onclick="toggleOperarioEns(${o.id})">
+            <span class="pc-op-avatar">${obtenerInicialesOperarioEns(o.nombre_completo)}</span>
+            <span class="cuerpo">
+                <span class="nom">${o.nombre_completo}</span>
+                ${o.cargo ? `<span class="cargo">${o.cargo}</span>` : ''}
+            </span>
+            <i class="fa-solid fa-circle-check check"></i>
+        </button>`;
+    }).join('');
+}
+
+function toggleOperarioEns(id) {
+    const existe = operariosSeleccionadosEns.some(o => o.id == id);
+    if (existe) {
+        operariosSeleccionadosEns = operariosSeleccionadosEns.filter(o => o.id != id);
+    } else {
+        const op = operariosCatalogoEns.find(o => o.id == id);
+        if (op) operariosSeleccionadosEns.push(op);
+    }
+    renderOperarioPickerGrid();
+    renderOperariosChipsEns();
+}
+
+// ── Carga de todos los "paneles" del modal (antes: selects) ────────────
 async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     const [productos, operario, sucursales] = await Promise.all([
         obtenerProductosDisponiblesEns(incluirEnsamblajeId),
@@ -492,42 +719,28 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
         obtenerSucursalesEns(),
     ]);
 
-    const sProd = document.getElementById('ens_producto_id');
-    sProd.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.producto_id}_${p.color_id}"
-                data-producto-id="${p.producto_id}"
-                data-color-id="${p.color_id}">${p.productoformato} — ${p.disponibles} disponible(s)</option>`).join('');
+    // Producto
+    productosGridDataEns = productos || [];
     if (seleccion.producto_id) {
-        const valorBuscado = `${seleccion.producto_id}_${seleccion.color_id ?? ''}`;
-        const coincide = Array.from(sProd.options).find(o => o.value === valorBuscado);
-        if (coincide) sProd.value = valorBuscado;
+        productoSeleccionadoEns = { producto_id: String(seleccion.producto_id), color_id: seleccion.color_id != null ? String(seleccion.color_id) : null };
     }
+    renderProductoGridEns();
 
-    const sSuc = document.getElementById('ens_sucursal_id');
-    sSuc.innerHTML = '<option value="">Selecciona...</option>' +
-        (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
-    if (seleccion.sucursal_id) sSuc.value = seleccion.sucursal_id;
+    // Sucursal
+    sucursalSeleccionadaEns = seleccion.sucursal_id ? String(seleccion.sucursal_id) : '';
+    renderSucursalChipsEns(sucursales || []);
 
-    inicializarTomSelectOperariosEns();
-    tsOperariosEns.clearOptions();
-    tsOperariosEns.clear();
-    if (operario.success) operario.operario.forEach(o => {
-        tsOperariosEns.addOption({ id: o.id, nombre_completo: o.nombre_completo, cargo: o.cargo });
-    });
-
+    // Operarios
+    operariosCatalogoEns = operario.success ? operario.operario : [];
     if (Array.isArray(seleccion.operario_ids) && seleccion.operario_ids.length > 0) {
-        tsOperariosEns.setValue(seleccion.operario_ids.map(String));
+        operariosSeleccionadosEns = operariosCatalogoEns.filter(o => seleccion.operario_ids.some(id => id == o.id));
     } else {
-        // Al crear un ensamblaje nuevo se autoselecciona al operario logueado
-        // en la tablet; puede agregar más compañeros si trabajaron juntos.
-        const yoEstoyEnLista = operario.success && operario.operario.some(o => o.id == OPERARIO_ID);
-        if (yoEstoyEnLista) tsOperariosEns.setValue([String(OPERARIO_ID)]);
+        // Al crear un ensamblaje nuevo se autoselecciona al operario logueado en la tablet.
+        const yo = operariosCatalogoEns.find(o => o.id == OPERARIO_ID);
+        operariosSeleccionadosEns = yo ? [yo] : [];
     }
-}
-
-function obtenerProductoIdSeleccionadoEns() {
-    const valorSelect = document.getElementById('ens_producto_id').value;
-    return valorSelect ? valorSelect.split('_')[0] : '';
+    renderOperariosChipsEns();
+    renderOperarioPickerGrid();
 }
 
 // ── Agrupación por producto ("escalera") ────────────────────────────────
@@ -790,8 +1003,8 @@ function cambiarTabDetalle(tipo) {
 async function renderGridDetalle() {
     const grid = document.getElementById('ens_detalle_grid');
     const texto = document.getElementById('ens_buscar_detalle').value.trim();
-    const sel = document.getElementById('ens_producto_id');
-    const [productoId, colorId] = (sel.value || '').split('_');
+    const productoId = productoSeleccionadoEns.producto_id;
+    const colorId = productoSeleccionadoEns.color_id;
 
     if (tabDetalleActiva === 'produccion') {
         if (!productoId) {
@@ -946,7 +1159,7 @@ function renderTicketDetalle() {
     const pesoEl = document.getElementById('ens_ticket_peso_producido');
 
     if (ticketDetalleEns.length === 0) {
-        list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de la izquierda para empezar.</li>`;
+        list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de en medio para empezar.</li>`;
     } else {
         list.innerHTML = ticketDetalleEns.map(l => `
             <li class="pc-tk-item">
@@ -983,21 +1196,21 @@ function obtenerDetalleJsonEns() {
     })));
 }
 
-function cambioProductoEnsamblaje() {
-    renderGridDetalle();
-}
-
 // ── Crear / Editar ───────────────────────────────────────────────────────
 function limpiarFormularioEnsamblaje() {
-    document.getElementById('formEnsamblaje').reset();
     document.getElementById('ens_buscar_detalle').value = '';
+    document.getElementById('ens_buscar_producto').value = '';
+    document.getElementById('ens_buscar_operario').value = '';
     ensamblajeIdActual = 0;
     ticketDetalleEns = [];
-    if (tsOperariosEns) tsOperariosEns.clear();
+    productoSeleccionadoEns = { producto_id: null, color_id: null };
+    sucursalSeleccionadaEns = '';
+    operariosSeleccionadosEns = [];
     tabDetalleActiva = 'produccion';
     document.getElementById('tab_producciones').classList.add('activo');
     document.getElementById('tab_derivados').classList.remove('activo');
     document.getElementById('tab_complementos').classList.remove('activo');
+    cerrarPickerOperarios();
     renderTicketDetalle();
 }
 
@@ -1076,6 +1289,14 @@ async function abrirModalEditarEnsamblaje(id) {
 document.getElementById('formEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (!obtenerProductoIdSeleccionadoEns()) {
+        Swal.fire('Falta el producto', 'Toca una card de producto para seleccionarlo.', 'warning');
+        return;
+    }
+    if (operariosSeleccionadosEns.length === 0) {
+        Swal.fire('Faltan operarios', 'Agrega al menos un operario que haya participado.', 'warning');
+        return;
+    }
     if (ticketDetalleEns.length === 0) {
         Swal.fire('Falta vincular', 'Debes vincular al menos una producción finalizada, un derivado o un complemento.', 'warning');
         return;
@@ -1084,8 +1305,8 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     const params = {
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
-        operarios: JSON.stringify(tsOperariosEns ? tsOperariosEns.getValue() : []),
-        sucursal_id: document.getElementById('ens_sucursal_id').value,
+        operarios: JSON.stringify(operariosSeleccionadosEns.map(o => String(o.id))),
+        sucursal_id: sucursalSeleccionadaEns,
         detalle: obtenerDetalleJsonEns(),
     };
 
