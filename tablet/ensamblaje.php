@@ -68,7 +68,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
 .pc-tabs-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px; }
-.pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; }
+.pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .pc-tab-item{ display:flex; align-items:center; gap:8px; padding:12px 4px 14px 4px; border:none; background:none; cursor:pointer; font-size:1em; font-weight:600; color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap; }
 .pc-tab-item.activo{ color:#152238; border-bottom-color:#2F6FED; }
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
@@ -100,9 +100,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-ens-title{ font-size:1.2em; font-weight:700; color:#1f2430; line-height:1.25; }
 .pc-ens-meta{ font-size:.87em; color:#9a9585; line-height:1.4; }
 .pc-ens-meta span:not(:last-child)::after{ content:"·"; margin:0 6px; color:#d8d4c8; }
-.pc-ens-stats{ display:flex; gap:26px; }
-.pc-ens-stat .num{ font-size:1.35em; font-weight:700; color:#1f2430; line-height:1; }
-.pc-ens-stat .lbl{ font-size:.72em; color:#9a9585; margin-top:3px; text-transform:uppercase; letter-spacing:.03em; }
+.pc-ens-stats{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.pc-ens-stat{ min-width:0; }
+.pc-ens-stat .num{ font-size:1.25em; font-weight:700; color:#1f2430; line-height:1.15; overflow-wrap:break-word; }
+.pc-ens-stat .lbl{ font-size:.68em; color:#9a9585; margin-top:3px; text-transform:uppercase; letter-spacing:.02em; line-height:1.25; overflow-wrap:break-word; }
 .pc-ens-tags{ display:flex; flex-wrap:wrap; gap:6px; }
 .pc-ens-tag{ font-size:.78em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:5px 10px; font-weight:600; display:inline-flex; align-items:center; gap:5px; }
 .pc-ens-tag.complemento{ background:#F1EAFD; color:#7C3AED; }
@@ -123,31 +124,32 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 @keyframes pc-flash-bg{ 0%{ background:#FFF6DC; box-shadow:0 0 0 2px #F5D98A inset; } 100%{ background:#fff; box-shadow:none; } }
 @keyframes pc-pulse-blue{ 0%{ box-shadow:0 0 0 0 rgba(11,77,166,.6); } 70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); } 100%{ box-shadow:0 0 0 0 rgba(11,77,166,0); } }
 
-/* Encabezado de la tarjeta principal: título a la izquierda, sin botón (se movió a FAB) */
-.pc-card-header-ens{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+/* Encabezado de la tarjeta principal: título a la izquierda, acción de
+   registrar a la derecha (antes flotaba como FAB tapando la esquina). */
+.pc-card-header-ens{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; }
 .pc-card-header-ens .subt{ color:#9a9585; font-size:.9em; margin-top:2px; }
 
-/* Botón flotante — alcance de pulgar sosteniendo la tablet con ambas manos */
-.pc-fab-nuevo{
-    position:fixed; right:calc(22px + var(--safe-r)); bottom:calc(22px + var(--safe-b));
-    z-index:1040; border:none; border-radius:999px; background:#152238; color:#fff;
-    padding:16px 24px; font-weight:700; font-size:1em; display:flex; align-items:center; gap:10px;
-    box-shadow:0 10px 24px rgba(21,34,56,.28); cursor:pointer;
+.pc-btn-registrar{
+    border:none; border-radius:12px; background:#152238; color:#fff; flex:0 0 auto;
+    padding:14px 22px; font-weight:700; font-size:.98em; display:flex; align-items:center; gap:10px;
+    box-shadow:0 6px 16px rgba(21,34,56,.18); cursor:pointer; min-height:50px; white-space:nowrap;
 }
-.pc-fab-nuevo:active{ transform:scale(.96); }
-.pc-fab-nuevo i{ font-size:1.05em; }
+.pc-btn-registrar:active{ transform:scale(.97); }
+.pc-btn-registrar i{ font-size:1em; }
+@media (max-width:560px){ .pc-btn-registrar{ width:100%; justify-content:center; } }
 
 /* =========================================================================
-   FORMULARIO DE ENSAMBLAJE — pensado 100% para tablet
-   Nada de <select>: todo son cards ya abiertas, tocables directamente.
+   FORMULARIO DE ENSAMBLAJE — rediseño: flujo guiado en 2 pasos + ticket
+   siempre visible. Nada de <select>: todo son cards ya abiertas.
    ========================================================================= */
 .pc-modal-tablet .modal-content{ background:#fbfaf7; }
-.pc-ens-form-body{ display:flex; flex-direction:column; gap:14px; padding-bottom:6px; height:100%; }
+.pc-ens-form-body{ display:flex; flex-direction:column; gap:14px; padding-bottom:6px; height:100%; overflow-y:auto; }
 
 /* Barra superior compacta: sucursal + operarios, simétrica en dos mitades */
-.pc-ens-topbar{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.pc-ens-topbar{ display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:0 0 auto; }
+@media (max-width:560px){ .pc-ens-topbar{ grid-template-columns:1fr; } }
 .pc-ens-topbar-group{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px 14px; }
-.pc-ens-topbar-group > label{ display:block; font-size:.78em; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:#8a8578; margin-bottom:8px; }
+.pc-ens-topbar-group > label{ display:flex; align-items:center; gap:6px; font-size:.78em; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:#8a8578; margin-bottom:8px; }
 
 .pc-chip-toggle-row{ display:flex; flex-wrap:wrap; gap:8px; }
 .pc-chip-toggle{ border:1px solid #e2ddcd; background:#fff; color:#5c5947; font-weight:600; font-size:.9em; padding:10px 16px; border-radius:999px; cursor:pointer; min-height:44px; }
@@ -163,30 +165,45 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-op-chip-add{ border:1.5px dashed #c7c2b3; background:none; color:#5c5947; font-weight:700; font-size:.88em; padding:9px 14px; border-radius:999px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
 .pc-op-chip-add:active{ transform:scale(.96); }
 
-/* Rejilla principal: 3 paneles simétricos visibles a la vez en horizontal */
-.pc-ens-main-grid{
-    flex:1; min-height:0; display:grid;
-    grid-template-columns: 1fr; grid-template-rows:auto auto auto;
-    gap:14px;
+/* Aviso de requisito, ahora como banner visible (antes texto gris perdido) */
+.pc-ens-requisito{
+    flex:0 0 auto; font-size:.85em; color:#7a5b12; background:#FFF8E8; border:1px solid #f0dcae;
+    border-radius:10px; padding:10px 14px; display:flex; align-items:center; gap:8px;
 }
+.pc-ens-requisito i{ flex:0 0 auto; }
+
+/* Layout principal: contenido (Producto + Vincular) a la izquierda, Ticket
+   siempre visible a la derecha en tablets apaisadas; apilado en vertical
+   en pantallas angostas / portrait, con el ticket como último bloque pero
+   con su propio scroll interno para no perder de vista el resumen. */
+.pc-ens-layout{ flex:1; min-height:0; display:flex; flex-direction:column; gap:14px; }
+.pc-ens-content{ display:flex; flex-direction:column; gap:14px; }
 @media (min-width:880px) and (orientation:landscape){
-    .pc-ens-main-grid{ grid-template-columns: 280px 1fr 320px; grid-template-rows:1fr; }
+    .pc-ens-layout{ display:grid; grid-template-columns:1fr 320px; align-items:start; gap:14px; }
+    .pc-ens-content{ max-height:100%; }
+    .pc-ens-ticket-col{ position:sticky; top:0; align-self:start; display:flex; flex-direction:column; max-height:calc(100vh - 210px); }
+    .pc-ens-ticket-col .pc-panel{ flex:1; min-height:0; }
 }
-/* Landscape ancho (tablet apaisada grande): panel central un poco más generoso */
 @media (min-width:1180px) and (orientation:landscape){
-    .pc-ens-main-grid{ grid-template-columns: 300px 1fr 340px; }
+    .pc-ens-layout{ grid-template-columns:1fr 340px; }
 }
+
+/* Paso numerado, para dar orden visual claro: 1. Producto, 2. Vincular */
+.pc-step-badge{ width:22px; height:22px; border-radius:50%; background:#152238; color:#fff; font-size:.7em; font-weight:800; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
 
 .pc-panel{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.pc-panel.accent-blue{ border-top:3px solid #2F6FED; }
+.pc-panel.accent-violet{ border-top:3px solid #7C3AED; }
+.pc-panel.accent-teal{ border-top:3px solid #0E9488; }
 .pc-panel-head{ padding:12px 14px; border-bottom:1px solid #eee7db; background:#fffefb; flex:0 0 auto; }
 .pc-panel-head h6{ margin:0; font-weight:700; font-size:1em; display:flex; align-items:center; gap:8px; }
+.pc-panel-head .sub{ font-size:.78em; color:#9a9585; margin-top:2px; font-weight:500; }
 .pc-panel-search{ padding:10px 12px 0 12px; flex:0 0 auto; }
-.pc-panel-body-scroll{ flex:1; min-height:180px; overflow-y:auto; padding:12px; }
+.pc-panel-body-scroll{ flex:1; min-height:140px; max-height:44vh; overflow-y:auto; padding:12px; }
+@media (min-width:880px) and (orientation:landscape){ .pc-panel-body-scroll{ max-height:none; } }
 
 /* Panel producto: cards ya abiertas, sin combo */
-.pc-prod-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
-@media (min-width:880px) and (orientation:landscape){ .pc-prod-grid{ grid-template-columns:1fr; } }
-@media (max-width:879px), (orientation:portrait){ .pc-prod-grid{ grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); } }
+.pc-prod-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:10px; }
 .pc-prod-card{ position:relative; text-align:left; border:1.5px solid #eae6da; border-radius:12px; background:#fff; padding:12px; display:flex; align-items:center; gap:10px; cursor:pointer; min-height:64px; }
 .pc-prod-card:active{ transform:scale(.98); }
 .pc-prod-card.activo{ border-color:#2F6FED; background:#EAF0FE; }
@@ -197,7 +214,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-card .check{ position:absolute; top:8px; right:8px; color:#2F6FED; font-size:1em; opacity:0; }
 .pc-prod-card.activo .check{ opacity:1; }
 
-/* Panel vincular: tabs internos simétricos */
+/* Panel vincular: tabs internos simétricos, ahora dentro del header */
 .pc-mat-tabs{ display:flex; gap:6px; padding:10px 12px 0 12px; flex:0 0 auto; }
 .pc-mat-tab{ flex:1; border:1px solid #e2ddcd; background:#fff; border-radius:10px; padding:12px 8px; font-size:.85em; font-weight:700; color:#8a8578; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; min-height:48px; }
 .pc-mat-tab.activo{ background:#152238; border-color:#152238; color:#fff; }
@@ -229,11 +246,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-tk-resumen-texto .total b{ font-size:1.2em; color:#2F6FED; }
 .pc-tk-resumen-texto .detalle{ font-size:.8em; color:#8a8578; }
 
-/* Drawer de operarios: reemplaza al panel de vincular mientras está abierto */
-.pc-op-drawer{ display:none; }
-.pc-op-drawer.abierto{ display:flex; }
-.pc-op-drawer .pc-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.pc-op-drawer-cerrar{ border:none; background:#152238; color:#fff; font-weight:700; font-size:.85em; padding:9px 16px; border-radius:999px; min-height:40px; }
+/* Modal (aparte) de selección de operarios: reemplaza al "drawer" que
+   antes tapaba el panel de vincular y confundía al operario. */
 .pc-op-picker-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:10px; }
 .pc-op-picker-card{ border:1.5px solid #eae6da; border-radius:12px; background:#fff; padding:12px; display:flex; align-items:center; gap:10px; cursor:pointer; text-align:left; min-height:60px; position:relative; }
 .pc-op-picker-card:active{ transform:scale(.97); }
@@ -248,17 +262,17 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 /* Pie del formulario: dos zonas simétricas, una para cada pulgar */
 .pc-ens-footer{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px calc(14px + var(--safe-l)) calc(14px + var(--safe-b)) 14px !important; }
 .pc-ens-footer .btn{ min-height:54px; font-size:1.02em; font-weight:700; border-radius:12px; }
-
-/* Requisito de vínculo, discreto arriba del panel central en pantallas angostas */
-.pc-ens-requisito{ font-size:.78em; color:#9a9585; padding:0 2px; }
 </style>
 
-<div class="pc-card" style="margin:20px; margin-bottom:110px;">
+<div class="pc-card" style="margin:20px;">
     <div class="pc-card-header pc-card-header-ens">
         <div>
             <h2>Ensamblaje</h2>
-            <div class="subt">Toca "+ Registrar" para armar un nuevo ensamblaje.</div>
+            <div class="subt">Toca "Registrar ensamblaje" para armar uno nuevo.</div>
         </div>
+        <button type="button" class="pc-btn-registrar" onclick="abrirModalCrearEnsamblaje()">
+            <i class="fa-solid fa-plus"></i> Registrar ensamblaje
+        </button>
     </div>
     <br>
     <div class="pc-stat-row" id="statRowEnsamblaje"></div>
@@ -272,11 +286,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     </div>
 </div>
 
-<!-- Botón flotante de acción principal, al alcance del pulgar -->
-<button type="button" class="pc-fab-nuevo" onclick="abrirModalCrearEnsamblaje()">
-    <i class="fa-solid fa-plus"></i> Registrar ensamblaje
-</button>
-
 <!-- Modal Crear/Editar -->
 <div class="modal fade pc-modal-tablet" id="modalEnsamblaje" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
@@ -289,16 +298,16 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
         <div class="modal-body pc-ens-form-body">
 
-            <!-- Barra superior: sucursal (chips) + operarios (chips + agregar) -->
+            <!-- Barra superior: sucursal (chips) + operarios (chips + botón que abre el modal de selección) -->
             <div class="pc-ens-topbar">
                 <div class="pc-ens-topbar-group">
-                    <label>Sucursal</label>
+                    <label><i class="fa-solid fa-store"></i> Sucursal</label>
                     <div class="pc-chip-toggle-row" id="ens_sucursal_chips">
-                        <span class="pc-ens-requisito">Cargando sucursales...</span>
+                        <span class="pc-ens-requisito" style="padding:6px 10px;">Cargando sucursales...</span>
                     </div>
                 </div>
                 <div class="pc-ens-topbar-group">
-                    <label>Operarios que participaron *</label>
+                    <label><i class="fa-solid fa-users"></i> Operarios que participaron *</label>
                     <div class="pc-op-chips-selected" id="ens_operarios_chips"></div>
                 </div>
             </div>
@@ -308,75 +317,70 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 Vincula al menos una producción finalizada, un derivado o un complemento.
             </div>
 
-            <!-- Rejilla de 3 paneles: Producto · Vincular (o drawer de operarios) · Ticket -->
-            <div class="pc-ens-main-grid">
+            <!-- Layout: contenido (Producto + Vincular) | Ticket siempre visible -->
+            <div class="pc-ens-layout">
 
-                <!-- Panel 1: Producto — cards ya abiertas, sin combo -->
-                <div class="pc-panel pc-panel-producto">
-                    <div class="pc-panel-head"><h6><i class="fa-solid fa-box"></i> Producto a ensamblar</h6></div>
-                    <div class="pc-panel-search">
-                        <input type="text" id="ens_buscar_producto" class="form-control form-control-lg" placeholder="Buscar producto...">
-                    </div>
-                    <div class="pc-panel-body-scroll">
-                        <div class="pc-prod-grid" id="ens_producto_grid">
-                            <div class="pc-mat-empty">Cargando productos...</div>
+                <div class="pc-ens-content">
+
+                    <!-- Paso 1: Producto -->
+                    <div class="pc-panel accent-blue">
+                        <div class="pc-panel-head">
+                            <h6><span class="pc-step-badge">1</span> <i class="fa-solid fa-box"></i> Producto a ensamblar</h6>
+                        </div>
+                        <div class="pc-panel-search">
+                            <input type="text" id="ens_buscar_producto" class="form-control form-control-lg" placeholder="Buscar producto...">
+                        </div>
+                        <div class="pc-panel-body-scroll">
+                            <div class="pc-prod-grid" id="ens_producto_grid">
+                                <div class="pc-mat-empty">Cargando productos...</div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Panel 2a: Vincular producciones / derivados / complementos -->
-                <div class="pc-panel pc-panel-vincular" id="pc_panel_vincular">
-                    <div class="pc-mat-tabs">
-                        <button type="button" class="pc-mat-tab activo" id="tab_producciones" onclick="cambiarTabDetalle('produccion')">
-                            <i class="fa-solid fa-industry"></i> Producciones
-                        </button>
-                        <button type="button" class="pc-mat-tab" id="tab_derivados" onclick="cambiarTabDetalle('derivado')">
-                            <i class="fa-solid fa-flask"></i> Derivados
-                        </button>
-                        <button type="button" class="pc-mat-tab" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
-                            <i class="fa-solid fa-puzzle-piece"></i> Complemento
-                        </button>
-                    </div>
-                    <div class="pc-panel-search">
-                        <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
-                    </div>
-                    <div class="pc-panel-body-scroll">
-                        <div class="pc-mat-grid" id="ens_detalle_grid">
-                            <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
+                    <!-- Paso 2: Vincular producciones / derivados / complementos -->
+                    <div class="pc-panel accent-violet" id="pc_panel_vincular">
+                        <div class="pc-panel-head">
+                            <h6><span class="pc-step-badge">2</span> <i class="fa-solid fa-link"></i> Vincular al armado</h6>
+                        </div>
+                        <div class="pc-mat-tabs">
+                            <button type="button" class="pc-mat-tab activo" id="tab_producciones" onclick="cambiarTabDetalle('produccion')">
+                                <i class="fa-solid fa-industry"></i> Producciones
+                            </button>
+                            <button type="button" class="pc-mat-tab" id="tab_derivados" onclick="cambiarTabDetalle('derivado')">
+                                <i class="fa-solid fa-flask"></i> Derivados
+                            </button>
+                            <button type="button" class="pc-mat-tab" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
+                                <i class="fa-solid fa-puzzle-piece"></i> Complemento
+                            </button>
+                        </div>
+                        <div class="pc-panel-search">
+                            <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
+                        </div>
+                        <div class="pc-panel-body-scroll">
+                            <div class="pc-mat-grid" id="ens_detalle_grid">
+                                <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
+                            </div>
                         </div>
                     </div>
+
                 </div>
 
-                <!-- Panel 2b: Drawer de selección de operarios (ocupa el mismo espacio que "Vincular") -->
-                <div class="pc-panel pc-op-drawer" id="pc_panel_operarios_drawer">
-                    <div class="pc-panel-head">
-                        <h6><i class="fa-solid fa-users"></i> Elige quién participó</h6>
-                        <button type="button" class="pc-op-drawer-cerrar" onclick="cerrarPickerOperarios()">Listo</button>
-                    </div>
-                    <div class="pc-panel-search">
-                        <input type="text" id="ens_buscar_operario" class="form-control form-control-lg" placeholder="Buscar operario...">
-                    </div>
-                    <div class="pc-panel-body-scroll">
-                        <div class="pc-op-picker-grid" id="ens_operario_picker_grid">
-                            <div class="pc-mat-empty">Cargando operarios...</div>
+                <!-- Ticket: columna fija en tablet apaisada, bloque final en vertical -->
+                <div class="pc-ens-ticket-col">
+                    <div class="pc-panel accent-teal">
+                        <div class="pc-panel-head"><h6><i class="fa-solid fa-receipt"></i> Ticket de este armado</h6></div>
+                        <div class="pc-panel-body-scroll" style="padding:0;">
+                            <ul class="pc-tk-list" id="ens_ticket_list">
+                                <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de arriba para empezar.</li>
+                            </ul>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Panel 3: Ticket de este armado -->
-                <div class="pc-panel pc-panel-ticket">
-                    <div class="pc-panel-head"><h6><i class="fa-solid fa-receipt"></i> Ticket de este armado</h6></div>
-                    <div class="pc-panel-body-scroll" style="padding:0;">
-                        <ul class="pc-tk-list" id="ens_ticket_list">
-                            <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de en medio para empezar.</li>
-                        </ul>
-                    </div>
-                    <div class="pc-tk-resumen">
-                        <div class="pc-tk-resumen-icon"><i class="fa-solid fa-layer-group"></i></div>
-                        <div class="pc-tk-resumen-texto">
-                            <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
-                            <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
-                            <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
+                        <div class="pc-tk-resumen">
+                            <div class="pc-tk-resumen-icon"><i class="fa-solid fa-layer-group"></i></div>
+                            <div class="pc-tk-resumen-texto">
+                                <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
+                                <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
+                                <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -395,6 +399,29 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
   </div>
 </div>
 
+<!-- Modal aparte para elegir operarios (antes era un "drawer" que tapaba
+     el panel de vincular; ahora es un diálogo independiente que no
+     interrumpe el flujo de armado). -->
+<div class="modal fade pc-modal-tablet" id="modalOperariosEns" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-users"></i> Elige quién participó</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="ens_buscar_operario" class="form-control form-control-lg mb-3" placeholder="Buscar operario...">
+        <div class="pc-op-picker-grid" id="ens_operario_picker_grid">
+            <div class="pc-mat-empty">Cargando operarios...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-lg w-100" data-bs-dismiss="modal">Listo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
@@ -403,7 +430,8 @@ const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
-const modalEnsamblaje = new bootstrap.Modal(document.getElementById('modalEnsamblaje'));
+const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'));
+const modalOperariosEns = new bootstrap.Modal(document.getElementById('modalOperariosEns'));
 
 let modoEdicionEnsamblaje = false;
 let ensamblajeIdActual = 0;
@@ -446,6 +474,10 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceOperario);
         debounceOperario = setTimeout(() => renderOperarioPickerGrid(), 250);
     });
+
+    // Al cerrar el picker de operarios (con "Listo", el X, o tocando fuera),
+    // refresca los chips por si hubo cambios.
+    document.getElementById('modalOperariosEns').addEventListener('hidden.bs.modal', renderOperariosChipsEns);
 
     iniciarAutoRefreshEns();
 });
@@ -623,13 +655,13 @@ function cambioProductoEnsamblaje() {
 }
 
 // =============================================================================
-// BARRA SUPERIOR: sucursal (chips) + operarios (chips + drawer)
+// BARRA SUPERIOR: sucursal (chips) + operarios (chips + modal de selección)
 // =============================================================================
 
 function renderSucursalChipsEns(sucursales) {
     const cont = document.getElementById('ens_sucursal_chips');
     if (!sucursales || sucursales.length === 0) {
-        cont.innerHTML = '<span class="pc-ens-requisito">No hay sucursales activas.</span>';
+        cont.innerHTML = '<span class="pc-ens-requisito" style="padding:6px 10px;">No hay sucursales activas.</span>';
         return;
     }
     cont.innerHTML = sucursales.map(s => `
@@ -663,14 +695,15 @@ function quitarOperarioEns(id) {
     renderOperarioPickerGrid();
 }
 
+// El picker de operarios ahora es un modal independiente (no tapa el panel
+// de vincular ni el ticket): se puede abrir/cerrar en cualquier momento sin
+// perder el contexto del armado que se está haciendo.
 function abrirPickerOperarios() {
-    document.getElementById('pc_panel_vincular').style.display = 'none';
-    document.getElementById('pc_panel_operarios_drawer').classList.add('abierto');
     renderOperarioPickerGrid();
+    modalOperariosEns.show();
 }
 function cerrarPickerOperarios() {
-    document.getElementById('pc_panel_operarios_drawer').classList.remove('abierto');
-    document.getElementById('pc_panel_vincular').style.display = '';
+    modalOperariosEns.hide();
 }
 
 function renderOperarioPickerGrid() {
@@ -1159,7 +1192,7 @@ function renderTicketDetalle() {
     const pesoEl = document.getElementById('ens_ticket_peso_producido');
 
     if (ticketDetalleEns.length === 0) {
-        list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de en medio para empezar.</li>`;
+        list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de arriba para empezar.</li>`;
     } else {
         list.innerHTML = ticketDetalleEns.map(l => `
             <li class="pc-tk-item">

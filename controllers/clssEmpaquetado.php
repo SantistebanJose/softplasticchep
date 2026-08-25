@@ -127,39 +127,41 @@ function controladorEmpaquetado($accion)
     }
 }
 
-// =============================================================================
-// LISTADOS AUXILIARES
-// =============================================================================
-
 function buscarOperarios()
 {
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    // id fijo de la etapa de empaquetado (tabla etapa: nombre = "EPAQUETADO", id = 3;
-    // el nombre tiene un typo en la BD pero no lo tocamos — filtramos por id, que es estable).
+    // id fijo de la etapa de empaquetado (tabla etapa: nombre = "EPAQUETADO", id = 3)
     $etapaId = 3;
 
     $where = [
-        "activo = true",
+        "o.activo = true",
         "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(js_etapas_relacionadas, '[]'::jsonb)) AS et
+            SELECT 1 FROM jsonb_array_elements(COALESCE(o.js_etapas_relacionadas, '[]'::jsonb)) AS et
             WHERE (et->>'etapa_id')::int = :etapa_id
         )"
     ];
     $params = ['etapa_id' => $etapaId];
 
     if ($texto !== '') {
-        $where[] = "LOWER(nombre_completo) LIKE LOWER(:texto)";
+        $where[] = "LOWER(o.nombre_completo) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "SELECT id, nombre_completo, cargo FROM operario
-            WHERE " . implode(' AND ', $where) . " ORDER BY nombre_completo";
+    // 'cargo' ya no es columna de operario -> se resuelve con LEFT JOIN a cargo,
+    // mismo patrón que resolverOperariosEnsamblaje() en clssOperario.php.
+    $sql = "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+            FROM operario o
+            LEFT JOIN cargo c ON c.id = o.cargo_id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY o.nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operario' => $result]);
 }
+
+
 function buscarUnidadesMedida()
 {
     $conectar = conectar_oll_BD();
