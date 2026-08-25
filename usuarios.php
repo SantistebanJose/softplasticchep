@@ -15,6 +15,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
     try {
         switch ($_POST['accion']) {
+            case 'listar':
+                $usuarios = $controller->getAllUsers(
+                    trim($_POST['texto'] ?? ''),
+                    trim($_POST['estado'] ?? '')
+                );
+                echo json_encode(['ok' => true, 'usuarios' => $usuarios]);
+                exit;
+
             case 'guardar':
                 $data = [
                     'id' => $_POST['id'] ?? null,
@@ -37,8 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     echo json_encode(['ok' => false, 'msg' => 'ID inválido.']);
                     exit;
                 }
-                $usuario = $controller->getById((int) $id);
-                echo json_encode(['ok' => true, 'data' => $usuario]);
+                echo json_encode(['ok' => true, 'data' => $controller->getById((int) $id)]);
                 exit;
 
             case 'eliminar':
@@ -56,54 +63,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     }
 }
 
-$usuarios = $controller->getAllUsers();
-require __DIR__ . '/header.php';?>
+require __DIR__ . '/header.php'; ?>
 
 <div class="pc-card">
-    <div class="pc-card-header">
+    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Usuarios</h2>
         <button class="pc-btn pc-btn-primary" onclick="abrirModalCrear()">
             <i class="fa-solid fa-user-plus"></i> Nuevo usuario
         </button>
     </div>
 
+    <div class="pc-filtros d-flex gap-2 flex-wrap mb-3">
+        <br>
+        <input type="text" id="fusu_texto" class="form-control" style="max-width:260px"
+               placeholder="Buscar por usuario o nombre...">
+        <select id="fusu_estado" class="form-select" style="max-width:160px">
+            <option value="">Todos</option>
+            <option value="activa" selected>Activos</option>
+            <option value="inactiva">Inactivos</option>
+        </select>
+    </div>
+
+    <div class="pc-table-wrap pc-table-responsive-cards">
     <table class="pc-table" id="tablaUsuarios">
         <thead>
             <tr>
                 <th>Usuario</th>
                 <th>Nombre completo</th>
                 <th>Rol</th>
+                <th>Origen</th>
                 <th>Estado</th>
                 <th>Creado</th>
                 <th>Acciones</th>
             </tr>
         </thead>
-        <tbody>
-        <?php foreach ($usuarios as $u): ?>
-            <?php $rolData = json_decode($u['rol_y_perfiles'] ?? '{}', true); ?>
-            <tr id="fila-<?= $u['id'] ?>">
-                <td><?= htmlspecialchars($u['user_']) ?></td>
-                <td><?= htmlspecialchars($u['nombre_completo']) ?></td>
-                <td><?= htmlspecialchars($rolData['rol'] ?? 'operario') ?></td>
-                <td><?= $u['deleted_at'] ? '<span class="text-danger">Inactivo</span>' : '<span class="text-success">Activo</span>' ?></td>
-                <td><?= htmlspecialchars(date('d/m/Y', strtotime($u['created_at'] ?? 'now'))) ?></td>
-                <td>
-                    <button class="pc-icon-btn" onclick="abrirModalEditar(<?= $u['id'] ?>)" title="Editar usuario">
-                        <i class="fa-solid fa-pen"></i>
-                    </button>
-                    <?php if (!$u['deleted_at']): ?>
-                        <button class="pc-icon-btn" onclick="eliminarUsuario(<?= $u['id'] ?>)" title="Eliminar usuario">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
-                    <?php endif; ?>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        <?php if (empty($usuarios)): ?>
-            <tr><td colspan="6" style="text-align:center;">No hay usuarios registrados.</td></tr>
-        <?php endif; ?>
+        <tbody id="tbodyUsuarios">
+            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
+    </div>
 </div>
 
 <div class="modal fade" id="modalUsuario" tabindex="-1">
@@ -143,7 +141,7 @@ require __DIR__ . '/header.php';?>
 
           <div class="row">
             <div class="col-md-6 mb-3">
-              <label class="form-label">Contraseña <?= '<small>(obligatoria al crear)</small>' ?></label>
+              <label class="form-label">Contraseña <small>(obligatoria al crear)</small></label>
               <input type="password" class="form-control" name="password" id="usu_password">
             </div>
             <div class="col-md-6 mb-3">
@@ -170,6 +168,85 @@ require __DIR__ . '/header.php';?>
 <script>
 const modalUsuario = new bootstrap.Modal(document.getElementById('modalUsuario'));
 
+document.addEventListener('DOMContentLoaded', () => {
+    cargarUsuarios().catch(err => {
+        console.error('Error cargando datos iniciales:', err);
+        document.getElementById('tbodyUsuarios').innerHTML =
+            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+    });
+
+    let debounceTimer = null;
+    document.getElementById('fusu_texto').addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(cargarUsuarios, 350);
+    });
+
+    document.getElementById('fusu_estado').addEventListener('change', cargarUsuarios);
+});
+
+async function llamarUsuarios(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch('usuarios.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+    const texto = await resp.text();
+    try {
+        return JSON.parse(texto);
+    } catch (e) {
+        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
+        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}).`);
+    }
+}
+
+async function cargarUsuarios() {
+    const texto  = document.getElementById('fusu_texto').value.trim();
+    const estado = document.getElementById('fusu_estado').value;
+
+    const json = await llamarUsuarios('listar', { texto, estado });
+    const tbody = document.getElementById('tbodyUsuarios');
+
+    if (!json.ok) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.msg}</td></tr>`;
+        return;
+    }
+
+    const usuarios = json.usuarios || [];
+    if (usuarios.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay usuarios registrados.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = usuarios.map(u => {
+        const rolData = JSON.parse(u.rol_y_perfiles || '{}');
+        return `
+        <tr id="fila-${u.id}">
+            <td data-label="Usuario">${u.user_}</td>
+            <td data-label="Nombre completo">${u.nombre_completo}</td>
+            <td data-label="Rol">${rolData.rol ?? 'operario'}</td>
+            <td data-label="Origen">${u.operario_id
+                ? '<span class="badge bg-info">Operario</span>'
+                : '<span class="badge bg-secondary">Manual</span>'}
+            </td>
+            <td data-label="Estado">${u.deleted_at
+                ? '<span class="badge bg-secondary">Inactivo</span>'
+                : '<span class="badge bg-success">Activo</span>'}
+            </td>
+            <td data-label="Creado">${new Date(u.created_at).toLocaleDateString('es-PE')}</td>
+            <td data-label="Acciones" class="pc-td-acciones">
+                <button class="pc-icon-btn" onclick="abrirModalEditar(${u.id})" title="Editar usuario">
+                    <i class="fa-solid fa-pen"></i>
+                </button>
+                ${!u.deleted_at
+                    ? `<button class="pc-icon-btn" onclick="eliminarUsuario(${u.id})" title="Eliminar usuario">
+                           <i class="fa-solid fa-trash"></i></button>`
+                    : ''}
+            </td>
+        </tr>`;
+    }).join('');
+}
+
 function abrirModalCrear() {
     document.getElementById('formUsuario').reset();
     document.getElementById('usu_id').value = '';
@@ -178,16 +255,8 @@ function abrirModalCrear() {
 }
 
 async function abrirModalEditar(id) {
-    const resp = await fetch('usuarios.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `accion=obtener&id=${id}`
-    });
-    const json = await resp.json();
-    if (!json.ok) {
-        Swal.fire('Error', json.msg, 'error');
-        return;
-    }
+    const json = await llamarUsuarios('obtener', { id });
+    if (!json.ok) { Swal.fire('Error', json.msg, 'error'); return; }
 
     const user = json.data;
     const roleData = JSON.parse(user.rol_y_perfiles || '{}');
@@ -210,7 +279,9 @@ document.getElementById('formUsuario').addEventListener('submit', async function
     const resp = await fetch('usuarios.php', { method: 'POST', body: formData });
     const json = await resp.json();
     if (json.ok) {
-        Swal.fire('Listo', json.msg, 'success').then(() => location.reload());
+        modalUsuario.hide();
+        Swal.fire('Listo', json.msg, 'success');
+        cargarUsuarios();
     } else {
         Swal.fire('Error', json.msg, 'error');
     }
@@ -226,15 +297,10 @@ function eliminarUsuario(id) {
         cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const resp = await fetch('usuarios.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `accion=eliminar&id=${id}`
-        });
-        const json = await resp.json();
+        const json = await llamarUsuarios('eliminar', { id });
         if (json.ok) {
-            document.getElementById(`fila-${id}`).remove();
             Swal.fire('Eliminado', json.msg, 'success');
+            cargarUsuarios();
         } else {
             Swal.fire('Error', json.msg, 'error');
         }

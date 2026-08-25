@@ -1,6 +1,5 @@
 <?php
 
-
 class UserController
 {
     private PDO $pdo;
@@ -9,17 +8,26 @@ class UserController
         $this->pdo = $pdo;
     }
 
-    public function getAllUsers(): array
+    public function getAllUsers(string $texto = '', string $estado = ''): array
     {
-        return $this->pdo->query('SELECT id, user_, nombre_completo, rol_y_perfiles, deleted_at, created_at, updated_at FROM usuario ORDER BY nombre_completo')->fetchAll();
-    }
+        $where = ['1=1'];
+        $params = [];
 
-    public function getUserCount(): array
-    {
-        return [
-            'total' => (int) $this->pdo->query('SELECT COUNT(*) FROM usuario')->fetchColumn(),
-            'active' => (int) $this->pdo->query('SELECT COUNT(*) FROM usuario WHERE deleted_at IS NULL')->fetchColumn(),
-        ];
+        if ($texto !== '') {
+            $where[] = '(LOWER(user_) LIKE LOWER(:texto) OR LOWER(nombre_completo) LIKE LOWER(:texto))';
+            $params['texto'] = "%$texto%";
+        }
+        if ($estado === 'activa') {
+            $where[] = 'deleted_at IS NULL';
+        } elseif ($estado === 'inactiva') {
+            $where[] = 'deleted_at IS NOT NULL';
+        }
+
+        $sql = 'SELECT id, user_, nombre_completo, rol_y_perfiles, operario_id, deleted_at, created_at, updated_at
+                FROM usuario WHERE ' . implode(' AND ', $where) . ' ORDER BY nombre_completo';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
     }
 
     public function getById(int $id): array
@@ -35,8 +43,16 @@ class UserController
             return ['ok' => false, 'msg' => 'El usuario y nombre completo son obligatorios.'];
         }
 
-        $rolYPerfiles = json_encode($data['rol_y_perfiles'] ?? ['rol' => 'operario', 'perfiles' => []]);
         $isEditing = !empty($data['id']);
+
+        // Evita logins duplicados, sea cuenta manual u originada desde un operario
+        $stmtDup = $this->pdo->prepare('SELECT id FROM usuario WHERE user_ = :user_ AND id <> :id');
+        $stmtDup->execute(['user_' => $data['user_'], 'id' => $data['id'] ?? 0]);
+        if ($stmtDup->fetch()) {
+            return ['ok' => false, 'msg' => 'Ya existe un usuario con ese login.'];
+        }
+
+        $rolYPerfiles = json_encode($data['rol_y_perfiles'] ?? ['rol' => 'operario', 'perfiles' => []]);
 
         if ($isEditing) {
             $params = [
@@ -51,8 +67,7 @@ class UserController
                 $params['pass_'] = password_hash($data['password'], PASSWORD_DEFAULT);
             }
             $sql .= ' WHERE id = :id';
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
+            $this->pdo->prepare($sql)->execute($params);
             return ['ok' => true, 'msg' => 'Usuario actualizado correctamente.'];
         }
 
@@ -60,8 +75,10 @@ class UserController
             return ['ok' => false, 'msg' => 'La contraseña es obligatoria al crear un usuario.'];
         }
 
+        // Cuenta creada manualmente desde este panel -> operario_id queda NULL
         $stmt = $this->pdo->prepare(
-            'INSERT INTO usuario (user_, pass_, nombre_completo, rol_y_perfiles, created_at, updated_at) VALUES (:user_, :pass_, :nombre_completo, :rol_y_perfiles, NOW(), NOW())'
+            'INSERT INTO usuario (user_, pass_, nombre_completo, rol_y_perfiles, operario_id, created_at, updated_at)
+             VALUES (:user_, :pass_, :nombre_completo, :rol_y_perfiles, NULL, NOW(), NOW())'
         );
         $stmt->execute([
             'user_' => $data['user_'],

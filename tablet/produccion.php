@@ -16,7 +16,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Producción · Plásticos Chepito</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
@@ -53,8 +53,41 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     display:inline-block; width:12px; height:12px; border-radius:50%;
     border:1px solid rgba(0,0,0,.15); vertical-align:middle; margin-right:5px;
 }
+
+/* ===================== LAYOUT GENERAL TABLET ===================== */
+.pc-form-layout{ display:grid; grid-template-columns:1fr; gap:22px; }
+@media (min-width:1150px) and (orientation:landscape){
+    .pc-form-layout{ grid-template-columns:380px 1fr; align-items:start; }
+}
+.pc-form-col-left{ display:flex; flex-direction:column; }
+.pc-form-col-right{ display:flex; flex-direction:column; }
+
 .pc-mat-layout{ display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start; }
-@media (max-width: 900px){ .pc-mat-layout{ grid-template-columns:1fr; } }
+@media (max-width:1000px){ .pc-mat-layout{ grid-template-columns:1fr; } }
+@media (orientation:portrait){ .pc-mat-layout{ grid-template-columns:1fr; } }
+
+/* ===================== SELECTORES TIPO CARD (reemplazan combos) ===================== */
+.pc-selector-block{ margin-bottom:18px; }
+.pc-sel-label{ font-weight:700; font-size:.85em; color:#5c5947; margin-bottom:8px; display:flex; align-items:center; gap:5px; text-transform:uppercase; letter-spacing:.02em; }
+.pc-sel-label .req{ color:#E23744; }
+.pc-chip-strip{ display:flex; flex-wrap:wrap; gap:8px; max-height:230px; overflow-y:auto; padding:2px; }
+.pc-chip-card{
+    display:flex; align-items:center; gap:8px; border:1.5px solid #e2ddcd; background:#fff;
+    border-radius:12px; padding:12px 16px; font-size:.9em; font-weight:600; color:#5c5947;
+    cursor:pointer; min-height:48px; transition:transform .1s ease, border-color .12s ease, background .12s ease;
+}
+.pc-chip-card:active{ transform:scale(.96); }
+.pc-chip-card.activo{ background:#152238; border-color:#152238; color:#fff; }
+.pc-chip-card .ico{ width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; background:var(--card-bg,#EAF0FE); color:var(--card-color,#2F6FED); font-size:.85em; flex:0 0 auto; }
+.pc-chip-card.activo .ico{ background:rgba(255,255,255,.18); color:#fff; }
+.pc-chip-card .ico .pc-color-dot{ margin:0; width:14px; height:14px; }
+.pc-sel-vacio{ color:#a7a293; font-size:.85em; font-style:italic; padding:10px 4px; }
+
+.pc-selector-row-compact{ display:grid; grid-template-columns:1fr; gap:14px; margin-bottom:6px; }
+@media (min-width:560px){ .pc-selector-row-compact{ grid-template-columns:repeat(3,1fr); } }
+.pc-selector-row-compact .pc-chip-strip{ max-height:150px; }
+
+/* ===================== PANEL MATERIALES / TICKET ===================== */
 .pc-mat-panel, .pc-tk-panel{ border:1px solid #e7e4dd; border-radius:14px; background:#fdfcfa; overflow:hidden; }
 .pc-mat-panel-head, .pc-tk-panel-head{ padding:10px 14px; border-bottom:1px solid #eee7db; display:flex; justify-content:space-between; align-items:center; background:#fffefb; }
 .pc-mat-panel-head h6, .pc-tk-panel-head h6{ margin:0; font-weight:700; font-size:.95em; }
@@ -83,10 +116,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-tk-item input.comentario{ font-size:.8em; border:none; border-bottom:1px dashed #ddd6c0; width:100%; padding:4px 0; margin-top:6px; background:transparent; }
 .pc-tk-item input.comentario:focus{ outline:none; border-color:#d97706; }
 .pc-tk-qty{ display:flex; align-items:center; gap:4px; flex:0 0 auto; }
-.pc-tk-qty button{ width:34px; height:34px; border:1px solid #e2ddcd; background:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:.85em; cursor:pointer; }
+.pc-tk-qty button{ width:38px; height:38px; border:1px solid #e2ddcd; background:#fff; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:.9em; cursor:pointer; }
 .pc-tk-qty button:disabled{ opacity:.35; cursor:not-allowed; }
 .pc-tk-qty input{ width:60px; text-align:center; border:none; font-variant-numeric:tabular-nums; font-weight:700; font-size:.95em; }
-.pc-tk-remove{ border:none; background:none; color:#c94a4a; font-size:1em; align-self:flex-start; padding:6px; }
+.pc-tk-remove{ border:none; background:none; color:#c94a4a; font-size:1.1em; align-self:flex-start; padding:8px; }
 .pc-tk-empty{ text-align:center; color:#9a9585; font-size:.9em; padding:26px 12px; }
 .pc-tk-empty i{ font-size:1.6em; display:block; margin-bottom:6px; opacity:.5; }
 .pc-tk-resumen{ display:flex; align-items:center; gap:12px; padding:14px; border-top:1px solid #eee7db; background:linear-gradient(0deg,#fffaf0,#fffefb); }
@@ -103,7 +136,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-group-header .linea{ flex:1; height:1px; background:#e7e4dd; }
 .pc-prod-group-header .texto{ font-size:.8em; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae; border-radius:999px; padding:7px 16px; white-space:nowrap; display:flex; align-items:center; gap:6px; }
 .pc-prod-group-count{ font-weight:600; color:#b8834a; opacity:.85; }
-.pc-prod-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:14px; margin-top:4px; }
+.pc-prod-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:14px; margin-top:4px; }
 .pc-prod-card{ border:1px solid #ece9e1; border-radius:14px; background:#fff; padding:18px; display:flex; flex-direction:column; gap:10px; }
 .pc-prod-card.inactiva{ opacity:.55; }
 .pc-prod-card-top{ display:flex; align-items:center; gap:8px; }
@@ -116,7 +149,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-card.estado-curso .pc-prod-estado-txt{ color:#0B4DA6; }
 .pc-prod-card.estado-fin .pc-prod-estado-txt{ color:#16A34A; }
 .pc-prod-card-spacer{ flex:1; }
-.pc-prod-edit-btn{ border:none; background:none; color:#c3beae; padding:8px; font-size:1em; cursor:pointer; border-radius:8px; }
+.pc-prod-edit-btn{ border:none; background:none; color:#c3beae; padding:10px; font-size:1.05em; cursor:pointer; border-radius:9px; }
 .pc-prod-edit-btn:active{ color:#2F6FED; background:#EAF0FE; }
 .pc-prod-title{ font-size:1.15em; font-weight:700; color:#1f2430; line-height:1.25; }
 .pc-prod-meta{ font-size:.85em; color:#9a9585; line-height:1.4; }
@@ -131,10 +164,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-corrida-line b{ color:#5c5947; font-weight:600; }
 .pc-prod-sin-ensamblaje{ font-size:.78em; color:#a7a293; font-style:italic; display:flex; align-items:center; gap:5px; margin-top:-2px; }
 .pc-prod-card-foot{ display:flex; align-items:center; gap:6px; padding-top:12px; margin-top:2px; border-top:1px solid #f1efe8; flex-wrap:wrap; }
-.pc-prod-ghost-btn{ border:none; background:#f6f4ee; color:#5c5947; font-size:.85em; font-weight:600; padding:10px 12px; border-radius:9px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.pc-prod-ghost-btn{ border:none; background:#f6f4ee; color:#5c5947; font-size:.85em; font-weight:600; padding:12px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
 .pc-prod-ghost-btn.success{ color:#16A34A; background:#E8F7EE; }
 .pc-prod-ghost-btn.warn{ color:#D97706; background:#FDF1E0; }
-.pc-btn-ensamblaje{ margin-left:auto; padding:10px 16px; font-size:.85em; border-radius:9px; border:none; background:#1f2430; color:#fff; font-weight:700; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.pc-btn-ensamblaje{ margin-left:auto; padding:12px 18px; font-size:.85em; border-radius:10px; border:none; background:#1f2430; color:#fff; font-weight:700; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
 .pc-prod-empty{ text-align:center; color:#9a9585; padding:50px 12px; grid-column:1/-1; font-size:1.05em; }
 .pc-stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
 .pc-stat-chip{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:14px; display:flex; align-items:center; gap:10px; }
@@ -159,26 +192,48 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-merma-item .cant{ font-weight:700; color:#8a5a10; flex:0 0 auto; }
 .pc-merma-item .nota{ color:#8a8578; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pc-merma-form{ background:#fdfcfa; border:1px dashed #e2ddcd; border-radius:10px; padding:14px; }
-.pc-merma-chip{ display:inline-flex; align-items:center; gap:5px; padding:8px 12px; border:1px solid #e2ddcd; background:#fff; border-radius:999px; font-size:.82em; font-weight:600; color:#5c5947; cursor:pointer; }
+.pc-merma-chip{ display:inline-flex; align-items:center; gap:5px; padding:10px 14px; border:1px solid #e2ddcd; background:#fff; border-radius:999px; font-size:.85em; font-weight:600; color:#5c5947; cursor:pointer; min-height:44px; }
 .pc-merma-chip.activo{ background:#152238; border-color:#152238; color:#fff; }
 .pc-merma-chip.activo .pc-color-dot{ border-color:rgba(255,255,255,.5); }
+
+/* Steppers para cantidades (evita depender del teclado) */
+.pc-num-stepper{ display:flex; align-items:center; gap:8px; }
+.pc-num-stepper button{ width:48px; height:48px; flex:0 0 auto; border:1px solid #e2ddcd; background:#fff; border-radius:10px; font-size:1.1em; display:flex; align-items:center; justify-content:center; color:#5c5947; }
+.pc-num-stepper button:active{ background:#f6f4ee; }
+.pc-num-stepper input{ flex:1; text-align:center; font-weight:700; font-size:1.15em; min-height:48px; }
 
 .pc-prod-card.pc-flash{ animation:pc-flash-bg 1.8s ease; }
 @keyframes pc-flash-bg{ 0%{ background:#FFF6DC; box-shadow:0 0 0 2px #F5D98A inset; } 100%{ background:#fff; box-shadow:none; } }
 @keyframes pc-pulse-blue{ 0%{ box-shadow:0 0 0 0 rgba(11,77,166,.6); } 70%{ box-shadow:0 0 0 6px rgba(11,77,166,0); } 100%{ box-shadow:0 0 0 0 rgba(11,77,166,0); } }
 
 .pc-tabs-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px; }
-.pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; }
+.pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; overflow-x:auto; }
 .pc-tab-item{ display:flex; align-items:center; gap:8px; padding:12px 4px 14px 4px; border:none; background:none; cursor:pointer; font-size:1em; font-weight:600; color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap; }
 .pc-tab-item.activo{ color:#152238; border-bottom-color:#2F6FED; }
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
 .pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
+
+/* ===================== ZONA DE PULGARES (botones principales) ===================== */
+.modal-footer.pc-footer-thumb{
+    position:sticky; bottom:0; background:#fff; z-index:5;
+    display:flex; justify-content:space-between; align-items:center; gap:16px;
+    padding:16px 22px; border-top:1px solid #eee7db;
+}
+.pc-footer-thumb .btn{ min-height:56px; font-size:1.05em; font-weight:700; border-radius:12px; flex:0 1 260px; }
+.pc-footer-thumb .btn.btn-primary{ flex:1 1 280px; }
+@media (max-width:560px){
+    .pc-footer-thumb{ flex-wrap:wrap; }
+    .pc-footer-thumb .btn{ flex:1 1 100%; }
+}
+
+/* Botón principal grande, fácil de alcanzar en la parte superior de la pantalla */
+.pc-btn-lg-touch{ min-height:52px; }
 </style>
 
 <div class="pc-card" style="margin:20px;">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Producción</h2>
-        <button class="pc-btn pc-btn-primary pc-btn-lg" onclick="abrirModalCrearProduccion()">
+        <button class="pc-btn pc-btn-primary pc-btn-lg pc-btn-lg-touch" onclick="abrirModalCrearProduccion()">
             <i class="fa-solid fa-plus"></i> Registrar producción
         </button>
     </div>
@@ -205,112 +260,105 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
         </div>
         <div class="modal-body">
 
-          <div class="row">
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Operario</label>
-                <input type="text" class="form-control" value="<?= htmlspecialchars($operarioNombre) ?>" disabled>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Máquina</label>
-                <select class="form-select form-select-lg" id="prod_maquina_id">
-                    <option value="">Selecciona...</option>
-                </select>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Categoría de material</label>
-                <select class="form-select form-select-lg" id="prod_categoria_material_id">
-                    <option value="">Selecciona...</option>
-                </select>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Sucursal</label>
-                <select class="form-select form-select-lg" id="prod_sucursal_id">
-                    <option value="">Selecciona...</option>
-                </select>
-            </div>
-        </div>
+          <div class="pc-form-layout">
 
-          <div class="row">
-            <div class="col-md-4 mb-3">
-                <label class="form-label">Producto *</label>
-                <select class="form-select form-select-lg" id="prod_producto_id" required>
-                    <option value="">Selecciona un producto...</option>
-                </select>
-            </div>
-            <div class="col-md-4 mb-3">
-                <label class="form-label">Molde *</label>
-                <select class="form-select form-select-lg" id="prod_molde_id" required disabled>
-                    <option value="">Primero selecciona un producto...</option>
-                </select>
-            </div>
-            <div class="col-md-4 mb-3">
-                <label class="form-label">Color *</label>
-                <select class="form-select form-select-lg" id="prod_color_id" required>
-                    <option value="">Selecciona un color...</option>
-                </select>
-            </div>
-          </div>
+            <!-- Columna izquierda: selectores tipo card (sin combos) -->
+            <div class="pc-form-col-left">
 
-          <div class="row">
-            <div class="col-md-4 mb-3">
-                <label class="form-label">Fecha de registro</label>
-                <input type="datetime-local" class="form-control form-control-lg" id="prod_fecha">
-            </div>
-            <div class="col-md-8 mb-3">
-                <label class="form-label">Observaciones</label>
-                <input type="text" class="form-control form-control-lg" id="prod_observaciones" placeholder="Opcional">
-            </div>
-        </div>
-
-          <hr>
-
-          <div class="mb-2 d-flex justify-content-between align-items-center flex-wrap gap-1">
-            <label class="form-label mb-0">Materiales consumidos (opcional)</label>
-            <span class="form-text mb-0">Si este avance no consume material nuevo, deja el ticket vacío.</span>
-          </div>
-
-          <div class="pc-mat-layout">
-            <div class="pc-mat-panel">
-                <div class="pc-mat-panel-head">
-                    <h6><i class="fa-solid fa-boxes-stacked"></i> Menú de materiales</h6>
+                <div class="pc-selector-block">
+                    <div class="pc-sel-label">Producto <span class="req">*</span></div>
+                    <div class="pc-chip-strip" id="chips_producto"></div>
                 </div>
-                <div class="pc-mat-tabs">
-                    <button type="button" class="pc-mat-tab activo" data-tipo="material" onclick="seleccionarTabMaterial('material')">
-                        <i class="fa-solid fa-cube"></i> Materiales
-                    </button>
-                    <button type="button" class="pc-mat-tab" data-tipo="tinte" onclick="seleccionarTabMaterial('tinte')">
-                        <i class="fa-solid fa-droplet"></i> Tintes
-                    </button>
+
+                <div class="pc-selector-block" id="bloque_molde" style="display:none;">
+                    <div class="pc-sel-label">Molde <span class="req">*</span></div>
+                    <div class="pc-chip-strip" id="chips_molde"></div>
                 </div>
-                <div class="pc-mat-search">
-                    <input type="text" id="prod_mat_buscar" class="form-control form-control-lg" placeholder="Buscar material...">
+
+                <div class="pc-selector-block">
+                    <div class="pc-sel-label">Color <span class="req">*</span></div>
+                    <div class="pc-chip-strip" id="chips_color"></div>
                 </div>
-                <div class="pc-mat-grid" id="prod_materiales_grid">
-                    <div class="pc-mat-empty">Cargando materiales...</div>
+
+                <div class="pc-selector-row-compact">
+                    <div class="pc-selector-block">
+                        <div class="pc-sel-label">Máquina</div>
+                        <div class="pc-chip-strip" id="chips_maquina"></div>
+                    </div>
+                    <div class="pc-selector-block">
+                        <div class="pc-sel-label">Categoría material</div>
+                        <div class="pc-chip-strip" id="chips_categoria"></div>
+                    </div>
+                    <div class="pc-selector-block">
+                        <div class="pc-sel-label">Sucursal</div>
+                        <div class="pc-chip-strip" id="chips_sucursal"></div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <label class="form-label">Fecha de registro</label>
+                        <input type="datetime-local" class="form-control form-control-lg" id="prod_fecha">
+                    </div>
+                    <div class="col-6 mb-3">
+                        <label class="form-label">Observaciones</label>
+                        <input type="text" class="form-control form-control-lg" id="prod_observaciones" placeholder="Opcional">
+                    </div>
                 </div>
             </div>
 
-            <div class="pc-tk-panel">
-                <div class="pc-tk-panel-head">
-                    <h6><i class="fa-solid fa-receipt"></i> Ticket de este avance</h6>
+            <!-- Columna derecha: materiales + ticket (ya existía como panel doble) -->
+            <div class="pc-form-col-right">
+                <div class="mb-2 d-flex justify-content-between align-items-center flex-wrap gap-1">
+                    <label class="form-label mb-0">Materiales consumidos (opcional)</label>
+                    <span class="form-text mb-0">Si este avance no consume material nuevo, deja el ticket vacío.</span>
                 </div>
-                <ul class="pc-tk-list" id="prod_ticket_list">
-                    <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>
-                </ul>
-                <div class="pc-tk-resumen" id="prod_ticket_footer">
-                <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
-                <div class="pc-tk-resumen-texto">
-                    <span class="total">
-                    <input type="number" step="1" min="1" id="prod_cantidad" class="pc-tk-total-input" required> Kg en total
-                    </span>
-                    <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
+
+                <div class="pc-mat-layout">
+                    <div class="pc-mat-panel">
+                        <div class="pc-mat-panel-head">
+                            <h6><i class="fa-solid fa-boxes-stacked"></i> Menú de materiales</h6>
+                        </div>
+                        <div class="pc-mat-tabs">
+                            <button type="button" class="pc-mat-tab activo" data-tipo="material" onclick="seleccionarTabMaterial('material')">
+                                <i class="fa-solid fa-cube"></i> Materiales
+                            </button>
+                            <button type="button" class="pc-mat-tab" data-tipo="tinte" onclick="seleccionarTabMaterial('tinte')">
+                                <i class="fa-solid fa-droplet"></i> Tintes
+                            </button>
+                        </div>
+                        <div class="pc-mat-search">
+                            <input type="text" id="prod_mat_buscar" class="form-control form-control-lg" placeholder="Buscar material...">
+                        </div>
+                        <div class="pc-mat-grid" id="prod_materiales_grid">
+                            <div class="pc-mat-empty">Cargando materiales...</div>
+                        </div>
+                    </div>
+
+                    <div class="pc-tk-panel">
+                        <div class="pc-tk-panel-head">
+                            <h6><i class="fa-solid fa-receipt"></i> Ticket de este avance</h6>
+                        </div>
+                        <ul class="pc-tk-list" id="prod_ticket_list">
+                            <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>
+                        </ul>
+                        <div class="pc-tk-resumen" id="prod_ticket_footer">
+                        <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                        <div class="pc-tk-resumen-texto">
+                            <span class="total">
+                            <input type="number" step="1" min="1" id="prod_cantidad" class="pc-tk-total-input" required> Kg en total
+                            </span>
+                            <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
+                        </div>
+                    </div>
+                    </div>
                 </div>
             </div>
-            </div>
+
           </div>
 
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer pc-footer-thumb">
           <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-primary btn-lg">Guardar</button>
         </div>
@@ -334,8 +382,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 <div class="pc-ens-step-num">1</div>
                 <div class="pc-ens-step-body">
                 <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>
-                    <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
-                           id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+                    <div class="pc-num-stepper">
+                        <button type="button" onclick="ajustarCantidadProducida(-1)"><i class="fa-solid fa-minus"></i></button>
+                        <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
+                               id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+                        <button type="button" onclick="ajustarCantidadProducida(1)"><i class="fa-solid fa-plus"></i></button>
+                    </div>
                 </div>
             </div>
 
@@ -350,19 +402,21 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div class="d-flex flex-wrap gap-2 mb-2" id="merma_colores_chips"></div>
                         <input type="text" class="form-control form-control-lg mb-2" id="merma_nota"
                                placeholder='Nota opcional (ej. "combinado azul y rojo", "purga")'>
-                        <div class="input-group input-group-lg">
+                        <div class="pc-num-stepper mb-2">
+                            <button type="button" onclick="ajustarCantidadMerma(-1)"><i class="fa-solid fa-minus"></i></button>
                             <input type="number" step="0.0001" min="0.0001" class="form-control"
                                    id="cantidad_merma_kg" placeholder="Kg de merma">
-                            <button type="button" class="btn btn-outline-danger" id="btnRegistrarMerma">
-                                <i class="fa-solid fa-triangle-exclamation"></i> Registrar
-                            </button>
+                            <button type="button" onclick="ajustarCantidadMerma(1)"><i class="fa-solid fa-plus"></i></button>
                         </div>
+                        <button type="button" class="btn btn-outline-danger btn-lg w-100" id="btnRegistrarMerma">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Registrar merma
+                        </button>
                     </div>
                 </div>
             </div>
 
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer pc-footer-thumb">
           <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitCantidadEnsamblaje">Continuar <i class="fa-solid fa-arrow-right"></i></button>
         </div>
@@ -395,6 +449,21 @@ let ticketLineas = [];
 let produccionesCache = [];
 let productoTabActivo = null;
 
+// ---- Estado de los selectores tipo card (reemplaza a los <select>) ----
+let maquinasProdCache = null;
+let sucursalesProdCache = null;
+let coloresProdCache = null;
+let moldesProdCache = [];
+
+let selEstado = {
+    maquina_id: '', maquina_nombre: '',
+    categoria_material_id: '', categoria_nombre: '',
+    sucursal_id: '', sucursal_nombre: '',
+    producto_id: '', producto_nombre: '',
+    molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
+    color_id: '', color_nombre: '', color_rgb: '',
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
@@ -403,10 +472,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
-
-    document.getElementById('prod_producto_id').addEventListener('change', (e) => {
-        cargarMoldesDeProducto(e.target.value, null);
-    });
 
     iniciarAutoRefresh();
 });
@@ -448,7 +513,6 @@ async function llamarSucursal(accion, params = {}) {
     return resp.json();
 }
 
-let sucursalesProdCache = null;
 async function obtenerSucursalesProd() {
     if (sucursalesProdCache) return sucursalesProdCache;
     const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
@@ -546,7 +610,25 @@ function aplicarUnidadesEtapaModal(p) {
     inputMerma.min = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
     inputMerma.dataset.unidad = unidadMerma;
 
-    document.getElementById('btnRegistrarMerma').innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Registrar (${unidadMerma})`;
+    document.getElementById('btnRegistrarMerma').innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Registrar merma (${unidadMerma})`;
+}
+
+function ajustarCantidadProducida(delta) {
+    const input = document.getElementById('cantidad_producida_ensamblaje');
+    const unidad = input.dataset.unidad || 'kg';
+    const paso = esUnidadEntera(unidad) ? 1 : 0.1;
+    let v = parseFloat(input.value) || 0;
+    v = Math.max(0, Math.round((v + delta * paso) * 10000) / 10000);
+    input.value = v;
+}
+
+function ajustarCantidadMerma(delta) {
+    const input = document.getElementById('cantidad_merma_kg');
+    const unidad = input.dataset.unidad || 'kg';
+    const paso = esUnidadEntera(unidad) ? 1 : 0.1;
+    let v = parseFloat(input.value) || 0;
+    v = Math.max(0, Math.round((v + delta * paso) * 10000) / 10000);
+    input.value = v;
 }
 
 function formatearFechaHoraLocal(fechaIso) {
@@ -636,72 +718,200 @@ async function obtenerProductosMoldeProd() {
     return productosMoldeProdCache;
 }
 
-async function cargarMoldesDeProducto(productoId, seleccion) {
-    const moldeSelect = document.getElementById('prod_molde_id');
-    if (!productoId) {
-        moldeSelect.innerHTML = '<option value="">Primero selecciona un producto...</option>';
-        moldeSelect.disabled = true;
-        return;
-    }
-    moldeSelect.disabled = false;
-    moldeSelect.innerHTML = '<option value="">Cargando moldes...</option>';
-    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: productoId });
-    const moldes = json.success ? json.moldes : [];
-    if (moldes.length === 0) {
-        moldeSelect.innerHTML = '<option value="">Este producto no tiene moldes asociados</option>';
-        return;
-    }
-    moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
-        moldes.map(m => `<option value="${m.unico_molde}" data-molde-id="${m.molde_id}" data-etiqueta="${m.etiqueta}">${m.molde_nombre}</option>`).join('');
-    if (seleccion) {
-        const porUnico   = [...moldeSelect.options].find(o => o.value == seleccion);
-        const porMoldeId = [...moldeSelect.options].find(o => o.dataset.moldeId == seleccion);
-        moldeSelect.value = (porUnico || porMoldeId)?.value ?? '';
-    }
+async function obtenerColoresProd() {
+    if (coloresProdCache) return coloresProdCache;
+    const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
+    coloresProdCache = json.success ? json.colores : [];
+    return coloresProdCache;
 }
 
-async function cargarSelectsModal(seleccion = {}) {
-    const [maquinas, colores, categorias, productos, sucursales] = await Promise.all([
+// ===================== RENDER GENÉRICO DE CARDS SELECCIONABLES =====================
+// Sustituye a los <select>: siempre muestra las opciones como cards táctiles,
+// nunca hay que "abrir" nada. Un tap selecciona y resalta la card activa.
+function renderChipGrid(contId, items, cfg) {
+    const cont = document.getElementById(contId);
+    if (!cont) return;
+    if (!items || items.length === 0) {
+        cont.innerHTML = `<div class="pc-sel-vacio">${cfg.vacioTxt || 'No hay opciones disponibles.'}</div>`;
+        return;
+    }
+    const seleccionado = cfg.seleccionadoId ?? '';
+    cont.innerHTML = items.map(it => {
+        const id = cfg.getId(it);
+        const activo = String(id) === String(seleccionado);
+        let icoHtml = '';
+        if (cfg.getColorDot) {
+            icoHtml = `<span class="ico"><span class="pc-color-dot" style="background:${cfg.getColorDot(it) || '#ccc'}"></span></span>`;
+        } else if (cfg.getIcon) {
+            icoHtml = `<span class="ico"><i class="fa-solid ${cfg.getIcon(it)}"></i></span>`;
+        }
+        return `<button type="button" class="pc-chip-card ${activo ? 'activo' : ''}" onclick="${cfg.onSeleccionar}('${id}')">${icoHtml}${cfg.getLabel(it)}</button>`;
+    }).join('');
+}
+
+// ---- Producto ----
+function pintarBloqueProducto(productos) {
+    renderChipGrid('chips_producto', productos, {
+        getId: p => p.producto_id, getLabel: p => p.descripcion, getIcon: () => 'fa-box',
+        seleccionadoId: selEstado.producto_id, onSeleccionar: 'seleccionarProducto',
+        vacioTxt: 'No hay productos con moldes asociados.',
+    });
+}
+async function seleccionarProducto(id) {
+    selEstado.producto_id = id;
+    const p = (productosMoldeProdCache || []).find(x => String(x.producto_id) === String(id));
+    selEstado.producto_nombre = p ? p.descripcion : '';
+    selEstado.molde_id = ''; selEstado.unico_molde = ''; selEstado.molde_etiqueta = ''; selEstado.molde_nombre = '';
+    pintarBloqueProducto(productosMoldeProdCache);
+    await cargarMoldesDeProducto(id, null);
+}
+
+// ---- Molde (depende de producto) ----
+async function cargarMoldesDeProducto(productoId, seleccion) {
+    const bloque = document.getElementById('bloque_molde');
+    const cont = document.getElementById('chips_molde');
+    if (!productoId) {
+        bloque.style.display = 'none';
+        cont.innerHTML = '';
+        moldesProdCache = [];
+        return;
+    }
+    bloque.style.display = '';
+    cont.innerHTML = '<div class="pc-sel-vacio">Cargando moldes...</div>';
+    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: productoId });
+    moldesProdCache = json.success ? json.moldes : [];
+
+    if (moldesProdCache.length === 0) {
+        cont.innerHTML = '<div class="pc-sel-vacio">Este producto no tiene moldes asociados.</div>';
+        return;
+    }
+
+    if (seleccion) {
+        const encontrado = moldesProdCache.find(m => String(m.unico_molde) === String(seleccion) || String(m.molde_id) === String(seleccion));
+        if (encontrado) {
+            selEstado.molde_id = encontrado.molde_id; selEstado.unico_molde = encontrado.unico_molde;
+            selEstado.molde_etiqueta = encontrado.etiqueta; selEstado.molde_nombre = encontrado.molde_nombre;
+        }
+    }
+
+    renderChipGrid('chips_molde', moldesProdCache, {
+        getId: m => m.unico_molde, getLabel: m => m.molde_nombre, getIcon: () => 'fa-shapes',
+        seleccionadoId: selEstado.unico_molde, onSeleccionar: 'seleccionarMolde',
+    });
+}
+function seleccionarMolde(uniqueVal) {
+    const m = moldesProdCache.find(x => String(x.unico_molde) === String(uniqueVal));
+    if (!m) return;
+    selEstado.molde_id = m.molde_id; selEstado.unico_molde = m.unico_molde;
+    selEstado.molde_etiqueta = m.etiqueta; selEstado.molde_nombre = m.molde_nombre;
+    renderChipGrid('chips_molde', moldesProdCache, {
+        getId: mm => mm.unico_molde, getLabel: mm => mm.molde_nombre, getIcon: () => 'fa-shapes',
+        seleccionadoId: selEstado.unico_molde, onSeleccionar: 'seleccionarMolde',
+    });
+}
+
+// ---- Color ----
+function pintarBloqueColor(colores) {
+    renderChipGrid('chips_color', colores, {
+        getId: c => c.id, getLabel: c => c.nombre, getColorDot: c => c.rgb,
+        seleccionadoId: selEstado.color_id, onSeleccionar: 'seleccionarColor',
+    });
+}
+function seleccionarColor(id) {
+    const c = (coloresProdCache || []).find(x => String(x.id) === String(id));
+    if (!c) return;
+    selEstado.color_id = id; selEstado.color_nombre = c.nombre; selEstado.color_rgb = c.rgb;
+    pintarBloqueColor(coloresProdCache);
+}
+
+// ---- Máquina (opcional) ----
+function pintarBloqueMaquina(maquinas) {
+    const items = [{ id: '', nombre: 'Ninguna' }, ...(maquinas || [])];
+    renderChipGrid('chips_maquina', items, {
+        getId: m => m.id, getLabel: m => m.nombre, getIcon: m => (m.id === '' ? 'fa-ban' : 'fa-gears'),
+        seleccionadoId: selEstado.maquina_id, onSeleccionar: 'seleccionarMaquina',
+    });
+}
+function seleccionarMaquina(id) {
+    selEstado.maquina_id = id;
+    const m = (maquinasProdCache || []).find(x => String(x.id) === String(id));
+    selEstado.maquina_nombre = m ? m.nombre : '';
+    pintarBloqueMaquina(maquinasProdCache);
+}
+
+// ---- Categoría de material (opcional) ----
+function pintarBloqueCategoria(categorias) {
+    const items = [{ id: '', nombre: 'Ninguna' }, ...(categorias || [])];
+    renderChipGrid('chips_categoria', items, {
+        getId: c => c.id, getLabel: c => c.nombre, getIcon: c => (c.id === '' ? 'fa-ban' : 'fa-tags'),
+        seleccionadoId: selEstado.categoria_material_id, onSeleccionar: 'seleccionarCategoria',
+    });
+}
+function seleccionarCategoria(id) {
+    selEstado.categoria_material_id = id;
+    const c = (categoriasMaterialProdCache || []).find(x => String(x.id) === String(id));
+    selEstado.categoria_nombre = c ? c.nombre : '';
+    pintarBloqueCategoria(categoriasMaterialProdCache);
+}
+
+// ---- Sucursal (opcional) ----
+function pintarBloqueSucursal(sucursales) {
+    const items = [{ id: '', nombre: 'Ninguna' }, ...(sucursales || [])];
+    renderChipGrid('chips_sucursal', items, {
+        getId: s => s.id, getLabel: s => s.nombre, getIcon: s => (s.id === '' ? 'fa-ban' : 'fa-store'),
+        seleccionadoId: selEstado.sucursal_id, onSeleccionar: 'seleccionarSucursal',
+    });
+}
+function seleccionarSucursal(id) {
+    selEstado.sucursal_id = id;
+    const s = (sucursalesProdCache || []).find(x => String(x.id) === String(id));
+    selEstado.sucursal_nombre = s ? s.nombre : '';
+    pintarBloqueSucursal(sucursalesProdCache);
+}
+
+// ---- Carga inicial de todos los selectores del modal ----
+async function cargarSelectoresModal(seleccion = {}) {
+    const [maquinasJson, colores, categorias, productos, sucursales] = await Promise.all([
         llamarProduccion('BUSCARMAQUINAS'),
-        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
+        obtenerColoresProd(),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
         obtenerSucursalesProd(),
     ]);
+    maquinasProdCache = maquinasJson.success ? maquinasJson.maquinas : [];
 
-    const sucursalSelect = document.getElementById('prod_sucursal_id');
-    sucursalSelect.innerHTML = '<option value="">Selecciona...</option>' +
-        (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
-    if (seleccion.sucursal_id) sucursalSelect.value = seleccion.sucursal_id;
+    selEstado = {
+        maquina_id: seleccion.maquina_id ?? '', maquina_nombre: '',
+        categoria_material_id: seleccion.categoria_material_id ?? '', categoria_nombre: '',
+        sucursal_id: seleccion.sucursal_id ?? '', sucursal_nombre: '',
+        producto_id: seleccion.producto_id ?? '', producto_nombre: '',
+        molde_id: '', unico_molde: seleccion.unico_molde ?? '', molde_etiqueta: '', molde_nombre: '',
+        color_id: seleccion.color_id ?? '', color_nombre: '', color_rgb: '',
+    };
 
-    const maquinaSelect = document.getElementById('prod_maquina_id');
-    maquinaSelect.innerHTML = '<option value="">Selecciona...</option>';
-    if (maquinas.success) maquinas.maquinas.forEach(m =>
-        maquinaSelect.insertAdjacentHTML('beforeend', `<option value="${m.id}">${m.nombre}</option>`));
-    if (seleccion.maquina_id) maquinaSelect.value = seleccion.maquina_id;
+    const maq = maquinasProdCache.find(x => String(x.id) === String(selEstado.maquina_id));
+    if (maq) selEstado.maquina_nombre = maq.nombre;
+    const cat = (categorias || []).find(x => String(x.id) === String(selEstado.categoria_material_id));
+    if (cat) selEstado.categoria_nombre = cat.nombre;
+    const suc = (sucursales || []).find(x => String(x.id) === String(selEstado.sucursal_id));
+    if (suc) selEstado.sucursal_nombre = suc.nombre;
+    const prod = (productos || []).find(x => String(x.producto_id) === String(selEstado.producto_id));
+    if (prod) selEstado.producto_nombre = prod.descripcion;
+    const col = (colores || []).find(x => String(x.id) === String(selEstado.color_id));
+    if (col) { selEstado.color_nombre = col.nombre; selEstado.color_rgb = col.rgb; }
 
-    const categoriaSelect = document.getElementById('prod_categoria_material_id');
-    categoriaSelect.innerHTML = '<option value="">Selecciona...</option>' +
-        (categorias || []).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-    if (seleccion.categoria_material_id) categoriaSelect.value = seleccion.categoria_material_id;
+    pintarBloqueMaquina(maquinasProdCache);
+    pintarBloqueCategoria(categorias);
+    pintarBloqueSucursal(sucursales);
+    pintarBloqueProducto(productos);
+    pintarBloqueColor(colores);
 
-    const productoSelect = document.getElementById('prod_producto_id');
-    productoSelect.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        (productos || []).map(p => `<option value="${p.producto_id}">${p.descripcion}</option>`).join('');
-
-    if (seleccion.producto_id) {
-        productoSelect.value = seleccion.producto_id;
-        await cargarMoldesDeProducto(seleccion.producto_id, seleccion.unico_molde || seleccion.molde_id);
+    if (selEstado.producto_id) {
+        await cargarMoldesDeProducto(selEstado.producto_id, selEstado.unico_molde || null);
     } else {
-        document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
-        document.getElementById('prod_molde_id').disabled = true;
+        document.getElementById('bloque_molde').style.display = 'none';
+        document.getElementById('chips_molde').innerHTML = '';
     }
-
-    const colorSelect = document.getElementById('prod_color_id');
-    colorSelect.innerHTML = '<option value="">Selecciona un color...</option>';
-    if (colores.success) colores.colores.forEach(c =>
-        colorSelect.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
-    if (seleccion.color_id) colorSelect.value = seleccion.color_id;
 }
 
 async function obtenerOpcionesMaterialesProd() {
@@ -986,12 +1196,21 @@ function obtenerDetalleJsonProd() {
 function limpiarFormularioProduccion() {
     document.getElementById('formProduccion').reset();
     document.getElementById('prod_mat_buscar').value = '';
-    document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
-    document.getElementById('prod_molde_id').disabled = true;
     produccionIdActual = 0;
     ticketLineas = [];
     tipoMaterialActivo = 'material';
     document.querySelectorAll('.pc-mat-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.tipo === 'material'));
+
+    selEstado = {
+        maquina_id: '', maquina_nombre: '',
+        categoria_material_id: '', categoria_nombre: '',
+        sucursal_id: '', sucursal_nombre: '',
+        producto_id: '', producto_nombre: '',
+        molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
+        color_id: '', color_nombre: '', color_rgb: '',
+    };
+    document.getElementById('bloque_molde').style.display = 'none';
+    document.getElementById('chips_molde').innerHTML = '';
     renderTicket();
 }
 
@@ -999,7 +1218,7 @@ async function abrirModalCrearProduccion() {
     limpiarFormularioProduccion();
     modoEdicionProduccion = false;
     document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
-    await cargarSelectsModal();
+    await cargarSelectoresModal();
     const ahora = new Date();
     ahora.setMinutes(ahora.getMinutes() - ahora.getTimezoneOffset());
     document.getElementById('prod_fecha').value = ahora.toISOString().substring(0, 16);
@@ -1023,7 +1242,7 @@ async function abrirModalEditarProduccion(id) {
     const partesUnico = (p.unico_molde_producto || '').split('-');
     const productoIdDesdeUnico = partesUnico.length > 1 ? partesUnico[1] : null;
 
-    await cargarSelectsModal({
+    await cargarSelectoresModal({
         maquina_id: p.maquina_id, producto_id: productoIdDesdeUnico,
         unico_molde: p.unico_molde_producto, color_id: p.color_id,
         categoria_material_id: p.categoria_material_id, sucursal_id: p.sucursal_id,
@@ -1055,22 +1274,21 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    const moldeSelect = document.getElementById('prod_molde_id');
-    const opcionMolde  = moldeSelect.selectedOptions[0];
-    const moldeIdReal  = opcionMolde?.dataset.moldeId || '';
-    const uniqueMolde  = moldeSelect.value;
-    const moldeProducto = opcionMolde?.dataset.etiqueta || '';
+    if (!selEstado.producto_id || !selEstado.unico_molde || !selEstado.color_id) {
+        Swal.fire('Faltan datos', 'Selecciona producto, molde y color antes de guardar.', 'warning');
+        return;
+    }
 
     const params = {
         id: produccionIdActual,
         operario_id: OPERARIO_ID,
-        maquina_id: document.getElementById('prod_maquina_id').value,
-        categoria_material_id: document.getElementById('prod_categoria_material_id').value,
-        sucursal_id: document.getElementById('prod_sucursal_id').value,
-        molde_id: moldeIdReal,
-        unico_molde: uniqueMolde,
-        molde_producto: moldeProducto,
-        color_id: document.getElementById('prod_color_id').value,
+        maquina_id: selEstado.maquina_id,
+        categoria_material_id: selEstado.categoria_material_id,
+        sucursal_id: selEstado.sucursal_id,
+        molde_id: selEstado.molde_id,
+        unico_molde: selEstado.unico_molde,
+        molde_producto: selEstado.molde_etiqueta,
+        color_id: selEstado.color_id,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),

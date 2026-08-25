@@ -64,16 +64,17 @@ include("header.php");
         </div>
         <div class="modal-body">
           <div class="mb-2">
-            <label class="form-label">DNI</label>
+            <label class="form-label">DNI *</label>
             <div class="input-group">
               <input type="text" class="form-control" id="op_dni" maxlength="8"
-                     placeholder="Ej: 73578005" inputmode="numeric">
+                     placeholder="Ej: 73578005" inputmode="numeric" required>
               <button type="button" class="btn btn-outline-secondary" id="btnBuscarDNI">
                 <i class="fa-solid fa-magnifying-glass"></i> Buscar
               </button>
             </div>
-            <small class="text-muted">Opcional. Autocompleta el nombre si se ingresa.</small>
+            <small class="text-muted">Obligatorio. Se usa como usuario y contraseña iniciales de acceso al sistema.</small>
           </div>
+          <div id="op_usuario_info" class="alert alert-info py-2 px-3 d-none mb-2"></div>
           <div class="mb-2">
             <label class="form-label">Nombre completo *</label>
             <input type="text" class="form-control" id="op_nombre_completo" required>
@@ -318,6 +319,9 @@ function limpiarFormularioOperario() {
     tomSelectSucursales.clear();
     tomSelectEtapas.clear();
     operarioIdActual = 0;
+    const infoUsuario = document.getElementById('op_usuario_info');
+    infoUsuario.classList.add('d-none');
+    infoUsuario.innerHTML = '';
 }
 
 function abrirModalCrearOperario() {
@@ -353,7 +357,35 @@ async function abrirModalEditarOperario(id) {
     }
     etapasAsignadas.forEach(e => tomSelectEtapas.addItem(e.etapa_id, true));
 
+    mostrarInfoUsuarioOperario(o);
+
     modalOperario.show();
+}
+
+function mostrarInfoUsuarioOperario(o) {
+    const infoUsuario = document.getElementById('op_usuario_info');
+    if (o.usuario_id) {
+        infoUsuario.className = 'alert alert-info py-2 px-3 mb-2';
+        infoUsuario.innerHTML = `Cuenta de acceso vinculada: <strong>${o.usuario_login}</strong>. ` +
+            `Editar el DNI aquí no cambia el usuario ni la contraseña ya existentes.`;
+    } else {
+        infoUsuario.className = 'alert alert-warning py-2 px-3 mb-2';
+        infoUsuario.innerHTML = `Este operario no tiene cuenta de acceso vinculada. ` +
+            `<button type="button" class="btn btn-sm btn-outline-primary ms-1" id="btnCrearUsuarioOperario">Crear cuenta ahora</button>`;
+        document.getElementById('btnCrearUsuarioOperario').addEventListener('click', crearUsuarioParaOperarioActual);
+    }
+}
+
+async function crearUsuarioParaOperarioActual() {
+    if (!operarioIdActual) return;
+    const json = await llamarOperario('CREARUSUARIODESDEOPERARIO', { id: operarioIdActual });
+    if (json.success) {
+        Swal.fire('Listo', json.message, 'success');
+        const detalle = await llamarOperario('OBTENEROPERARIO', { id: operarioIdActual });
+        if (detalle.success) mostrarInfoUsuarioOperario(detalle.operario);
+    } else {
+        Swal.fire('No se pudo crear', json.message, 'warning');
+    }
 }
 
 async function buscarDNIOperario() {
@@ -397,7 +429,8 @@ document.getElementById('formOperario').addEventListener('submit', async functio
 
     if (json.success) {
         modalOperario.hide();
-        Swal.fire('Listo', json.message, 'success');
+        const esColisionUsuario = json.modo === 'crear' && json.usuario_creado === false;
+        Swal.fire(esColisionUsuario ? 'Operario creado' : 'Listo', json.message, esColisionUsuario ? 'warning' : 'success');
         cargarOperarios();
     } else {
         Swal.fire('Error', json.message, 'error');

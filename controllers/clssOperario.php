@@ -28,6 +28,14 @@
  * tener que hacer join al listar. Se resincronizan completos en cada
  * guardado (no se hace merge parcial).
  *
+ * DNI y cuenta de acceso: el DNI es obligatorio al crear un operario.
+ * Al registrarlo, crearUsuarioDesdeOperario() genera automáticamente una
+ * fila en 'usuario' con user_ = DNI y pass_ = DNI hasheado (bcrypt vía
+ * password_hash), vinculada por 'usuario.operario_id' (FK, UNIQUE).
+ * Si ya existe un usuario con ese DNI como login, no se duplica: el
+ * operario se crea igual y la respuesta trae un aviso ('usuario_creado'
+ * => false). Editar el operario NO toca la cuenta de acceso existente.
+ *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -61,6 +69,9 @@ function controladorOperario($accion)
             break;
         case 'REACTIVAROPERARIO':
             reactivarOperario();
+            break;
+        case 'CREARUSUARIODESDEOPERARIO':
+            crearUsuarioManualDesdeOperario();
             break;
         case 'LISTARCARGOS':
             listarCargos();
@@ -328,9 +339,11 @@ function obtenerOperario($id)
     if (!$id) responder(false, 'ID inválido.');
 
     $result = executeQuery($conectar, "
-        SELECT o.*, c.nombre AS cargo_nombre
+        SELECT o.*, c.nombre AS cargo_nombre,
+               u.id AS usuario_id, u.user_ AS usuario_login
         FROM operario o
         LEFT JOIN cargo c ON c.id = o.cargo_id
+        LEFT JOIN usuario u ON u.operario_id = o.id
         WHERE o.id = :id
     ", ['id' => $id]);
     if (empty($result)) responder(false, 'Operario no encontrado.');
@@ -378,18 +391,19 @@ function guardarOperario()
     if (!is_array($etapasInput)) $etapasInput = [];
 
     if (empty($nombre_completo)) responder(false, 'El nombre completo es obligatorio.');
-    if ($dni !== '' && !preg_match('/^\d{8}$/', $dni)) {
+    if (empty($dni)) {
+        responder(false, 'El DNI es obligatorio: se usa para generar el usuario de acceso al sistema.');
+    }
+    if (!preg_match('/^\d{8}$/', $dni)) {
         responder(false, 'El DNI debe tener 8 dígitos.');
     }
 
     // Validar unicidad del DNI (excluyendo al propio registro en edición)
-    if ($dni !== '') {
-        $existe = executeQuery($conectar, "
-            SELECT id FROM operario WHERE dni = :dni AND id <> :id
-        ", ['dni' => $dni, 'id' => $id]);
-        if (!empty($existe)) {
-            responder(false, 'Ya existe un operario registrado con ese DNI.');
-        }
+    $existe = executeQuery($conectar, "
+        SELECT id FROM operario WHERE dni = :dni AND id <> :id
+    ", ['dni' => $dni, 'id' => $id]);
+    if (!empty($existe)) {
+        responder(false, 'Ya existe un operario registrado con ese DNI.');
     }
 
     $sucursalesResueltas = resolverSucursales($conectar, $sucursalesInput);
@@ -447,7 +461,22 @@ function guardarOperario()
             'js_etapas_relacionadas'  => $js_etapas_json,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
-        responder(true, 'Operario creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
+
+        $usuarioCreado = null;
+        if ($nuevo_id) {
+            $usuarioCreado = crearUsuarioDesdeOperario($conectar, $nuevo_id, $datosNuevos['dni'], $datosNuevos['nombre_completo']);
+        }
+
+        $mensaje = 'Operario creado correctamente.';
+        if ($usuarioCreado && $usuarioCreado['ok'] === false) {
+            $mensaje .= ' Aviso: ' . $usuarioCreado['motivo'];
+        }
+
+        responder(true, $mensaje, [
+            'id'             => $nuevo_id,
+            'modo'           => 'crear',
+            'usuario_creado' => $usuarioCreado['ok'] ?? false,
+        ]);
     } else {
         $actual = executeQuery($conectar, "SELECT * FROM operario WHERE id = :id", ['id' => $id]);
         if (empty($actual)) responder(false, 'Operario no encontrado.');
@@ -563,6 +592,80 @@ function listarEtapasActivas()
         ORDER BY orden
     ");
     responder(true, 'OK', ['etapas' => $result]);
+}
+
+/**
+ * Crea automáticamente la cuenta de acceso (tabla 'usuario') para un
+ * operario recién registrado: user_ = DNI, pass_ = DNI hasheado.
+ * Si ya existe un usuario con ese DNI como login, no lo duplica —
+ * devuelve el motivo para que guardarOperario() lo informe en la
+ * respuesta sin bloquear la creación del operario.
+ */
+function crearUsuarioDesdeOperario($conectar, int $operarioId, string $dni, string $nombreCompleto): array
+{
+    $existe = executeQuery($conectar, "SELECT id FROM usuario WHERE user_ = :user_", ['user_' => $dni]);
+    if (!empty($existe)) {
+        return ['ok' => false, 'motivo' => 'Ya existe un usuario con ese DNI como login; no se creó automáticamente.'];
+    }
+
+    $rolYPerfiles = json_encode(['rol' => 'operario', 'perfiles' => []], JSON_UNESCAPED_UNICODE);
+    $passHash     = password_hash($dni, PASSWORD_DEFAULT);
+
+    // json_historial de usuario sigue un patrón parecido a js_historial de
+    // operario: guardamos quién/cómo se creó la cuenta, no solo la fila.
+    $movimiento    = obtenerMovimientoSesion('crear_auto_desde_operario', [[
+        'campo' => 'Origen', 'valor_antes' => '(nuevo)', 'valor_despues' => 'Autogenerado al registrar operario #' . $operarioId,
+    ]]);
+    $jsonHistorial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+    executeQuery($conectar, "
+        INSERT INTO usuario
+            (user_, pass_, nombre_completo, rol_y_perfiles, operario_id, json_historial, fecha_cambio_pass, created_at, updated_at)
+        VALUES
+            (:user_, :pass_, :nombre_completo, :rol_y_perfiles, :operario_id, :json_historial, NOW(), NOW(), NOW())
+    ", [
+        'user_'            => $dni,
+        'pass_'            => $passHash,
+        'nombre_completo'  => $nombreCompleto,
+        'rol_y_perfiles'   => $rolYPerfiles,
+        'operario_id'      => $operarioId,
+        'json_historial'   => $jsonHistorial,
+    ]);
+
+    return ['ok' => true];
+}
+
+/**
+ * Acción manual (botón en el modal de edición) para vincular/crear la
+ * cuenta de acceso de un operario que quedó sin 'usuario' — ya sea por
+ * colisión de DNI al crearlo, o por ser un registro anterior a que el
+ * DNI se volviera obligatorio. Reusa crearUsuarioDesdeOperario().
+ */
+function crearUsuarioManualDesdeOperario()
+{
+    $conectar = conectar_oll_BD();
+    $id = intval($_POST['id'] ?? 0);
+    if (!$id) responder(false, 'ID inválido.');
+
+    $actual = executeQuery($conectar, "SELECT id, nombre_completo, dni FROM operario WHERE id = :id", ['id' => $id]);
+    if (empty($actual)) responder(false, 'Operario no encontrado.');
+    $operario = $actual[0];
+
+    if (empty($operario['dni'])) {
+        responder(false, 'Este operario no tiene DNI registrado; agrégalo primero para poder crear su cuenta de acceso.');
+    }
+
+    $yaVinculado = executeQuery($conectar, "SELECT id FROM usuario WHERE operario_id = :id", ['id' => $id]);
+    if (!empty($yaVinculado)) {
+        responder(false, 'Este operario ya tiene una cuenta de acceso vinculada.');
+    }
+
+    $resultado = crearUsuarioDesdeOperario($conectar, $id, $operario['dni'], $operario['nombre_completo']);
+    if ($resultado['ok']) {
+        responder(true, 'Cuenta de acceso creada correctamente (usuario y contraseña = DNI).');
+    } else {
+        responder(false, $resultado['motivo']);
+    }
 }
 
 function resolverOperariosEnsamblaje($conectar, array $idsOperario): array
