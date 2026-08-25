@@ -16,7 +16,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
     <title>Empaquetado · Plásticos Chepito</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
@@ -24,7 +24,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
-<body>
+<body class="pc-emp-body">
 
 <header class="pc-op-brand-bar pc-op-brand-bar-inline">
     <div class="pc-op-brand">
@@ -43,73 +43,140 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <style>
 :root{
     --emp-accent:#2F6FED; --emp-accent-bg:#EAF0FE;
+    --emp-header-h:64px;
+    --emp-actionbar-h:78px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+}
+*{ box-sizing:border-box; }
+.pc-emp-body{ overscroll-behavior-y:contain; }
+
+/* =============================================================================
+   SHELL — dos paneles (lista + detalle) que se reacomodan según orientación
+   ============================================================================= */
+.pc-emp-shell{
+    display:flex; flex-direction:column;
+    padding-bottom: calc(var(--emp-actionbar-h) + var(--safe-b) + 14px);
+}
+.pc-emp-workspace{
+    display:grid;
+    grid-template-columns: 1fr;
+    gap:16px;
+    padding: 16px 16px 4px;
+}
+.pc-panel{ min-width:0; }
+.pc-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.pc-panel-head h2{ margin:0; }
+
+/* Landscape en pantalla ancha (tablet apoyada u horizontal): lista + detalle lado a lado, cada uno con su propio scroll */
+@media (orientation:landscape) and (min-width:760px){
+    .pc-emp-workspace{
+        grid-template-columns: minmax(300px, 34%) 1fr;
+        align-items:start;
+        height: calc(100vh - var(--emp-header-h) - var(--emp-actionbar-h) - var(--safe-b) - 20px);
+    }
+    .pc-panel-list, .pc-panel-detail{
+        height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch;
+        padding-right:4px;
+    }
+    .pc-panel-list{ padding-bottom:8px; }
 }
 
-/* ---------- Stat row (mismo patrón que Ensamblaje) ---------- */
-.pc-stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
-.pc-stat-chip{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:14px; display:flex; align-items:center; gap:10px; }
-.pc-stat-chip .ico{ width:38px; height:38px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:16px; }
-.pc-stat-chip .txt .n{ font-size:21px; font-weight:700; line-height:1.15; color:#152238; }
-.pc-stat-chip .txt .l{ font-size:11.5px; color:#8a8578; }
+/* Portrait (tablet en vertical, sostenida con ambas manos): todo apilado, lista arriba compacta y angosta en alto */
+@media (orientation:portrait){
+    .pc-emp-workspace{ grid-template-columns:1fr; }
+    .pc-panel-list{ order:1; }
+    .pc-panel-detail{ order:2; }
+}
+
+/* ---------- Switch Pendientes / Mis paquetes (panel de lista) ---------- */
+.pc-list-switch{ display:flex; gap:8px; background:#f1efe9; border-radius:14px; padding:5px; margin-bottom:14px; }
+.pc-list-switch-btn{
+    flex:1; border:none; background:none; border-radius:10px; padding:12px 10px;
+    font-size:.92em; font-weight:700; color:#8a8578; min-height:44px;
+    display:flex; align-items:center; justify-content:center; gap:7px;
+}
+.pc-list-switch-btn.activo{ background:#fff; color:#152238; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+.pc-list-switch-btn .badge-cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:2px 8px; }
+.pc-list-switch-btn.activo .badge-cnt{ background:var(--emp-accent); color:#fff; }
+
+/* ---------- Stat row (compacta dentro del panel angosto) ---------- */
+.pc-stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
+.pc-stat-chip{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px; display:flex; align-items:center; gap:9px; }
+.pc-stat-chip .ico{ width:34px; height:34px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; }
+.pc-stat-chip .txt .n{ font-size:19px; font-weight:700; line-height:1.15; color:#152238; }
+.pc-stat-chip .txt .l{ font-size:10.5px; color:#8a8578; }
 .pc-stat-chip.s-gray .ico{ background:#EEECE6; color:#8a8578; }
 .pc-stat-chip.s-info .ico{ background:#E3F2FD; color:#0B4DA6; }
 .pc-stat-chip.s-success .ico{ background:#E8F7EE; color:#16A34A; }
 .pc-stat-chip.s-purple .ico{ background:#F1EAFD; color:#7C3AED; }
-@media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
-/* ---------- Tabs de producto (táctiles) ---------- */
-.pc-tabs-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid #e7e4dd; margin-bottom:18px; }
-.pc-tabs-row{ display:flex; align-items:center; gap:20px; flex-wrap:wrap; row-gap:6px; overflow-x:auto; }
-.pc-tab-item{ display:flex; align-items:center; gap:8px; padding:12px 6px 14px 6px; border:none; background:none; cursor:pointer; font-size:1em; font-weight:600; color:#8a8578; border-bottom:2px solid transparent; white-space:nowrap; min-height:44px; }
-.pc-tab-item.activo{ color:#152238; border-bottom-color:var(--emp-accent); }
+/* ---------- Lista de productos pendientes: pestañas -> tarjetas de lista ---------- */
+.pc-tabs-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+.pc-tab-item{
+    display:flex; align-items:center; gap:10px; padding:13px 14px; cursor:pointer;
+    font-size:.96em; font-weight:600; color:#5c5947; white-space:nowrap; min-height:52px;
+    border:1px solid #e7e4dd; border-radius:14px; background:#fff;
+}
+.pc-tab-item.activo{ color:#152238; border-color:var(--emp-accent); background:var(--emp-accent-bg); }
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
-.pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
+.pc-tab-item.activo .cnt{ background:var(--emp-accent); color:#fff; }
+
+/* En landscape con panel angosto, la lista se vuelve una columna vertical de tarjetas (lista real, no scroll horizontal) */
+@media (orientation:landscape) and (min-width:760px){
+    .pc-tabs-row{ flex-direction:column; align-items:stretch; overflow-x:visible; }
+    .pc-tab-item{ width:100%; justify-content:space-between; }
+    .pc-tab-item span:not(.cnt){ flex:1; overflow:hidden; text-overflow:ellipsis; }
+}
 
 .pc-est-empty{ text-align:center; color:#9a9585; padding:50px 12px; font-size:1.05em; }
 .pc-est-empty i{ font-size:1.6em; display:block; margin-bottom:10px; opacity:.5; }
 
 /* ---------- Chips de operarios (táctiles, grandes) ---------- */
-.pc-operario-chips-wrap{ display:flex; flex-wrap:wrap; gap:8px; min-height:44px; align-items:flex-start; padding-top:2px; }
+.pc-operario-chips-wrap{ display:flex; flex-wrap:wrap; gap:9px; min-height:48px; align-items:flex-start; padding-top:2px; }
 .pc-operario-chip{
-    border:1px solid #e2ddcd; background:#fff; border-radius:999px; padding:10px 16px;
-    font-size:.95em; font-weight:600; cursor:pointer; color:#3a3730; min-height:44px;
+    border:1px solid #e2ddcd; background:#fff; border-radius:999px; padding:12px 18px;
+    font-size:.96em; font-weight:600; cursor:pointer; color:#3a3730; min-height:48px;
+    touch-action:manipulation;
 }
 .pc-operario-chip.activo{ background:var(--emp-accent); border-color:var(--emp-accent); color:#fff; }
 
 /* ---------- Estación visual de sacos/colores (táctil, agrandada) ---------- */
 .pc-estacion{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start; }
-@media (max-width:900px){ .pc-estacion{ grid-template-columns:1fr; } }
+@media (max-width:900px), (orientation:portrait){ .pc-estacion{ grid-template-columns:1fr; } }
 .pc-estacion-hint{ font-size:.85em; color:#9a9585; margin:0 0 10px; }
-.pc-sacos-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
+.pc-sacos-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(clamp(140px,18vw,170px),1fr)); gap:14px; }
 .pc-saco-card{
-    border:1px solid #e2ddcd; border-radius:14px; padding:12px; background:#fff;
-    cursor:pointer; text-align:left; position:relative; min-height:110px;
+    border:1px solid #e2ddcd; border-radius:14px; padding:13px; background:#fff;
+    cursor:pointer; text-align:left; position:relative; min-height:132px;
+    touch-action:manipulation;
 }
 .pc-saco-card:active{ transform:scale(.96); border-color:var(--emp-accent); }
 .pc-saco-card.agotado{ opacity:.4; cursor:not-allowed; pointer-events:none; }
-.pc-saco-card .swatch{ width:100%; height:44px; border-radius:10px; }
-.pc-saco-card .nombre{ font-size:.92em; font-weight:700; margin:9px 0 1px; color:#3a3730; }
-.pc-saco-card .origen{ font-size:.8em; color:#9a9585; }
-.pc-saco-card .disp{ font-size:.8em; color:#6b6656; margin-top:2px; font-weight:600; }
+.pc-saco-card .swatch{ width:100%; height:52px; border-radius:10px; }
+.pc-saco-card .nombre{ font-size:.94em; font-weight:700; margin:10px 0 1px; color:#3a3730; }
+.pc-saco-card .origen{ font-size:.81em; color:#9a9585; }
+.pc-saco-card .disp{ font-size:.81em; color:#6b6656; margin-top:2px; font-weight:600; }
 .pc-saco-card .en-mezcla{
     position:absolute; top:8px; right:8px; background:var(--emp-accent); color:#fff;
-    font-size:.72em; font-weight:700; border-radius:999px; padding:2px 9px;
+    font-size:.72em; font-weight:700; border-radius:999px; padding:3px 10px;
 }
 .pc-mezcla-panel{ background:#fdfcfa; border:1px solid #e7e4dd; border-radius:14px; padding:14px 16px; }
 .pc-mezcla-panel-titulo{ font-size:.82em; color:#9a9585; margin:0 0 10px; text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
-.pc-mezcla-lista{ display:flex; flex-direction:column; gap:8px; min-height:36px; }
+.pc-mezcla-lista{ display:flex; flex-direction:column; gap:9px; min-height:36px; }
 .pc-mezcla-fila{ display:flex; align-items:center; gap:8px; font-size:.92em; }
 .pc-mezcla-fila .swatch-mini{ width:18px; height:18px; border-radius:5px; flex:0 0 auto; border:1px solid rgba(0,0,0,.08); }
 .pc-mezcla-fila .nombre{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pc-mezcla-fila input{ width:90px; flex:0 0 auto; min-height:40px; }
+.pc-mezcla-fila input{ width:96px; flex:0 0 auto; min-height:44px; }
 .pc-paquete-box{ margin-top:14px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:12px; padding:12px 14px; }
 .pc-paquete-box .fila{ display:flex; justify-content:space-between; align-items:center; font-size:.92em; }
 .pc-paquete-barra{ height:9px; background:#f1efe9; border-radius:5px; margin-top:8px; overflow:hidden; }
 .pc-paquete-barra > div{ height:100%; background:var(--emp-accent); transition:width .15s ease; }
-.pc-swatch-picker{ display:flex; flex-wrap:wrap; gap:7px; margin-bottom:7px; }
+.pc-swatch-picker{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
 .pc-swatch-chip{
-    width:34px; height:34px; border-radius:9px; border:2px solid transparent;
-    cursor:pointer; padding:0; position:relative;
+    width:38px; height:38px; border-radius:9px; border:2px solid transparent;
+    cursor:pointer; padding:0; position:relative; touch-action:manipulation;
 }
 .pc-swatch-chip.activo{ border-color:var(--emp-accent); }
 .pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
@@ -117,146 +184,195 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-bulto-card{ border:1px solid #e2ddcd; border-radius:14px; padding:14px; margin-bottom:12px; background:#fffefb; }
 .pc-bulto-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:.95em; font-weight:700; color:#3a3730; flex-wrap:wrap; gap:8px; }
 .pc-color-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
-.pc-color-row select{ flex:2; min-width:160px; min-height:42px; }
-.pc-color-row input{ flex:1; min-width:100px; min-height:42px; }
-.pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1.15em; flex:0 0 auto; padding:8px; }
+.pc-color-row select{ flex:2; min-width:160px; min-height:46px; }
+.pc-color-row input{ flex:1; min-width:100px; min-height:46px; }
+.pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1.2em; flex:0 0 auto; padding:10px; min-width:44px; min-height:44px; }
 .pc-bultos-total{
     display:flex; justify-content:space-between; align-items:center;
-    padding:10px 14px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:12px;
+    padding:12px 14px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:12px;
     font-size:.95em; margin-top:8px;
 }
 .pc-bultos-total b{ color:var(--emp-accent); font-size:1.1em; }
 
-.pc-btn-tap{ min-height:46px; font-size:.95em; }
+.pc-btn-tap{ min-height:48px; font-size:.95em; touch-action:manipulation; }
 
 /* ---------- Mis últimos registros ---------- */
 .pc-mis-registros{ display:flex; flex-direction:column; gap:10px; }
 .pc-reg-card{ border:1px solid #ece9e1; border-radius:14px; background:#fff; padding:14px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-.pc-reg-info{ flex:1; min-width:200px; }
+.pc-reg-info{ flex:1; min-width:180px; }
 .pc-reg-producto{ font-weight:700; font-size:1em; color:#1f2430; }
 .pc-reg-detalle{ font-size:.85em; color:#8a8578; margin-top:2px; }
 .pc-reg-total{ font-size:1.1em; font-weight:700; color:#152238; white-space:nowrap; }
 .pc-reg-fecha{ font-size:.8em; color:#9a9585; white-space:nowrap; }
-.pc-reg-badge-vendido{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; border-radius:999px; padding:3px 10px; font-size:.78em; font-weight:700; white-space:nowrap; }
-.pc-reg-badge-disp{ background:#E8F7EE; color:#16A34A; border:1px solid #cdeedb; border-radius:999px; padding:3px 10px; font-size:.78em; font-weight:700; white-space:nowrap; }
-.pc-reg-del-btn{ border:none; background:#FCEAEC; color:#c94a4a; border-radius:10px; padding:10px 14px; font-size:.9em; min-height:44px; }
+.pc-reg-badge-vendido{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; border-radius:999px; padding:4px 11px; font-size:.78em; font-weight:700; white-space:nowrap; }
+.pc-reg-badge-disp{ background:#E8F7EE; color:#16A34A; border:1px solid #cdeedb; border-radius:999px; padding:4px 11px; font-size:.78em; font-weight:700; white-space:nowrap; }
+.pc-reg-del-btn{ border:none; background:#FCEAEC; color:#c94a4a; border-radius:10px; padding:11px 15px; font-size:.9em; min-height:46px; touch-action:manipulation; }
+
+/* =============================================================================
+   BARRA DE ACCIÓN FIJA — zona de pulgares
+   Ancho completo con extremos anclados a las esquinas inferiores: al sostener
+   la tablet con ambas manos, cada pulgar cae naturalmente sobre un extremo.
+   ============================================================================= */
+.pc-action-bar{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    display:flex; align-items:center; gap:14px;
+    background:#fff; border-top:1px solid #e7e4dd;
+    padding: 12px calc(18px + var(--safe-r)) calc(12px + var(--safe-b)) calc(18px + var(--safe-l));
+    box-shadow: 0 -6px 18px rgba(20,20,10,.08);
+    min-height: var(--emp-actionbar-h);
+}
+.pc-action-bar-info{ flex:1; min-width:0; }
+.pc-action-bar-info .titulo{ font-size:.78em; color:#9a9585; text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
+.pc-action-bar-info .valor{ font-size:1.05em; font-weight:700; color:#152238; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-btn-guardar{
+    background:var(--emp-accent); color:#fff; border:none; border-radius:14px;
+    padding:16px 26px; font-size:1.02em; font-weight:700; min-height:56px; min-width:190px;
+    display:flex; align-items:center; justify-content:center; gap:10px; flex:0 0 auto;
+    box-shadow:0 4px 10px rgba(47,111,237,.32); touch-action:manipulation;
+}
+.pc-btn-guardar:active{ transform:scale(.97); }
+.pc-btn-guardar:disabled{ opacity:.45; box-shadow:none; }
+
+@media (orientation:portrait){
+    .pc-action-bar-info{ display:none; } /* en vertical se prioriza el botón, ancho completo */
+    .pc-btn-guardar{ flex:1; min-width:0; }
+}
 </style>
 
-<div class="pc-card" style="margin:20px;">
-    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2>Empaquetado</h2>
-    </div>
-    <br>
-    <div class="pc-stat-row" id="statRowEmp"></div>
+<div class="pc-emp-shell">
+    <div class="pc-emp-workspace">
 
-    <div class="pc-tabs-toolbar">
-        <div class="pc-tabs-row" id="tabsEmpaquetado"></div>
-    </div>
-
-    <div id="estacionVaciaCard">
-        <div class="pc-est-empty">
-            <i class="fa-solid fa-hand-pointer"></i>
-            Elige un producto en las pestañas de arriba para empezar a armar un paquete.
-        </div>
-    </div>
-
-    <div id="estacionArmadoCard" style="display:none;">
-        <h4 id="estacionArmadoTitulo" style="margin-bottom:14px;">Armar paquete</h4>
-
-        <form id="formEstacionArmado">
-            <input type="hidden" id="est_producto_id" value="0">
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Unidad de medida *</label>
-                    <select class="form-select form-select-lg" id="est_unidad_medida" required></select>
-                    <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
-                        Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí.
-                    </small>
-                </div>
-                <div class="col-md-5 mb-3">
-                    <label class="form-label">Operarios *</label>
-                    <div id="est_operarios_chips" class="pc-operario-chips-wrap"></div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label class="form-label">Sucursal</label>
-                    <select class="form-select form-select-lg" id="est_sucursal_id"></select>
-                </div>
-            </div>
-
-            <!-- Modo BULTO -->
-            <div id="bloqueBultos">
-                <label class="form-label">Paquetes (toca un saco para agregar) *</label>
-                <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Ajusta la cantidad exacta abajo si hace falta.</p>
-                <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:16px;"></div>
-
-                <div id="listaBultos"></div>
-                <button type="button" class="btn btn-outline-secondary pc-btn-tap mb-2" onclick="agregarBulto()">
-                    <i class="fa-solid fa-plus"></i> Agregar Paquete
+        <!-- ================= PANEL IZQUIERDO / SUPERIOR: lista ================= -->
+        <aside class="pc-panel pc-panel-list">
+            <div class="pc-list-switch" role="tablist">
+                <button type="button" class="pc-list-switch-btn activo" id="btnVistaPendientes" onclick="cambiarVistaLista('pendientes')" role="tab" aria-selected="true">
+                    <i class="fa-solid fa-layer-group"></i> Pendientes
                 </button>
-                <div class="pc-bultos-total">
-                    <span><span id="bultosCount">0</span> paquete(s)</span>
-                    <span>Total: <b id="bultosTotal">0</b></span>
+                <button type="button" class="pc-list-switch-btn" id="btnVistaRegistros" onclick="cambiarVistaLista('registros')" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Mis paquetes
+                </button>
+            </div>
+
+            <div class="pc-stat-row" id="statRowEmp"></div>
+
+            <div class="pc-list-section" id="seccionPendientes">
+                <div class="pc-tabs-toolbar">
+                    <div class="pc-tabs-row" id="tabsEmpaquetado"></div>
                 </div>
             </div>
 
-            <!-- Modo MEZCLA -->
-            <div id="bloqueMezcla" style="display:none;">
-                <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
-                <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Ajusta el kg exacto después.</p>
-                <div class="pc-estacion">
-                    <div>
-                        <div class="pc-sacos-grid" id="sacosMezclaGrid"></div>
-                    </div>
-                    <div class="pc-mezcla-panel">
-                        <p class="pc-mezcla-panel-titulo">Mezcla actual</p>
-                        <div class="pc-mezcla-lista" id="listaMezclaOrigenes"></div>
+            <div class="pc-list-section" id="seccionRegistros" style="display:none;">
+                <div class="pc-mis-registros" id="misRegistrosLista">
+                    <div class="pc-est-empty">Cargando...</div>
+                </div>
+            </div>
+        </aside>
 
-                        <div class="pc-paquete-box">
-                            <div class="fila">
-                                <span>Kg totales mezclados</span>
-                                <b id="mezclaKgTotal">0</b>
-                            </div>
-                            <div class="fila mt-2">
-                                <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
-                                <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:120px; min-height:42px;"
-                                    id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
-                            </div>
-                            <div class="fila mt-2" style="font-size:.85em;">
-                                <span class="text-muted">Estimado teórico</span>
-                                <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
-                            </div>
-                            <div class="fila mt-2" style="font-size:.8em; color:#9a9585;">
-                                <span>Paquete de 24 bolsas</span>
-                                <span id="mezclaPaqueteFrac">0 / 24</span>
-                            </div>
-                            <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
-                            <div class="text-muted mt-1" style="font-size:.78em;">
-                                ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
-                            </div>
+        <!-- ================= PANEL DERECHO / INFERIOR: detalle / estación ================= -->
+        <main class="pc-panel pc-panel-detail">
+            <div id="estacionVaciaCard">
+                <div class="pc-est-empty">
+                    <i class="fa-solid fa-hand-pointer"></i>
+                    Elige un producto en la lista para empezar a armar un paquete.
+                </div>
+            </div>
+
+            <div id="estacionArmadoCard" style="display:none;">
+                <h4 id="estacionArmadoTitulo" style="margin-bottom:14px;">Armar paquete</h4>
+
+                <form id="formEstacionArmado">
+                    <input type="hidden" id="est_producto_id" value="0">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Unidad de medida *</label>
+                            <select class="form-select form-select-lg" id="est_unidad_medida" required></select>
+                            <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
+                                Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí.
+                            </small>
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label">Operarios *</label>
+                            <div id="est_operarios_chips" class="pc-operario-chips-wrap"></div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Sucursal</label>
+                            <select class="form-select form-select-lg" id="est_sucursal_id"></select>
                         </div>
                     </div>
-                </div>
-                <button type="button" class="btn btn-outline-secondary pc-btn-tap mt-2" onclick="agregarOrigenMezcla()">
-                    <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
-                </button>
-            </div>
 
-            <div class="d-flex gap-2 mt-3">
-                <button type="submit" class="btn btn-primary btn-lg pc-btn-tap">
-                    <i class="fa-solid fa-floppy-disk"></i> Guardar paquete
-                </button>
+                    <!-- Modo BULTO -->
+                    <div id="bloqueBultos">
+                        <label class="form-label">Paquetes (toca un saco para agregar) *</label>
+                        <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Ajusta la cantidad exacta abajo si hace falta.</p>
+                        <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:16px;"></div>
+
+                        <div id="listaBultos"></div>
+                        <button type="button" class="btn btn-outline-secondary pc-btn-tap mb-2" onclick="agregarBulto()">
+                            <i class="fa-solid fa-plus"></i> Agregar Paquete
+                        </button>
+                        <div class="pc-bultos-total">
+                            <span><span id="bultosCount">0</span> paquete(s)</span>
+                            <span>Total: <b id="bultosTotal">0</b></span>
+                        </div>
+                    </div>
+
+                    <!-- Modo MEZCLA -->
+                    <div id="bloqueMezcla" style="display:none;">
+                        <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
+                        <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Ajusta el kg exacto después.</p>
+                        <div class="pc-estacion">
+                            <div>
+                                <div class="pc-sacos-grid" id="sacosMezclaGrid"></div>
+                            </div>
+                            <div class="pc-mezcla-panel">
+                                <p class="pc-mezcla-panel-titulo">Mezcla actual</p>
+                                <div class="pc-mezcla-lista" id="listaMezclaOrigenes"></div>
+
+                                <div class="pc-paquete-box">
+                                    <div class="fila">
+                                        <span>Kg totales mezclados</span>
+                                        <b id="mezclaKgTotal">0</b>
+                                    </div>
+                                    <div class="fila mt-2">
+                                        <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
+                                        <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:120px; min-height:44px;"
+                                            id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
+                                    </div>
+                                    <div class="fila mt-2" style="font-size:.85em;">
+                                        <span class="text-muted">Estimado teórico</span>
+                                        <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
+                                    </div>
+                                    <div class="fila mt-2" style="font-size:.8em; color:#9a9585;">
+                                        <span>Paquete de 24 bolsas</span>
+                                        <span id="mezclaPaqueteFrac">0 / 24</span>
+                                    </div>
+                                    <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
+                                    <div class="text-muted mt-1" style="font-size:.78em;">
+                                        ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary pc-btn-tap mt-2" onclick="agregarOrigenMezcla()">
+                            <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
+                        </button>
+                    </div>
+                </form>
             </div>
-        </form>
+        </main>
+
     </div>
 </div>
 
-<div class="pc-card" style="margin:20px;">
-    <div class="pc-card-header">
-        <h2>Tus últimos registros</h2>
+<!-- Barra de acción fija: siempre visible en la zona alcanzable por los pulgares -->
+<div class="pc-action-bar">
+    <div class="pc-action-bar-info">
+        <div class="titulo">Resumen</div>
+        <div class="valor" id="accionBarResumen">Selecciona un producto</div>
     </div>
-    <div class="pc-mis-registros" id="misRegistrosLista">
-        <div class="pc-est-empty">Cargando...</div>
-    </div>
+    <button type="submit" form="formEstacionArmado" class="pc-btn-guardar" id="btnGuardarPaquete">
+        <i class="fa-solid fa-floppy-disk"></i> Guardar paquete
+    </button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -290,10 +406,14 @@ let tabActivoEmp = null;
 // ── Registros propios ──
 let registrosGlobalCache = [];
 
+// ── Panel de lista (Pendientes / Mis paquetes) ──
+let vistaListaActual = 'pendientes';
+
 document.addEventListener('DOMContentLoaded', () => {
     cargarPendientesEmpaquetado();
     cargarMisRegistros();
     iniciarAutoRefreshEmp();
+    actualizarResumenBarraAccion();
 });
 
 // ── Auto-refresh silencioso ──
@@ -402,6 +522,48 @@ function colorHexPara(colorNombre, colorHexBD) {
 }
 
 // =============================================================================
+// PANEL DE LISTA — alternar entre "Pendientes" y "Mis paquetes" sin salir
+// de la pantalla de armado (evita saltos de página en tablet).
+// =============================================================================
+
+function cambiarVistaLista(vista) {
+    vistaListaActual = vista;
+    const esPendientes = vista === 'pendientes';
+    document.getElementById('seccionPendientes').style.display = esPendientes ? 'block' : 'none';
+    document.getElementById('seccionRegistros').style.display = esPendientes ? 'none' : 'block';
+    document.getElementById('btnVistaPendientes').classList.toggle('activo', esPendientes);
+    document.getElementById('btnVistaRegistros').classList.toggle('activo', !esPendientes);
+    document.getElementById('btnVistaPendientes').setAttribute('aria-selected', esPendientes);
+    document.getElementById('btnVistaRegistros').setAttribute('aria-selected', !esPendientes);
+}
+
+// =============================================================================
+// BARRA DE ACCIÓN FIJA — resumen en vivo cerca del botón principal
+// =============================================================================
+
+function actualizarResumenBarraAccion() {
+    const el = document.getElementById('accionBarResumen');
+    const btn = document.getElementById('btnGuardarPaquete');
+    if (!el || !btn) return;
+
+    if (!estacionProductoIdActual) {
+        el.textContent = 'Selecciona un producto';
+        btn.disabled = true;
+        return;
+    }
+    btn.disabled = false;
+
+    if (esModoMezcla()) {
+        const kgTotal = mezclaOrigenes.reduce((s, m) => s + (parseFloat(m.cantidad_kg) || 0), 0);
+        const bolsas = parseFloat(bolsasProducidasValor) || 0;
+        el.textContent = `${formatearCantidadEmp(kgTotal)} kg mezclados · ${formatearCantidadEmp(bolsas)} bolsas`;
+    } else {
+        const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
+        el.textContent = `${bultosState.length} paquete(s) · total ${formatearCantidadEmp(total)}`;
+    }
+}
+
+// =============================================================================
 // OPERARIOS (chips)
 // =============================================================================
 
@@ -436,11 +598,20 @@ function renderStatRowEmp() {
     const disponiblesStock = registrosGlobalCache.filter(r => !r.pasado_venta).length;
 
     document.getElementById('statRowEmp').innerHTML = `
-        <div class="pc-stat-chip s-gray"><div class="ico"><i class="fa-solid fa-layer-group"></i></div><div class="txt"><div class="n">${pendientes}</div><div class="l">Productos pendientes</div></div></div>
-        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-box"></i></div><div class="txt"><div class="n">${hoy.length}</div><div class="l">Paquetes hoy (todos)</div></div></div>
+        <div class="pc-stat-chip s-gray"><div class="ico"><i class="fa-solid fa-layer-group"></i></div><div class="txt"><div class="n">${pendientes}</div><div class="l">Pendientes</div></div></div>
+        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-box"></i></div><div class="txt"><div class="n">${hoy.length}</div><div class="l">Paquetes hoy</div></div></div>
         <div class="pc-stat-chip s-success"><div class="ico"><i class="fa-solid fa-user-check"></i></div><div class="txt"><div class="n">${tuyosHoy.length}</div><div class="l">Tuyos hoy</div></div></div>
-        <div class="pc-stat-chip s-purple"><div class="ico"><i class="fa-solid fa-warehouse"></i></div><div class="txt"><div class="n">${disponiblesStock}</div><div class="l">Disponibles (stock)</div></div></div>
+        <div class="pc-stat-chip s-purple"><div class="ico"><i class="fa-solid fa-warehouse"></i></div><div class="txt"><div class="n">${disponiblesStock}</div><div class="l">En stock</div></div></div>
     `;
+
+    const btnReg = document.getElementById('btnVistaRegistros');
+    if (btnReg) {
+        const existente = btnReg.querySelector('.badge-cnt');
+        if (existente) existente.remove();
+        if (tuyosHoy.length > 0) {
+            btnReg.insertAdjacentHTML('beforeend', `<span class="badge-cnt">${tuyosHoy.length}</span>`);
+        }
+    }
 }
 
 // =============================================================================
@@ -508,6 +679,10 @@ function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
     renderTabsEmp();
     actualizarEstacionArmado();
+    // En pantallas apiladas (portrait) llevar la vista a la estación de armado.
+    if (window.matchMedia('(orientation: portrait)').matches) {
+        document.getElementById('estacionArmadoCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 async function actualizarEstacionArmado() {
@@ -519,6 +694,7 @@ async function actualizarEstacionArmado() {
         estCard.style.display = 'none';
         vacCard.style.display = 'block';
         estacionProductoIdActual = 0;
+        actualizarResumenBarraAccion();
         return;
     }
 
@@ -547,6 +723,7 @@ async function cargarEstacionParaProducto(productoId) {
     ]);
     aplicarUnidadEmpaquetadoFija();
     inicializarBloqueFormulario();
+    actualizarResumenBarraAccion();
 }
 
 // =============================================================================
@@ -877,6 +1054,7 @@ function actualizarResumenMezcla() {
         elTeorico.textContent = '-';
         elDiff.style.display = 'none';
     }
+    actualizarResumenBarraAccion();
 }
 
 function renderSacosMezclaGrid() {
@@ -1122,6 +1300,7 @@ function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
     document.getElementById('bultosTotal').textContent = formatearCantidadEmp(total);
+    actualizarResumenBarraAccion();
 }
 
 function obtenerBultosJsonEmp() {
