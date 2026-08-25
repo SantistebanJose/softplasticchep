@@ -448,17 +448,20 @@ function crearEnsamblajeAutomaticoParaProduccion(
 // =============================================================================
 // PRODUCCIÓN (avances)
 // =============================================================================
-
 function listarProducciones()
 {
     $conectar = conectar_oll_BD();
-
     $texto        = trim($_POST['texto'] ?? '');
-    $operario_id  = trim($_POST['operario_id'] ?? '');
+    if (!empty($_SESSION['operario_id'])) {
+        $operario_id = (string) intval($_SESSION['operario_id']);
+    } else {
+        $operario_id = trim($_POST['operario_id'] ?? '');
+    }
+
     $maquina_id   = trim($_POST['maquina_id'] ?? '');
     $molde_id     = trim($_POST['molde_id'] ?? '');
     $color_id     = trim($_POST['color_id'] ?? '');
-    $estado       = trim($_POST['estado'] ?? ''); // '', 'activa', 'inactiva'
+    $estado       = trim($_POST['estado'] ?? '');
     $fecha_desde  = trim($_POST['fecha_desde'] ?? '');
     $fecha_hasta  = trim($_POST['fecha_hasta'] ?? '');
 

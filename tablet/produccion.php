@@ -2,6 +2,10 @@
 session_start();
 require __DIR__ . '/../controllers_tablet/clssAuthOperario.php';
 
+
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+
 if (empty($_SESSION['operario_id'])) {
     header('Location: loginoperarios.php');
     exit;
@@ -213,6 +217,28 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
 .pc-tab-item.activo .cnt{ background:#152238; color:#fff; }
 
+.pc-tk-qty-value{
+    min-width:64px; height:40px; border:none; background:transparent;
+    font-weight:700; font-size:1.05em; color:#152238; font-variant-numeric:tabular-nums;
+    border-bottom:2px dashed #d8d4c8; padding:0 4px;
+}
+.pc-tk-qty-value:active{ background:#f6f4ee; border-radius:8px; }
+
+.pc-teclado-display{
+    background:#152238; color:#fff; border-radius:14px; padding:18px 20px;
+    text-align:right; font-size:2.1em; font-weight:700; font-variant-numeric:tabular-nums;
+    margin-bottom:14px; word-break:break-all;
+}
+.pc-teclado-sub{ font-size:.55em; color:#9fb0d0; font-weight:500; display:block; text-align:left; margin-bottom:4px; }
+.pc-teclado-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.pc-teclado-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.pc-teclado-grid button{
+    height:64px; border:1px solid #e2ddcd; background:#fff; border-radius:12px;
+    font-size:1.4em; font-weight:700; color:#152238; display:flex; align-items:center; justify-content:center;
+}
+.pc-teclado-grid button:active{ background:#f6f4ee; }
+.pc-teclado-grid button.pc-tec-borrar{ color:#c94a4a; }
+.pc-teclado-grid button.pc-tec-cero{ grid-column:span 2; }
 /* ===================== ZONA DE PULGARES (botones principales) ===================== */
 .modal-footer.pc-footer-thumb{
     position:sticky; bottom:0; background:#fff; z-index:5;
@@ -346,8 +372,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div class="pc-tk-resumen-icon"><i class="fa-solid fa-scale-balanced"></i></div>
                         <div class="pc-tk-resumen-texto">
                             <span class="total">
-                            <input type="number" step="1" min="1" id="prod_cantidad" class="pc-tk-total-input" required> Kg en total
-                            </span>
+<input type="number" step="1" min="1" id="prod_cantidad" class="pc-tk-total-input" required onclick="abrirTecladoTotalManual()" readonly>                            </span>
                             <span class="detalle" id="prod_ticket_total_detalle">0 material(es) en este avance</span>
                         </div>
                     </div>
@@ -363,6 +388,45 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
           <button type="submit" class="btn btn-primary btn-lg">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Teclado numérico táctil para cantidades (materiales/tintes) -->
+<div class="modal fade pc-modal-tablet" id="modalTecladoCantidad" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="teclado_material_nombre">Cantidad</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="pc-teclado-display">
+            <span class="pc-teclado-sub" id="teclado_disponible">&nbsp;</span>
+            <span id="teclado_valor">0</span>
+        </div>
+
+        <div class="pc-teclado-chips" id="teclado_chips"></div>
+
+        <div class="pc-teclado-grid">
+            <button type="button" onclick="tecladoDigito('7')">7</button>
+            <button type="button" onclick="tecladoDigito('8')">8</button>
+            <button type="button" onclick="tecladoDigito('9')">9</button>
+            <button type="button" onclick="tecladoDigito('4')">4</button>
+            <button type="button" onclick="tecladoDigito('5')">5</button>
+            <button type="button" onclick="tecladoDigito('6')">6</button>
+            <button type="button" onclick="tecladoDigito('1')">1</button>
+            <button type="button" onclick="tecladoDigito('2')">2</button>
+            <button type="button" onclick="tecladoDigito('3')">3</button>
+            <button type="button" onclick="tecladoDigito('.')">.</button>
+            <button type="button" class="pc-tec-cero" onclick="tecladoDigito('0')">0</button>
+            <button type="button" class="pc-tec-borrar" onclick="tecladoBorrar()"><i class="fa-solid fa-delete-left"></i></button>
+        </div>
+      </div>
+      <div class="modal-footer pc-footer-thumb">
+        <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-lg" id="btnAceptarTeclado">Usar esta cantidad</button>
+      </div>
     </div>
   </div>
 </div>
@@ -485,6 +549,98 @@ function seleccionarTabMaterial(tipo) {
     });
     renderGridMateriales();
 }
+
+const modalTecladoCantidad = new bootstrap.Modal(document.getElementById('modalTecladoCantidad'));
+let tecladoValorStr = '0';
+let tecladoContexto = null; // { tipo: 'linea', tempId } o { tipo: 'total' }
+
+function actualizarPantallaTeclado() {
+    document.getElementById('teclado_valor').textContent = tecladoValorStr;
+}
+
+function tecladoDigito(d) {
+    if (d === '.' && tecladoValorStr.includes('.')) return;
+    if (tecladoValorStr === '0' && d !== '.') tecladoValorStr = d;
+    else tecladoValorStr += d;
+    actualizarPantallaTeclado();
+}
+
+function tecladoBorrar() {
+    tecladoValorStr = tecladoValorStr.length > 1 ? tecladoValorStr.slice(0, -1) : '0';
+    actualizarPantallaTeclado();
+}
+
+function tecladoLimiteMax() {
+    if (tecladoContexto?.tipo === 'linea') {
+        const linea = ticketLineas.find(l => l.tempId === tecladoContexto.tempId);
+        return linea ? linea.disponible : null;
+    }
+    return null;
+}
+
+function tecladoSumar(delta) {
+    let v = (parseFloat(tecladoValorStr) || 0) + delta;
+    const max = tecladoLimiteMax();
+    if (max !== null && v > max) v = max;
+    if (v < 0) v = 0;
+    tecladoValorStr = String(Math.round(v * 10000) / 10000);
+    actualizarPantallaTeclado();
+}
+
+function tecladoTodoStock() {
+    const max = tecladoLimiteMax();
+    if (max === null) return;
+    tecladoValorStr = String(max);
+    actualizarPantallaTeclado();
+}
+
+function renderChipsTeclado(esEntera, tieneMax) {
+    const pasos = esEntera ? [5, 10, 50, 100] : [1, 5, 10, 25];
+    const cont = document.getElementById('teclado_chips');
+    let html = pasos.map(p => `<button type="button" class="pc-chip-card" onclick="tecladoSumar(${p})">+${p}</button>`).join('');
+    if (tieneMax) html += `<button type="button" class="pc-chip-card" onclick="tecladoTodoStock()"><i class="fa-solid fa-layer-group"></i> Todo el stock</button>`;
+    cont.innerHTML = html;
+}
+
+// Abrir para una línea del ticket (material o tinte)
+function abrirTecladoCantidad(tempId) {
+    const linea = ticketLineas.find(l => l.tempId === tempId);
+    if (!linea) return;
+    tecladoContexto = { tipo: 'linea', tempId };
+    tecladoValorStr = String(linea.cantidad);
+    document.getElementById('teclado_material_nombre').textContent = linea.material_nombre;
+    document.getElementById('teclado_disponible').textContent =
+        `Disponible: ${formatearCantidadProd(linea.disponible)} ${linea.unidad_corto ?? ''}`;
+    const esEntera = (linea.unidad_corto || '').toLowerCase() !== 'kg';
+    renderChipsTeclado(esEntera, true);
+    actualizarPantallaTeclado();
+    modalTecladoCantidad.show();
+}
+
+// Abrir para el total manual (cuando no hay materiales en el ticket)
+function abrirTecladoTotalManual() {
+    const totalInput = document.getElementById('prod_cantidad');
+    if (totalInput.readOnly) return; // hay materiales -> el total es automático
+    tecladoContexto = { tipo: 'total' };
+    tecladoValorStr = String(totalInput.value || '0');
+    document.getElementById('teclado_material_nombre').textContent = 'Kg en total del avance';
+    document.getElementById('teclado_disponible').textContent = '';
+    renderChipsTeclado(true, false);
+    actualizarPantallaTeclado();
+    modalTecladoCantidad.show();
+}
+
+document.getElementById('btnAceptarTeclado').addEventListener('click', () => {
+    const v = parseFloat(tecladoValorStr) || 0;
+    if (v <= 0) { Swal.fire('Cantidad inválida', 'Ingresa una cantidad mayor a 0.', 'warning'); return; }
+
+    if (tecladoContexto?.tipo === 'linea') {
+        fijarCantidadTicket(tecladoContexto.tempId, v);
+    } else if (tecladoContexto?.tipo === 'total') {
+        document.getElementById('prod_cantidad').value = Math.round(v);
+    }
+    modalTecladoCantidad.hide();
+});
 
 const POLL_INTERVAL_MS = 8000;
 let pollTimer = null;
@@ -1165,7 +1321,7 @@ function renderTicket() {
             </div>
             <div class="pc-tk-qty">
                 <button type="button" onclick="cambiarCantidadTicket(${l.tempId}, -1)"><i class="fa-solid fa-minus"></i></button>
-                <input type="number" step="0.0001" min="0.0001" value="${l.cantidad}" onchange="fijarCantidadTicket(${l.tempId}, this.value)">
+                <button type="button" class="pc-tk-qty-value" onclick="abrirTecladoCantidad(${l.tempId})">${formatearCantidadProd(l.cantidad)}</button>
                 <button type="button" onclick="cambiarCantidadTicket(${l.tempId}, 1)" ${l.cantidad + 1 > l.disponible + 0.0001 ? 'disabled' : ''}><i class="fa-solid fa-plus"></i></button>
             </div>
             <button type="button" class="pc-tk-remove" onclick="quitarLineaTicket(${l.tempId})"><i class="fa-solid fa-xmark"></i></button>
