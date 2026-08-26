@@ -59,6 +59,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     display:flex; flex-direction:column;
     padding-bottom: calc(var(--emp-actionbar-h) + var(--safe-b) + 14px);
 }
+.pc-emp-shell.pc-shell-solo-lista{ padding-bottom: 20px; }
+
 .pc-emp-workspace{
     display:grid;
     grid-template-columns: 1fr;
@@ -68,6 +70,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-panel{ min-width:0; }
 .pc-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
 .pc-panel-head h2{ margin:0; }
+.pc-panel-lead{ font-size:.86em; color:#9a9585; margin:0 0 14px; }
 
 /* Landscape en pantalla ancha (tablet apoyada u horizontal): lista + detalle lado a lado, cada uno con su propio scroll */
 @media (orientation:landscape) and (min-width:760px){
@@ -90,20 +93,33 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     .pc-panel-detail{ order:2; }
 }
 
+/* ---------- Vista "Mis paquetes": SOLO listado, sin estación de armado ---------- */
+.pc-emp-workspace.pc-vista-registros{ grid-template-columns:1fr !important; height:auto !important; }
+.pc-emp-workspace.pc-vista-registros .pc-panel-detail{ display:none !important; }
+.pc-emp-workspace.pc-vista-registros .pc-panel-list{
+    max-width:760px; margin:0 auto; width:100%; height:auto !important; overflow:visible !important;
+}
+.pc-action-bar.pc-oculta{ display:none; }
+
 /* ---------- Switch Pendientes / Mis paquetes (panel de lista) ---------- */
 .pc-list-switch{ display:flex; gap:8px; background:#f1efe9; border-radius:14px; padding:5px; margin-bottom:14px; }
 .pc-list-switch-btn{
     flex:1; border:none; background:none; border-radius:10px; padding:12px 10px;
     font-size:.92em; font-weight:700; color:#8a8578; min-height:44px;
     display:flex; align-items:center; justify-content:center; gap:7px;
+    touch-action:manipulation;
 }
 .pc-list-switch-btn.activo{ background:#fff; color:#152238; box-shadow:0 1px 3px rgba(0,0,0,.08); }
 .pc-list-switch-btn .badge-cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:2px 8px; }
 .pc-list-switch-btn.activo .badge-cnt{ background:var(--emp-accent); color:#fff; }
 
-/* ---------- Stat row (compacta dentro del panel angosto) ---------- */
+/* ---------- Stat row (compacta dentro del panel angosto). Son botones: llevan directo a la vista relacionada. ---------- */
 .pc-stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
-.pc-stat-chip{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px; display:flex; align-items:center; gap:9px; }
+.pc-stat-chip{
+    border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px; display:flex; align-items:center; gap:9px;
+    cursor:pointer; touch-action:manipulation; text-align:left; width:100%;
+}
+.pc-stat-chip:active{ transform:scale(.97); }
 .pc-stat-chip .ico{ width:34px; height:34px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; }
 .pc-stat-chip .txt .n{ font-size:19px; font-weight:700; line-height:1.15; color:#152238; }
 .pc-stat-chip .txt .l{ font-size:10.5px; color:#8a8578; }
@@ -118,8 +134,9 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     display:flex; align-items:center; gap:10px; padding:13px 14px; cursor:pointer;
     font-size:.96em; font-weight:600; color:#5c5947; white-space:nowrap; min-height:52px;
     border:1px solid #e7e4dd; border-radius:14px; background:#fff;
+    touch-action:manipulation;
 }
-.pc-tab-item.activo{ color:#152238; border-color:var(--emp-accent); background:var(--emp-accent-bg); }
+.pc-tab-item.activo{ color:#152238; border-color:var(--emp-accent); background:var(--emp-accent-bg); box-shadow:0 2px 8px rgba(47,111,237,.15); }
 .pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
 .pc-tab-item.activo .cnt{ background:var(--emp-accent); color:#fff; }
 
@@ -140,21 +157,29 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     font-size:.96em; font-weight:600; cursor:pointer; color:#3a3730; min-height:48px;
     touch-action:manipulation;
 }
-.pc-operario-chip.activo{ background:var(--emp-accent); border-color:var(--emp-accent); color:#fff; }
+.pc-operario-chip.activo{ background:var(--emp-accent); border-color:var(--emp-accent); color:#fff; box-shadow:0 2px 6px rgba(47,111,237,.35); }
 
 /* ---------- Estación visual de sacos/colores (táctil, agrandada) ---------- */
+.pc-estacion-titulo-paso{
+    display:flex; align-items:center; gap:9px; margin:2px 0 4px;
+    font-size:.82em; font-weight:700; color:#5c5947; text-transform:uppercase; letter-spacing:.03em;
+}
+.pc-estacion-titulo-paso .num{
+    width:22px; height:22px; border-radius:999px; background:var(--emp-accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:.85em; flex-shrink:0;
+}
 .pc-estacion{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start; }
 @media (max-width:900px), (orientation:portrait){ .pc-estacion{ grid-template-columns:1fr; } }
 .pc-estacion-hint{ font-size:.85em; color:#9a9585; margin:0 0 10px; }
 .pc-sacos-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(clamp(140px,18vw,170px),1fr)); gap:14px; }
 .pc-saco-card{
-    border:1px solid #e2ddcd; border-radius:14px; padding:13px; background:#fff;
+    border:1.5px solid #e2ddcd; border-radius:14px; padding:13px; background:#fff;
     cursor:pointer; text-align:left; position:relative; min-height:132px;
-    touch-action:manipulation;
+    touch-action:manipulation; transition:border-color .12s ease;
 }
 .pc-saco-card:active{ transform:scale(.96); border-color:var(--emp-accent); }
 .pc-saco-card.agotado{ opacity:.4; cursor:not-allowed; pointer-events:none; }
-.pc-saco-card .swatch{ width:100%; height:52px; border-radius:10px; }
+.pc-saco-card .swatch{ width:100%; height:52px; border-radius:10px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
 .pc-saco-card .nombre{ font-size:.94em; font-weight:700; margin:10px 0 1px; color:#3a3730; }
 .pc-saco-card .origen{ font-size:.81em; color:#9a9585; }
 .pc-saco-card .disp{ font-size:.81em; color:#6b6656; margin-top:2px; font-weight:600; }
@@ -196,7 +221,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 .pc-btn-tap{ min-height:48px; font-size:.95em; touch-action:manipulation; }
 
-/* ---------- Mis últimos registros ---------- */
+/* ---------- Mis últimos registros (vista de solo consulta) ---------- */
 .pc-mis-registros{ display:flex; flex-direction:column; gap:10px; }
 .pc-reg-card{ border:1px solid #ece9e1; border-radius:14px; background:#fff; padding:14px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
 .pc-reg-info{ flex:1; min-width:180px; }
@@ -212,6 +237,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
    BARRA DE ACCIÓN FIJA — zona de pulgares
    Ancho completo con extremos anclados a las esquinas inferiores: al sostener
    la tablet con ambas manos, cada pulgar cae naturalmente sobre un extremo.
+   Solo existe en la vista "Pendientes" (armado); en "Mis paquetes" se oculta.
    ============================================================================= */
 .pc-action-bar{
     position:fixed; left:0; right:0; bottom:0; z-index:40;
@@ -239,8 +265,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 </style>
 
-<div class="pc-emp-shell">
-    <div class="pc-emp-workspace">
+<div class="pc-emp-shell" id="empShell">
+    <div class="pc-emp-workspace" id="empWorkspace">
 
         <!-- ================= PANEL IZQUIERDO / SUPERIOR: lista ================= -->
         <aside class="pc-panel pc-panel-list">
@@ -256,19 +282,21 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <div class="pc-stat-row" id="statRowEmp"></div>
 
             <div class="pc-list-section" id="seccionPendientes">
+                <p class="pc-panel-lead">Toca un producto para empezar a armar su paquete.</p>
                 <div class="pc-tabs-toolbar">
                     <div class="pc-tabs-row" id="tabsEmpaquetado"></div>
                 </div>
             </div>
 
             <div class="pc-list-section" id="seccionRegistros" style="display:none;">
+                <p class="pc-panel-lead">Solo consulta. Para corregir un error reciente, elimina el registro.</p>
                 <div class="pc-mis-registros" id="misRegistrosLista">
                     <div class="pc-est-empty">Cargando...</div>
                 </div>
             </div>
         </aside>
 
-        <!-- ================= PANEL DERECHO / INFERIOR: detalle / estación ================= -->
+        <!-- ================= PANEL DERECHO / INFERIOR: detalle / estación (solo en "Pendientes") ================= -->
         <main class="pc-panel pc-panel-detail">
             <div id="estacionVaciaCard">
                 <div class="pc-est-empty">
@@ -282,6 +310,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
                 <form id="formEstacionArmado">
                     <input type="hidden" id="est_producto_id" value="0">
+
+                    <p class="pc-estacion-titulo-paso"><span class="num">1</span> Quiénes están armando</p>
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Unidad de medida *</label>
@@ -302,7 +332,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
                     <!-- Modo BULTO -->
                     <div id="bloqueBultos">
-                        <label class="form-label">Paquetes (toca un saco para agregar) *</label>
+                        <p class="pc-estacion-titulo-paso"><span class="num">2</span> Arma el paquete</p>
                         <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Ajusta la cantidad exacta abajo si hace falta.</p>
                         <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:16px;"></div>
 
@@ -318,7 +348,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
                     <!-- Modo MEZCLA -->
                     <div id="bloqueMezcla" style="display:none;">
-                        <label class="form-label">Mezcla de sacos (kg por color/origen) *</label>
+                        <p class="pc-estacion-titulo-paso"><span class="num">2</span> Registra la mezcla</p>
                         <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Ajusta el kg exacto después.</p>
                         <div class="pc-estacion">
                             <div>
@@ -364,8 +394,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     </div>
 </div>
 
-<!-- Barra de acción fija: siempre visible en la zona alcanzable por los pulgares -->
-<div class="pc-action-bar">
+<!-- Barra de acción fija: siempre visible en la zona alcanzable por los pulgares (solo en "Pendientes") -->
+<div class="pc-action-bar" id="actionBarEmp">
     <div class="pc-action-bar-info">
         <div class="titulo">Resumen</div>
         <div class="valor" id="accionBarResumen">Selecciona un producto</div>
@@ -522,19 +552,27 @@ function colorHexPara(colorNombre, colorHexBD) {
 }
 
 // =============================================================================
-// PANEL DE LISTA — alternar entre "Pendientes" y "Mis paquetes" sin salir
-// de la pantalla de armado (evita saltos de página en tablet).
+// PANEL DE LISTA — alternar entre "Pendientes" (arma) y "Mis paquetes" (solo
+// consulta). En "Mis paquetes" se oculta por completo la estación de armado
+// y la barra de guardar, para que quede claro que ahí no se registra nada.
 // =============================================================================
 
 function cambiarVistaLista(vista) {
     vistaListaActual = vista;
     const esPendientes = vista === 'pendientes';
+
     document.getElementById('seccionPendientes').style.display = esPendientes ? 'block' : 'none';
     document.getElementById('seccionRegistros').style.display = esPendientes ? 'none' : 'block';
     document.getElementById('btnVistaPendientes').classList.toggle('activo', esPendientes);
     document.getElementById('btnVistaRegistros').classList.toggle('activo', !esPendientes);
     document.getElementById('btnVistaPendientes').setAttribute('aria-selected', esPendientes);
     document.getElementById('btnVistaRegistros').setAttribute('aria-selected', !esPendientes);
+
+    document.getElementById('empWorkspace').classList.toggle('pc-vista-registros', !esPendientes);
+    document.getElementById('empShell').classList.toggle('pc-shell-solo-lista', !esPendientes);
+    document.getElementById('actionBarEmp').classList.toggle('pc-oculta', !esPendientes);
+
+    if (!esPendientes) cargarMisRegistros();
 }
 
 // =============================================================================
@@ -588,7 +626,7 @@ function toggleOperarioEstacion(id) {
 }
 
 // =============================================================================
-// STAT ROW
+// STAT ROW — cada chip también es un atajo de navegación entre vistas
 // =============================================================================
 
 function renderStatRowEmp() {
@@ -598,10 +636,10 @@ function renderStatRowEmp() {
     const disponiblesStock = registrosGlobalCache.filter(r => !r.pasado_venta).length;
 
     document.getElementById('statRowEmp').innerHTML = `
-        <div class="pc-stat-chip s-gray"><div class="ico"><i class="fa-solid fa-layer-group"></i></div><div class="txt"><div class="n">${pendientes}</div><div class="l">Pendientes</div></div></div>
-        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-box"></i></div><div class="txt"><div class="n">${hoy.length}</div><div class="l">Paquetes hoy</div></div></div>
-        <div class="pc-stat-chip s-success"><div class="ico"><i class="fa-solid fa-user-check"></i></div><div class="txt"><div class="n">${tuyosHoy.length}</div><div class="l">Tuyos hoy</div></div></div>
-        <div class="pc-stat-chip s-purple"><div class="ico"><i class="fa-solid fa-warehouse"></i></div><div class="txt"><div class="n">${disponiblesStock}</div><div class="l">En stock</div></div></div>
+        <button type="button" class="pc-stat-chip s-gray" onclick="cambiarVistaLista('pendientes')"><div class="ico"><i class="fa-solid fa-layer-group"></i></div><div class="txt"><div class="n">${pendientes}</div><div class="l">Pendientes</div></div></button>
+        <button type="button" class="pc-stat-chip s-info" onclick="cambiarVistaLista('registros')"><div class="ico"><i class="fa-solid fa-box"></i></div><div class="txt"><div class="n">${hoy.length}</div><div class="l">Paquetes hoy</div></div></button>
+        <button type="button" class="pc-stat-chip s-success" onclick="cambiarVistaLista('registros')"><div class="ico"><i class="fa-solid fa-user-check"></i></div><div class="txt"><div class="n">${tuyosHoy.length}</div><div class="l">Tuyos hoy</div></div></button>
+        <button type="button" class="pc-stat-chip s-purple" onclick="cambiarVistaLista('registros')"><div class="ico"><i class="fa-solid fa-warehouse"></i></div><div class="txt"><div class="n">${disponiblesStock}</div><div class="l">En stock</div></div></button>
     `;
 
     const btnReg = document.getElementById('btnVistaRegistros');
@@ -677,6 +715,7 @@ function renderTabsEmp() {
 
 function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
+    if (vistaListaActual !== 'pendientes') cambiarVistaLista('pendientes');
     renderTabsEmp();
     actualizarEstacionArmado();
     // En pantallas apiladas (portrait) llevar la vista a la estación de armado.
