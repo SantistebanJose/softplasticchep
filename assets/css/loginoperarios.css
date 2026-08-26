@@ -3,28 +3,40 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f4f6fb;
+  background: radial-gradient(circle at 30% 20%, #eef1f9 0%, #e3e7f2 45%, #dde2f0 100%);
   padding: 24px;
 }
 
 .pc-op-card {
   width: 100%;
-  max-width: 380px;
+  /* antes: max-width fijo de 380px -> se veía perdida en tablets grandes */
+  max-width: clamp(380px, 34vw, 480px);
   background: var(--pc-surface);
   border-radius: var(--pc-radius);
-  padding: 32px 28px;
+  padding: clamp(32px, 4vw, 48px) clamp(28px, 3.5vw, 40px);
   text-align: center;
   box-shadow: 0 20px 50px rgba(12, 28, 51, 0.12);
 }
 
-.pc-op-card h1 { color: var(--pc-navy); font-size: 26px; margin-bottom: 4px; }
-.pc-op-sub { color: var(--pc-muted); font-size: 14px; margin-bottom: 22px; }
+.pc-op-card h1 {
+  color: var(--pc-navy);
+  font-size: clamp(26px, 2.4vw, 32px);
+  margin-bottom: 4px;
+}
+.pc-op-sub {
+  color: var(--pc-muted);
+  font-size: clamp(14px, 1.1vw, 16px);
+  margin-bottom: 22px;
+}
 
 .pc-op-display { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
 
 .pc-op-dot {
-  width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--pc-border); background: transparent;
+  width: clamp(14px, 1.2vw, 18px);
+  height: clamp(14px, 1.2vw, 18px);
+  border-radius: 50%;
+  border: 2px solid var(--pc-border);
+  background: transparent;
   transition: background .15s, border-color .15s;
 }
 .pc-op-dot-filled { background: var(--pc-navy); border-color: var(--pc-navy); }
@@ -39,17 +51,34 @@
 }
 .pc-op-msg-visible { opacity: 1; }
 
-.pc-op-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 14px 0 22px; }
+.pc-op-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(14px, 1.6vw, 22px);
+  margin: 14px 0 22px;
+}
 
 .pc-op-key {
-  aspect-ratio: 1 / 1; border: none; border-radius: 50%;
-  background: var(--pc-navy); color: #fff; font-size: 22px; font-weight: 600;
-  cursor: pointer; transition: transform .1s, opacity .1s;
+  aspect-ratio: 1 / 1;
+  border: none;
+  border-radius: 50%;
+  background: var(--pc-navy);
+  color: #fff;
+  font-size: clamp(22px, 1.8vw, 26px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .1s, opacity .1s;
 }
 .pc-op-key:active { transform: scale(0.94); opacity: 0.85; }
-.pc-op-key-action { background: transparent; color: var(--pc-navy); font-size: 18px; }
+.pc-op-key-action { background: transparent; color: var(--pc-navy); font-size: clamp(18px, 1.5vw, 22px); }
 
-.pc-op-btn { width: 100%; justify-content: center; padding: 12px; border-radius: 999px; }
+.pc-op-btn {
+  width: 100%;
+  justify-content: center;
+  padding: clamp(12px, 1.2vw, 15px);
+  border-radius: 999px;
+  font-size: clamp(15px, 1.1vw, 17px);
+}
 
 @keyframes pc-op-shake-kf {
   0%, 100% { transform: translateX(0); }
@@ -58,4 +87,13 @@
 }
 .pc-op-shake { animation: pc-op-shake-kf .35s ease; }
 
-@media (max-width: 420px) { .pc-op-card { padding: 26px 18px; } }
+/* Tablets (portrait/landscape) — el rango donde antes se veía la card "perdida" */
+@media (min-width: 768px) and (max-width: 1200px) {
+  .pc-op-card {
+    max-width: 420px;
+  }
+}
+
+@media (max-width: 420px) {
+  .pc-op-card { padding: 26px 18px; max-width: 100%; }
+}
