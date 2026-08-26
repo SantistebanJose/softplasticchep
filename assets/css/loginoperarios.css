@@ -1,39 +1,57 @@
 .pc-op-shell {
   min-height: 100vh;
+  min-height: 100dvh; /* corrige la barra de direcciones móvil que cambia la altura real */
   display: flex;
   align-items: center;
   justify-content: center;
   background: radial-gradient(circle at 30% 20%, #eef1f9 0%, #e3e7f2 45%, #dde2f0 100%);
-  padding: 24px;
+  padding: 4vmin;
+  box-sizing: border-box;
 }
+
+/*
+  Base de escalado: vmin = % del lado MÁS CHICO de la pantalla (ancho o alto).
+  Esto es lo que hace que sea responsivo a CUALQUIER dispositivo sin necesidad
+  de adivinar breakpoints por marca/modelo:
+    - Celular vertical (ej. 390x844): el lado chico es el ancho -> escala por ancho.
+    - Tablet vertical  (ej. 768x1024): el lado chico es el ancho -> escala por ancho.
+    - Celular/tablet horizontal (ej. 1024x768): el lado chico es el alto -> escala por alto,
+      evitando que la card quede gigante y se corte verticalmente.
+  clamp(mínimo, preferido-en-vmin, máximo) evita extremos en pantallas muy chicas o muy grandes.
+*/
 
 .pc-op-card {
   width: 100%;
-  /* antes: max-width fijo de 380px -> se veía perdida en tablets grandes */
-  max-width: clamp(380px, 34vw, 480px);
+  max-width: clamp(320px, 62vmin, 560px);
   background: var(--pc-surface);
   border-radius: var(--pc-radius);
-  padding: clamp(32px, 4vw, 48px) clamp(28px, 3.5vw, 40px);
+  padding: clamp(24px, 6vmin, 56px) clamp(20px, 5vmin, 48px);
   text-align: center;
   box-shadow: 0 20px 50px rgba(12, 28, 51, 0.12);
+  box-sizing: border-box;
 }
 
 .pc-op-card h1 {
   color: var(--pc-navy);
-  font-size: clamp(26px, 2.4vw, 32px);
+  font-size: clamp(24px, 4.2vmin, 38px);
   margin-bottom: 4px;
 }
 .pc-op-sub {
   color: var(--pc-muted);
-  font-size: clamp(14px, 1.1vw, 16px);
-  margin-bottom: 22px;
+  font-size: clamp(13px, 1.9vmin, 18px);
+  margin-bottom: clamp(16px, 2.6vmin, 28px);
 }
 
-.pc-op-display { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
+.pc-op-display {
+  display: flex;
+  justify-content: center;
+  gap: clamp(6px, 1vmin, 10px);
+  margin-bottom: clamp(8px, 1.2vmin, 14px);
+}
 
 .pc-op-dot {
-  width: clamp(14px, 1.2vw, 18px);
-  height: clamp(14px, 1.2vw, 18px);
+  width: clamp(12px, 1.9vmin, 20px);
+  height: clamp(12px, 1.9vmin, 20px);
   border-radius: 50%;
   border: 2px solid var(--pc-border);
   background: transparent;
@@ -43,7 +61,7 @@
 
 .pc-op-msg {
   min-height: 18px;
-  font-size: 13px;
+  font-size: clamp(12px, 1.6vmin, 14px);
   color: var(--pc-danger, #d64545);
   margin-bottom: 8px;
   opacity: 0;
@@ -54,8 +72,8 @@
 .pc-op-keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: clamp(14px, 1.6vw, 22px);
-  margin: 14px 0 22px;
+  gap: clamp(10px, 2.4vmin, 26px);
+  margin: clamp(10px, 2vmin, 18px) 0 clamp(16px, 3vmin, 26px);
 }
 
 .pc-op-key {
@@ -64,20 +82,24 @@
   border-radius: 50%;
   background: var(--pc-navy);
   color: #fff;
-  font-size: clamp(22px, 1.8vw, 26px);
+  font-size: clamp(18px, 3.4vmin, 32px);
   font-weight: 600;
   cursor: pointer;
   transition: transform .1s, opacity .1s;
 }
 .pc-op-key:active { transform: scale(0.94); opacity: 0.85; }
-.pc-op-key-action { background: transparent; color: var(--pc-navy); font-size: clamp(18px, 1.5vw, 22px); }
+.pc-op-key-action {
+  background: transparent;
+  color: var(--pc-navy);
+  font-size: clamp(16px, 2.6vmin, 26px);
+}
 
 .pc-op-btn {
   width: 100%;
   justify-content: center;
-  padding: clamp(12px, 1.2vw, 15px);
+  padding: clamp(11px, 2vmin, 18px);
   border-radius: 999px;
-  font-size: clamp(15px, 1.1vw, 17px);
+  font-size: clamp(14px, 2.1vmin, 19px);
 }
 
 @keyframes pc-op-shake-kf {
@@ -87,13 +109,8 @@
 }
 .pc-op-shake { animation: pc-op-shake-kf .35s ease; }
 
-/* Tablets (portrait/landscape) — el rango donde antes se veía la card "perdida" */
-@media (min-width: 768px) and (max-width: 1200px) {
-  .pc-op-card {
-    max-width: 420px;
-  }
-}
-
-@media (max-width: 420px) {
-  .pc-op-card { padding: 26px 18px; max-width: 100%; }
+/* Pantallas muy anchas y bajas (celular en horizontal): evitar que se corte verticalmente */
+@media (max-height: 480px) {
+  .pc-op-shell { align-items: flex-start; padding: 3vmin 4vmin; }
+  .pc-op-card { max-width: clamp(320px, 50vmin, 460px); }
 }
