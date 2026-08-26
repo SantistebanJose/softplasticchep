@@ -10,17 +10,19 @@ if (!empty($_SESSION['operario_id'])) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Ingreso operario · Plásticos Chepito</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
-    <link rel="stylesheet" href="../assets/css/loginoperarios.css">
+    <link rel="stylesheet" href="../assets/css/loginoperarios.css?v=<?= time() ?>">
 </head>
 <body>
 <div class="pc-op-shell">
     <div class="pc-op-card">
+        <img src="../assets/img/logo.png" alt="Plásticos Chepito" class="pc-op-logo">
+
         <h1>Bienvenido</h1>
-        <p class="pc-op-sub">Ingresa tu DNI</p>
+        <p class="pc-op-sub">Ingresa tu DNI para registrar tu producción</p>
 
         <div class="pc-op-display" id="pcOpDisplay">
             <span class="pc-op-dot"></span><span class="pc-op-dot"></span>
@@ -49,6 +51,8 @@ if (!empty($_SESSION['operario_id'])) {
         <button type="button" class="pc-btn pc-btn-primary pc-op-btn" id="pcOpIngresar">
             <i class="fa-solid fa-right-to-bracket"></i> Ingresa
         </button>
+
+        <p class="pc-op-footer">Plásticos Chepito · Sistema de control de producción</p>
     </div>
 </div>
 

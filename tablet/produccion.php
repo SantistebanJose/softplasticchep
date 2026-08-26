@@ -58,6 +58,15 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     border:1px solid rgba(0,0,0,.15); vertical-align:middle; margin-right:5px;
 }
 
+.pc-select-btn{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    border:1.5px solid #e2ddcd; background:#fff; border-radius:12px;
+    padding:12px 14px; min-height:52px; width:100%; text-align:left;
+}
+.pc-select-btn .lbl{ font-size:.72em; font-weight:700; text-transform:uppercase; color:#8a8578; letter-spacing:.02em; flex:0 0 auto; }
+.pc-select-btn .val{ flex:1; font-weight:600; color:#152238; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0 8px; }
+.pc-select-btn i{ color:#c3beae; flex:0 0 auto; }
+
 /* ===================== LAYOUT GENERAL TABLET ===================== */
 .pc-form-layout{ display:grid; grid-template-columns:1fr; gap:22px; }
 @media (min-width:1150px) and (orientation:landscape){
@@ -307,18 +316,21 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
 
                 <div class="pc-selector-row-compact">
-                    <div class="pc-selector-block">
-                        <div class="pc-sel-label">Máquina</div>
-                        <div class="pc-chip-strip" id="chips_maquina"></div>
-                    </div>
-                    <div class="pc-selector-block">
-                        <div class="pc-sel-label">Categoría material</div>
-                        <div class="pc-chip-strip" id="chips_categoria"></div>
-                    </div>
-                    <div class="pc-selector-block">
-                        <div class="pc-sel-label">Sucursal</div>
-                        <div class="pc-chip-strip" id="chips_sucursal"></div>
-                    </div>
+                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('maquina')">
+                        <span class="lbl">Máquina</span>
+                        <span class="val" id="valor_maquina">Ninguna</span>
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('categoria')">
+                        <span class="lbl">Categoría material</span>
+                        <span class="val" id="valor_categoria">Ninguna</span>
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('sucursal')">
+                        <span class="lbl">Sucursal</span>
+                        <span class="val" id="valor_sucursal">Ninguna</span>
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
                 </div>
 
                 <div class="row">
@@ -426,6 +438,22 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
       <div class="modal-footer pc-footer-thumb">
         <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
         <button type="button" class="btn btn-primary btn-lg" id="btnAceptarTeclado">Usar esta cantidad</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal genérico reutilizable para Máquina / Categoría material / Sucursal -->
+<div class="modal fade pc-modal-tablet" id="modalSelectorGenerico" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:480px;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="selector_generico_titulo">Seleccionar</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="selector_generico_buscar" class="form-control form-control-lg mb-3" placeholder="Buscar...">
+        <div class="pc-chip-strip" id="selector_generico_grid" style="max-height:55vh;"></div>
       </div>
     </div>
   </div>
@@ -549,6 +577,52 @@ function seleccionarTabMaterial(tipo) {
     });
     renderGridMateriales();
 }
+
+// ===================== SELECTOR GENÉRICO (Máquina / Categoría / Sucursal) =====================
+const modalSelectorGenerico = new bootstrap.Modal(document.getElementById('modalSelectorGenerico'));
+let selectorGenericoContexto = null; // 'maquina' | 'categoria' | 'sucursal'
+
+const SELECTOR_CONFIG = {
+    maquina:   { titulo: 'Máquina',            cache: () => maquinasProdCache,           icon: () => 'fa-gears',  seleccionar: seleccionarMaquina,   estadoKey: 'maquina_id',              estadoNombreKey: 'maquina_nombre' },
+    categoria: { titulo: 'Categoría material',  cache: () => categoriasMaterialProdCache, icon: () => 'fa-tags',   seleccionar: seleccionarCategoria, estadoKey: 'categoria_material_id',   estadoNombreKey: 'categoria_nombre' },
+    sucursal:  { titulo: 'Sucursal',            cache: () => sucursalesProdCache,         icon: () => 'fa-store',  seleccionar: seleccionarSucursal,  estadoKey: 'sucursal_id',             estadoNombreKey: 'sucursal_nombre' },
+};
+
+function abrirSelectorGenerico(tipo) {
+    selectorGenericoContexto = tipo;
+    const cfg = SELECTOR_CONFIG[tipo];
+    document.getElementById('selector_generico_titulo').textContent = cfg.titulo;
+    document.getElementById('selector_generico_buscar').value = '';
+    renderSelectorGenericoGrid('');
+    modalSelectorGenerico.show();
+}
+
+function renderSelectorGenericoGrid(filtro) {
+    const cfg = SELECTOR_CONFIG[selectorGenericoContexto];
+    const items = [{ id: '', nombre: 'Ninguna' }, ...(cfg.cache() || [])]
+        .filter(it => it.nombre.toLowerCase().includes(filtro.toLowerCase()));
+
+    renderChipGrid('selector_generico_grid', items, {
+        getId: it => it.id,
+        getLabel: it => it.nombre,
+        getIcon: it => (it.id === '' ? 'fa-ban' : cfg.icon()),
+        seleccionadoId: selEstado[cfg.estadoKey],
+        onSeleccionar: 'seleccionarDesdeSelectorGenerico',
+        vacioTxt: 'Sin resultados.',
+    });
+}
+
+function seleccionarDesdeSelectorGenerico(id) {
+    const cfg = SELECTOR_CONFIG[selectorGenericoContexto];
+    cfg.seleccionar(id); // reutiliza las funciones existentes seleccionarMaquina/Categoria/Sucursal
+    document.getElementById('valor_' + selectorGenericoContexto).textContent =
+        selEstado[cfg.estadoNombreKey] || 'Ninguna';
+    modalSelectorGenerico.hide();
+}
+
+document.getElementById('selector_generico_buscar').addEventListener('input', e => {
+    renderSelectorGenericoGrid(e.target.value);
+});
 
 const modalTecladoCantidad = new bootstrap.Modal(document.getElementById('modalTecladoCantidad'));
 let tecladoValorStr = '0';
@@ -982,47 +1056,39 @@ function seleccionarColor(id) {
 
 // ---- Máquina (opcional) ----
 function pintarBloqueMaquina(maquinas) {
-    const items = [{ id: '', nombre: 'Ninguna' }, ...(maquinas || [])];
-    renderChipGrid('chips_maquina', items, {
-        getId: m => m.id, getLabel: m => m.nombre, getIcon: m => (m.id === '' ? 'fa-ban' : 'fa-gears'),
-        seleccionadoId: selEstado.maquina_id, onSeleccionar: 'seleccionarMaquina',
-    });
+    maquinasProdCache = maquinas || [];
 }
 function seleccionarMaquina(id) {
     selEstado.maquina_id = id;
     const m = (maquinasProdCache || []).find(x => String(x.id) === String(id));
     selEstado.maquina_nombre = m ? m.nombre : '';
-    pintarBloqueMaquina(maquinasProdCache);
 }
 
 // ---- Categoría de material (opcional) ----
 function pintarBloqueCategoria(categorias) {
-    const items = [{ id: '', nombre: 'Ninguna' }, ...(categorias || [])];
-    renderChipGrid('chips_categoria', items, {
-        getId: c => c.id, getLabel: c => c.nombre, getIcon: c => (c.id === '' ? 'fa-ban' : 'fa-tags'),
-        seleccionadoId: selEstado.categoria_material_id, onSeleccionar: 'seleccionarCategoria',
-    });
+    categoriasMaterialProdCache = categorias || [];
 }
 function seleccionarCategoria(id) {
     selEstado.categoria_material_id = id;
     const c = (categoriasMaterialProdCache || []).find(x => String(x.id) === String(id));
     selEstado.categoria_nombre = c ? c.nombre : '';
-    pintarBloqueCategoria(categoriasMaterialProdCache);
 }
 
 // ---- Sucursal (opcional) ----
 function pintarBloqueSucursal(sucursales) {
-    const items = [{ id: '', nombre: 'Ninguna' }, ...(sucursales || [])];
-    renderChipGrid('chips_sucursal', items, {
-        getId: s => s.id, getLabel: s => s.nombre, getIcon: s => (s.id === '' ? 'fa-ban' : 'fa-store'),
-        seleccionadoId: selEstado.sucursal_id, onSeleccionar: 'seleccionarSucursal',
-    });
+    sucursalesProdCache = sucursales || [];
 }
 function seleccionarSucursal(id) {
     selEstado.sucursal_id = id;
     const s = (sucursalesProdCache || []).find(x => String(x.id) === String(id));
     selEstado.sucursal_nombre = s ? s.nombre : '';
-    pintarBloqueSucursal(sucursalesProdCache);
+}
+
+// Refresca los 3 botones "val" del formulario (Máquina / Categoría / Sucursal)
+function refrescarValoresSelectorGenerico() {
+    document.getElementById('valor_maquina').textContent = selEstado.maquina_nombre || 'Ninguna';
+    document.getElementById('valor_categoria').textContent = selEstado.categoria_nombre || 'Ninguna';
+    document.getElementById('valor_sucursal').textContent = selEstado.sucursal_nombre || 'Ninguna';
 }
 
 // ---- Carga inicial de todos los selectores del modal ----
@@ -1061,6 +1127,7 @@ async function cargarSelectoresModal(seleccion = {}) {
     pintarBloqueSucursal(sucursales);
     pintarBloqueProducto(productos);
     pintarBloqueColor(colores);
+    refrescarValoresSelectorGenerico();
 
     if (selEstado.producto_id) {
         await cargarMoldesDeProducto(selEstado.producto_id, selEstado.unico_molde || null);
@@ -1367,6 +1434,7 @@ function limpiarFormularioProduccion() {
     };
     document.getElementById('bloque_molde').style.display = 'none';
     document.getElementById('chips_molde').innerHTML = '';
+    refrescarValoresSelectorGenerico();
     renderTicket();
 }
 

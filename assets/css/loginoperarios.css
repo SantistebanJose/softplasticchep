@@ -1,106 +1,66 @@
-.pc-op-shell {
+:root {
+  --pc-op-gap-safe-top: env(safe-area-inset-top, 0px);
+  --pc-op-gap-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html, body { height: 100%; margin: 0; }
+
+body .pc-op-shell {
   min-height: 100vh;
-  min-height: 100dvh; /* corrige la barra de direcciones móvil que cambia la altura real */
+  min-height: 100svh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: radial-gradient(circle at 30% 20%, #eef1f9 0%, #e3e7f2 45%, #dde2f0 100%);
-  padding: 4vmin;
+  padding: calc(4vmin + var(--pc-op-gap-safe-top)) 4vmin calc(4vmin + var(--pc-op-gap-safe-bottom));
   box-sizing: border-box;
+  overflow-y: auto;
 }
 
-/*
-  Base de escalado: vmin = % del lado MÁS CHICO de la pantalla (ancho o alto).
-  Esto es lo que hace que sea responsivo a CUALQUIER dispositivo sin necesidad
-  de adivinar breakpoints por marca/modelo:
-    - Celular vertical (ej. 390x844): el lado chico es el ancho -> escala por ancho.
-    - Tablet vertical  (ej. 768x1024): el lado chico es el ancho -> escala por ancho.
-    - Celular/tablet horizontal (ej. 1024x768): el lado chico es el alto -> escala por alto,
-      evitando que la card quede gigante y se corte verticalmente.
-  clamp(mínimo, preferido-en-vmin, máximo) evita extremos en pantallas muy chicas o muy grandes.
-*/
-
-.pc-op-card {
+/* ===== Base: celulares (hasta 479px) ===== */
+body .pc-op-card {
   width: 100%;
-  max-width: clamp(320px, 62vmin, 560px);
+  max-width: 380px !important;
   background: var(--pc-surface);
   border-radius: var(--pc-radius);
-  padding: clamp(24px, 6vmin, 56px) clamp(20px, 5vmin, 48px);
+  padding: 32px 24px;
   text-align: center;
   box-shadow: 0 20px 50px rgba(12, 28, 51, 0.12);
   box-sizing: border-box;
+  margin: auto;
 }
 
-.pc-op-card h1 {
-  color: var(--pc-navy);
-  font-size: clamp(24px, 4.2vmin, 38px);
-  margin-bottom: 4px;
-}
-.pc-op-sub {
-  color: var(--pc-muted);
-  font-size: clamp(13px, 1.9vmin, 18px);
-  margin-bottom: clamp(16px, 2.6vmin, 28px);
-}
+.pc-op-logo { display: block; margin: 0 auto 12px; width: 64px; height: auto; }
+.pc-op-card h1 { color: var(--pc-navy); font-size: 26px; margin-bottom: 4px; }
+.pc-op-sub { color: var(--pc-muted); font-size: 14px; margin-bottom: 20px; }
 
-.pc-op-display {
-  display: flex;
-  justify-content: center;
-  gap: clamp(6px, 1vmin, 10px);
-  margin-bottom: clamp(8px, 1.2vmin, 14px);
-}
-
+.pc-op-display { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
 .pc-op-dot {
-  width: clamp(12px, 1.9vmin, 20px);
-  height: clamp(12px, 1.9vmin, 20px);
-  border-radius: 50%;
-  border: 2px solid var(--pc-border);
-  background: transparent;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--pc-border); background: transparent;
   transition: background .15s, border-color .15s;
 }
 .pc-op-dot-filled { background: var(--pc-navy); border-color: var(--pc-navy); }
 
 .pc-op-msg {
-  min-height: 18px;
-  font-size: clamp(12px, 1.6vmin, 14px);
-  color: var(--pc-danger, #d64545);
-  margin-bottom: 8px;
-  opacity: 0;
-  transition: opacity .15s;
+  min-height: 18px; font-size: 13px; color: var(--pc-danger, #d64545);
+  margin-bottom: 8px; opacity: 0; transition: opacity .15s;
 }
 .pc-op-msg-visible { opacity: 1; }
 
-.pc-op-keypad {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: clamp(10px, 2.4vmin, 26px);
-  margin: clamp(10px, 2vmin, 18px) 0 clamp(16px, 3vmin, 26px);
-}
-
+.pc-op-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 12px 0 20px; }
 .pc-op-key {
-  aspect-ratio: 1 / 1;
-  border: none;
-  border-radius: 50%;
-  background: var(--pc-navy);
-  color: #fff;
-  font-size: clamp(18px, 3.4vmin, 32px);
-  font-weight: 600;
-  cursor: pointer;
+  aspect-ratio: 1 / 1; border: none; border-radius: 50%;
+  background: var(--pc-navy); color: #fff;
+  font-size: 22px; font-weight: 600; cursor: pointer;
   transition: transform .1s, opacity .1s;
 }
 .pc-op-key:active { transform: scale(0.94); opacity: 0.85; }
-.pc-op-key-action {
-  background: transparent;
-  color: var(--pc-navy);
-  font-size: clamp(16px, 2.6vmin, 26px);
-}
+.pc-op-key-action { background: transparent; color: var(--pc-navy); font-size: 18px; }
 
-.pc-op-btn {
-  width: 100%;
-  justify-content: center;
-  padding: clamp(11px, 2vmin, 18px);
-  border-radius: 999px;
-  font-size: clamp(14px, 2.1vmin, 19px);
-}
+.pc-op-btn { width: 100%; justify-content: center; padding: 13px; border-radius: 999px; font-size: 15px; }
+.pc-op-footer { margin-top: 16px; font-size: 11px; color: var(--pc-muted); letter-spacing: .02em; }
 
 @keyframes pc-op-shake-kf {
   0%, 100% { transform: translateX(0); }
@@ -109,8 +69,47 @@
 }
 .pc-op-shake { animation: pc-op-shake-kf .35s ease; }
 
-/* Pantallas muy anchas y bajas (celular en horizontal): evitar que se corte verticalmente */
+/* ===== Tablets chicas / phablets (480px – 767px) ===== */
+@media (min-width: 480px) {
+  body .pc-op-card { max-width: 420px !important; padding: 38px 32px; }
+  .pc-op-logo { width: 74px; margin-bottom: 14px; }
+  .pc-op-card h1 { font-size: 29px; }
+  .pc-op-keypad { gap: 17px; }
+  .pc-op-key { font-size: 25px; }
+}
+
+/* ===== Tablets (768px – 1023px) ===== */
+@media (min-width: 768px) {
+  body .pc-op-card { max-width: 480px !important; padding: 46px 42px; }
+  .pc-op-logo { width: 88px; margin-bottom: 16px; }
+  .pc-op-card h1 { font-size: 33px; }
+  .pc-op-sub { font-size: 16px; margin-bottom: 26px; }
+  .pc-op-dot { width: 18px; height: 18px; }
+  .pc-op-display { gap: 10px; margin-bottom: 14px; }
+  .pc-op-keypad { gap: 20px; margin: 18px 0 26px; }
+  .pc-op-key { font-size: 28px; }
+  .pc-op-key-action { font-size: 22px; }
+  .pc-op-btn { padding: 16px; font-size: 17px; }
+  .pc-op-footer { font-size: 12px; margin-top: 20px; }
+}
+
+/* ===== Tablets grandes / desktop (1024px+) ===== */
+@media (min-width: 1024px) {
+  body .pc-op-card { max-width: 540px !important; padding: 54px 50px; }
+  .pc-op-logo { width: 100px; }
+  .pc-op-card h1 { font-size: 37px; }
+  .pc-op-keypad { gap: 24px; }
+  .pc-op-key { font-size: 30px; }
+}
+
+/* ===== Horizontal / poca altura: que no se corte ===== */
 @media (max-height: 480px) {
-  .pc-op-shell { align-items: flex-start; padding: 3vmin 4vmin; }
-  .pc-op-card { max-width: clamp(320px, 50vmin, 460px); }
+  body .pc-op-shell { align-items: flex-start; padding-top: calc(3vmin + var(--pc-op-gap-safe-top)); }
+  body .pc-op-card { max-width: 400px !important; padding: 20px 24px; }
+  .pc-op-logo { width: 48px; margin-bottom: 8px; }
+  .pc-op-keypad { gap: 10px; margin: 8px 0 12px; }
+}
+
+@supports not (height: 100dvh) {
+  body .pc-op-shell { min-height: 100vh; }
 }
