@@ -9,12 +9,16 @@ include("header.php");
 <style>
 .pc-dv-tabla-wrap{ max-height:560px; overflow-y:auto; border:1px solid #eee7db; border-radius:10px; }
 .pc-dv-tabla{ width:100%; font-size:.88em; border-collapse:collapse; }
-.pc-dv-tabla th{ position:sticky; top:0; background:#fdfcfa; text-align:left; padding:9px 12px; border-bottom:1px solid #eee7db; font-size:.78em; color:#8a8578; text-transform:uppercase; }
+.pc-dv-tabla th{ position:sticky; top:0; background:#fdfcfa; text-align:left; padding:9px 12px; border-bottom:1px solid #eee7db; font-size:.78em; color:#8a8578; text-transform:uppercase; z-index:1; }
 .pc-dv-tabla td{ padding:9px 12px; border-bottom:1px dashed #eee2c8; vertical-align:top; }
 .pc-dv-tabla tr:last-child td{ border-bottom:none; }
 .pc-dv-color-dot{ display:inline-block; width:10px; height:10px; border-radius:50%; background:#ccc; margin-right:6px; vertical-align:middle; }
 .pc-dv-color-dot.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 2px, #fff 2px, #fff 4px); border:1px solid #bbb; }
-.pc-dv-cantidad{ font-weight:700; color:#2F6FED; }
+
+.pc-dv-paquetes{ font-weight:700; color:#2F6FED; font-size:1.05em; }
+.pc-dv-paquetes small{ font-weight:600; color:#5c85e8; }
+.pc-dv-cantidad-base{ color:#9a9585; font-size:.85em; }
+
 .pc-dv-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
 .pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:220px; }
 .pc-dv-legado{ font-style:italic; color:#9a9585; }
@@ -23,6 +27,16 @@ include("header.php");
     background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg);
 }
 .pc-dv-mezcla-texto{ font-weight:600; color:#3a3730; }
+
+.pc-dv-warning-mix{ color:#c9822a; margin-left:6px; cursor:help; }
+
+.pc-dv-subtotal td{
+    background:#fbf9f3; font-weight:700; border-bottom:2px solid #eee2c8;
+    border-top:1px solid #eee2c8; color:#3a3730;
+}
+.pc-dv-subtotal .pc-dv-paquetes{ font-size:1em; }
+
+.pc-dv-producto-header{ display:flex; align-items:baseline; gap:8px; }
 </style>
 
 <div class="pc-card">
@@ -48,11 +62,12 @@ include("header.php");
                     <th>Producto</th>
                     <th>Color</th>
                     <th># Registros</th>
-                    <th>Cantidad disponible</th>
+                    <th>Paquetes disponibles</th>
+                    <th>Cantidad (unidad base)</th>
                 </tr>
             </thead>
             <tbody id="tablaDisponibilidadVenta">
-                <tr><td colspan="4" class="text-center text-muted">Cargando...</td></tr>
+                <tr><td colspan="5" class="text-center text-muted">Cargando...</td></tr>
             </tbody>
         </table>
     </div>
@@ -77,9 +92,9 @@ async function llamarDV(accion, params = {}) {
     }
 }
 
-function formatearCantidadDV(n) {
+function formatearNumeroDV(n, decimales = 2) {
     if (n === null || n === undefined || n === '') return '-';
-    return Number(n).toLocaleString('es-PE', { maximumFractionDigits: 4 });
+    return Number(n).toLocaleString('es-PE', { maximumFractionDigits: decimales });
 }
 
 async function cargarColoresDV() {
@@ -91,9 +106,81 @@ async function cargarColoresDV() {
     }
 }
 
+// Arma un array de "grupos" (uno por producto), asumiendo que las filas ya
+// vienen ordenadas por producto desde el backend (ORDER BY p.descripcion...).
+function agruparPorProductoDV(filas) {
+    const grupos = [];
+    let actual = null;
+    filas.forEach(f => {
+        if (!actual || actual.producto_id !== f.producto_id) {
+            actual = {
+                producto_id: f.producto_id,
+                producto_codigo: f.producto_codigo,
+                producto: f.producto,
+                filas: [],
+            };
+            grupos.push(actual);
+        }
+        actual.filas.push(f);
+    });
+    return grupos;
+}
+
+function filaHtmlDV(f) {
+    const esLegado = f.color_id === null || f.color_id === undefined;
+    const esMezcla = f.color_id === -1;
+
+    let dotClase = 'pc-dv-color-dot';
+    let colorTexto = f.color ?? '-';
+
+    if (esLegado) {
+        dotClase += ' sin-color';
+        colorTexto = `<span class="pc-dv-legado">${colorTexto}</span>`;
+    } else if (esMezcla) {
+        dotClase += ' mezcla';
+        colorTexto = `<span class="pc-dv-mezcla-texto">${colorTexto}</span>`;
+    }
+
+    const warningMix = f.unidades_paquete_distintas
+        ? `<span class="pc-dv-warning-mix" title="Este grupo mezcla registros con distinta unidad de empaquetado configurada. La suma de paquetes es aproximada.">⚠️</span>`
+        : '';
+
+    return `
+    <tr>
+        <td><b>${f.producto_codigo ?? ''}</b> - ${f.producto ?? '-'}</td>
+        <td><span class="${dotClase}"></span>${colorTexto}</td>
+        <td>${f.registros_count ?? 0}</td>
+        <td>
+            <span class="pc-dv-paquetes">${formatearNumeroDV(f.paquetes_disponibles)} <small>${f.unidad_paquete_corto ?? ''}</small></span>
+            ${warningMix}
+        </td>
+        <td class="pc-dv-cantidad-base">${formatearNumeroDV(f.cantidad_disponible, 4)} ${f.unidad_corto ?? ''}</td>
+    </tr>`;
+}
+
+function subtotalHtmlDV(grupo) {
+    const totalPaquetes = grupo.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
+    const totalBase     = grupo.filas.reduce((acc, f) => acc + Number(f.cantidad_disponible || 0), 0);
+
+    // Si todas las filas del producto comparten la misma unidad de
+    // empaquetado, se muestra junto al total; si no, se omite (ya cada
+    // fila trae su propia unidad + el aviso ⚠️ si aplica).
+    const unidadesPaquete = [...new Set(grupo.filas.map(f => f.unidad_paquete_corto).filter(Boolean))];
+    const unidadesBase    = [...new Set(grupo.filas.map(f => f.unidad_corto).filter(Boolean))];
+    const sufijoPaquete = unidadesPaquete.length === 1 ? ` <small>${unidadesPaquete[0]}</small>` : '';
+    const sufijoBase    = unidadesBase.length === 1 ? ` ${unidadesBase[0]}` : '';
+
+    return `
+    <tr class="pc-dv-subtotal">
+        <td colspan="3">Total ${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''}</td>
+        <td><span class="pc-dv-paquetes">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</span></td>
+        <td class="pc-dv-cantidad-base">${formatearNumeroDV(totalBase, 4)}${sufijoBase}</td>
+    </tr>`;
+}
+
 async function cargarDisponibilidadVenta() {
     const tbody = document.getElementById('tablaDisponibilidadVenta');
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
     const params = {
         texto: document.getElementById('dv_texto').value.trim(),
@@ -103,39 +190,26 @@ async function cargarDisponibilidadVenta() {
     const json = await llamarDV('LISTARDISPONIBILIDADVENTA', params);
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">${json.message}</td></tr>`;
         return;
     }
 
     const filas = json.disponibilidad || [];
     if (filas.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No hay stock disponible con estos filtros.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No hay stock disponible con estos filtros.</td></tr>';
         return;
     }
 
-    tbody.innerHTML = filas.map(f => {
-        const esLegado = f.color_id === null || f.color_id === undefined;
-        const esMezcla = f.color_id === -1;
-
-        let dotClase = 'pc-dv-color-dot';
-        let colorTexto = f.color ?? '-';
-
-        if (esLegado) {
-            dotClase += ' sin-color';
-            colorTexto = `<span class="pc-dv-legado">${colorTexto}</span>`;
-        } else if (esMezcla) {
-            dotClase += ' mezcla';
-            colorTexto = `<span class="pc-dv-mezcla-texto">${colorTexto}</span>`;
+    const grupos = agruparPorProductoDV(filas);
+    let html = '';
+    grupos.forEach(grupo => {
+        grupo.filas.forEach(f => { html += filaHtmlDV(f); });
+        // Subtotal solo tiene sentido si el producto tiene más de un color/bucket
+        if (grupo.filas.length > 1) {
+            html += subtotalHtmlDV(grupo);
         }
-
-        return `
-        <tr>
-            <td><b>${f.producto_codigo ?? ''}</b> - ${f.producto ?? '-'}</td>
-            <td><span class="${dotClase}"></span>${colorTexto}</td>
-            <td>${f.registros_count ?? 0}</td>
-            <td class="pc-dv-cantidad">${formatearCantidadDV(f.cantidad_disponible)} ${f.unidad_corto ?? ''}</td>
-        </tr>`;
-    }).join('');
+    });
+    tbody.innerHTML = html;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

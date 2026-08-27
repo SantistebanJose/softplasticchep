@@ -15,6 +15,11 @@ include("header.php");
 .pc-venta-item-resultados .disp{ color:#8a8578; font-size:.8em; }
 .pc-venta-item-nombre{ font-size:.82em; color:#555; margin-top:2px; }
 #ventaMontoTotal{ font-weight:700; font-size:1.2em; color:#2F6FED; }
+
+.pc-venta-color-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; background:#ccc; margin-right:5px; vertical-align:middle; }
+.pc-venta-color-dot.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 2px, #fff 2px, #fff 4px); border:1px solid #bbb; }
+.pc-venta-color-dot.mezcla{ background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg); }
+.pc-venta-item-resultados .disp b{ color:#2F6FED; }
 </style>
 
 <div class="pc-card">
@@ -264,17 +269,33 @@ function agregarFilaItemVenta() {
         if (valor.length < 2) { contResultados.style.display = 'none'; return; }
         debounceItemTimer = setTimeout(async () => {
             const json = await llamarVenta('BUSCARDISPONIBLESVENTA', { texto: valor });
-            if (!json.success || !json.disponibles.length) {
+            if (!json.success) {
+                contResultados.innerHTML = `<div class="disp text-danger">Error: ${json.message}</div>`;
+                contResultados.style.display = 'block';
+                return;
+            }
+            if (!json.disponibles.length) {
                 contResultados.innerHTML = '<div class="disp">Sin stock disponible con ese texto.</div>';
                 contResultados.style.display = 'block';
                 return;
             }
-            contResultados.innerHTML = json.disponibles.map(d => `
+            contResultados.innerHTML = json.disponibles.map(d => {
+                const esLegado = d.color_id === null || d.color_id === undefined;
+                const esMezcla = d.color_id === -1;
+                let dotClase = 'pc-venta-color-dot';
+                if (esLegado) dotClase += ' sin-color';
+                else if (esMezcla) dotClase += ' mezcla';
+
+                return `
                 <div onclick='seleccionarItemVenta("${idFila}", ${JSON.stringify(d)})'>
+                    <span class="${dotClase}"></span>
                     <b>${d.producto_codigo}</b> - ${d.producto} · ${d.color ?? '-'}
-                    <div class="disp">Disponible: ${formatearCantidadVenta(d.cantidad_disponible)} ${d.unidad_corto ?? ''}</div>
-                </div>
-            `).join('');
+                    <div class="disp">
+                        Paquetes: <b>${formatearCantidadVenta(d.paquetes_disponibles)} ${d.unidad_paquete_corto ?? ''}</b>
+                        &nbsp;|&nbsp; Disponible: ${formatearCantidadVenta(d.cantidad_disponible)} ${d.unidad_corto ?? ''}
+                    </div>
+                </div>`;
+            }).join('');
             contResultados.style.display = 'block';
         }, 300);
     });

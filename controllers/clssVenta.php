@@ -9,16 +9,26 @@
  * ítem (js_consumo dentro de cada item), para trazabilidad y para poder
  * anular la venta reponiendo stock.
  *
- * Consumo de stock: FIFO por producto_id sobre la tabla empaquetado
- * (deleted_at IS NULL, pasado_venta IS NULL, cantidad_tota > 0), ordenado
- * por created_at ASC. Se descuenta cantidad_tota parcialmente; si llega a
- * 0 se marca pasado_venta = NOW().
+ * REESCRITO (2026-08-27): el vínculo producto->color YA NO se deriva de
+ * produccion.color_id (ese enfoque asignaba a un registro de empaquetado
+ * CUALQUIER color que esa producción hubiera tenido alguna vez, sin
+ * relación real con lo que ese bulto contiene, y no distinguía Mezcla).
+ * Ahora se usa la MISMA clasificación de clssDisponibilidadVenta.php,
+ * basada en rel_empaquetado_origen por registro de empaquetado:
+ *   - 1 solo color en rel_empaquetado_origen -> ese color real (id > 0).
+ *   - 2+ colores distintos                   -> "Mezcla" (sentinel -1).
+ *   - 0 líneas activas (registro legado)      -> NULL ("Sin color").
  *
- * NOTA (heredada de clssDisponibilidadVenta.php): el vínculo producto->color
- * se deriva vía produccion.unico_molde_producto; empaquetado no tiene color_id
- * propio, así que el consumo FIFO es por producto_id, no por color. Si un
- * producto tiene más de un color histórico en empaquetado, el consumo no
- * distingue entre colores. Mismo caveat que ya tenías anotado ahí.
+ * Con esto, tanto buscarDisponiblesVenta() como el consumo FIFO
+ * (consumirStockFIFOVenta) ahora operan sobre producto_id + ESTE bucket
+ * de color, así que vender "Pinza Palanita (Celeste)" solo puede
+ * descontar registros de empaquetado que de verdad son celestes — nunca
+ * un registro Mezcla ni de otro color, aunque compartan producto_id.
+ *
+ * Consumo de stock: FIFO por (producto_id, color_id_efectivo) sobre la
+ * tabla empaquetado (deleted_at IS NULL, pasado_venta IS NULL,
+ * cantidad_tota > 0), ordenado por created_at ASC. Se descuenta
+ * cantidad_tota parcialmente; si llega a 0 se marca pasado_venta = NOW().
  *
  * Solo se puede vender a proveedor.tipo = 'cliente' (activos).
  *
@@ -127,9 +137,14 @@ function buscarClientes()
     $result = executeQuery($conectar, $sql, $params);
     responderVenta(true, 'OK', ['clientes' => $result]);
 }
+
 // =============================================================================
 // PRODUCTOS/COLORES DISPONIBLES PARA VENDER
-// (mismo criterio que clssDisponibilidadVenta.php, siempre sin vendidos)
+// REESCRITO (2026-08-27): mismo criterio de bucket de color que
+// clssDisponibilidadVenta.php (rel_empaquetado_origen por registro,
+// jamás produccion.color_id). Devuelve también paquetes_disponibles
+// (cantidad_tota, unidad de empaquetado propia del registro) porque es
+// lo que le importa a ventas en la práctica, igual que en el reporte.
 // =============================================================================
 
 function buscarDisponiblesVenta()
@@ -137,50 +152,78 @@ function buscarDisponiblesVenta()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    $where  = ["t1.deleted_at IS NULL", "t1.pasado_venta IS NULL"];
+    // FIX: 'emp' solo existe DENTRO de la CTE 'detalle' (ese filtro ya se
+    // aplica ahí mismo). Afuera la tabla se llama 'detalle dc', así que
+    // referenciar emp.deleted_at/emp.pasado_venta acá rompía la query con
+    // "missing FROM-clause entry for table emp" — y como el catch general
+    // devolvía el mismo mensaje genérico que "sin stock", el error quedaba
+    // invisible en el frontend.
+    $whereDetalle = ["1=1"];
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(pc.producto_codigo) LIKE LOWER(:texto) OR LOWER(pc.producto) LIKE LOWER(:texto))";
+        $whereDetalle[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
 
-    $sql = "WITH producto_color AS (
-                SELECT DISTINCT
-                    t2.id AS producto_id,
-                    t2.codigo AS producto_codigo,
-                    t2.descripcion AS producto,
-                    t4.id AS color_id,
-                    t4.nombre AS color
-                FROM produccion t3
-                JOIN producto t2 ON t2.id::varchar = split_part(t3.unico_molde_producto, '-', 2)
-                JOIN color t4 ON t4.id = t3.color_id
-                WHERE t4.deleted_at IS NULL
-            )
+    $sql = "
+        WITH color_stats AS (
             SELECT
-                pc.producto_id, pc.producto_codigo, pc.producto,
-                pc.color_id, pc.color,
-                COALESCE(SUM(
-                    CASE WHEN um.unidad_base_id IS NOT NULL
-                         THEN t1.cantidad_tota * um.equivalencia
-                         ELSE t1.cantidad_tota
-                    END
-                ), 0) AS cantidad_disponible,
-                MIN(COALESCE(ub.nombre_corto, um.nombre_corto)) AS unidad_corto
-            FROM producto_color pc
-            JOIN empaquetado t1 ON t1.producto_id = pc.producto_id
-            JOIN unidad_medida um ON um.id = t1.unidad_medida
+                reo.empaquetado_id,
+                COUNT(DISTINCT reo.color_id) AS colores_distintos,
+                SUM(reo.cantidad) AS cantidad_base_total,
+                MIN(reo.color_id) AS unico_color_id
+            FROM rel_empaquetado_origen reo
+            WHERE reo.deleted_at IS NULL
+            GROUP BY reo.empaquetado_id
+        ),
+        detalle AS (
+            SELECT
+                emp.id AS empaquetado_id,
+                emp.producto_id,
+                CASE
+                    WHEN cs.colores_distintos IS NULL THEN NULL   -- legado
+                    WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
+                    ELSE -1                                        -- mezcla
+                END AS color_id_efectivo,
+                COALESCE(
+                    cs.cantidad_base_total,
+                    emp.cantidad_tota * COALESCE(um.equivalencia, 1)  -- fallback legado
+                ) AS cantidad_base,
+                emp.cantidad_tota AS cantidad_paquetes,
+                um.nombre_corto AS unidad_paquete_corto,
+                COALESCE(ub.nombre_corto, um.nombre_corto) AS unidad_base_corto
+            FROM empaquetado emp
+            LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
+            JOIN unidad_medida um ON um.id = emp.unidad_medida
             LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
-            WHERE " . implode(' AND ', $where) . "
-            GROUP BY pc.producto_id, pc.producto_codigo, pc.producto, pc.color_id, pc.color
-            HAVING COALESCE(SUM(
-                CASE WHEN um.unidad_base_id IS NOT NULL
-                     THEN t1.cantidad_tota * um.equivalencia
-                     ELSE t1.cantidad_tota
-                END
-            ), 0) > 0
-            ORDER BY pc.producto, pc.color
-            LIMIT 30";
+            WHERE emp.deleted_at IS NULL AND emp.pasado_venta IS NULL
+        )
+        SELECT
+            dc.producto_id,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto,
+            dc.color_id_efectivo AS color_id,
+            CASE
+                WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
+                WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
+                ELSE co.nombre
+            END AS color,
+            SUM(dc.cantidad_base) AS cantidad_disponible,
+            MIN(dc.unidad_base_corto) AS unidad_corto,
+            SUM(dc.cantidad_paquetes) AS paquetes_disponibles,
+            MIN(dc.unidad_paquete_corto) AS unidad_paquete_corto
+        FROM detalle dc
+        JOIN producto p ON p.id = dc.producto_id
+        LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
+        WHERE " . implode(' AND ', $whereDetalle) . "
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre
+        HAVING SUM(dc.cantidad_base) > 0
+        ORDER BY p.descripcion,
+                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
+                 co.nombre NULLS LAST
+        LIMIT 30
+    ";
 
     $result = executeQuery($conectar, $sql, $params);
     responderVenta(true, 'OK', ['disponibles' => $result]);
@@ -191,11 +234,23 @@ function buscarDisponiblesVenta()
 // =============================================================================
 
 /**
- * Reserva/consume stock FIFO para un producto. Debe llamarse dentro de una
- * transacción abierta en $conectar. Lanza RuntimeException si no alcanza.
+ * Reserva/consume stock FIFO para un producto + bucket de color. Debe
+ * llamarse dentro de una transacción abierta en $conectar. Lanza
+ * RuntimeException si no alcanza.
+ *
+ * $colorIdEfectivo sigue el mismo sentinel que clssDisponibilidadVenta.php:
+ *   null -> "Sin color (registro legado)"
+ *   -1   -> "Mezcla"
+ *   > 0  -> color real
+ *
+ * El filtro de color se calcula por registro con una subconsulta
+ * correlacionada contra rel_empaquetado_origen (misma clasificación que
+ * buscarDisponiblesVenta), usando IS NOT DISTINCT FROM para que el caso
+ * NULL (legado) también matchee correctamente.
+ *
  * Devuelve el detalle de qué registros de empaquetado se afectaron.
  */
-function consumirStockFIFOVenta($conectar, int $productoId, float $cantidadNecesaria): array
+function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectivo, float $cantidadNecesaria): array
 {
     $stmt = $conectar->prepare("
         SELECT t1.id, t1.cantidad_tota, um.equivalencia, um.unidad_base_id
@@ -205,10 +260,22 @@ function consumirStockFIFOVenta($conectar, int $productoId, float $cantidadNeces
           AND t1.deleted_at IS NULL
           AND t1.pasado_venta IS NULL
           AND t1.cantidad_tota > 0
+          AND (
+              SELECT CASE
+                  WHEN COUNT(DISTINCT reo.color_id) = 0 THEN NULL
+                  WHEN COUNT(DISTINCT reo.color_id) = 1 THEN MIN(reo.color_id)
+                  ELSE -1
+              END
+              FROM rel_empaquetado_origen reo
+              WHERE reo.empaquetado_id = t1.id AND reo.deleted_at IS NULL
+          ) IS NOT DISTINCT FROM :color_id_efectivo
         ORDER BY t1.created_at ASC, t1.id ASC
-        FOR UPDATE
+        FOR UPDATE OF t1
     ");
-    $stmt->execute(['producto_id' => $productoId]);
+    $stmt->execute([
+        'producto_id'       => $productoId,
+        'color_id_efectivo' => $colorIdEfectivo,
+    ]);
     $registros = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $restante = $cantidadNecesaria;
@@ -240,7 +307,10 @@ function consumirStockFIFOVenta($conectar, int $productoId, float $cantidadNeces
     }
 
     if ($restante > 0.0001) {
-        throw new RuntimeException('Stock insuficiente para cubrir la cantidad solicitada (faltan ' . $restante . ').');
+        $etiquetaColor = $colorIdEfectivo === null
+            ? 'sin color (registro legado)'
+            : ($colorIdEfectivo === -1 ? 'Mezcla' : "color #$colorIdEfectivo");
+        throw new RuntimeException("Stock insuficiente para producto #$productoId ($etiquetaColor): faltan $restante.");
     }
 
     foreach ($consumo as $c) {
@@ -264,6 +334,8 @@ function consumirStockFIFOVenta($conectar, int $productoId, float $cantidadNeces
 /**
  * Reversa el consumo de un ítem anulado: repone cantidad_tota y libera
  * pasado_venta si corresponde. Debe llamarse dentro de una transacción.
+ * No necesita saber de colores: opera directo sobre empaquetado_id, que
+ * ya quedó fijo en js_consumo al momento de la venta.
  */
 function restaurarStockVenta($conectar, array $consumo): void
 {
@@ -340,6 +412,38 @@ function obtenerVenta(int $id)
     responderVenta(true, 'OK', ['venta' => $result[0]]);
 }
 
+// Resuelve el texto de producto/color para el snapshot de un ítem, usando
+// el MISMO bucket (color_id_efectivo) ya validado contra rel_empaquetado_
+// origen. Ya no consulta produccion en absoluto.
+function resolverInfoItemVenta($conectar, int $productoId, ?int $colorIdEfectivo): array
+{
+    $productoRow = executeQuery($conectar,
+        "SELECT id, codigo, descripcion FROM producto WHERE id = :id",
+        ['id' => $productoId]
+    );
+    if (empty($productoRow)) {
+        throw new RuntimeException("No se encontró el producto #$productoId.");
+    }
+
+    if ($colorIdEfectivo === null) {
+        $colorNombre = 'Sin color (registro legado)';
+    } elseif ($colorIdEfectivo === -1) {
+        $colorNombre = 'Mezcla';
+    } else {
+        $colorRow = executeQuery($conectar, "SELECT nombre FROM color WHERE id = :id", ['id' => $colorIdEfectivo]);
+        if (empty($colorRow)) {
+            throw new RuntimeException("El color #$colorIdEfectivo indicado no existe.");
+        }
+        $colorNombre = $colorRow[0]['nombre'];
+    }
+
+    return [
+        'producto_codigo' => $productoRow[0]['codigo'],
+        'producto'        => $productoRow[0]['descripcion'],
+        'color'           => $colorNombre,
+    ];
+}
+
 function guardarVenta()
 {
     $conectar = conectar_oll_BD();
@@ -374,42 +478,29 @@ function guardarVenta()
 
         foreach ($itemsInput as $item) {
             $productoId = (int)($item['producto_id'] ?? 0);
-            $colorId    = !empty($item['color_id']) ? (int)$item['color_id'] : null;
             $cantidad   = (float)($item['cantidad'] ?? 0);
             $precio     = (float)($item['precio_unitario'] ?? 0);
+
+            // Mismo sentinel que clssDisponibilidadVenta.php: null = legado,
+            // -1 = mezcla, >0 = color real. !empty() distingue bien estos
+            // tres casos porque -1 es "truthy" y null/'' son "falsy".
+            $colorIdEfectivo = !empty($item['color_id']) ? (int)$item['color_id'] : null;
 
             if ($productoId <= 0 || $cantidad <= 0) {
                 throw new RuntimeException('Cada ítem debe tener producto y cantidad válidos.');
             }
 
-            $paramsInfo = ['producto_id' => $productoId];
-            $sqlInfo = "SELECT DISTINCT t2.id AS producto_id, t2.codigo AS producto_codigo,
-                               t2.descripcion AS producto, t4.id AS color_id, t4.nombre AS color
-                        FROM produccion t3
-                        JOIN producto t2 ON t2.id::varchar = split_part(t3.unico_molde_producto, '-', 2)
-                        JOIN color t4 ON t4.id = t3.color_id
-                        WHERE t2.id = :producto_id";
-            if ($colorId) {
-                $sqlInfo .= " AND t4.id = :color_id";
-                $paramsInfo['color_id'] = $colorId;
-            }
-            $sqlInfo .= " LIMIT 1";
+            $info = resolverInfoItemVenta($conectar, $productoId, $colorIdEfectivo);
 
-            $infoProducto = executeQuery($conectar, $sqlInfo, $paramsInfo);
-            if (empty($infoProducto)) {
-                throw new RuntimeException('No se encontró información del producto/color seleccionado (ID producto ' . $productoId . ').');
-            }
-            $info = $infoProducto[0];
-
-            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $cantidad);
+            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $colorIdEfectivo, $cantidad);
             $subtotal = round($cantidad * $precio, 2);
             $montoTotal += $subtotal;
 
             $itemsFinal[] = [
-                'producto_id'     => (int)$info['producto_id'],
+                'producto_id'     => $productoId,
                 'producto_codigo' => $info['producto_codigo'],
                 'producto'        => $info['producto'],
-                'color_id'        => $info['color_id'] !== null ? (int)$info['color_id'] : null,
+                'color_id'        => $colorIdEfectivo,
                 'color'           => $info['color'],
                 'cantidad'        => $cantidad,
                 'precio_unitario' => $precio,
@@ -447,6 +538,7 @@ function guardarVenta()
         responderVenta(false, 'No se pudo registrar la venta: ' . $e->getMessage());
     }
 }
+
 function anularVenta(int $id)
 {
     $conectar = conectar_oll_BD();

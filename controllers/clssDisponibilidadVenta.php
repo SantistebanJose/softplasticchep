@@ -23,6 +23,24 @@
  * cálculo que el reporte usaba antes) bajo un color "Sin color (registro
  * legado)", en vez de perderlos silenciosamente del reporte.
  *
+ * ACTUALIZADO (2026-08-27): se agrega PAQUETES DISPONIBLES como métrica
+ * principal del reporte (ventas se hace mayormente por paquete, no por
+ * unidad suelta). "Paquete" = emp.cantidad_tota, es decir la cantidad en
+ * la UNIDAD DE EMPAQUETADO propia del registro (Bulto, Docena, Bolsa,
+ * etc.), SIN convertir a unidad base. La categorización por color/mezcla/
+ * legado sigue siendo a nivel de REGISTRO completo (un registro de
+ * empaquetado cae entero en un solo bucket), así que sumar cantidad_tota
+ * agrupado igual que cantidad_base es seguro y consistente: no hay
+ * prorrateo de un mismo registro entre dos colores distintos.
+ *
+ * Si dentro de un mismo grupo (producto+color) hay registros con distinta
+ * unidad de empaquetado configurada (caso raro: el producto cambió su
+ * config de empaquetado con stock viejo aún disponible), el total de
+ * paquetes es una SUMA APROXIMADA de cantidades en unidades distintas.
+ * Se expone `unidades_paquete_distintas` para que el frontend lo marque
+ * en vez de mostrar un número limpio que en realidad mezcla peras con
+ * manzanas.
+ *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -67,15 +85,10 @@ function buscarColoresDV()
     responderDV(true, 'OK', ['colores' => $result]);
 }
 
-// REESCRITO (2026-08-19 v2): un registro de empaquetado que combina más
-// de un color YA NO se reparte entre cada color individual (eso sugería
-// que cada color se podía vender por separado, cuando en realidad el
-// paquete se vende completo, tal cual se armó). Ahora se clasifica en
-// una de tres categorías por registro:
-//   - 1 solo color en rel_empaquetado_origen -> ese color real.
-//   - 2+ colores distintos -> "Mezcla" (color_id_efectivo = -1, sentinel).
-//   - 0 líneas activas (registro legado, sin rel_empaquetado_origen) ->
-//     "Sin color (registro legado)".
+// REESCRITO (2026-08-27): además de cantidad_base (unidad base, ej. UND),
+// ahora se calcula paquetes_disponibles = SUM(cantidad_tota) del grupo,
+// osea el conteo en la unidad de empaquetado tal cual se registró (Bulto,
+// Docena, Bolsa...), que es la que le importa a ventas.
 function listarDisponibilidadVenta()
 {
     $conectar        = conectar_oll_BD();
@@ -128,10 +141,14 @@ function listarDisponibilidadVenta()
                 COALESCE(
                     cs.cantidad_base_total,
                     emp.cantidad_tota * COALESCE(um.equivalencia, 1)  -- fallback legado
-                ) AS cantidad_base
+                ) AS cantidad_base,
+                emp.cantidad_tota AS cantidad_paquetes,
+                um.nombre_corto AS unidad_paquete_corto,
+                COALESCE(ub.nombre_corto, um.nombre_corto) AS unidad_base_corto
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
+            LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         )
         SELECT
             dc.producto_id,
@@ -145,12 +162,12 @@ function listarDisponibilidadVenta()
             END AS color,
             COUNT(*) AS registros_count,
             SUM(dc.cantidad_base) AS cantidad_disponible,
-            MIN(COALESCE(ub.nombre_corto, um.nombre_corto)) AS unidad_corto
+            MIN(dc.unidad_base_corto) AS unidad_corto,
+            SUM(dc.cantidad_paquetes) AS paquetes_disponibles,
+            MIN(dc.unidad_paquete_corto) AS unidad_paquete_corto,
+            (COUNT(DISTINCT dc.unidad_paquete_corto) > 1) AS unidades_paquete_distintas
         FROM detalle dc
         JOIN producto p ON p.id = dc.producto_id
-        JOIN empaquetado emp2 ON emp2.id = dc.empaquetado_id
-        JOIN unidad_medida um ON um.id = emp2.unidad_medida
-        LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
         GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre
