@@ -59,13 +59,31 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 
 .pc-select-btn{
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
-    border:1.5px solid #e2ddcd; background:#fff; border-radius:12px;
-    padding:12px 14px; min-height:52px; width:100%; text-align:left;
+    position:relative; display:flex; align-items:center; gap:12px;
+    border:1.5px solid #e2ddcd; background:#fff; border-radius:14px;
+    padding:12px 14px; min-height:64px; width:100%; text-align:left;
+    transition:border-color .12s ease, background .12s ease, transform .1s ease, box-shadow .12s ease;
 }
-.pc-select-btn .lbl{ font-size:.72em; font-weight:700; text-transform:uppercase; color:#8a8578; letter-spacing:.02em; flex:0 0 auto; }
-.pc-select-btn .val{ flex:1; font-weight:600; color:#152238; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0 8px; }
-.pc-select-btn i{ color:#c3beae; flex:0 0 auto; }
+.pc-select-btn:active{ transform:scale(.97); }
+.pc-select-btn.lleno{ border-color:var(--sel-color,#2F6FED); background:var(--sel-bg,#EAF0FE); }
+.pc-select-btn .ico{
+    width:38px; height:38px; border-radius:11px; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center;
+    background:#f2f0e9; color:#a7a293; font-size:1em;
+    transition:background .12s ease, color .12s ease;
+}
+.pc-select-btn.lleno .ico{ background:var(--sel-color,#2F6FED); color:#fff; }
+.pc-select-btn .cuerpo{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.pc-select-btn .lbl{ font-size:.68em; font-weight:700; text-transform:uppercase; color:#a7a293; letter-spacing:.03em; }
+.pc-select-btn .val{ font-weight:600; color:#152238; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-select-btn .val.vacio{ color:#c3beae; font-weight:500; }
+.pc-select-btn .chev{ color:#c3beae; flex:0 0 auto; font-size:.85em; }
+.pc-select-btn .clear-btn{
+    position:absolute; top:-7px; right:-7px; width:22px; height:22px; border-radius:50%;
+    border:1.5px solid #fff; background:#8a8578; color:#fff; font-size:.6em;
+    display:flex; align-items:center; justify-content:center; z-index:2;
+}
+.pc-select-btn.lleno .clear-btn{ background:var(--sel-color,#2F6FED); }
 
 /* ===================== LAYOUT GENERAL TABLET ===================== */
 .pc-form-layout{ display:grid; grid-template-columns:1fr; gap:22px; }
@@ -193,21 +211,115 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-stat-chip.s-warning .ico{ background:#FDF1E0; color:#D97706; }
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
-.pc-ens-step{ display:flex; gap:12px; padding:16px 0; }
-.pc-ens-step + .pc-ens-step{ border-top:1px solid #eee7db; }
-.pc-ens-step-num{ width:30px; height:30px; border-radius:50%; flex:0 0 auto; background:#152238; color:#fff; font-weight:700; font-size:.85em; display:flex; align-items:center; justify-content:center; margin-top:2px; }
-.pc-ens-step-num.alt{ background:#D97706; }
-.pc-ens-step-body{ flex:1; min-width:0; }
-.pc-merma-lista{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
-.pc-merma-lista:empty{ display:none; }
-.pc-merma-item{ display:flex; align-items:center; gap:8px; font-size:.85em; background:#FDF1E0; border:1px solid #f0dcae; border-radius:9px; padding:8px 12px; }
+/* ============ MODAL: Cantidad producida / Merma — rediseño ============ */
+.pc-ens-body{
+    display:flex; flex-direction:column; gap:20px;
+    max-width:640px; margin:0 auto; /* centra todo -> look simétrico en tablet */
+}
+
+.pc-ens-card{
+    border:1px solid #ece9e1; border-radius:18px; background:#fff;
+    padding:22px 24px; box-shadow:0 1px 3px rgba(20,20,10,.05);
+}
+
+.pc-ens-card-header{ display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+.pc-ens-card-header .num{
+    width:34px; height:34px; border-radius:50%; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:.95em; color:#fff; background:#152238;
+}
+.pc-ens-card-header.opcional .num{ background:#D97706; }
+.pc-ens-card-header .titulos{ flex:1; min-width:0; }
+.pc-ens-card-header .titulo{ font-weight:700; font-size:1.05em; color:#1f2430; }
+.pc-ens-card-header .sub{ font-size:.8em; color:#9a9585; margin-top:1px; }
+.pc-ens-badge-opcional{
+    font-size:.7em; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+    color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae;
+    border-radius:999px; padding:4px 10px; flex:0 0 auto;
+}
+
+/* Stepper principal: grande, centrado, fácil para el pulgar */
+.pc-ens-stepper-main{ display:flex; align-items:center; justify-content:center; gap:18px; }
+.pc-ens-stepper-main button{
+    width:60px; height:60px; border-radius:50%; border:none;
+    background:#152238; color:#fff; font-size:1.2em;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+    box-shadow:0 3px 8px rgba(21,34,56,.25);
+}
+.pc-ens-stepper-main button:active{ background:#0d1626; transform:scale(.93); }
+.pc-ens-stepper-main .valor-wrap{
+    flex:1 1 auto; max-width:240px; text-align:center;
+    background:#f9f8f4; border:1.5px solid #eee7db; border-radius:16px; padding:10px 12px 12px;
+}
+.pc-ens-stepper-main input{
+    width:100%; border:none; border-bottom:3px solid #eee1c4; text-align:center; font-weight:800;
+    font-size:2.5em; color:#152238; background:transparent; padding:0 0 4px;
+    font-variant-numeric:tabular-nums;
+}
+.pc-ens-stepper-main input:focus{ outline:none; border-bottom-color:#2F6FED; }
+.pc-stepper-unidad{
+    display:inline-block; margin-top:8px; font-size:.7em; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; color:#2F6FED; background:#EAF0FE; border-radius:999px; padding:4px 12px;
+}
+.pc-stepper-chips{ display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:16px; }
+.pc-stepper-chips button{
+    border:1.5px solid #e2ddcd; background:#fff; color:#5c5947; font-weight:700; font-size:.85em;
+    border-radius:999px; padding:0 16px; min-height:42px; min-width:auto; box-shadow:none;
+}
+.pc-stepper-chips button:active{ background:#152238; border-color:#152238; color:#fff; transform:scale(.95); }
+
+/* Lista de mermas ya registradas */
+.pc-merma-lista{ display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.pc-merma-lista:empty{ display:none; margin:0; }
+.pc-merma-item{
+    display:flex; align-items:center; gap:10px; font-size:.88em;
+    background:#FDF1E0; border:1px solid #f0dcae; border-radius:12px; padding:10px 14px;
+}
 .pc-merma-item .dots{ display:flex; gap:2px; flex:0 0 auto; }
 .pc-merma-item .cant{ font-weight:700; color:#8a5a10; flex:0 0 auto; }
 .pc-merma-item .nota{ color:#8a8578; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pc-merma-form{ background:#fdfcfa; border:1px dashed #e2ddcd; border-radius:10px; padding:14px; }
-.pc-merma-chip{ display:inline-flex; align-items:center; gap:5px; padding:10px 14px; border:1px solid #e2ddcd; background:#fff; border-radius:999px; font-size:.85em; font-weight:600; color:#5c5947; cursor:pointer; min-height:44px; }
+
+/* Formulario para agregar merma nueva */
+.pc-merma-form{ background:#fdfcfa; border:1px dashed #ded8c4; border-radius:14px; padding:18px; }
+.pc-merma-form-label{
+    font-size:.78em; font-weight:700; text-transform:uppercase; letter-spacing:.02em;
+    color:#8a8578; margin-bottom:10px;
+}
+.pc-merma-chip-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr));
+    gap:8px; margin-bottom:14px;
+}
+.pc-merma-chip{
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 10px; border:1.5px solid #e2ddcd; background:#fff; border-radius:12px;
+    font-size:.85em; font-weight:600; color:#5c5947; cursor:pointer; min-height:46px; text-align:center;
+}
 .pc-merma-chip.activo{ background:#152238; border-color:#152238; color:#fff; }
 .pc-merma-chip.activo .pc-color-dot{ border-color:rgba(255,255,255,.5); }
+
+.pc-merma-form-row{ display:grid; grid-template-columns:1fr; gap:12px; margin-top:4px; }
+@media (min-width:560px){ .pc-merma-form-row{ grid-template-columns:1.4fr 1fr; align-items:end; } }
+.pc-merma-form-row .campo label{
+    font-size:.78em; font-weight:700; color:#8a8578; text-transform:uppercase;
+    letter-spacing:.02em; margin-bottom:6px; display:block;
+}
+
+.pc-merma-add-btn{
+    width:100%; margin-top:14px; border:none; border-radius:12px; padding:14px;
+    background:#D97706; color:#fff; font-weight:700; font-size:.95em;
+    display:flex; align-items:center; justify-content:center; gap:8px; min-height:50px;
+}
+.pc-merma-add-btn:active{ background:#b8630a; }
+
+/* Resumen antes de los botones de acción */
+.pc-ens-resumen{
+    display:flex; justify-content:center; gap:32px; align-items:center;
+    padding:12px 22px; background:#f9f8f4; border-top:1px solid #eee7db;
+}
+.pc-ens-resumen .item{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+.pc-ens-resumen .item .n{ font-weight:700; font-size:1.15em; color:#152238; }
+.pc-ens-resumen .item .l{ font-size:.72em; color:#9a9585; text-transform:uppercase; letter-spacing:.02em; }
+.pc-ens-resumen .sep{ width:1px; height:28px; background:#e2ddcd; }
 
 /* Steppers para cantidades (evita depender del teclado) */
 .pc-num-stepper{ display:flex; align-items:center; gap:8px; }
@@ -316,20 +428,29 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
 
                 <div class="pc-selector-row-compact">
-                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('maquina')">
-                        <span class="lbl">Máquina</span>
-                        <span class="val" id="valor_maquina">Ninguna</span>
-                        <i class="fa-solid fa-chevron-right"></i>
+                    <button type="button" class="pc-select-btn" id="btnSel_maquina" onclick="abrirSelectorGenerico('maquina')">
+                        <span class="ico"><i class="fa-solid fa-gears"></i></span>
+                        <span class="cuerpo">
+                            <span class="lbl">Máquina</span>
+                            <span class="val vacio" id="valor_maquina">Ninguna</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right chev"></i>
                     </button>
-                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('categoria')">
-                        <span class="lbl">Categoría material</span>
-                        <span class="val" id="valor_categoria">Ninguna</span>
-                        <i class="fa-solid fa-chevron-right"></i>
+                    <button type="button" class="pc-select-btn" id="btnSel_categoria" onclick="abrirSelectorGenerico('categoria')">
+                        <span class="ico"><i class="fa-solid fa-tags"></i></span>
+                        <span class="cuerpo">
+                            <span class="lbl">Categoría material</span>
+                            <span class="val vacio" id="valor_categoria">Ninguna</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right chev"></i>
                     </button>
-                    <button type="button" class="pc-select-btn" onclick="abrirSelectorGenerico('sucursal')">
-                        <span class="lbl">Sucursal</span>
-                        <span class="val" id="valor_sucursal">Ninguna</span>
-                        <i class="fa-solid fa-chevron-right"></i>
+                    <button type="button" class="pc-select-btn" id="btnSel_sucursal" onclick="abrirSelectorGenerico('sucursal')">
+                        <span class="ico"><i class="fa-solid fa-store"></i></span>
+                        <span class="cuerpo">
+                            <span class="lbl">Sucursal</span>
+                            <span class="val vacio" id="valor_sucursal">Ninguna</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right chev"></i>
                     </button>
                 </div>
 
@@ -469,48 +590,81 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
+            <div class="pc-ens-body">
 
-            <div class="pc-ens-step" id="pasoCantidadProducida">
-                <div class="pc-ens-step-num">1</div>
-                <div class="pc-ens-step-body">
-                <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>
-                    <div class="pc-num-stepper">
+                <!-- Paso 1: cantidad producida -->
+                <div class="pc-ens-card" id="pasoCantidadProducida">
+                    <div class="pc-ens-card-header">
+                        <span class="num">1</span>
+                        <div class="titulos">
+                            <div class="titulo" id="lbl_cantidad_producida">Cantidad producida</div>
+                            <div class="sub">Ingresa cuánto se produjo en esta corrida</div>
+                        </div>
+                    </div>
+                    <div class="pc-ens-stepper-main">
                         <button type="button" onclick="ajustarCantidadProducida(-1)"><i class="fa-solid fa-minus"></i></button>
-                        <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
-                               id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+                        <div class="valor-wrap">
+                            <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
+                                id="cantidad_producida_ensamblaje" placeholder="0" required autofocus>
+                            <span class="pc-stepper-unidad" id="unidad_producida_badge">UND</span>
+                        </div>
                         <button type="button" onclick="ajustarCantidadProducida(1)"><i class="fa-solid fa-plus"></i></button>
                     </div>
+                    <div class="pc-stepper-chips" id="chips_cantidad_producida"></div>
                 </div>
-            </div>
 
-            <div class="pc-ens-step">
-                <div class="pc-ens-step-num alt">2</div>
-                <div class="pc-ens-step-body">
-                    <label class="form-label mb-1">Merma <span class="text-muted fw-normal">(opcional)</span></label>
+                <!-- Paso 2: merma -->
+                <div class="pc-ens-card">
+                    <div class="pc-ens-card-header opcional">
+                        <span class="num">2</span>
+                        <div class="titulos">
+                            <div class="titulo">Merma</div>
+                            <div class="sub">Registra material perdido o descartado, si aplica</div>
+                        </div>
+                        <span class="pc-ens-badge-opcional">Opcional</span>
+                    </div>
 
                     <div id="merma_lista_registrada" class="pc-merma-lista"></div>
 
                     <div class="pc-merma-form">
-                        <div class="d-flex flex-wrap gap-2 mb-2" id="merma_colores_chips"></div>
-                        <input type="text" class="form-control form-control-lg mb-2" id="merma_nota"
-                               placeholder='Nota opcional (ej. "combinado azul y rojo", "purga")'>
-                        <div class="pc-num-stepper mb-2">
-                            <button type="button" onclick="ajustarCantidadMerma(-1)"><i class="fa-solid fa-minus"></i></button>
-                            <input type="number" step="0.0001" min="0.0001" class="form-control"
-                                   id="cantidad_merma_kg" placeholder="Kg de merma">
-                            <button type="button" onclick="ajustarCantidadMerma(1)"><i class="fa-solid fa-plus"></i></button>
+                        <div class="pc-merma-form-label">Color de la merma</div>
+                        <div class="pc-merma-chip-grid" id="merma_colores_chips"></div>
+
+                        <div class="pc-merma-form-row">
+                            <div class="campo">
+                                <label for="merma_nota">Nota (opcional)</label>
+                                <input type="text" class="form-control form-control-lg" id="merma_nota"
+                                    placeholder='Ej. "combinado azul y rojo", "purga"'>
+                            </div>
+                            <div class="campo">
+                                <label for="cantidad_merma_kg">Cantidad</label>
+                                <div class="pc-num-stepper">
+                                    <button type="button" onclick="ajustarCantidadMerma(-1)"><i class="fa-solid fa-minus"></i></button>
+                                    <input type="number" step="0.0001" min="0.0001" class="form-control"
+                                        id="cantidad_merma_kg" placeholder="0">
+                                    <button type="button" onclick="ajustarCantidadMerma(1)"><i class="fa-solid fa-plus"></i></button>
+                                </div>
+                            </div>
                         </div>
-                        <button type="button" class="btn btn-outline-danger btn-lg w-100" id="btnRegistrarMerma">
-                            <i class="fa-solid fa-triangle-exclamation"></i> Registrar merma
+
+                        <button type="button" class="pc-merma-add-btn" id="btnRegistrarMerma">
+                            <i class="fa-solid fa-plus"></i> Registrar merma
                         </button>
                     </div>
                 </div>
-            </div>
 
+            </div>
         </div>
-        <div class="modal-footer pc-footer-thumb">
-          <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitCantidadEnsamblaje">Continuar <i class="fa-solid fa-arrow-right"></i></button>
+        <div class="modal-footer pc-footer-thumb" style="flex-direction:column; align-items:stretch; gap:0; padding:0;">
+            <div class="pc-ens-resumen">
+                <div class="item"><span class="n" id="resumen_producido">0</span><span class="l">Producido</span></div>
+                <div class="sep"></div>
+                <div class="item"><span class="n" id="resumen_merma">0</span><span class="l">Merma</span></div>
+            </div>
+            <div style="display:flex; gap:16px; padding:16px 22px;">
+                <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal" style="flex:0 1 260px;">Cancelar</button>
+                <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitCantidadEnsamblaje" style="flex:1 1 280px;">Continuar <i class="fa-solid fa-arrow-right"></i></button>
+            </div>
         </div>
       </form>
     </div>
@@ -564,7 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
-
+    document.getElementById('cantidad_producida_ensamblaje').addEventListener('input', actualizarResumenEnsamblaje);
     iniciarAutoRefresh();
 });
 
@@ -586,6 +740,12 @@ const SELECTOR_CONFIG = {
     maquina:   { titulo: 'Máquina',            cache: () => maquinasProdCache,           icon: () => 'fa-gears',  seleccionar: seleccionarMaquina,   estadoKey: 'maquina_id',              estadoNombreKey: 'maquina_nombre' },
     categoria: { titulo: 'Categoría material',  cache: () => categoriasMaterialProdCache, icon: () => 'fa-tags',   seleccionar: seleccionarCategoria, estadoKey: 'categoria_material_id',   estadoNombreKey: 'categoria_nombre' },
     sucursal:  { titulo: 'Sucursal',            cache: () => sucursalesProdCache,         icon: () => 'fa-store',  seleccionar: seleccionarSucursal,  estadoKey: 'sucursal_id',             estadoNombreKey: 'sucursal_nombre' },
+};
+
+const SELECTOR_COLOR = {
+    maquina:   { color: '#2F6FED', bg: '#EAF0FE' },
+    categoria: { color: '#7C3AED', bg: '#F1EAFD' },
+    sucursal:  { color: '#16A34A', bg: '#E8F7EE' },
 };
 
 function abrirSelectorGenerico(tipo) {
@@ -611,12 +771,20 @@ function renderSelectorGenericoGrid(filtro) {
         vacioTxt: 'Sin resultados.',
     });
 }
+function actualizarResumenEnsamblaje() {
+    const resumenProducido = document.getElementById('resumen_producido');
+    if (!resumenProducido) return;
+    resumenProducido.textContent = formatearCantidadProd(parseFloat(document.getElementById('cantidad_producida_ensamblaje').value) || 0);
 
+    const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
+    const totalMerma = (p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [])
+        .reduce((s, m) => s + Number(m.cantidad || 0), 0);
+    document.getElementById('resumen_merma').textContent = formatearCantidadProd(totalMerma);
+}
 function seleccionarDesdeSelectorGenerico(id) {
     const cfg = SELECTOR_CONFIG[selectorGenericoContexto];
     cfg.seleccionar(id); // reutiliza las funciones existentes seleccionarMaquina/Categoria/Sucursal
-    document.getElementById('valor_' + selectorGenericoContexto).textContent =
-        selEstado[cfg.estadoNombreKey] || 'Ninguna';
+    refrescarValoresSelectorGenerico();
     modalSelectorGenerico.hide();
 }
 
@@ -833,6 +1001,8 @@ function aplicarUnidadesEtapaModal(p) {
     inputProducida.min = esUnidadEntera(unidadProduccion) ? '1' : '0.0001';
     inputProducida.placeholder = esUnidadEntera(unidadProduccion) ? 'Ej. 120' : 'Ej. 25.5';
     inputProducida.dataset.unidad = unidadProduccion;
+    document.getElementById('unidad_producida_badge').textContent = unidadProduccion.toUpperCase();
+    renderChipsCantidadProducida(unidadProduccion);
 
     const inputMerma = document.getElementById('cantidad_merma_kg');
     inputMerma.placeholder = `${unidadMerma} de merma`;
@@ -850,6 +1020,24 @@ function ajustarCantidadProducida(delta) {
     let v = parseFloat(input.value) || 0;
     v = Math.max(0, Math.round((v + delta * paso) * 10000) / 10000);
     input.value = v;
+    actualizarResumenEnsamblaje();
+}
+
+// Chips de suma rápida para la cantidad producida (paso 1 del modal).
+// Los pasos cambian según si la unidad de salida es entera (UND) o fraccionaria (kg).
+function renderChipsCantidadProducida(unidad) {
+    const esEntera = esUnidadEntera(unidad);
+    const pasos = esEntera ? [5, 10, 50, 100] : [1, 5, 10, 25];
+    document.getElementById('chips_cantidad_producida').innerHTML =
+        pasos.map(p => `<button type="button" onclick="sumarCantidadProducida(${p})">+${p}</button>`).join('');
+}
+
+function sumarCantidadProducida(delta) {
+    const input = document.getElementById('cantidad_producida_ensamblaje');
+    let v = (parseFloat(input.value) || 0) + delta;
+    if (v < 0) v = 0;
+    input.value = Math.round(v * 10000) / 10000;
+    actualizarResumenEnsamblaje();
 }
 
 function ajustarCantidadMerma(delta) {
@@ -1084,11 +1272,22 @@ function seleccionarSucursal(id) {
     selEstado.sucursal_nombre = s ? s.nombre : '';
 }
 
-// Refresca los 3 botones "val" del formulario (Máquina / Categoría / Sucursal)
+// Refresca los 3 botones "val" del formulario (Máquina / Categoría / Sucursal),
+// pintándolos de color cuando ya tienen una selección (estado "lleno").
+const SELECTOR_NOMBRE_KEY = { maquina: 'maquina_nombre', categoria: 'categoria_nombre', sucursal: 'sucursal_nombre' };
 function refrescarValoresSelectorGenerico() {
-    document.getElementById('valor_maquina').textContent = selEstado.maquina_nombre || 'Ninguna';
-    document.getElementById('valor_categoria').textContent = selEstado.categoria_nombre || 'Ninguna';
-    document.getElementById('valor_sucursal').textContent = selEstado.sucursal_nombre || 'Ninguna';
+    Object.keys(SELECTOR_NOMBRE_KEY).forEach(tipo => {
+        const nombre = selEstado[SELECTOR_NOMBRE_KEY[tipo]];
+        const valEl = document.getElementById('valor_' + tipo);
+        const btnEl = document.getElementById('btnSel_' + tipo);
+        valEl.textContent = nombre || 'Ninguna';
+        valEl.classList.toggle('vacio', !nombre);
+        if (btnEl) {
+            btnEl.classList.toggle('lleno', !!nombre);
+            btnEl.style.setProperty('--sel-color', SELECTOR_COLOR[tipo].color);
+            btnEl.style.setProperty('--sel-bg', SELECTOR_COLOR[tipo].bg);
+        }
+    });
 }
 
 // ---- Carga inicial de todos los selectores del modal ----

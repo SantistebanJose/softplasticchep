@@ -42,48 +42,84 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 <style>
 :root{
-    --emp-accent:#2F6FED; --emp-accent-bg:#EAF0FE;
+    --emp-accent:#2F6FED; --emp-accent-bg:#EAF0FE; --emp-accent-dark:#1E54C4;
     --emp-header-h:64px;
-    --emp-actionbar-h:78px;
+    --emp-actionbar-h:84px;
     --safe-b: env(safe-area-inset-bottom, 0px);
     --safe-l: env(safe-area-inset-left, 0px);
     --safe-r: env(safe-area-inset-right, 0px);
+
+    /* ---- lienzo / superficies ---- */
+    --pc-canvas:#F3F2ED;
+    --pc-surface:#FFFFFF;
+    --pc-surface-soft:#FBFAF6;
+    --pc-border:#E7E2D6;
+    --pc-border-soft:#EFEBDE;
+    --pc-ink:#1B2130;
+    --pc-ink-soft:#6B6656;
+    --pc-muted:#9A9585;
+
+    /* ---- escala ---- */
+    --pc-r-lg:20px; --pc-r-md:14px; --pc-r-sm:10px;
+    --pc-gap:20px;
+    --pc-shadow-card:0 1px 2px rgba(27,33,48,.05), 0 10px 24px -14px rgba(27,33,48,.14);
 }
 *{ box-sizing:border-box; }
-.pc-emp-body{ overscroll-behavior-y:contain; }
+.pc-emp-body{
+    overscroll-behavior-y:contain;
+    background:var(--pc-canvas);
+}
 
 /* =============================================================================
-   SHELL — dos paneles (lista + detalle) que se reacomodan según orientación
+   TIPOGRAFÍA — Poppins para títulos de sección, Inter para todo lo demás
+   ============================================================================= */
+.pc-emp-shell, .pc-action-bar{ color:var(--pc-ink); }
+.pc-emp-shell h1, .pc-emp-shell h2, .pc-emp-shell h3, .pc-emp-shell h4,
+#estacionArmadoTitulo{
+    font-family:'Poppins', 'Inter', sans-serif;
+    letter-spacing:-0.01em;
+}
+
+/* =============================================================================
+   SHELL — dos paneles (lista + detalle) que se reacomodan según orientación.
+   Cada panel es una tarjeta independiente con relleno simétrico por los 4 lados.
    ============================================================================= */
 .pc-emp-shell{
     display:flex; flex-direction:column;
-    padding-bottom: calc(var(--emp-actionbar-h) + var(--safe-b) + 14px);
+    padding-bottom: calc(var(--emp-actionbar-h) + var(--safe-b) + var(--pc-gap));
+    min-height: calc(100vh - var(--emp-header-h));
 }
-.pc-emp-shell.pc-shell-solo-lista{ padding-bottom: 20px; }
+.pc-emp-shell.pc-shell-solo-lista{ padding-bottom: var(--pc-gap); }
 
 .pc-emp-workspace{
     display:grid;
     grid-template-columns: 1fr;
-    gap:16px;
-    padding: 16px 16px 4px;
+    gap:var(--pc-gap);
+    padding: var(--pc-gap) calc(var(--pc-gap) + var(--safe-l)) var(--pc-gap) calc(var(--pc-gap) + var(--safe-r));
 }
-.pc-panel{ min-width:0; }
+.pc-panel{
+    min-width:0;
+    background:var(--pc-surface);
+    border:1px solid var(--pc-border);
+    border-radius:var(--pc-r-lg);
+    box-shadow:var(--pc-shadow-card);
+    padding:var(--pc-gap);
+}
 .pc-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
 .pc-panel-head h2{ margin:0; }
-.pc-panel-lead{ font-size:.86em; color:#9a9585; margin:0 0 14px; }
+.pc-panel-lead{ font-size:.86em; color:var(--pc-muted); margin:0 0 16px; line-height:1.5; }
 
 /* Landscape en pantalla ancha (tablet apoyada u horizontal): lista + detalle lado a lado, cada uno con su propio scroll */
 @media (orientation:landscape) and (min-width:760px){
     .pc-emp-workspace{
-        grid-template-columns: minmax(300px, 34%) 1fr;
+        grid-template-columns: minmax(320px, 36%) 1fr;
         align-items:start;
-        height: calc(100vh - var(--emp-header-h) - var(--emp-actionbar-h) - var(--safe-b) - 20px);
+        height: calc(100vh - var(--emp-header-h) - var(--emp-actionbar-h) - var(--safe-b) - calc(var(--pc-gap) * 2));
     }
     .pc-panel-list, .pc-panel-detail{
         height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch;
-        padding-right:4px;
+        scrollbar-width:thin;
     }
-    .pc-panel-list{ padding-bottom:8px; }
 }
 
 /* Portrait (tablet en vertical, sostenida con ambas manos): todo apilado, lista arriba compacta y angosta en alto */
@@ -93,37 +129,42 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     .pc-panel-detail{ order:2; }
 }
 
+/* Tablets grandes / escritorio: centrar el conjunto para que no se estire de más */
+@media (min-width:1280px){
+    .pc-emp-workspace{ max-width:1280px; margin:0 auto; }
+}
+
 /* ---------- Vista "Mis paquetes": SOLO listado, sin estación de armado ---------- */
 .pc-emp-workspace.pc-vista-registros{ grid-template-columns:1fr !important; height:auto !important; }
 .pc-emp-workspace.pc-vista-registros .pc-panel-detail{ display:none !important; }
 .pc-emp-workspace.pc-vista-registros .pc-panel-list{
-    max-width:760px; margin:0 auto; width:100%; height:auto !important; overflow:visible !important;
+    max-width:780px; margin:0 auto; width:100%; height:auto !important; overflow:visible !important;
 }
 .pc-action-bar.pc-oculta{ display:none; }
 
 /* ---------- Switch Pendientes / Mis paquetes (panel de lista) ---------- */
-.pc-list-switch{ display:flex; gap:8px; background:#f1efe9; border-radius:14px; padding:5px; margin-bottom:14px; }
+.pc-list-switch{ display:flex; gap:6px; background:var(--pc-canvas); border:1px solid var(--pc-border-soft); border-radius:var(--pc-r-md); padding:5px; margin-bottom:var(--pc-gap); }
 .pc-list-switch-btn{
-    flex:1; border:none; background:none; border-radius:10px; padding:12px 10px;
-    font-size:.92em; font-weight:700; color:#8a8578; min-height:44px;
+    flex:1; border:none; background:none; border-radius:9px; padding:12px 10px;
+    font-size:.92em; font-weight:700; color:var(--pc-ink-soft); min-height:46px;
     display:flex; align-items:center; justify-content:center; gap:7px;
-    touch-action:manipulation;
+    touch-action:manipulation; transition:background .12s ease, color .12s ease;
 }
-.pc-list-switch-btn.activo{ background:#fff; color:#152238; box-shadow:0 1px 3px rgba(0,0,0,.08); }
-.pc-list-switch-btn .badge-cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:2px 8px; }
+.pc-list-switch-btn.activo{ background:var(--pc-surface); color:var(--pc-ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+.pc-list-switch-btn .badge-cnt{ background:var(--pc-border-soft); color:var(--pc-ink-soft); font-size:.78em; font-weight:700; border-radius:999px; padding:2px 8px; }
 .pc-list-switch-btn.activo .badge-cnt{ background:var(--emp-accent); color:#fff; }
 
 /* ---------- Stat row (compacta dentro del panel angosto). Son botones: llevan directo a la vista relacionada. ---------- */
-.pc-stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
+.pc-stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:var(--pc-gap); }
 .pc-stat-chip{
-    border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px; display:flex; align-items:center; gap:9px;
-    cursor:pointer; touch-action:manipulation; text-align:left; width:100%;
+    border:1px solid var(--pc-border); border-radius:var(--pc-r-md); background:var(--pc-surface); padding:12px; display:flex; align-items:center; gap:9px;
+    cursor:pointer; touch-action:manipulation; text-align:left; width:100%; transition:border-color .12s ease, transform .08s ease;
 }
 .pc-stat-chip:active{ transform:scale(.97); }
 .pc-stat-chip .ico{ width:34px; height:34px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; }
-.pc-stat-chip .txt .n{ font-size:19px; font-weight:700; line-height:1.15; color:#152238; }
-.pc-stat-chip .txt .l{ font-size:10.5px; color:#8a8578; }
-.pc-stat-chip.s-gray .ico{ background:#EEECE6; color:#8a8578; }
+.pc-stat-chip .txt .n{ font-size:19px; font-weight:700; line-height:1.15; color:var(--pc-ink); }
+.pc-stat-chip .txt .l{ font-size:10.5px; color:var(--pc-muted); font-weight:600; text-transform:uppercase; letter-spacing:.02em; }
+.pc-stat-chip.s-gray .ico{ background:var(--pc-border-soft); color:var(--pc-ink-soft); }
 .pc-stat-chip.s-info .ico{ background:#E3F2FD; color:#0B4DA6; }
 .pc-stat-chip.s-success .ico{ background:#E8F7EE; color:#16A34A; }
 .pc-stat-chip.s-purple .ico{ background:#F1EAFD; color:#7C3AED; }
@@ -132,12 +173,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-tabs-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
 .pc-tab-item{
     display:flex; align-items:center; gap:10px; padding:13px 14px; cursor:pointer;
-    font-size:.96em; font-weight:600; color:#5c5947; white-space:nowrap; min-height:52px;
-    border:1px solid #e7e4dd; border-radius:14px; background:#fff;
-    touch-action:manipulation;
+    font-size:.96em; font-weight:600; color:var(--pc-ink-soft); white-space:nowrap; min-height:52px;
+    border:1px solid var(--pc-border); border-radius:var(--pc-r-md); background:var(--pc-surface);
+    touch-action:manipulation; transition:border-color .12s ease, background .12s ease;
 }
-.pc-tab-item.activo{ color:#152238; border-color:var(--emp-accent); background:var(--emp-accent-bg); box-shadow:0 2px 8px rgba(47,111,237,.15); }
-.pc-tab-item .cnt{ background:#EEECE6; color:#5c5947; font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
+.pc-tab-item.activo{ color:var(--pc-ink); border-color:var(--emp-accent); background:var(--emp-accent-bg); box-shadow:0 2px 8px rgba(47,111,237,.15); }
+.pc-tab-item .cnt{ background:var(--pc-border-soft); color:var(--pc-ink-soft); font-size:.78em; font-weight:700; border-radius:999px; padding:3px 9px; min-width:20px; text-align:center; }
 .pc-tab-item.activo .cnt{ background:var(--emp-accent); color:#fff; }
 
 /* En landscape con panel angosto, la lista se vuelve una columna vertical de tarjetas (lista real, no scroll horizontal) */
@@ -147,91 +188,117 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     .pc-tab-item span:not(.cnt){ flex:1; overflow:hidden; text-overflow:ellipsis; }
 }
 
-.pc-est-empty{ text-align:center; color:#9a9585; padding:50px 12px; font-size:1.05em; }
-.pc-est-empty i{ font-size:1.6em; display:block; margin-bottom:10px; opacity:.5; }
+.pc-est-empty{ text-align:center; color:var(--pc-muted); padding:56px 12px; font-size:1.05em; }
+.pc-est-empty i{ font-size:1.7em; display:block; margin-bottom:12px; opacity:.4; }
 
-/* ---------- Chips de operarios (táctiles, grandes) ---------- */
-.pc-operario-chips-wrap{ display:flex; flex-wrap:wrap; gap:9px; min-height:48px; align-items:flex-start; padding-top:2px; }
-.pc-operario-chip{
-    border:1px solid #e2ddcd; background:#fff; border-radius:999px; padding:12px 18px;
-    font-size:.96em; font-weight:600; cursor:pointer; color:#3a3730; min-height:48px;
-    touch-action:manipulation;
+.pc-chip-wrap{ display:flex; flex-wrap:wrap; gap:9px; min-height:48px; align-items:flex-start; padding-top:2px; }
+/* ---------- Chips táctiles (operarios, sucursal): grandes, sin combos ---------- */
+.pc-chip-wrap{ display:flex; flex-wrap:wrap; gap:9px; min-height:48px; align-items:flex-start; padding-top:2px; }
+.pc-chip-wrap-scroll{
+    max-height:184px; overflow-y:auto; -webkit-overflow-scrolling:touch;
+    padding:2px 4px 6px 2px; margin:0 -2px;
+    scrollbar-width:thin;
 }
-.pc-operario-chip.activo{ background:var(--emp-accent); border-color:var(--emp-accent); color:#fff; box-shadow:0 2px 6px rgba(47,111,237,.35); }
+.pc-chip-tap{
+    border:1.5px solid var(--pc-border); background:var(--pc-surface); border-radius:999px; padding:12px 18px;
+    font-size:.96em; font-weight:600; cursor:pointer; color:var(--pc-ink); min-height:48px;
+    touch-action:manipulation; transition:background .12s ease, border-color .12s ease;
+}
+.pc-chip-tap.activo{ background:var(--emp-accent); border-color:var(--emp-accent); color:#fff; box-shadow:0 2px 6px rgba(47,111,237,.35); }
+.pc-chip-count{ font-weight:700; color:var(--emp-accent); text-transform:none; letter-spacing:0; margin-left:4px; }
+
+/* ---------- Cabecera del formulario de armado ---------- */
+#estacionArmadoCard > h4{
+    font-size:1.2em; font-weight:700; padding-bottom:16px; margin-bottom:20px !important;
+    border-bottom:1px solid var(--pc-border-soft);
+}
+.form-label{
+    font-size:.78em; font-weight:700; color:var(--pc-ink-soft);
+    text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;
+}
+#formEstacionArmado .form-select,
+#formEstacionArmado .form-control{
+    border:1.5px solid var(--pc-border); border-radius:var(--pc-r-sm); color:var(--pc-ink);
+}
+#formEstacionArmado .form-select:focus,
+#formEstacionArmado .form-control:focus{
+    border-color:var(--emp-accent); box-shadow:0 0 0 3px var(--emp-accent-bg);
+}
 
 /* ---------- Estación visual de sacos/colores (táctil, agrandada) ---------- */
 .pc-estacion-titulo-paso{
-    display:flex; align-items:center; gap:9px; margin:2px 0 4px;
-    font-size:.82em; font-weight:700; color:#5c5947; text-transform:uppercase; letter-spacing:.03em;
+    display:flex; align-items:center; gap:9px; margin:28px 0 12px;
+    font-size:.82em; font-weight:700; color:var(--pc-ink-soft); text-transform:uppercase; letter-spacing:.03em;
 }
 .pc-estacion-titulo-paso .num{
     width:22px; height:22px; border-radius:999px; background:var(--emp-accent); color:#fff;
     display:flex; align-items:center; justify-content:center; font-size:.85em; flex-shrink:0;
 }
-.pc-estacion{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start; }
+.pc-estacion{ display:grid; grid-template-columns:1.3fr 1fr; gap:var(--pc-gap); align-items:start; }
 @media (max-width:900px), (orientation:portrait){ .pc-estacion{ grid-template-columns:1fr; } }
-.pc-estacion-hint{ font-size:.85em; color:#9a9585; margin:0 0 10px; }
+.pc-estacion-hint{ font-size:.85em; color:var(--pc-muted); margin:0 0 14px; line-height:1.5; }
 .pc-sacos-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(clamp(140px,18vw,170px),1fr)); gap:14px; }
 .pc-saco-card{
-    border:1.5px solid #e2ddcd; border-radius:14px; padding:13px; background:#fff;
+    border:1.5px solid var(--pc-border); border-radius:var(--pc-r-md); padding:13px; background:var(--pc-surface);
     cursor:pointer; text-align:left; position:relative; min-height:132px;
-    touch-action:manipulation; transition:border-color .12s ease;
+    touch-action:manipulation; transition:border-color .12s ease, box-shadow .12s ease;
 }
 .pc-saco-card:active{ transform:scale(.96); border-color:var(--emp-accent); }
 .pc-saco-card.agotado{ opacity:.4; cursor:not-allowed; pointer-events:none; }
-.pc-saco-card .swatch{ width:100%; height:52px; border-radius:10px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
-.pc-saco-card .nombre{ font-size:.94em; font-weight:700; margin:10px 0 1px; color:#3a3730; }
-.pc-saco-card .origen{ font-size:.81em; color:#9a9585; }
-.pc-saco-card .disp{ font-size:.81em; color:#6b6656; margin-top:2px; font-weight:600; }
+.pc-saco-card .swatch{ width:100%; height:52px; border-radius:9px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.pc-saco-card .nombre{ font-size:.94em; font-weight:700; margin:10px 0 1px; color:var(--pc-ink); }
+.pc-saco-card .origen{ font-size:.81em; color:var(--pc-muted); }
+.pc-saco-card .disp{ font-size:.81em; color:var(--pc-ink-soft); margin-top:2px; font-weight:600; }
 .pc-saco-card .en-mezcla{
     position:absolute; top:8px; right:8px; background:var(--emp-accent); color:#fff;
     font-size:.72em; font-weight:700; border-radius:999px; padding:3px 10px;
 }
-.pc-mezcla-panel{ background:#fdfcfa; border:1px solid #e7e4dd; border-radius:14px; padding:14px 16px; }
-.pc-mezcla-panel-titulo{ font-size:.82em; color:#9a9585; margin:0 0 10px; text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
+.pc-mezcla-panel{ background:var(--pc-surface-soft); border:1px solid var(--pc-border-soft); border-radius:var(--pc-r-md); padding:16px; }
+.pc-mezcla-panel-titulo{ font-size:.82em; color:var(--pc-muted); margin:0 0 12px; text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
 .pc-mezcla-lista{ display:flex; flex-direction:column; gap:9px; min-height:36px; }
 .pc-mezcla-fila{ display:flex; align-items:center; gap:8px; font-size:.92em; }
 .pc-mezcla-fila .swatch-mini{ width:18px; height:18px; border-radius:5px; flex:0 0 auto; border:1px solid rgba(0,0,0,.08); }
 .pc-mezcla-fila .nombre{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pc-mezcla-fila input{ width:96px; flex:0 0 auto; min-height:44px; }
-.pc-paquete-box{ margin-top:14px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:12px; padding:12px 14px; }
+.pc-paquete-box{ margin-top:16px; background:#FFF9EC; border:1px solid #F4E4BC; border-radius:var(--pc-r-sm); padding:14px 16px; }
 .pc-paquete-box .fila{ display:flex; justify-content:space-between; align-items:center; font-size:.92em; }
-.pc-paquete-barra{ height:9px; background:#f1efe9; border-radius:5px; margin-top:8px; overflow:hidden; }
+.pc-paquete-barra{ height:9px; background:var(--pc-border-soft); border-radius:5px; margin-top:8px; overflow:hidden; }
 .pc-paquete-barra > div{ height:100%; background:var(--emp-accent); transition:width .15s ease; }
 .pc-swatch-picker{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
 .pc-swatch-chip{
     width:38px; height:38px; border-radius:9px; border:2px solid transparent;
     cursor:pointer; padding:0; position:relative; touch-action:manipulation;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
 }
 .pc-swatch-chip.activo{ border-color:var(--emp-accent); }
 .pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
 
-.pc-bulto-card{ border:1px solid #e2ddcd; border-radius:14px; padding:14px; margin-bottom:12px; background:#fffefb; }
-.pc-bulto-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:.95em; font-weight:700; color:#3a3730; flex-wrap:wrap; gap:8px; }
+.pc-bulto-card{ border:1px solid var(--pc-border); border-radius:var(--pc-r-md); padding:16px; margin-bottom:14px; background:var(--pc-surface); }
+.pc-bulto-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:.95em; font-weight:700; color:var(--pc-ink); flex-wrap:wrap; gap:8px; }
 .pc-color-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
 .pc-color-row select{ flex:2; min-width:160px; min-height:46px; }
 .pc-color-row input{ flex:1; min-width:100px; min-height:46px; }
-.pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1.2em; flex:0 0 auto; padding:10px; min-width:44px; min-height:44px; }
+.pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1.2em; flex:0 0 auto; padding:10px; min-width:44px; min-height:44px; border-radius:var(--pc-r-sm); }
 .pc-bultos-total{
     display:flex; justify-content:space-between; align-items:center;
-    padding:12px 14px; background:#fffaf0; border:1px solid #f4e8c8; border-radius:12px;
-    font-size:.95em; margin-top:8px;
+    padding:14px 16px; background:#FFF9EC; border:1px solid #F4E4BC; border-radius:var(--pc-r-sm);
+    font-size:.95em; margin-top:12px;
 }
 .pc-bultos-total b{ color:var(--emp-accent); font-size:1.1em; }
 
-.pc-btn-tap{ min-height:48px; font-size:.95em; touch-action:manipulation; }
+.pc-btn-tap{ min-height:48px; font-size:.95em; touch-action:manipulation; border-radius:var(--pc-r-sm); }
 
 /* ---------- Mis últimos registros (vista de solo consulta) ---------- */
 .pc-mis-registros{ display:flex; flex-direction:column; gap:10px; }
-.pc-reg-card{ border:1px solid #ece9e1; border-radius:14px; background:#fff; padding:14px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.pc-reg-card{ border:1px solid var(--pc-border-soft); border-radius:var(--pc-r-md); background:var(--pc-surface); padding:14px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
 .pc-reg-info{ flex:1; min-width:180px; }
-.pc-reg-producto{ font-weight:700; font-size:1em; color:#1f2430; }
-.pc-reg-detalle{ font-size:.85em; color:#8a8578; margin-top:2px; }
-.pc-reg-total{ font-size:1.1em; font-weight:700; color:#152238; white-space:nowrap; }
-.pc-reg-fecha{ font-size:.8em; color:#9a9585; white-space:nowrap; }
+.pc-reg-producto{ font-weight:700; font-size:1em; color:var(--pc-ink); }
+.pc-reg-detalle{ font-size:.85em; color:var(--pc-muted); margin-top:2px; }
+.pc-reg-total{ font-size:1.1em; font-weight:700; color:var(--pc-ink); white-space:nowrap; }
+.pc-reg-fecha{ font-size:.8em; color:var(--pc-muted); white-space:nowrap; }
 .pc-reg-badge-vendido{ background:#FDF1E0; color:#D97706; border:1px solid #f4dcb0; border-radius:999px; padding:4px 11px; font-size:.78em; font-weight:700; white-space:nowrap; }
 .pc-reg-badge-disp{ background:#E8F7EE; color:#16A34A; border:1px solid #cdeedb; border-radius:999px; padding:4px 11px; font-size:.78em; font-weight:700; white-space:nowrap; }
-.pc-reg-del-btn{ border:none; background:#FCEAEC; color:#c94a4a; border-radius:10px; padding:11px 15px; font-size:.9em; min-height:46px; touch-action:manipulation; }
+.pc-reg-del-btn{ border:none; background:#FCEAEC; color:#c94a4a; border-radius:var(--pc-r-sm); padding:11px 15px; font-size:.9em; min-height:46px; touch-action:manipulation; }
 
 /* =============================================================================
    BARRA DE ACCIÓN FIJA — zona de pulgares
@@ -241,34 +308,39 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
    ============================================================================= */
 .pc-action-bar{
     position:fixed; left:0; right:0; bottom:0; z-index:40;
-    display:flex; align-items:center; gap:14px;
-    background:#fff; border-top:1px solid #e7e4dd;
-    padding: 12px calc(18px + var(--safe-r)) calc(12px + var(--safe-b)) calc(18px + var(--safe-l));
-    box-shadow: 0 -6px 18px rgba(20,20,10,.08);
+    display:flex; align-items:center; gap:16px;
+    background:var(--pc-surface); border-top:1px solid var(--pc-border);
+    padding: 14px calc(var(--pc-gap) + var(--safe-r)) calc(14px + var(--safe-b)) calc(var(--pc-gap) + var(--safe-l));
+    box-shadow: 0 -8px 20px rgba(20,20,10,.07);
     min-height: var(--emp-actionbar-h);
 }
 .pc-action-bar-info{ flex:1; min-width:0; }
-.pc-action-bar-info .titulo{ font-size:.78em; color:#9a9585; text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
-.pc-action-bar-info .valor{ font-size:1.05em; font-weight:700; color:#152238; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-action-bar-info .titulo{ font-size:.78em; color:var(--pc-muted); text-transform:uppercase; letter-spacing:.03em; font-weight:700; }
+.pc-action-bar-info .valor{ font-size:1.05em; font-weight:700; color:var(--pc-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pc-btn-guardar{
-    background:var(--emp-accent); color:#fff; border:none; border-radius:14px;
+    background:var(--emp-accent); color:#fff; border:none; border-radius:var(--pc-r-md);
     padding:16px 26px; font-size:1.02em; font-weight:700; min-height:56px; min-width:190px;
     display:flex; align-items:center; justify-content:center; gap:10px; flex:0 0 auto;
-    box-shadow:0 4px 10px rgba(47,111,237,.32); touch-action:manipulation;
+    box-shadow:0 4px 10px rgba(47,111,237,.32); touch-action:manipulation; transition:background .12s ease;
 }
-.pc-btn-guardar:active{ transform:scale(.97); }
+.pc-btn-guardar:active{ transform:scale(.97); background:var(--emp-accent-dark); }
 .pc-btn-guardar:disabled{ opacity:.45; box-shadow:none; }
 
 @media (orientation:portrait){
     .pc-action-bar-info{ display:none; } /* en vertical se prioriza el botón, ancho completo */
     .pc-btn-guardar{ flex:1; min-width:0; }
 }
+
+/* Tablets muy angostas en portrait: reducir el relleno de las tarjetas un poco */
+@media (max-width:600px){
+    .pc-emp-workspace{ padding: 14px; gap:14px; }
+    .pc-panel{ padding:16px; }
+}
 </style>
 
 <div class="pc-emp-shell" id="empShell">
     <div class="pc-emp-workspace" id="empWorkspace">
 
-        <!-- ================= PANEL IZQUIERDO / SUPERIOR: lista ================= -->
         <aside class="pc-panel pc-panel-list">
             <div class="pc-list-switch" role="tablist">
                 <button type="button" class="pc-list-switch-btn activo" id="btnVistaPendientes" onclick="cambiarVistaLista('pendientes')" role="tab" aria-selected="true">
@@ -296,7 +368,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             </div>
         </aside>
 
-        <!-- ================= PANEL DERECHO / INFERIOR: detalle / estación (solo en "Pendientes") ================= -->
         <main class="pc-panel pc-panel-detail">
             <div id="estacionVaciaCard">
                 <div class="pc-est-empty">
@@ -312,25 +383,22 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     <input type="hidden" id="est_producto_id" value="0">
 
                     <p class="pc-estacion-titulo-paso"><span class="num">1</span> Quiénes están armando</p>
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Unidad de medida *</label>
-                            <select class="form-select form-select-lg" id="est_unidad_medida" required></select>
-                            <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
-                                Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí.
-                            </small>
-                        </div>
-                        <div class="col-md-5 mb-3">
-                            <label class="form-label">Operarios *</label>
-                            <div id="est_operarios_chips" class="pc-operario-chips-wrap"></div>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Sucursal</label>
-                            <select class="form-select form-select-lg" id="est_sucursal_id"></select>
-                        </div>
+                    <div class="mb-3">
+                        <label class="form-label">Unidad de medida *</label>
+                        <select class="form-select form-select-lg" id="est_unidad_medida" required style="max-width:280px;"></select>
+                        <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
+                            Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí.
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Operarios * <span class="pc-chip-count" id="est_operarios_count"></span></label>
+                        <div id="est_operarios_chips" class="pc-chip-wrap"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Sucursal</label>
+                        <div id="est_sucursal_chips" class="pc-chip-wrap"></div>
                     </div>
 
-                    <!-- Modo BULTO -->
                     <div id="bloqueBultos">
                         <p class="pc-estacion-titulo-paso"><span class="num">2</span> Arma el paquete</p>
                         <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Ajusta la cantidad exacta abajo si hace falta.</p>
@@ -346,7 +414,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         </div>
                     </div>
 
-                    <!-- Modo MEZCLA -->
                     <div id="bloqueMezcla" style="display:none;">
                         <p class="pc-estacion-titulo-paso"><span class="num">2</span> Registra la mezcla</p>
                         <p class="pc-estacion-hint">Toca un saco para llevarlo a la mezcla. Ajusta el kg exacto después.</p>
@@ -394,7 +461,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     </div>
 </div>
 
-<!-- Barra de acción fija: siempre visible en la zona alcanzable por los pulgares (solo en "Pendientes") -->
 <div class="pc-action-bar" id="actionBarEmp">
     <div class="pc-action-bar-info">
         <div class="titulo">Resumen</div>
@@ -414,7 +480,6 @@ const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 const CONTROLADOR_EMPAQUETADO = '../controllers/clssEmpaquetado.php';
 const CONTROLADOR_SUCURSAL    = '../controllers/clssSucursal.php';
 
-// ── Estado de la ESTACIÓN DE ARMADO ──
 let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
@@ -428,15 +493,13 @@ let bolsasProducidasValor = '';
 let contadorBulto = 0;
 let contadorColorRow = 0;
 let estOperariosSeleccionados = [];
+let estSucursalSeleccionada = 0;
 
-// ── Tabs por producto ──
 let cacheFilasEmpaquetado = [];
 let tabActivoEmp = null;
 
-// ── Registros propios ──
 let registrosGlobalCache = [];
 
-// ── Panel de lista (Pendientes / Mis paquetes) ──
 let vistaListaActual = 'pendientes';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -446,7 +509,6 @@ document.addEventListener('DOMContentLoaded', () => {
     actualizarResumenBarraAccion();
 });
 
-// ── Auto-refresh silencioso ──
 const POLL_INTERVAL_MS_EMP = 10000;
 let pollTimerEmp = null;
 function iniciarAutoRefreshEmp() {
@@ -551,12 +613,6 @@ function colorHexPara(colorNombre, colorHexBD) {
     return `hsl(${hue}, 45%, 55%)`;
 }
 
-// =============================================================================
-// PANEL DE LISTA — alternar entre "Pendientes" (arma) y "Mis paquetes" (solo
-// consulta). En "Mis paquetes" se oculta por completo la estación de armado
-// y la barra de guardar, para que quede claro que ahí no se registra nada.
-// =============================================================================
-
 function cambiarVistaLista(vista) {
     vistaListaActual = vista;
     const esPendientes = vista === 'pendientes';
@@ -574,10 +630,6 @@ function cambiarVistaLista(vista) {
 
     if (!esPendientes) cargarMisRegistros();
 }
-
-// =============================================================================
-// BARRA DE ACCIÓN FIJA — resumen en vivo cerca del botón principal
-// =============================================================================
 
 function actualizarResumenBarraAccion() {
     const el = document.getElementById('accionBarResumen');
@@ -601,10 +653,6 @@ function actualizarResumenBarraAccion() {
     }
 }
 
-// =============================================================================
-// OPERARIOS (chips)
-// =============================================================================
-
 function renderOperariosChips(containerId, seleccionados, toggleFnName) {
     const cont = document.getElementById(containerId);
     if (!cont) return;
@@ -613,10 +661,17 @@ function renderOperariosChips(containerId, seleccionados, toggleFnName) {
         return;
     }
     cont.innerHTML = empOperariosCache.map(o => `
-        <button type="button" class="pc-operario-chip ${seleccionados.includes(o.id) ? 'activo' : ''}"
+        <button type="button" class="pc-chip-tap ${seleccionados.includes(o.id) ? 'activo' : ''}"
                 onclick="${toggleFnName}(${o.id})">
             ${o.nombre_completo}
         </button>`).join('');
+
+    const contador = document.getElementById('est_operarios_count');
+    if (contador) {
+        contador.textContent = seleccionados.length > 0
+            ? `(${seleccionados.length} seleccionado${seleccionados.length > 1 ? 's' : ''})`
+            : '';
+    }
 }
 
 function toggleOperarioEstacion(id) {
@@ -625,9 +680,25 @@ function toggleOperarioEstacion(id) {
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
 }
 
-// =============================================================================
-// STAT ROW — cada chip también es un atajo de navegación entre vistas
-// =============================================================================
+function renderSucursalChips(containerId, seleccionadaId, selectFnName) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    const sucursales = empSucursalesCache || [];
+    if (sucursales.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.9em;">(sin sucursales)</div>';
+        return;
+    }
+    cont.innerHTML = sucursales.map(s => `
+        <button type="button" class="pc-chip-tap ${seleccionadaId == s.id ? 'activo' : ''}"
+                onclick="${selectFnName}(${s.id})">
+            ${s.nombre}
+        </button>`).join('');
+}
+
+function seleccionarSucursalEstacion(id) {
+    estSucursalSeleccionada = (estSucursalSeleccionada == id) ? 0 : id;
+    renderSucursalChips('est_sucursal_chips', estSucursalSeleccionada, 'seleccionarSucursalEstacion');
+}
 
 function renderStatRowEmp() {
     const pendientes = new Set(cacheFilasEmpaquetado.map(f => f.producto_id)).size;
@@ -651,10 +722,6 @@ function renderStatRowEmp() {
         }
     }
 }
-
-// =============================================================================
-// TABS + ESTACIÓN DE ARMADO
-// =============================================================================
 
 async function cargarPendientesEmpaquetado() {
     const json = await llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', {});
@@ -718,7 +785,6 @@ function seleccionarTabEmp(clave) {
     if (vistaListaActual !== 'pendientes') cambiarVistaLista('pendientes');
     renderTabsEmp();
     actualizarEstacionArmado();
-    // En pantallas apiladas (portrait) llevar la vista a la estación de armado.
     if (window.matchMedia('(orientation: portrait)').matches) {
         document.getElementById('estacionArmadoCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -764,10 +830,6 @@ async function cargarEstacionParaProducto(productoId) {
     inicializarBloqueFormulario();
     actualizarResumenBarraAccion();
 }
-
-// =============================================================================
-// MIS ÚLTIMOS REGISTROS (sin filtros, solo lo reciente)
-// =============================================================================
 
 async function cargarMisRegistros() {
     const cont = document.getElementById('misRegistrosLista');
@@ -839,10 +901,6 @@ function eliminarMiRegistro(id) {
     });
 }
 
-// =============================================================================
-// SELECTS AUXILIARES
-// =============================================================================
-
 async function obtenerUnidadesEmp() {
     if (empUnidadesCache) return empUnidadesCache;
     const json = await llamarEmpaquetado('BUSCARUNIDADESMEDIDA', { texto: '' });
@@ -874,14 +932,12 @@ async function cargarSelectsEstacion() {
         ? '<option value="">Selecciona...</option>' + unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('')
         : '<option value="">(sin unidades disponibles - revisar consola)</option>';
 
-    const sSuc = document.getElementById('est_sucursal_id');
-    sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
-
-    // El operario que inició sesión en la tablet queda preseleccionado; puede
-    // agregar compañeros que hayan trabajado con él en este paquete.
     const yoEstoyEnLista = (operarios || []).some(o => o.id == OPERARIO_ID);
     estOperariosSeleccionados = yoEstoyEnLista ? [OPERARIO_ID] : [];
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
+
+    estSucursalSeleccionada = (sucursales && sucursales.length === 1) ? sucursales[0].id : 0;
+    renderSucursalChips('est_sucursal_chips', estSucursalSeleccionada, 'seleccionarSucursalEstacion');
 }
 
 async function cargarOrigenesDisponibles(productoId) {
@@ -907,8 +963,6 @@ function aplicarUnidadEmpaquetadoFija() {
         aviso.style.display = 'block';
     }
 }
-
-// ── Bultos con mezcla de colores ────────────────────────────────────────────
 
 function claveOrigen(tipo, id) { return `${tipo}:${id}`; }
 
@@ -1355,10 +1409,6 @@ function obtenerBultosJsonEmp() {
     return JSON.stringify(bultos);
 }
 
-// =============================================================================
-// FORMULARIO: crear registro
-// =============================================================================
-
 document.getElementById('formEstacionArmado').addEventListener('submit', async function (e) {
     e.preventDefault();
 
@@ -1383,7 +1433,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: document.getElementById('est_sucursal_id').value,
+            sucursal_id: estSucursalSeleccionada || '',
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1456,7 +1506,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: document.getElementById('est_sucursal_id').value,
+            sucursal_id: estSucursalSeleccionada || '',
             bultos: bultosJson,
         };
     }
