@@ -1,6 +1,6 @@
 <?php
 $pageTitle    = 'Reporte de Producción';
-$pageSubtitle = 'Producción por operario: día, semana, mes o rango de fechas';
+$pageSubtitle = 'Producción por operario y por molde: día, semana, mes o rango de fechas';
 $activePage   = 'reporte_produccion';
 
 include("header.php");
@@ -85,6 +85,24 @@ include("header.php");
     .rep-fila-top1 td:first-child { font-weight: 700; }
     .rep-vacio { text-align: center; color: #6b7280; padding: 18px 0; }
 </style>
+
+<ul class="nav nav-tabs mb-3" id="repTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tabBtnOperario" data-bs-toggle="tab" data-bs-target="#tabOperario"
+                type="button" role="tab">
+            <i class="fa-solid fa-user"></i> Por operario
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tabBtnMolde" data-bs-toggle="tab" data-bs-target="#tabMolde"
+                type="button" role="tab">
+            <i class="fa-solid fa-shapes"></i> Por molde
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="repTabsContent">
+<div class="tab-pane fade show active" id="tabOperario" role="tabpanel">
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -224,6 +242,165 @@ include("header.php");
     </div>
 </div>
 
+</div><!-- /tabOperario -->
+
+<div class="tab-pane fade" id="tabMolde" role="tabpanel">
+
+<div class="pc-card">
+    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2>Producción por molde</h2>
+    </div>
+
+    <div class="pc-filtros d-flex gap-2 flex-wrap align-items-end mb-3">
+        <br>
+        <div>
+            <label class="form-label d-block">Periodo</label>
+            <select id="repm_modo" class="form-select" style="min-width:160px">
+                <option value="dia" selected>Día</option>
+                <option value="semana">Semana</option>
+                <option value="mes">Mes</option>
+                <option value="rango">Rango personalizado</option>
+            </select>
+        </div>
+
+        <div id="repm_wrap_fecha">
+            <label class="form-label d-block">Fecha</label>
+            <input type="date" id="repm_fecha" class="form-control">
+        </div>
+
+        <div id="repm_wrap_rango" style="display:none;">
+            <label class="form-label d-block">Desde</label>
+            <input type="date" id="repm_fecha_desde" class="form-control">
+        </div>
+        <div id="repm_wrap_rango_hasta" style="display:none;">
+            <label class="form-label d-block">Hasta</label>
+            <input type="date" id="repm_fecha_hasta" class="form-control">
+        </div>
+
+        <div>
+            <label class="form-label d-block">Molde</label>
+            <select id="repm_molde" class="form-select" style="min-width:170px">
+                <option value="">Todos</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label d-block">Color</label>
+            <select id="repm_color" class="form-select" style="min-width:150px">
+                <option value="">Todos</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label d-block">Operario</label>
+            <select id="repm_operario" class="form-select" style="min-width:180px">
+                <option value="">Todos</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label d-block">Máquina</label>
+            <select id="repm_maquina" class="form-select" style="min-width:150px">
+                <option value="">Todas</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label d-block">Sucursal</label>
+            <select id="repm_sucursal" class="form-select" style="min-width:150px">
+                <option value="">Todas</option>
+            </select>
+        </div>
+
+        <div class="form-check" style="padding-top:8px;">
+            <input class="form-check-input" type="checkbox" id="repm_solo_actividad" checked>
+            <label class="form-check-label" for="repm_solo_actividad">
+                Solo con actividad
+            </label>
+        </div>
+
+        <div>
+            <button class="pc-btn pc-btn-primary" onclick="generarReporteMolde()">
+                <i class="fa-solid fa-magnifying-glass"></i> Generar reporte
+            </button>
+        </div>
+    </div>
+
+    <p id="repm_etiqueta_periodo" class="text-muted"></p>
+
+    <div class="rep-stats">
+        <div class="rep-stat-card">
+            <div class="rep-stat-label">Kg insertados (total)</div>
+            <div class="rep-stat-valor" id="repm_total_kg">-</div>
+        </div>
+        <div class="rep-stat-card">
+            <div class="rep-stat-label">Avances registrados</div>
+            <div class="rep-stat-valor" id="repm_total_avances">-</div>
+        </div>
+        <div class="rep-stat-card">
+            <div class="rep-stat-label">Moldes con actividad</div>
+            <div class="rep-stat-valor" id="repm_total_moldes">-</div>
+        </div>
+    </div>
+
+    <div class="rep-destacado" id="repm_destacado">
+        <div class="rep-destacado-icono"><i class="fa-solid fa-trophy"></i></div>
+        <div>
+            <div class="rep-destacado-nombre" id="repm_destacado_nombre">-</div>
+            <div class="rep-destacado-cargo" id="repm_destacado_producto">-</div>
+        </div>
+        <div class="rep-destacado-metricas">
+            <div><b id="repm_destacado_kg">-</b><span>Kg insertados</span></div>
+            <div><b id="repm_destacado_avances">-</b><span>Avances</span></div>
+        </div>
+    </div>
+
+    <div class="pc-table-wrap pc-table-responsive-cards">
+        <table class="pc-table" id="tablaRankingMolde">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Molde</th>
+                    <th>Producto</th>
+                    <th>Avances</th>
+                    <th>Kg insertados</th>
+                    <th>Kg producidos</th>
+                    <th>Promedio kg/avance</th>
+                    <th>Participación</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="tbodyRankingMolde">
+                <tr><td colspan="9" class="rep-vacio">Genera el reporte para ver resultados.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="pc-card">
+    <div class="pc-card-header">
+        <h2>Tendencia diaria del periodo</h2>
+    </div>
+    <div class="pc-table-wrap pc-table-responsive-cards">
+        <table class="pc-table" id="tablaTendenciaMolde">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Avances</th>
+                    <th>Kg insertados</th>
+                    <th>Comparativo</th>
+                </tr>
+            </thead>
+            <tbody id="tbodyTendenciaMolde">
+                <tr><td colspan="4" class="rep-vacio">Sin datos aún.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+</div><!-- /tabMolde -->
+</div><!-- /repTabsContent -->
+
 <!-- Modal Detalle de operario -->
 <div class="modal fade" id="modalDetalleOperario" tabindex="-1">
   <div class="modal-dialog modal-lg">
@@ -258,18 +435,56 @@ include("header.php");
   </div>
 </div>
 
+<!-- Modal Detalle de molde -->
+<div class="modal fade" id="modalDetalleMolde" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Detalle de producción — <span id="modalDetalleMoldeNombre">-</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="pc-table-wrap">
+            <table class="pc-table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Avances</th>
+                        <th>Kg insertados</th>
+                        <th>Kg producidos</th>
+                        <th>Operarios</th>
+                        <th>Colores</th>
+                    </tr>
+                </thead>
+                <tbody id="tbodyDetalleMolde">
+                    <tr><td colspan="6" class="rep-vacio">-</td></tr>
+                </tbody>
+            </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_REPORTE = 'controllers/clssReporteProduccion.php';
 const modalDetalleOperario = new bootstrap.Modal(document.getElementById('modalDetalleOperario'));
+const modalDetalleMolde = new bootstrap.Modal(document.getElementById('modalDetalleMolde'));
 
-// Guardamos el rango de fechas del último reporte generado, para que el
-// modal de detalle de operario consulte exactamente el mismo periodo.
+// Guardamos el rango de fechas del último reporte generado en cada pestaña,
+// para que el modal de detalle consulte exactamente el mismo periodo.
 let ultimoPeriodo = { desde: null, hasta: null };
+let ultimoPeriodoMolde = { desde: null, hasta: null };
+let pestanaMoldeCargada = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('rep_fecha').value = hoyISO();
+    document.getElementById('repm_fecha').value = hoyISO();
 
     Promise.all([
         cargarSelectOperarios(),
@@ -282,6 +497,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('rep_modo').addEventListener('change', actualizarVisibilidadFechas);
     actualizarVisibilidadFechas();
+
+    document.getElementById('repm_modo').addEventListener('change', actualizarVisibilidadFechasMolde);
+    actualizarVisibilidadFechasMolde();
+
+    // La pestaña "Por molde" se carga recién la primera vez que se abre,
+    // para no duplicar peticiones al servidor si el usuario nunca la usa.
+    document.getElementById('tabBtnMolde').addEventListener('shown.bs.tab', () => {
+        if (pestanaMoldeCargada) return;
+        pestanaMoldeCargada = true;
+        Promise.all([
+            cargarSelectMoldes(),
+            cargarSelectColores(),
+            cargarSelectOperariosMolde(),
+            cargarSelectMaquinasMolde(),
+            cargarSelectSucursalesMolde(),
+        ]).then(generarReporteMolde).catch(err => {
+            console.error('Error cargando filtros del reporte por molde:', err);
+            Swal.fire('Error', 'No se pudieron cargar los filtros del reporte por molde.', 'error');
+        });
+    });
 });
 
 function hoyISO() {
@@ -298,6 +533,21 @@ function actualizarVisibilidadFechas() {
     if (esRango) {
         const desde = document.getElementById('rep_fecha_desde');
         const hasta = document.getElementById('rep_fecha_hasta');
+        if (!desde.value) desde.value = hoyISO();
+        if (!hasta.value) hasta.value = hoyISO();
+    }
+}
+
+function actualizarVisibilidadFechasMolde() {
+    const modo = document.getElementById('repm_modo').value;
+    const esRango = modo === 'rango';
+    document.getElementById('repm_wrap_fecha').style.display = esRango ? 'none' : 'block';
+    document.getElementById('repm_wrap_rango').style.display = esRango ? 'block' : 'none';
+    document.getElementById('repm_wrap_rango_hasta').style.display = esRango ? 'block' : 'none';
+
+    if (esRango) {
+        const desde = document.getElementById('repm_fecha_desde');
+        const hasta = document.getElementById('repm_fecha_hasta');
         if (!desde.value) desde.value = hoyISO();
         if (!hasta.value) hasta.value = hoyISO();
     }
@@ -348,6 +598,67 @@ async function cargarSelectMaquinas() {
 async function cargarSelectSucursales() {
     const json = await llamarReporte('BUSCARSUCURSALESREPORTE');
     const select = document.getElementById('rep_sucursal');
+    if (!json.success) return;
+    (json.sucursales || []).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.nombre;
+        select.appendChild(opt);
+    });
+}
+
+// ── Selects de filtro de la pestaña "Por molde" ─────────────────────────────
+async function cargarSelectMoldes() {
+    const json = await llamarReporte('BUSCARMOLDESREPORTE');
+    const select = document.getElementById('repm_molde');
+    if (!json.success) return;
+    (json.moldes || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.nombre;
+        select.appendChild(opt);
+    });
+}
+
+async function cargarSelectColores() {
+    const json = await llamarReporte('BUSCARCOLORESREPORTE');
+    const select = document.getElementById('repm_color');
+    if (!json.success) return;
+    (json.colores || []).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.nombre;
+        select.appendChild(opt);
+    });
+}
+
+async function cargarSelectOperariosMolde() {
+    const json = await llamarReporte('BUSCAROPERARIOSREPORTE');
+    const select = document.getElementById('repm_operario');
+    if (!json.success) return;
+    (json.operarios || []).forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.id;
+        opt.textContent = o.cargo ? `${o.nombre_completo} (${o.cargo})` : o.nombre_completo;
+        select.appendChild(opt);
+    });
+}
+
+async function cargarSelectMaquinasMolde() {
+    const json = await llamarReporte('BUSCARMAQUINASREPORTE');
+    const select = document.getElementById('repm_maquina');
+    if (!json.success) return;
+    (json.maquinas || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.nombre;
+        select.appendChild(opt);
+    });
+}
+
+async function cargarSelectSucursalesMolde() {
+    const json = await llamarReporte('BUSCARSUCURSALESREPORTE');
+    const select = document.getElementById('repm_sucursal');
     if (!json.success) return;
     (json.sucursales || []).forEach(s => {
         const opt = document.createElement('option');
@@ -463,6 +774,156 @@ function pintarTendencia(serie) {
             </td>
         </tr>`;
     }).join('');
+}
+
+// ── Reporte por molde ────────────────────────────────────────────────────────
+async function generarReporteMolde() {
+    const modo = document.getElementById('repm_modo').value;
+
+    const params = {
+        modo,
+        fecha: document.getElementById('repm_fecha').value || hoyISO(),
+        fecha_desde: document.getElementById('repm_fecha_desde').value,
+        fecha_hasta: document.getElementById('repm_fecha_hasta').value,
+        molde_id: document.getElementById('repm_molde').value,
+        color_id: document.getElementById('repm_color').value,
+        operario_id: document.getElementById('repm_operario').value,
+        maquina_id: document.getElementById('repm_maquina').value,
+        sucursal_id: document.getElementById('repm_sucursal').value,
+        solo_con_actividad: document.getElementById('repm_solo_actividad').checked ? '1' : '0',
+    };
+
+    const json = await llamarReporte('REPORTEMOLDES', params);
+    if (!json.success) {
+        Swal.fire('Error', json.message, 'error');
+        return;
+    }
+
+    ultimoPeriodoMolde = { desde: json.periodo.desde, hasta: json.periodo.hasta };
+
+    document.getElementById('repm_etiqueta_periodo').textContent = json.periodo.etiqueta;
+
+    document.getElementById('repm_total_kg').textContent = formatearKg(json.resumen.total_kg_insertado);
+    document.getElementById('repm_total_avances').textContent = json.resumen.total_avances;
+    document.getElementById('repm_total_moldes').textContent = json.resumen.moldes_con_actividad;
+
+    pintarDestacadoMolde(json.destacado);
+    pintarRankingMolde(json.filas || []);
+    pintarTendenciaMolde(json.serie_diaria || []);
+}
+
+function pintarDestacadoMolde(destacado) {
+    const card = document.getElementById('repm_destacado');
+    if (!destacado) {
+        card.classList.remove('activo');
+        return;
+    }
+    card.classList.add('activo');
+    document.getElementById('repm_destacado_nombre').textContent = destacado.molde_nombre;
+    document.getElementById('repm_destacado_producto').textContent = destacado.producto_descripcion || 'Producto no definido';
+    document.getElementById('repm_destacado_kg').textContent = formatearKg(destacado.total_kg_insertado);
+    document.getElementById('repm_destacado_avances').textContent = destacado.total_avances;
+}
+
+function pintarRankingMolde(filas) {
+    const tbody = document.getElementById('tbodyRankingMolde');
+
+    if (filas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="rep-vacio">No hay moldes con actividad en este periodo.</td></tr>';
+        return;
+    }
+
+    const maxKg = Math.max(...filas.map(f => parseFloat(f.total_kg_insertado) || 0), 0.0001);
+
+    tbody.innerHTML = filas.map((f, i) => {
+        const kg = parseFloat(f.total_kg_insertado) || 0;
+        const porcentaje = Math.round((kg / maxKg) * 100);
+        const filaTop = i === 0 && kg > 0 ? 'rep-fila-top1' : '';
+
+        return `
+        <tr class="${filaTop}">
+            <td data-label="#">${i + 1}${i === 0 && kg > 0 ? ' <i class="fa-solid fa-trophy" style="color:#c9a227"></i>' : ''}</td>
+            <td data-label="Molde">${f.molde_nombre}</td>
+            <td data-label="Producto">${f.producto_descripcion ?? '-'}</td>
+            <td data-label="Avances">${f.total_avances}</td>
+            <td data-label="Kg insertados">${formatearKg(f.total_kg_insertado)}</td>
+            <td data-label="Kg producidos">${formatearKg(f.total_kg_producido)}</td>
+            <td data-label="Promedio kg/avance">${f.promedio_kg_avance ?? '-'}</td>
+            <td data-label="Participación">
+                <div class="rep-barra-wrap"><div class="rep-barra" style="width:${porcentaje}%"></div></div>
+            </td>
+            <td data-label="Acciones" class="pc-td-acciones">
+                <button class="pc-icon-btn" title="Ver detalle" onclick="verDetalleMolde(${f.molde_id}, '${escaparComillas(f.unico_molde_producto || '')}', '${escaparComillas(f.molde_nombre)}')">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function pintarTendenciaMolde(serie) {
+    const tbody = document.getElementById('tbodyTendenciaMolde');
+
+    if (serie.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="rep-vacio">Sin datos en este periodo.</td></tr>';
+        return;
+    }
+
+    const maxKg = Math.max(...serie.map(s => parseFloat(s.total_kg) || 0), 0.0001);
+
+    tbody.innerHTML = serie.map(s => {
+        const kg = parseFloat(s.total_kg) || 0;
+        const porcentaje = Math.round((kg / maxKg) * 100);
+        return `
+        <tr>
+            <td data-label="Fecha">${formatearFecha(s.dia)}</td>
+            <td data-label="Avances">${s.total_avances}</td>
+            <td data-label="Kg insertados">${formatearKg(s.total_kg)}</td>
+            <td data-label="Comparativo">
+                <div class="rep-barra-wrap"><div class="rep-barra" style="width:${porcentaje}%"></div></div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Detalle de molde (modal) ─────────────────────────────────────────────────
+async function verDetalleMolde(moldeId, unicoMoldeProducto, moldeNombre) {
+    if (!ultimoPeriodoMolde.desde || !ultimoPeriodoMolde.hasta) return;
+
+    document.getElementById('modalDetalleMoldeNombre').textContent = moldeNombre;
+    document.getElementById('tbodyDetalleMolde').innerHTML =
+        '<tr><td colspan="6" class="rep-vacio">Cargando...</td></tr>';
+    modalDetalleMolde.show();
+
+    const json = await llamarReporte('REPORTEDETALLEMOLDE', {
+        molde_id: moldeId,
+        unico_molde_producto: unicoMoldeProducto,
+        fecha_desde: ultimoPeriodoMolde.desde,
+        fecha_hasta: ultimoPeriodoMolde.hasta,
+    });
+
+    const tbody = document.getElementById('tbodyDetalleMolde');
+    if (!json.success) {
+        tbody.innerHTML = `<tr><td colspan="6" class="rep-vacio">${json.message}</td></tr>`;
+        return;
+    }
+
+    const detalle = json.detalle || [];
+    if (detalle.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="rep-vacio">Sin avances en este periodo.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = detalle.map(d => `
+        <tr>
+            <td data-label="Fecha">${formatearFecha(d.dia)}</td>
+            <td data-label="Avances">${d.avances}</td>
+            <td data-label="Kg insertados">${formatearKg(d.kg_insertado)}</td>
+            <td data-label="Kg producidos">${formatearKg(d.kg_producido)}</td>
+            <td data-label="Operarios">${d.operarios ?? '-'}</td>
+            <td data-label="Colores">${d.colores ?? '-'}</td>
+        </tr>
+    `).join('');
 }
 
 // ── Detalle de operario (modal) ───────────────────────────────────────────────
