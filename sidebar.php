@@ -111,12 +111,12 @@ $analisisOpen       = in_array($activePage, $analisisPages);
     <details class="pc-nav-group" <?= $analisisOpen ? 'open' : '' ?>>
         <summary class="pc-nav-item">
             <span class="pc-nav-icon"><i class="fa-solid fa-chart-column"></i></span>
-            Análisis
+            Reportes
             
         </summary>
         <div class="pc-nav-sublist">
-            <a href="reportes.php" class="<?= pc_sub_class('reportes', $activePage) ?>">
-                <span class="dot"></span> Reportes
+            <a href="produccion_operario.php" class="<?= pc_sub_class('reportes', $activePage) ?>">
+                <span class="dot"></span> Producción por Operario
             </a>
         </div>
     </details>
