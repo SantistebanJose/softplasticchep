@@ -1,5 +1,5 @@
 <?php
-$pageTitle    = 'Disponibilidad de Venta';
+$pageTitle    = 'Stock de productos';
 $pageSubtitle = 'Stock empaquetado disponible, por producto y color';
 $activePage   = 'disponibilidad_venta';
 

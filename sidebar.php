@@ -115,6 +115,9 @@ $analisisOpen       = in_array($activePage, $analisisPages);
             
         </summary>
         <div class="pc-nav-sublist">
+            <a href="stock.php" class="<?= pc_sub_class('reportes', $activePage) ?>">
+                <span class="dot"></span> Stock
+            </a>
             <a href="produccion_operario.php" class="<?= pc_sub_class('reportes', $activePage) ?>">
                 <span class="dot"></span> Producción por Operario
             </a>
