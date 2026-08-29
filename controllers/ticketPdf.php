@@ -7,16 +7,14 @@
  *
  * Uso: controllers/ticketPdf.php?id=123
  *
- * Requiere la librería FPDF (un solo archivo, sin dependencias):
- *   https://www.fpdf.org/  -> descargar, descomprimir la carpeta "fpdf"
- * Colócala donde te acomode dentro del proyecto y ajusta el require_once
- * de abajo a esa ruta (por defecto asume /lib/fpdf/fpdf.php un nivel
- * arriba de controllers/).
+ * SIN DEPENDENCIAS: no usa FPDF ni ninguna librería externa. El PDF se
+ * arma a mano (texto monoespaciado con fuentes estándar Courier, sin
+ * necesidad de embeber ni instalar nada) — así no hay que instalar nada
+ * en el servidor para que esto funcione.
  */
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/../lib/fpdf/fpdf.php';
 session_start();
 
 $id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
@@ -43,65 +41,168 @@ if (empty($result)) {
 $venta = $result[0];
 $items = json_decode($venta['js_items'], true) ?: [];
 
-// FPDF no maneja UTF-8 directo; se pasa todo por utf8_decode (cp1252),
-// suficiente para tildes/ñ en español.
-function t(string $texto): string
+// =============================================================================
+// GENERADOR DE PDF MÍNIMO (sin librerías)
+// Arma un PDF de una sola página con texto monoespaciado (Courier /
+// Courier-Bold, fuentes estándar de PDF: no requieren embeber archivos).
+// Usa WinAnsiEncoding para que tildes/ñ se vean bien con solo utf8_decode().
+// =============================================================================
+
+function pdfEscaparTexto(string $s): string
 {
-    return utf8_decode($texto);
+    return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $s);
 }
 
-$anchoTicket = 80; // mm, típico de impresora térmica
-$pdf = new FPDF('P', 'mm', [$anchoTicket, 200]);
-$pdf->SetAutoPageBreak(true, 6);
-$pdf->AddPage();
-$pdf->SetMargins(5, 5, 5);
-$anchoUtil = $anchoTicket - 10;
+// UTF-8 -> Latin-1/CP1252, que es lo que espera WinAnsiEncoding.
+function pdfTexto(string $s): string
+{
+    return pdfEscaparTexto(utf8_decode($s));
+}
 
-$pdf->SetFont('Courier', 'B', 12);
-$pdf->Cell($anchoUtil, 6, t($venta['codigo']), 0, 1, 'C');
+// str_pad() cuenta BYTES, no caracteres visibles: con tildes/ñ (2 bytes en
+// UTF-8) desalinea las columnas del ticket. Este helper cuenta caracteres
+// reales (mb_strlen) para que "Colgador Osito" y "Pinza Palaníta" ocupen
+// el mismo ancho de columna.
+function mbPad(string $s, int $length, string $padType = STR_PAD_RIGHT): string
+{
+    $faltante = $length - mb_strlen($s, 'UTF-8');
+    if ($faltante <= 0) return $s;
+    $relleno = str_repeat(' ', $faltante);
+    return $padType === STR_PAD_LEFT ? $relleno . $s : $s . $relleno;
+}
+
+/**
+ * @param array $lineas cada línea: ['texto'=>string, 'size'=>int, 'bold'=>bool, 'alto'=>int (pt, opcional)]
+ * @param float $anchoPt ancho de página en puntos
+ */
+function generarPdfTicket(array $lineas, float $anchoPt = 226.77): string
+{
+    $margen = 14.0;
+    $alturaTotal = $margen * 2;
+    foreach ($lineas as $ln) {
+        $alturaTotal += $ln['alto'] ?? ($ln['size'] + 3);
+    }
+    $alturaPt = $alturaTotal;
+
+    $contenido = "BT\n";
+    $x0 = $margen;
+    $y0 = $alturaPt - $margen;
+    $contenido .= sprintf("1 0 0 1 %.2F %.2F Tm\n", $x0, $y0);
+
+    foreach ($lineas as $ln) {
+        $fuente = !empty($ln['bold']) ? '/F2' : '/F1';
+        $contenido .= "{$fuente} {$ln['size']} Tf\n";
+        $contenido .= '(' . pdfTexto($ln['texto']) . ") Tj\n";
+        $alto = $ln['alto'] ?? ($ln['size'] + 3);
+        $contenido .= sprintf("0 %.2F Td\n", -$alto);
+    }
+    $contenido .= "ET\n";
+
+    $objetos = [
+        1 => "<< /Type /Catalog /Pages 2 0 R >>",
+        2 => "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3 => sprintf(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2F %.2F] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>",
+            $anchoPt,
+            $alturaPt
+        ),
+        // 4 = stream de contenido, se maneja aparte
+        5 => "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>",
+        6 => "<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>",
+    ];
+
+    $out = "%PDF-1.4\n";
+    $offsets = [];
+    $totalObjs = 6;
+
+    for ($i = 1; $i <= $totalObjs; $i++) {
+        $offsets[$i] = strlen($out);
+        if ($i === 4) {
+            $out .= "4 0 obj\n<< /Length " . strlen($contenido) . " >>\nstream\n" . $contenido . "\nendstream\nendobj\n";
+        } else {
+            $out .= "{$i} 0 obj\n{$objetos[$i]}\nendobj\n";
+        }
+    }
+
+    $xrefOffset = strlen($out);
+    $n = $totalObjs + 1;
+    $out .= "xref\n0 {$n}\n";
+    $out .= "0000000000 65535 f \n";
+    for ($i = 1; $i <= $totalObjs; $i++) {
+        $out .= sprintf("%010d 00000 n \n", $offsets[$i]);
+    }
+    $out .= "trailer\n<< /Size {$n} /Root 1 0 R >>\nstartxref\n{$xrefOffset}\n%%EOF";
+
+    return $out;
+}
+
+// =============================================================================
+// ARMAR EL CONTENIDO DEL TICKET
+// =============================================================================
+
+const TICKET_ANCHO_CHARS = 42; // caracteres por línea a 8pt Courier en ~80mm
+
+$lineas = [];
+
+$lineas[] = ['texto' => $venta['codigo'], 'size' => 12, 'bold' => true, 'alto' => 16];
 
 if ($venta['estado'] === 'anulada') {
-    $pdf->SetFont('Courier', 'B', 10);
-    $pdf->SetTextColor(180, 0, 0);
-    $pdf->Cell($anchoUtil, 5, '*** VENTA ANULADA ***', 0, 1, 'C');
-    $pdf->SetTextColor(0, 0, 0);
+    $lineas[] = ['texto' => '*** VENTA ANULADA ***', 'size' => 10, 'bold' => true, 'alto' => 13];
 }
 
-$pdf->SetFont('Courier', '', 8);
-$pdf->Cell($anchoUtil, 4, t('Fecha: ' . date('d/m/Y H:i', strtotime($venta['fecha_venta']))), 0, 1);
-$pdf->Cell($anchoUtil, 4, t('Cliente: ' . $venta['cliente_nombre']), 0, 1);
-$pdf->Cell($anchoUtil, 4, t('RUC/DNI: ' . $venta['cliente_ruc']), 0, 1);
+$lineas[] = ['texto' => 'Fecha: ' . date('d/m/Y H:i', strtotime($venta['fecha_venta'])), 'size' => 8, 'alto' => 11];
+$lineas[] = ['texto' => 'Cliente: ' . $venta['cliente_nombre'], 'size' => 8, 'alto' => 11];
+$lineas[] = ['texto' => 'RUC/DNI: ' . $venta['cliente_ruc'], 'size' => 8, 'alto' => 13];
+$lineas[] = ['texto' => str_repeat('-', TICKET_ANCHO_CHARS), 'size' => 8, 'alto' => 11];
 
-$pdf->Ln(1);
-$pdf->Cell($anchoUtil, 0, str_repeat('-', 42), 0, 1);
+// Encabezado de columnas: Producto (26) | Cant (6, der.) | Subtotal (10, der.)
+$lineas[] = [
+    'texto' => mbPad('Producto', 26) . mbPad('Cant', 6, STR_PAD_LEFT) . mbPad('Subt.', 10, STR_PAD_LEFT),
+    'size'  => 8,
+    'bold'  => true,
+    'alto'  => 11,
+];
 
-$pdf->SetFont('Courier', 'B', 8);
-$pdf->Cell($anchoUtil - 24, 4, t('Producto'), 0, 0);
-$pdf->Cell(8, 4, t('Cant'), 0, 0, 'R');
-$pdf->Cell(16, 4, t('Subt.'), 0, 1, 'R');
-
-$pdf->SetFont('Courier', '', 8);
 foreach ($items as $it) {
     $nombre = $it['producto_codigo'] . ' - ' . $it['producto'];
     if (!empty($it['color']) && $it['color'] !== 'Sin color (registro legado)') {
         $nombre .= ' (' . $it['color'] . ')';
     }
-    $lineas = explode("\n", wordwrap(t($nombre), 30, "\n", true));
 
-    $pdf->Cell($anchoUtil - 24, 4, $lineas[0], 0, 0);
-    $cantidadTxt = number_format((float)$it['cantidad'], 0) . ' ' . t($it['unidad_venta_corto'] ?? '');
-    $pdf->Cell(8, 4, $cantidadTxt, 0, 0, 'R');
-    $pdf->Cell(16, 4, 'S/ ' . number_format((float)$it['subtotal'], 2), 0, 1, 'R');
+    $cantidadTxt = number_format((float)$it['cantidad'], 0) . ' ' . ($it['unidad_venta_corto'] ?? '');
+    $subtotalTxt = 'S/ ' . number_format((float)$it['subtotal'], 2);
 
-    for ($i = 1; $i < count($lineas); $i++) {
-        $pdf->Cell($anchoUtil, 4, $lineas[$i], 0, 1);
+    $wrap = explode("\n", wordwrap($nombre, 26, "\n", true));
+
+    // Primera línea del nombre, junto con cantidad y subtotal.
+    $lineas[] = [
+        'texto' => mbPad(mb_substr($wrap[0], 0, 26, 'UTF-8'), 26)
+                 . mbPad($cantidadTxt, 6, STR_PAD_LEFT)
+                 . mbPad($subtotalTxt, 10, STR_PAD_LEFT),
+        'size'  => 8,
+        'alto'  => 11,
+    ];
+    // Líneas adicionales del nombre (si es largo), sin cantidad/subtotal.
+    for ($i = 1; $i < count($wrap); $i++) {
+        $lineas[] = ['texto' => $wrap[$i], 'size' => 8, 'alto' => 11];
     }
 }
 
-$pdf->Cell($anchoUtil, 0, str_repeat('-', 42), 0, 1);
-$pdf->Ln(1);
-$pdf->SetFont('Courier', 'B', 10);
-$pdf->Cell($anchoUtil, 6, t('TOTAL: S/ ' . number_format((float)$venta['monto_total'], 2)), 0, 1, 'R');
+$lineas[] = ['texto' => str_repeat('-', TICKET_ANCHO_CHARS), 'size' => 8, 'alto' => 13];
+$lineas[] = [
+    'texto' => mbPad('TOTAL: S/ ' . number_format((float)$venta['monto_total'], 2), TICKET_ANCHO_CHARS, STR_PAD_LEFT),
+    'size'  => 10,
+    'bold'  => true,
+    'alto'  => 14,
+];
 
-// 'I' = mostrar en el navegador (permite imprimir/guardar desde ahí).
-$pdf->Output('I', $venta['codigo'] . '.pdf');
+$pdf = generarPdfTicket($lineas);
+
+if (ob_get_level() > 0) {
+    ob_end_clean();
+}
+header('Content-Type: application/pdf');
+header('Content-Disposition: inline; filename="' . $venta['codigo'] . '.pdf"');
+header('Content-Length: ' . strlen($pdf));
+echo $pdf;
+exit;
