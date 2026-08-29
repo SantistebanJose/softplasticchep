@@ -4,35 +4,29 @@
  * controllers/clssVenta.php
  * Módulo de Ventas (simple, sin SUNAT).
  *
- * Una venta guarda un snapshot de sus ítems en js_items (jsonb), incluyendo
- * el detalle de qué registros de `empaquetado` fueron consumidos por cada
- * ítem (js_consumo dentro de cada item), para trazabilidad y para poder
- * anular la venta reponiendo stock.
+ * FIX (2026-08-29): la venta ahora se hace por PAQUETE (la unidad real de
+ * venta del producto, producto.unidad_venta_id + cant_equivale +
+ * unidad_equivale_id — mismo mecanismo ya usado en el reporte de
+ * Disponibilidad de Venta), no por unidad base (ganchitos/UND) ni por la
+ * unidad operativa de empaquetado (bolsas/GRU). Al negocio solo le
+ * importa el paquete; la unidad base sigue existiendo por dentro
+ * únicamente para poder descontar contra `empaquetado` con precisión.
  *
- * REESCRITO (2026-08-27): el vínculo producto->color YA NO se deriva de
- * produccion.color_id (ese enfoque asignaba a un registro de empaquetado
- * CUALQUIER color que esa producción hubiera tenido alguna vez, sin
- * relación real con lo que ese bulto contiene, y no distinguía Mezcla).
- * Ahora se usa la MISMA clasificación de clssDisponibilidadVenta.php,
- * basada en rel_empaquetado_origen por registro de empaquetado:
- *   - 1 solo color en rel_empaquetado_origen -> ese color real (id > 0).
- *   - 2+ colores distintos                   -> "Mezcla" (sentinel -1).
- *   - 0 líneas activas (registro legado)      -> NULL ("Sin color").
+ * Si un producto no tiene su unidad de venta configurada
+ * (cant_equivale / unidad_equivale_id), NO se puede vender por paquete
+ * todavía: se avisa en vez de dejar vender en una unidad ambigua.
  *
- * Con esto, tanto buscarDisponiblesVenta() como el consumo FIFO
- * (consumirStockFIFOVenta) ahora operan sobre producto_id + ESTE bucket
- * de color, así que vender "Pinza Palanita (Celeste)" solo puede
- * descontar registros de empaquetado que de verdad son celestes — nunca
- * un registro Mezcla ni de otro color, aunque compartan producto_id.
+ * Los paquetes se venden COMPLETOS (cantidad entera). Si se necesita
+ * vender fracciones de paquete en el futuro, hay que decidirlo
+ * explícitamente — por ahora se valida como error.
  *
- * Consumo de stock: FIFO por (producto_id, color_id_efectivo) sobre la
- * tabla empaquetado (deleted_at IS NULL, pasado_venta IS NULL,
- * cantidad_tota > 0), ordenado por created_at ASC. Se descuenta
- * cantidad_tota parcialmente; si llega a 0 se marca pasado_venta = NOW().
- *
- * Solo se puede vender a proveedor.tipo = 'cliente' (activos).
- *
- * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
+ * FIX (2026-08-29 bis): confirmado con el negocio que TODA la venta es
+ * por paquete, sin excepciones de unidad. Por eso buscarDisponiblesVenta()
+ * ahora excluye directamente del buscador cualquier producto sin su
+ * unidad de venta configurada (antes aparecía en los resultados y recién
+ * fallaba al guardar, con nombres de campo que además no coincidían con
+ * los que leía el frontend: unidad_paquete_corto/cantidad_disponible no
+ * existían en la respuesta — el frontend fue corregido junto con esto).
  */
 
 ob_start();
@@ -110,6 +104,39 @@ function obtenerMovimientoSesionVenta(string $accion, array $cambios = []): arra
 }
 
 // =============================================================================
+// UNIDAD DE VENTA (paquete real) DE UN PRODUCTO
+// Mismo mecanismo ya usado en clssDisponibilidadVenta.php: capacidad del
+// paquete de venta, expresada en unidad base, a partir de
+// producto.cant_equivale x equivalencia de producto.unidad_equivale_id.
+// =============================================================================
+
+function obtenerCapacidadPaqueteVenta($conectar, int $productoId): array
+{
+    $rows = executeQuery($conectar, "
+        SELECT
+            uv.nombre_corto AS unidad_venta_corto,
+            p.cant_equivale,
+            p.unidad_equivale_id,
+            ue.equivalencia AS unidad_equivale_equivalencia
+        FROM producto p
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+        LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
+        WHERE p.id = :id
+    ", ['id' => $productoId]);
+
+    if (empty($rows)) {
+        return ['capacidad_base' => null, 'unidad_venta_corto' => null];
+    }
+    $r = $rows[0];
+    if (empty($r['cant_equivale']) || empty($r['unidad_equivale_id'])) {
+        return ['capacidad_base' => null, 'unidad_venta_corto' => $r['unidad_venta_corto']];
+    }
+
+    $capacidad = (float)$r['cant_equivale'] * (float)($r['unidad_equivale_equivalencia'] ?? 1);
+    return ['capacidad_base' => $capacidad, 'unidad_venta_corto' => $r['unidad_venta_corto']];
+}
+
+// =============================================================================
 // CLIENTES (proveedor.tipo = 'cliente')
 // =============================================================================
 
@@ -140,11 +167,17 @@ function buscarClientes()
 
 // =============================================================================
 // PRODUCTOS/COLORES DISPONIBLES PARA VENDER
-// REESCRITO (2026-08-27): mismo criterio de bucket de color que
-// clssDisponibilidadVenta.php (rel_empaquetado_origen por registro,
-// jamás produccion.color_id). Devuelve también paquetes_disponibles
-// (cantidad_tota, unidad de empaquetado propia del registro) porque es
-// lo que le importa a ventas en la práctica, igual que en el reporte.
+// REESCRITO (2026-08-29): "paquetes_disponibles" sale de la unidad REAL de
+// venta del producto (igual que el reporte de Disponibilidad), no de
+// cantidad_tota en la unidad operativa de empaquetado. Se sigue
+// clasificando el color vía rel_empaquetado_origen (único / mezcla / legado).
+//
+// REESCRITO (2026-08-29 bis): confirmado que no hay venta por otra unidad
+// como excepción, así que ahora el JOIN a producto_venta es INNER y exige
+// capacidad_paquete_venta_base > 0 — un producto sin su unidad de venta
+// configurada simplemente no aparece en el buscador (antes aparecía y
+// recién fallaba al guardar). Se quita el campo sin_config_venta, que ya
+// no aplica.
 // =============================================================================
 
 function buscarDisponiblesVenta()
@@ -152,12 +185,6 @@ function buscarDisponiblesVenta()
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
 
-    // FIX: 'emp' solo existe DENTRO de la CTE 'detalle' (ese filtro ya se
-    // aplica ahí mismo). Afuera la tabla se llama 'detalle dc', así que
-    // referenciar emp.deleted_at/emp.pasado_venta acá rompía la query con
-    // "missing FROM-clause entry for table emp" — y como el catch general
-    // devolvía el mismo mensaje genérico que "sin stock", el error quedaba
-    // invisible en el frontend.
     $whereDetalle = ["1=1"];
     $params = [];
 
@@ -171,7 +198,6 @@ function buscarDisponiblesVenta()
             SELECT
                 reo.empaquetado_id,
                 COUNT(DISTINCT reo.color_id) AS colores_distintos,
-                SUM(reo.cantidad) AS cantidad_base_total,
                 MIN(reo.color_id) AS unico_color_id
             FROM rel_empaquetado_origen reo
             WHERE reo.deleted_at IS NULL
@@ -186,18 +212,22 @@ function buscarDisponiblesVenta()
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
                     ELSE -1                                        -- mezcla
                 END AS color_id_efectivo,
-                COALESCE(
-                    cs.cantidad_base_total,
-                    emp.cantidad_tota * COALESCE(um.equivalencia, 1)  -- fallback legado
-                ) AS cantidad_base,
-                emp.cantidad_tota AS cantidad_paquetes,
-                um.nombre_corto AS unidad_paquete_corto,
-                COALESCE(ub.nombre_corto, um.nombre_corto) AS unidad_base_corto
+                -- Cantidad en unidad base: uso interno para calcular paquetes.
+                emp.cantidad_tota * COALESCE(um.equivalencia, 1) AS cantidad_base
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
-            LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
             WHERE emp.deleted_at IS NULL AND emp.pasado_venta IS NULL
+        ),
+        producto_venta AS (
+            SELECT
+                p.id AS producto_id,
+                uv.nombre_corto AS unidad_venta_corto,
+                p.cant_equivale * COALESCE(ue.equivalencia, 1) AS capacidad_paquete_venta_base
+            FROM producto p
+            LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+            LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
+            WHERE p.cant_equivale IS NOT NULL AND p.unidad_equivale_id IS NOT NULL
         )
         SELECT
             dc.producto_id,
@@ -209,16 +239,17 @@ function buscarDisponiblesVenta()
                 WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
                 ELSE co.nombre
             END AS color,
-            SUM(dc.cantidad_base) AS cantidad_disponible,
-            MIN(dc.unidad_base_corto) AS unidad_corto,
-            SUM(dc.cantidad_paquetes) AS paquetes_disponibles,
-            MIN(dc.unidad_paquete_corto) AS unidad_paquete_corto
+            FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) AS paquetes_disponibles,
+            pv.unidad_venta_corto
         FROM detalle dc
         JOIN producto p ON p.id = dc.producto_id
+        JOIN producto_venta pv ON pv.producto_id = dc.producto_id
+                                AND pv.capacidad_paquete_venta_base > 0
         LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
-        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre
-        HAVING SUM(dc.cantidad_base) > 0
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre,
+                 pv.unidad_venta_corto, pv.capacidad_paquete_venta_base
+        HAVING FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) > 0
         ORDER BY p.descripcion,
                  CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
                  co.nombre NULLS LAST
@@ -231,26 +262,14 @@ function buscarDisponiblesVenta()
 
 // =============================================================================
 // CONSUMO FIFO DE STOCK (empaquetado)
+// Sigue operando en UNIDAD BASE por dentro — eso no cambia. Lo que cambia
+// es quién calcula la cantidad en unidad base a pedir: ahora es
+// guardarVenta(), convirtiendo paquetes -> base con
+// obtenerCapacidadPaqueteVenta(), en vez de recibir la cantidad ya en
+// base directo del frontend.
 // =============================================================================
 
-/**
- * Reserva/consume stock FIFO para un producto + bucket de color. Debe
- * llamarse dentro de una transacción abierta en $conectar. Lanza
- * RuntimeException si no alcanza.
- *
- * $colorIdEfectivo sigue el mismo sentinel que clssDisponibilidadVenta.php:
- *   null -> "Sin color (registro legado)"
- *   -1   -> "Mezcla"
- *   > 0  -> color real
- *
- * El filtro de color se calcula por registro con una subconsulta
- * correlacionada contra rel_empaquetado_origen (misma clasificación que
- * buscarDisponiblesVenta), usando IS NOT DISTINCT FROM para que el caso
- * NULL (legado) también matchee correctamente.
- *
- * Devuelve el detalle de qué registros de empaquetado se afectaron.
- */
-function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectivo, float $cantidadNecesaria): array
+function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectivo, float $cantidadNecesariaBase): array
 {
     $stmt = $conectar->prepare("
         SELECT t1.id, t1.cantidad_tota, um.equivalencia, um.unidad_base_id
@@ -278,7 +297,7 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
     ]);
     $registros = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $restante = $cantidadNecesaria;
+    $restante = $cantidadNecesariaBase;
     $consumo  = [];
 
     foreach ($registros as $reg) {
@@ -310,7 +329,7 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
         $etiquetaColor = $colorIdEfectivo === null
             ? 'sin color (registro legado)'
             : ($colorIdEfectivo === -1 ? 'Mezcla' : "color #$colorIdEfectivo");
-        throw new RuntimeException("Stock insuficiente para producto #$productoId ($etiquetaColor): faltan $restante.");
+        throw new RuntimeException("Stock insuficiente para producto #$productoId ($etiquetaColor): faltan $restante (unidad base).");
     }
 
     foreach ($consumo as $c) {
@@ -331,19 +350,13 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
     return $consumo;
 }
 
-/**
- * Reversa el consumo de un ítem anulado: repone cantidad_tota y libera
- * pasado_venta si corresponde. Debe llamarse dentro de una transacción.
- * No necesita saber de colores: opera directo sobre empaquetado_id, que
- * ya quedó fijo en js_consumo al momento de la venta.
- */
 function restaurarStockVenta($conectar, array $consumo): void
 {
     foreach ($consumo as $c) {
         $stmt = $conectar->prepare("SELECT cantidad_tota FROM empaquetado WHERE id = :id FOR UPDATE");
         $stmt->execute(['id' => $c['empaquetado_id']]);
         $actual = $stmt->fetchColumn();
-        if ($actual === false) continue; // el registro ya no existe
+        if ($actual === false) continue;
 
         $nuevaCantidad = round((float)$actual + (float)$c['cantidad_consumida'], 4);
 
@@ -412,9 +425,7 @@ function obtenerVenta(int $id)
     responderVenta(true, 'OK', ['venta' => $result[0]]);
 }
 
-// Resuelve el texto de producto/color para el snapshot de un ítem, usando
-// el MISMO bucket (color_id_efectivo) ya validado contra rel_empaquetado_
-// origen. Ya no consulta produccion en absoluto.
+// Resuelve el texto de producto/color para el snapshot de un ítem.
 function resolverInfoItemVenta($conectar, int $productoId, ?int $colorIdEfectivo): array
 {
     $productoRow = executeQuery($conectar,
@@ -444,6 +455,12 @@ function resolverInfoItemVenta($conectar, int $productoId, ?int $colorIdEfectivo
     ];
 }
 
+// FIX (2026-08-29): $item['cantidad'] ahora es PAQUETES (unidad real de
+// venta), no unidad base. Se convierte a base con
+// obtenerCapacidadPaqueteVenta() antes de descontar stock. Se exige
+// cantidad de paquetes ENTERA (no se venden fracciones de paquete). Si el
+// producto no tiene su unidad de venta configurada, se rechaza el ítem
+// con un mensaje claro en vez de vender en una unidad ambigua.
 function guardarVenta()
 {
     $conectar = conectar_oll_BD();
@@ -477,35 +494,47 @@ function guardarVenta()
         $montoTotal = 0.0;
 
         foreach ($itemsInput as $item) {
-            $productoId = (int)($item['producto_id'] ?? 0);
-            $cantidad   = (float)($item['cantidad'] ?? 0);
-            $precio     = (float)($item['precio_unitario'] ?? 0);
+            $productoId       = (int)($item['producto_id'] ?? 0);
+            $cantidadPaquetes = (float)($item['cantidad'] ?? 0);
+            $precio           = (float)($item['precio_unitario'] ?? 0);
+            $colorIdEfectivo  = !empty($item['color_id']) ? (int)$item['color_id'] : null;
 
-            // Mismo sentinel que clssDisponibilidadVenta.php: null = legado,
-            // -1 = mezcla, >0 = color real. !empty() distingue bien estos
-            // tres casos porque -1 es "truthy" y null/'' son "falsy".
-            $colorIdEfectivo = !empty($item['color_id']) ? (int)$item['color_id'] : null;
-
-            if ($productoId <= 0 || $cantidad <= 0) {
+            if ($productoId <= 0 || $cantidadPaquetes <= 0) {
                 throw new RuntimeException('Cada ítem debe tener producto y cantidad válidos.');
+            }
+            if (abs($cantidadPaquetes - round($cantidadPaquetes)) > 0.0001) {
+                throw new RuntimeException('La cantidad debe ser en paquetes completos (sin decimales).');
+            }
+            $cantidadPaquetes = (float) round($cantidadPaquetes);
+
+            $capacidadVenta = obtenerCapacidadPaqueteVenta($conectar, $productoId);
+            if ($capacidadVenta['capacidad_base'] === null) {
+                $info = resolverInfoItemVenta($conectar, $productoId, $colorIdEfectivo);
+                throw new RuntimeException(
+                    "\"{$info['producto']}\" no tiene configurada su unidad de venta " .
+                    "(cant_equivale / unidad_equivale_id). Configúrala en Productos antes de vender por paquete."
+                );
             }
 
             $info = resolverInfoItemVenta($conectar, $productoId, $colorIdEfectivo);
+            $cantidadBaseNecesaria = round($cantidadPaquetes * $capacidadVenta['capacidad_base'], 4);
 
-            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $colorIdEfectivo, $cantidad);
-            $subtotal = round($cantidad * $precio, 2);
+            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $colorIdEfectivo, $cantidadBaseNecesaria);
+            $subtotal = round($cantidadPaquetes * $precio, 2);
             $montoTotal += $subtotal;
 
             $itemsFinal[] = [
-                'producto_id'     => $productoId,
-                'producto_codigo' => $info['producto_codigo'],
-                'producto'        => $info['producto'],
-                'color_id'        => $colorIdEfectivo,
-                'color'           => $info['color'],
-                'cantidad'        => $cantidad,
-                'precio_unitario' => $precio,
-                'subtotal'        => $subtotal,
-                'js_consumo'      => $consumo,
+                'producto_id'         => $productoId,
+                'producto_codigo'     => $info['producto_codigo'],
+                'producto'            => $info['producto'],
+                'color_id'            => $colorIdEfectivo,
+                'color'               => $info['color'],
+                'cantidad'            => $cantidadPaquetes,           // en PAQUETES
+                'unidad_venta_corto'  => $capacidadVenta['unidad_venta_corto'],
+                'cantidad_base_consumida' => $cantidadBaseNecesaria,  // auditoría
+                'precio_unitario'     => $precio,
+                'subtotal'            => $subtotal,
+                'js_consumo'          => $consumo,
             ];
         }
 

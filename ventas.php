@@ -106,6 +106,7 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_VENTA = 'controllers/clssVenta.php';
+const TICKET_PDF_URL = 'controllers/ticketPdf.php';
 const modalVenta = new bootstrap.Modal(document.getElementById('modalVenta'));
 
 async function llamarVenta(accion, params = {}) {
@@ -129,7 +130,7 @@ function formatearMoneda(n) {
 }
 
 function formatearCantidadVenta(n) {
-    return Number(n || 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
+    return Number(n || 0).toLocaleString('es-PE', { maximumFractionDigits: 0 });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -178,8 +179,8 @@ async function cargarVentas() {
             <td data-label="Monto">${formatearMoneda(v.monto_total)}</td>
             <td data-label="Estado">${badgeEstado}</td>
             <td data-label="Acciones" class="pc-td-acciones">
-                <button class="pc-icon-btn" onclick="imprimirTicketVenta(${v.id})" title="Imprimir ticket">
-                    <i class="fa-solid fa-print"></i>
+                <button class="pc-icon-btn" onclick="imprimirTicketVenta(${v.id})" title="Ver ticket (PDF)">
+                    <i class="fa-solid fa-file-pdf"></i>
                 </button>
                 ${v.estado !== 'anulada'
                     ? `<button class="pc-icon-btn" onclick="anularVenta(${v.id})" title="Anular">
@@ -227,6 +228,9 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Ítems dinámicos ──────────────────────────────────────────────────────────
+// Nota: la cantidad siempre es en PAQUETES (unidad real de venta del
+// producto), igual que exige el backend. Por eso el input es entero
+// (step=1, min=1), sin decimales.
 let contadorFilaItem = 0;
 
 function agregarFilaItemVenta() {
@@ -246,7 +250,7 @@ function agregarFilaItemVenta() {
             <input type="hidden" class="item-disponible">
             <input type="hidden" class="item-unidad">
         </div>
-        <input type="number" class="form-control item-cantidad" placeholder="Cant." min="0.0001" step="0.0001">
+        <input type="number" class="form-control item-cantidad" placeholder="Paquetes" min="1" step="1">
         <input type="number" class="form-control item-precio" placeholder="Precio" min="0" step="0.01">
         <div class="form-control-plaintext text-end item-subtotal">S/ 0.00</div>
         <button type="button" class="btn btn-outline-danger btn-sm" onclick="document.getElementById('${idFila}').remove(); recalcularMontoTotal();">
@@ -263,7 +267,6 @@ function agregarFilaItemVenta() {
         fila.querySelector('.item-producto-id').value = '';
         fila.querySelector('.item-color-id').value = '';
         fila.querySelector('.item-disponible').value = '';
-        fila.querySelector('.item-nombre')?.remove();
         clearTimeout(debounceItemTimer);
         const valor = inputBuscar.value.trim();
         if (valor.length < 2) { contResultados.style.display = 'none'; return; }
@@ -275,7 +278,7 @@ function agregarFilaItemVenta() {
                 return;
             }
             if (!json.disponibles.length) {
-                contResultados.innerHTML = '<div class="disp">Sin stock disponible con ese texto.</div>';
+                contResultados.innerHTML = '<div class="disp">Sin paquetes disponibles con ese texto.</div>';
                 contResultados.style.display = 'block';
                 return;
             }
@@ -291,8 +294,7 @@ function agregarFilaItemVenta() {
                     <span class="${dotClase}"></span>
                     <b>${d.producto_codigo}</b> - ${d.producto} · ${d.color ?? '-'}
                     <div class="disp">
-                        Paquetes: <b>${formatearCantidadVenta(d.paquetes_disponibles)} ${d.unidad_paquete_corto ?? ''}</b>
-                        &nbsp;|&nbsp; Disponible: ${formatearCantidadVenta(d.cantidad_disponible)} ${d.unidad_corto ?? ''}
+                        Disponible: <b>${formatearCantidadVenta(d.paquetes_disponibles)} ${d.unidad_venta_corto ?? 'paq.'}</b>
                     </div>
                 </div>`;
             }).join('');
@@ -313,26 +315,25 @@ function seleccionarItemVenta(idFila, datos) {
     fila.querySelector('.item-buscar').value = `${datos.producto_codigo} - ${datos.producto} (${datos.color ?? 'sin color'})`;
     fila.querySelector('.item-producto-id').value = datos.producto_id;
     fila.querySelector('.item-color-id').value = datos.color_id ?? '';
-    fila.querySelector('.item-disponible').value = datos.cantidad_disponible;
-    fila.querySelector('.item-unidad').value = datos.unidad_corto ?? '';
+    fila.querySelector('.item-disponible').value = datos.paquetes_disponibles;
+    fila.querySelector('.item-unidad').value = datos.unidad_venta_corto ?? '';
     fila.querySelector('.pc-venta-item-resultados').style.display = 'none';
 
     const cantidadInput = fila.querySelector('.item-cantidad');
-    cantidadInput.max = datos.cantidad_disponible;
-    cantidadInput.placeholder = `Máx. ${formatearCantidadVenta(datos.cantidad_disponible)} ${datos.unidad_corto ?? ''}`;
+    cantidadInput.max = datos.paquetes_disponibles;
+    cantidadInput.placeholder = `Máx. ${formatearCantidadVenta(datos.paquetes_disponibles)} ${datos.unidad_venta_corto ?? 'paq.'}`;
+    actualizarSubtotalFila(fila);
 }
 
 function actualizarSubtotalFila(fila) {
-    const cantidad = parseFloat(fila.querySelector('.item-cantidad').value) || 0;
+    const cantidadInput = fila.querySelector('.item-cantidad');
+    const cantidad = parseFloat(cantidadInput.value) || 0;
     const precio   = parseFloat(fila.querySelector('.item-precio').value) || 0;
     const disponible = parseFloat(fila.querySelector('.item-disponible').value) || 0;
 
-    const cantidadInput = fila.querySelector('.item-cantidad');
-    if (disponible && cantidad > disponible) {
-        cantidadInput.classList.add('is-invalid');
-    } else {
-        cantidadInput.classList.remove('is-invalid');
-    }
+    const noEsEntero = Math.abs(cantidad - Math.round(cantidad)) > 0.0001;
+    const excedeStock = disponible > 0 && cantidad > disponible;
+    cantidadInput.classList.toggle('is-invalid', noEsEntero || excedeStock);
 
     fila.querySelector('.item-subtotal').textContent = formatearMoneda(cantidad * precio);
     recalcularMontoTotal();
@@ -374,13 +375,23 @@ document.getElementById('formVenta').addEventListener('submit', async function (
         const productoId = fila.querySelector('.item-producto-id').value;
         const cantidad    = parseFloat(fila.querySelector('.item-cantidad').value);
         const precio      = parseFloat(fila.querySelector('.item-precio').value);
+        const disponible  = parseFloat(fila.querySelector('.item-disponible').value) || 0;
 
         if (!productoId || !cantidad || cantidad <= 0) continue;
+
+        if (Math.abs(cantidad - Math.round(cantidad)) > 0.0001) {
+            Swal.fire('Atención', 'La cantidad debe ser en paquetes completos (sin decimales).', 'warning');
+            return;
+        }
+        if (disponible > 0 && cantidad > disponible) {
+            Swal.fire('Atención', `Solo hay ${formatearCantidadVenta(disponible)} paquete(s) disponibles para ese producto.`, 'warning');
+            return;
+        }
 
         items.push({
             producto_id: productoId,
             color_id: fila.querySelector('.item-color-id').value || null,
-            cantidad,
+            cantidad: Math.round(cantidad),
             precio_unitario: precio || 0,
         });
     }
@@ -426,58 +437,9 @@ function anularVenta(id) {
     });
 }
 
-// ── Ticket de impresión (simple, sin SUNAT) ─────────────────────────────────
-async function imprimirTicketVenta(id) {
-    const json = await llamarVenta('OBTENERVENTA', { id });
-    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
-
-    const v = json.venta;
-    const items = typeof v.js_items === 'string' ? JSON.parse(v.js_items) : v.js_items;
-    const fecha = new Date(v.fecha_venta).toLocaleString('es-PE');
-
-    const filasHtml = items.map(it => `
-        <tr>
-            <td>${it.producto_codigo} - ${it.producto}${it.color ? ' (' + it.color + ')' : ''}</td>
-            <td style="text-align:right">${formatearCantidadVenta(it.cantidad)}</td>
-            <td style="text-align:right">${formatearMoneda(it.precio_unitario)}</td>
-            <td style="text-align:right">${formatearMoneda(it.subtotal)}</td>
-        </tr>
-    `).join('');
-
-    const ventana = window.open('', '_blank', 'width=420,height=600');
-    ventana.document.write(`
-        <html>
-        <head>
-            <title>Ticket ${v.codigo}</title>
-            <style>
-                body{ font-family: monospace; font-size:13px; padding:16px; }
-                h2{ text-align:center; margin-bottom:4px; }
-                .center{ text-align:center; }
-                table{ width:100%; border-collapse:collapse; margin-top:10px; }
-                th,td{ padding:4px 2px; font-size:12px; }
-                th{ border-bottom:1px solid #000; text-align:left; }
-                .total{ text-align:right; font-weight:bold; margin-top:10px; font-size:14px; }
-                hr{ border:none; border-top:1px dashed #000; }
-            </style>
-        </head>
-        <body>
-            <h2>${v.codigo}</h2>
-            <div class="center">${v.estado === 'anulada' ? '*** VENTA ANULADA ***' : ''}</div>
-            <div>Fecha: ${fecha}</div>
-            <div>Cliente: ${v.cliente_nombre}</div>
-            <div>RUC/DNI: ${v.cliente_ruc}</div>
-            <hr>
-            <table>
-                <thead><tr><th>Producto</th><th style="text-align:right">Cant.</th><th style="text-align:right">P.Unit</th><th style="text-align:right">Subt.</th></tr></thead>
-                <tbody>${filasHtml}</tbody>
-            </table>
-            <hr>
-            <div class="total">TOTAL: ${formatearMoneda(v.monto_total)}</div>
-            <script>window.onload = () => window.print();<\/script>
-        </body>
-        </html>
-    `);
-    ventana.document.close();
+// ── Ticket (PDF, generado por el servidor) ──────────────────────────────────
+function imprimirTicketVenta(id) {
+    window.open(`${TICKET_PDF_URL}?id=${id}`, '_blank');
 }
 </script>
 
