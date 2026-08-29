@@ -17,7 +17,7 @@ include("header.php");
 
 .pc-dv-paquetes{ font-weight:700; color:#2F6FED; font-size:1.05em; }
 .pc-dv-paquetes small{ font-weight:600; color:#5c85e8; }
-.pc-dv-cantidad-base{ color:#9a9585; font-size:.85em; }
+.pc-dv-bolsas{ color:#9a9585; font-size:.85em; }
 
 .pc-dv-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
 .pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:220px; }
@@ -29,6 +29,8 @@ include("header.php");
 .pc-dv-mezcla-texto{ font-weight:600; color:#3a3730; }
 
 .pc-dv-warning-mix{ color:#c9822a; margin-left:6px; cursor:help; }
+.pc-dv-warning-config{ color:#c9482a; margin-left:6px; cursor:help; }
+.pc-dv-sin-config{ color:#9a9585; font-style:italic; font-size:.85em; }
 
 .pc-dv-subtotal td{
     background:#fbf9f3; font-weight:700; border-bottom:2px solid #eee2c8;
@@ -63,7 +65,7 @@ include("header.php");
                     <th>Color</th>
                     <th># Registros</th>
                     <th>Paquetes disponibles</th>
-                    <th>Cantidad (unidad base)</th>
+                    <th>Bolsas empaquetadas</th>
                 </tr>
             </thead>
             <tbody id="tablaDisponibilidadVenta">
@@ -117,6 +119,7 @@ function agruparPorProductoDV(filas) {
                 producto_id: f.producto_id,
                 producto_codigo: f.producto_codigo,
                 producto: f.producto,
+                config_venta_inconsistente: f.config_venta_inconsistente === true || f.config_venta_inconsistente === 't',
                 filas: [],
             };
             grupos.push(actual);
@@ -124,6 +127,13 @@ function agruparPorProductoDV(filas) {
         actual.filas.push(f);
     });
     return grupos;
+}
+
+function celdaPaquetesHtmlDV(f) {
+    if (f.paquetes_venta_sin_configurar) {
+        return `<span class="pc-dv-sin-config" title="Este producto no tiene configurada su unidad de venta (cant_equivale / unidad_equivale_id). Configúrala en Productos.">Sin config. de venta</span>`;
+    }
+    return `<span class="pc-dv-paquetes">${formatearNumeroDV(f.paquetes_disponibles)} <small>${f.unidad_venta_corto ?? ''}</small></span>`;
 }
 
 function filaHtmlDV(f) {
@@ -141,8 +151,8 @@ function filaHtmlDV(f) {
         colorTexto = `<span class="pc-dv-mezcla-texto">${colorTexto}</span>`;
     }
 
-    const warningMix = f.unidades_paquete_distintas
-        ? `<span class="pc-dv-warning-mix" title="Este grupo mezcla registros con distinta unidad de empaquetado configurada. La suma de paquetes es aproximada.">⚠️</span>`
+    const warningBolsasMix = f.unidades_bolsa_distintas
+        ? `<span class="pc-dv-warning-mix" title="Este grupo mezcla registros con distinta unidad de empaquetado configurada. La suma de bolsas es aproximada.">⚠️</span>`
         : '';
 
     return `
@@ -150,41 +160,38 @@ function filaHtmlDV(f) {
         <td><b>${f.producto_codigo ?? ''}</b> - ${f.producto ?? '-'}</td>
         <td><span class="${dotClase}"></span>${colorTexto}</td>
         <td>${f.registros_count ?? 0}</td>
-        <td>
-            <span class="pc-dv-paquetes">${formatearNumeroDV(f.paquetes_disponibles)} <small>${f.unidad_paquete_corto ?? ''}</small></span>
-            ${warningMix}
+        <td>${celdaPaquetesHtmlDV(f)}</td>
+        <td class="pc-dv-bolsas">
+            ${formatearNumeroDV(f.bolsas_disponibles)} ${f.unidad_bolsa_corto ?? ''}
+            ${warningBolsasMix}
         </td>
-        <td class="pc-dv-cantidad-base">${formatearNumeroDV(f.cantidad_disponible, 4)} ${f.unidad_corto ?? ''}</td>
     </tr>`;
 }
 
 function subtotalHtmlDV(grupo) {
-    const totalPaquetes = grupo.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
-    const totalBase     = grupo.filas.reduce((acc, f) => acc + Number(f.cantidad_disponible || 0), 0);
+    const tieneSinConfig = grupo.filas.some(f => f.paquetes_venta_sin_configurar);
+    const totalPaquetes  = grupo.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
+    const totalBolsas    = grupo.filas.reduce((acc, f) => acc + Number(f.bolsas_disponibles || 0), 0);
 
-    // Si todas las filas del producto comparten la misma unidad de
-    // empaquetado, se muestra junto al total; si no, se omite (ya cada
-    // fila trae su propia unidad + el aviso ⚠️ si aplica).
-    const unidadesPaquete = [...new Set(grupo.filas.map(f => f.unidad_paquete_corto).filter(Boolean))];
-    const unidadesBase    = [...new Set(grupo.filas.map(f => f.unidad_corto).filter(Boolean))];
-    const sufijoPaquete = unidadesPaquete.length === 1 ? ` <small>${unidadesPaquete[0]}</small>` : '';
-    const sufijoBase    = unidadesBase.length === 1 ? ` ${unidadesBase[0]}` : '';
+    const unidadesVenta = [...new Set(grupo.filas.map(f => f.unidad_venta_corto).filter(Boolean))];
+    const unidadesBolsa = [...new Set(grupo.filas.map(f => f.unidad_bolsa_corto).filter(Boolean))];
+    const sufijoPaquete  = unidadesVenta.length === 1 ? ` <small>${unidadesVenta[0]}</small>` : '';
+    const sufijoBolsa    = unidadesBolsa.length === 1 ? ` ${unidadesBolsa[0]}` : '';
 
-    // NUEVO: si CUALQUIER fila del grupo ya venía marcada como
-    // unidades_paquete_distintas, o si el propio grupo junta más de una
-    // unidad de paquete entre sus colores, el total también lo advierte
-    // (antes el ⚠️ solo aparecía por fila y el total podía verse "limpio").
-    const huboAvisoEnFilas = grupo.filas.some(f => f.unidades_paquete_distintas);
-    const totalEsAproximado = huboAvisoEnFilas || unidadesPaquete.length > 1;
-    const warningTotal = totalEsAproximado
-        ? `<span class="pc-dv-warning-mix" title="El total de paquetes de este producto combina registros con distinta unidad de empaquetado. Es una suma aproximada.">⚠️</span>`
+    const huboAvisoBolsas   = grupo.filas.some(f => f.unidades_bolsa_distintas);
+    const warningBolsasTotal = (huboAvisoBolsas || unidadesBolsa.length > 1)
+        ? `<span class="pc-dv-warning-mix" title="El total de bolsas de este producto combina registros con distinta unidad de empaquetado. Es una suma aproximada.">⚠️</span>`
         : '';
+
+    const celdaPaquetesTotal = tieneSinConfig
+        ? `<span class="pc-dv-sin-config">Sin config. de venta</span>`
+        : `<span class="pc-dv-paquetes">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</span>`;
 
     return `
     <tr class="pc-dv-subtotal">
         <td colspan="3">Total ${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''}</td>
-        <td><span class="pc-dv-paquetes">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</span>${warningTotal}</td>
-        <td class="pc-dv-cantidad-base">${formatearNumeroDV(totalBase, 4)}${sufijoBase}</td>
+        <td>${celdaPaquetesTotal}</td>
+        <td class="pc-dv-bolsas">${formatearNumeroDV(totalBolsas)}${sufijoBolsa}${warningBolsasTotal}</td>
     </tr>`;
 }
 
@@ -213,7 +220,18 @@ async function cargarDisponibilidadVenta() {
     const grupos = agruparPorProductoDV(filas);
     let html = '';
     grupos.forEach(grupo => {
-        grupo.filas.forEach(f => { html += filaHtmlDV(f); });
+        grupo.filas.forEach((f, idx) => {
+            let fila = filaHtmlDV(f);
+            // Advertencia de config de venta inconsistente: solo se marca
+            // una vez, en la primera fila del producto, junto al nombre.
+            if (idx === 0 && grupo.config_venta_inconsistente) {
+                fila = fila.replace(
+                    '</b>',
+                    `</b> <span class="pc-dv-warning-config" title="La unidad de venta configurada en 'Productos' no coincide con la de 'Configuración de empaquetado'. Revisa ambas para que 'Paquetes disponibles' sea correcto.">⚠️</span>`
+                );
+            }
+            html += fila;
+        });
         // Subtotal solo tiene sentido si el producto tiene más de un color/bucket
         if (grupo.filas.length > 1) {
             html += subtotalHtmlDV(grupo);

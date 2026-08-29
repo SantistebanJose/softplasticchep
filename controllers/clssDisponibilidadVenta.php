@@ -85,10 +85,6 @@ function buscarColoresDV()
     responderDV(true, 'OK', ['colores' => $result]);
 }
 
-// REESCRITO (2026-08-27): además de cantidad_base (unidad base, ej. UND),
-// ahora se calcula paquetes_disponibles = SUM(cantidad_tota) del grupo,
-// osea el conteo en la unidad de empaquetado tal cual se registró (Bulto,
-// Docena, Bolsa...), que es la que le importa a ventas.
 function listarDisponibilidadVenta()
 {
     $conectar        = conectar_oll_BD();
@@ -133,18 +129,17 @@ function listarDisponibilidadVenta()
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
                     ELSE -1                                        -- mezcla
                 END AS color_id_efectivo,
-                -- cantidad en unidad base (ganchos/UND), siempre desde
-                -- cantidad_tota x equivalencia de la unidad OPERATIVA de
-                -- empaquetado. Esto NO cambia respecto al fix anterior.
+                -- Uso INTERNO para calcular paquetes_disponibles. No se expone tal cual.
                 emp.cantidad_tota * COALESCE(um.equivalencia, 1) AS cantidad_base,
-                COALESCE(ub.nombre_corto, um.nombre_corto) AS unidad_base_corto
+                -- Cantidad en la unidad OPERATIVA de empaquetado (ej. bolsas/GRU).
+                emp.cantidad_tota AS cantidad_bolsas,
+                um.nombre_corto AS unidad_bolsa_corto
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
             LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         ),
         producto_venta AS (
-            -- Capacidad del paquete REAL de venta, en unidad base.
             SELECT
                 p.id AS producto_id,
                 uv.nombre_corto AS unidad_venta_corto,
@@ -152,7 +147,13 @@ function listarDisponibilidadVenta()
                     WHEN p.cant_equivale IS NOT NULL AND p.unidad_equivale_id IS NOT NULL
                         THEN p.cant_equivale * COALESCE(ue.equivalencia, 1)
                     ELSE NULL
-                END AS capacidad_paquete_venta_base
+                END AS capacidad_paquete_venta_base,
+                -- Compara la config básica (unidad_venta_id) contra la del
+                -- modal de Configuración (se_vende_por_unidad_medida_id).
+                (
+                    p.unidad_venta_id IS DISTINCT FROM
+                    NULLIF(p.js_configuracion_empaquetado->>'se_vende_por_unidad_medida_id','')::bigint
+                ) AS config_venta_inconsistente
             FROM producto p
             LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
             LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
@@ -168,22 +169,24 @@ function listarDisponibilidadVenta()
                 ELSE co.nombre
             END AS color,
             COUNT(*) AS registros_count,
-            SUM(dc.cantidad_base) AS cantidad_disponible,
-            MIN(dc.unidad_base_corto) AS unidad_corto,
             CASE
                 WHEN pv.capacidad_paquete_venta_base > 0
                     THEN ROUND(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base, 2)
                 ELSE NULL
             END AS paquetes_disponibles,
-            pv.unidad_venta_corto AS unidad_paquete_corto,
-            (pv.capacidad_paquete_venta_base IS NULL) AS paquetes_venta_sin_configurar
+            pv.unidad_venta_corto,
+            (pv.capacidad_paquete_venta_base IS NULL) AS paquetes_venta_sin_configurar,
+            pv.config_venta_inconsistente,
+            SUM(dc.cantidad_bolsas) AS bolsas_disponibles,
+            MIN(dc.unidad_bolsa_corto) AS unidad_bolsa_corto,
+            (COUNT(DISTINCT dc.unidad_bolsa_corto) > 1) AS unidades_bolsa_distintas
         FROM detalle dc
         JOIN producto p ON p.id = dc.producto_id
         LEFT JOIN producto_venta pv ON pv.producto_id = dc.producto_id
         LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
         GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre,
-                 pv.unidad_venta_corto, pv.capacidad_paquete_venta_base
+                 pv.unidad_venta_corto, pv.capacidad_paquete_venta_base, pv.config_venta_inconsistente
         HAVING SUM(dc.cantidad_base) > 0
         ORDER BY p.descripcion,
                  CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
@@ -192,7 +195,8 @@ function listarDisponibilidadVenta()
  
     $result = executeQuery($conectar, $sql, $params);
     responderDV(true, 'OK', ['disponibilidad' => $result]);
-} 
+}
+ 
 
 function responderDV(bool $ok, string $msg, array $extra = []): void
 {
