@@ -170,10 +170,20 @@ function subtotalHtmlDV(grupo) {
     const sufijoPaquete = unidadesPaquete.length === 1 ? ` <small>${unidadesPaquete[0]}</small>` : '';
     const sufijoBase    = unidadesBase.length === 1 ? ` ${unidadesBase[0]}` : '';
 
+    // NUEVO: si CUALQUIER fila del grupo ya venía marcada como
+    // unidades_paquete_distintas, o si el propio grupo junta más de una
+    // unidad de paquete entre sus colores, el total también lo advierte
+    // (antes el ⚠️ solo aparecía por fila y el total podía verse "limpio").
+    const huboAvisoEnFilas = grupo.filas.some(f => f.unidades_paquete_distintas);
+    const totalEsAproximado = huboAvisoEnFilas || unidadesPaquete.length > 1;
+    const warningTotal = totalEsAproximado
+        ? `<span class="pc-dv-warning-mix" title="El total de paquetes de este producto combina registros con distinta unidad de empaquetado. Es una suma aproximada.">⚠️</span>`
+        : '';
+
     return `
     <tr class="pc-dv-subtotal">
         <td colspan="3">Total ${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''}</td>
-        <td><span class="pc-dv-paquetes">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</span></td>
+        <td><span class="pc-dv-paquetes">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</span>${warningTotal}</td>
         <td class="pc-dv-cantidad-base">${formatearNumeroDV(totalBase, 4)}${sufijoBase}</td>
     </tr>`;
 }

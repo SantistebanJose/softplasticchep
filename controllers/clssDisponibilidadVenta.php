@@ -95,10 +95,10 @@ function listarDisponibilidadVenta()
     $texto           = trim($_POST['texto'] ?? '');
     $colorId         = trim($_POST['color_id'] ?? '');
     $incluirVendidos = ($_POST['incluir_vendidos'] ?? '0') === '1';
-
+ 
     $whereDetalle = ["dc.deleted_at IS NULL"];
     $params       = [];
-
+ 
     if (!$incluirVendidos) {
         $whereDetalle[] = "dc.pasado_venta IS NULL";
     }
@@ -107,21 +107,19 @@ function listarDisponibilidadVenta()
         $params['texto'] = "%$texto%";
     }
     if ($colorId !== '') {
-        // El filtro de color solo aplica a colores reales (nunca matchea
-        // "Mezcla" ni "Sin color", que usan sentinels -1 / NULL).
         $whereDetalle[] = "dc.color_id_efectivo = :color_id";
         $params['color_id'] = $colorId;
     }
-
+ 
     $sql = "
         WITH color_stats AS (
-            -- Por registro: cuántos colores distintos tiene y cuánto suma
-            -- en total (ya en unidades base). MIN(color_id) solo se usa
-            -- cuando colores_distintos = 1 (en ese caso es EL color).
+            -- Solo para decidir el COLOR del registro (único / mezcla /
+            -- legado). NUNCA se usa para calcular cantidades: la unidad de
+            -- reo.cantidad varía según el flujo de empaquetado del
+            -- producto (UND en el flujo normal, KG en el flujo mezcla).
             SELECT
                 reo.empaquetado_id,
                 COUNT(DISTINCT reo.color_id) AS colores_distintos,
-                SUM(reo.cantidad) AS cantidad_base_total,
                 MIN(reo.color_id) AS unico_color_id
             FROM rel_empaquetado_origen reo
             WHERE reo.deleted_at IS NULL
@@ -138,10 +136,9 @@ function listarDisponibilidadVenta()
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
                     ELSE -1                                        -- mezcla
                 END AS color_id_efectivo,
-                COALESCE(
-                    cs.cantidad_base_total,
-                    emp.cantidad_tota * COALESCE(um.equivalencia, 1)  -- fallback legado
-                ) AS cantidad_base,
+                -- FIX: cantidad en unidad base SIEMPRE a partir de
+                -- cantidad_tota * equivalencia, sin importar el flujo.
+                emp.cantidad_tota * COALESCE(um.equivalencia, 1) AS cantidad_base,
                 emp.cantidad_tota AS cantidad_paquetes,
                 um.nombre_corto AS unidad_paquete_corto,
                 COALESCE(ub.nombre_corto, um.nombre_corto) AS unidad_base_corto
@@ -173,13 +170,14 @@ function listarDisponibilidadVenta()
         GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre
         HAVING SUM(dc.cantidad_base) > 0
         ORDER BY p.descripcion,
-                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END, -- Mezcla al final de cada producto
+                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
                  co.nombre NULLS LAST
     ";
-
+ 
     $result = executeQuery($conectar, $sql, $params);
     responderDV(true, 'OK', ['disponibilidad' => $result]);
 }
+ 
 
 function responderDV(bool $ok, string $msg, array $extra = []): void
 {
