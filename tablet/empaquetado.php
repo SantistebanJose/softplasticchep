@@ -495,6 +495,8 @@ let contadorColorRow = 0;
 let estOperariosSeleccionados = [];
 let estSucursalSeleccionada = 0;
 
+let capacidadEnUnidadOrigenActual = null;
+
 let cacheFilasEmpaquetado = [];
 let tabActivoEmp = null;
 
@@ -649,8 +651,7 @@ function actualizarResumenBarraAccion() {
         el.textContent = `${formatearCantidadEmp(kgTotal)} kg mezclados · ${formatearCantidadEmp(bolsas)} bolsas`;
     } else {
         const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
-        const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-            ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+        const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
         const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
         let texto = `${bultosState.length} paquete(s) · total ${formatearCantidadEmp(total)}${unidadBase ? ' ' + unidadBase : ''}`;
         if (capacidad) {
@@ -954,6 +955,7 @@ async function cargarOrigenesDisponibles(productoId) {
     origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
+    capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null; // NUEVO
 }
 
 function aplicarUnidadEmpaquetadoFija() {
@@ -1049,8 +1051,7 @@ function tocarSacoBulto(origenTipo, origenId) {
     if (bultosState.length === 0) agregarBulto();
     let bulto = bultosState[bultosState.length - 1];
 
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     const incremento = granularidad > 1 ? granularidad : 1;
 
@@ -1258,8 +1259,7 @@ function distribuirParejoBulto(bultoTempId) {
     if (!bulto) return;
     const colores = bulto.colores.filter(c => c.origen_tipo && c.origen_id);
     if (colores.length < 2) return;
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     if (!capacidad) return;
     const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
@@ -1311,8 +1311,7 @@ function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
 function renderBultos() {
     renderSacosBultoGrid();
     const cont = document.getElementById('listaBultos');
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
 
     if (bultosState.length === 0) {
         cont.innerHTML = '<div class="text-muted" style="font-size:.9em;">Agrega al menos un bulto.</div>';
@@ -1401,8 +1400,7 @@ function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
 
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
     const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
 
@@ -1467,8 +1465,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             return;
         }
 
-        const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-            ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+       const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
         if (capacidad !== null) {
             const totalesExcedidos = bultosParsed
                 .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
