@@ -1437,11 +1437,10 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             Swal.fire('Falta información', 'Indica cuántas bolsas se produjeron.', 'warning');
             return;
         }
-
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: document.getElementById('est_sucursal_id').value,
+            sucursal_id: estSucursalSeleccionada || '',
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1457,21 +1456,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             return;
         }
 
-        const capacidad = capacidadEnUnidadOrigenActual ?? null;
-        if (capacidad !== null) {
-            const totalesExcedidos = bultosParsed
-                .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
-                .filter(b => b.total > capacidad + 0.0001);
-            if (totalesExcedidos.length > 0) {
-                const detalle = totalesExcedidos.map(b => `Bulto ${b.idx}: ${formatearCantidadEmp(b.total)}`).join(', ');
-                Swal.fire('Bulto excede la capacidad',
-                    `${detalle} — la capacidad de ${unidadEmpaquetadoProductoActual.nombre} es ${formatearCantidadEmp(capacidad)}. Ajusta las cantidades.`,
-                    'warning');
-                return;
-            }
-        }
-
-                const capacidad = capacidadEnUnidadOrigenActual; // o unidadEmpaquetadoProductoActual?.equivalencia en escritorio
+        const capacidad = capacidadEnUnidadOrigenActual;
         if (capacidad !== null) {
             const totalesExcedidos = bultosParsed
                 .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
@@ -1488,7 +1473,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: /* según la vista */,
+            sucursal_id: estSucursalSeleccionada || '',
             bultos: bultosJson,
         };
     }
@@ -1501,22 +1486,14 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         const productoRecienUsado = estacionProductoIdActual;
         await Promise.all([
             cargarPendientesEmpaquetado(),
-            cargarListadoGeneralEmp(),
+            cargarMisRegistros(),
         ]);
-        // Recarga forzada de la estación (disponibles cambiaron)
         estacionProductoIdActual = 0;
-        tabActivoEmp = tabActivoEmp; // conserva la pestaña actual
         await cargarEstacionParaProducto(productoRecienUsado);
-
-        // Si el modal de registros de este producto está abierto, refrescarlo también
-        if (modalProductoIdActual === productoRecienUsado) {
-            await cargarRegistrosEmp();
-        }
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
-
 async function refrescarEstacionActual() {
     if (!estacionProductoIdActual) return;
     await cargarOrigenesDisponibles(estacionProductoIdActual);

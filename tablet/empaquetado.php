@@ -1465,21 +1465,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             return;
         }
 
-       const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
-        if (capacidad !== null) {
-            const totalesExcedidos = bultosParsed
-                .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
-                .filter(b => b.total > capacidad + 0.0001);
-            if (totalesExcedidos.length > 0) {
-                const detalle = totalesExcedidos.map(b => `Bulto ${b.idx}: ${formatearCantidadEmp(b.total)}`).join(', ');
-                Swal.fire('Bulto excede la capacidad',
-                    `${detalle} — la capacidad de ${unidadEmpaquetadoProductoActual.nombre} es ${formatearCantidadEmp(capacidad)}. Ajusta las cantidades.`,
-                    'warning');
-                return;
-            }
-        }
-
-                const capacidad = capacidadEnUnidadOrigenActual; // o unidadEmpaquetadoProductoActual?.equivalencia en escritorio
+        const capacidad = capacidadEnUnidadOrigenActual;
         if (capacidad !== null) {
             const totalesExcedidos = bultosParsed
                 .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
@@ -1496,11 +1482,10 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: /* según la vista */,
+            sucursal_id: estSucursalSeleccionada || '',
             bultos: bultosJson,
         };
-
-
+    }
 
     const json = await llamarEmpaquetado('CREAREMPAQUETADO', params);
 
