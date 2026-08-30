@@ -9,6 +9,13 @@
  * a cada módulo tablet (Producción / Ensamblaje / Empaquetado) según a qué
  * etapas está realmente asignado, en vez de dejar entrar a cualquier
  * operario logueado a cualquier página solo por tener sesión activa.
+ *
+ * FIX: las etapas se resolvían buscando en `operario` por usuario.id, pero
+ * `usuario` y `operario` son secuencias independientes — la relación real
+ * es usuario.operario_id (FK) -> operario.id. Usar usuario.id directamente
+ * hacía que, cuando ambos ids se desalineaban, el login leyera las etapas
+ * de OTRO operario (el que casualmente tuviera ese mismo id en la tabla
+ * operario), dejando al usuario real con acceso incorrecto o incompleto.
  */
 
 require_once __DIR__ . '/../controllers/bd.php';
@@ -26,7 +33,7 @@ function intentarLoginOperario(string $dni): array
 
     $result = executeQuery(
         $conectar,
-        "SELECT id, user_, nombre_completo, rol_y_perfiles, deleted_at
+        "SELECT id, operario_id, user_, nombre_completo, rol_y_perfiles, deleted_at
          FROM usuario
          WHERE user_ = :user_",
         ['user_' => $dni]
@@ -51,10 +58,11 @@ function intentarLoginOperario(string $dni): array
 
     // NUEVO: se resuelven las etapas asignadas a este operario en la tabla
     // `operario` (misma fila que usa el resto del sistema para
-    // js_etapas_relacionadas / js_sucursales). Si el id de usuario no tiene
-    // fila correspondiente en `operario`, simplemente queda sin etapas
-    // (sin acceso a ningún módulo) hasta que un admin lo configure.
-    $etapas = resolverEtapasOperario($conectar, (int) $usuario['id']);
+    // js_etapas_relacionadas / js_sucursales), usando usuario.operario_id
+    // (FK real hacia operario.id) y NO usuario.id. Si el usuario no tiene
+    // operario_id vinculado, simplemente queda sin etapas (sin acceso a
+    // ningún módulo) hasta que un admin lo configure.
+    $etapas = resolverEtapasOperario($conectar, (int) ($usuario['operario_id'] ?? 0));
 
     session_regenerate_id(true);
     guardarSesionOperario($usuario, $etapas);
@@ -93,7 +101,8 @@ function decodificarJsonArray($valor): array
 
 /**
  * Devuelve los nombres de etapa (en mayúsculas) a las que está asignado
- * el operario con este id, leyendo operario.js_etapas_relacionadas.
+ * el operario con este id (operario.id, NO usuario.id), leyendo
+ * operario.js_etapas_relacionadas.
  */
 function resolverEtapasOperario($conectar, int $operarioId): array
 {
