@@ -210,6 +210,11 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
     $unidadEmpaquetado = obtenerUnidadEmpaquetadoProducto($conectar, $productoId);
     $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
 
+    // NUEVO: capacidad real del paquete, expresada en la unidad de los
+    // orígenes (ej. DOC), no en la unidad base del sistema.
+    $unidadOrigenCodigo = $result[0]['unidad_salida_codigo'] ?? null;
+    $capacidadEnUnidadOrigen = obtenerCapacidadPaqueteEnUnidadOrigen($conectar, $unidadEmpaquetado, $unidadOrigenCodigo);
+
     if ($reglas['conversion_peso_a_unidad'] && $reglas['peso_unitario_g']) {
         foreach ($result as &$r) {
             $r['disponible_kg'] = $r['disponible'];
@@ -223,6 +228,7 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
         'origenes' => $result,
         'unidad_empaquetado' => $unidadEmpaquetado,
         'reglas_empaquetado' => $reglas,
+        'capacidad_en_unidad_origen' => $capacidadEnUnidadOrigen, // <-- NUEVO
     ]);
 }
 // FIX: excluir "ya empaquetados" ahora se calcula contra
@@ -649,6 +655,36 @@ function obtenerEmpaquetado(int $id)
     responder(true, 'OK', ['empaquetado' => $filas[0]]);
 }
 
+// Convierte la capacidad de la unidad de empaquetado (ej. 600, expresada
+// en la unidad BASE del sistema) a la unidad real en la que reportan los
+// orígenes (ej. DOC), dividiendo entre la equivalencia de esa unidad.
+// Ambas equivalencias deben estar expresadas respecto a la MISMA unidad
+// base (ej. UND) para que la división tenga sentido.
+function obtenerCapacidadPaqueteEnUnidadOrigen($conectar, ?array $unidadEmpaquetado, ?string $unidadOrigenCodigo): ?float
+{
+    if (!$unidadEmpaquetado || empty($unidadEmpaquetado['equivalencia']) || !$unidadOrigenCodigo) {
+        return null;
+    }
+
+    $unidadOrigen = executeQuery($conectar, "
+        SELECT equivalencia, unidad_base_id
+        FROM unidad_medida
+        WHERE nombre_corto = :codigo AND deleted_at IS NULL
+        LIMIT 1
+    ", ['codigo' => $unidadOrigenCodigo]);
+
+    if (empty($unidadOrigen) || empty($unidadOrigen[0]['equivalencia'])) {
+        return null;
+    }
+
+    // Si son la misma unidad (ej. ambas ya en DOC), no hace falta convertir.
+    if ($unidadOrigenCodigo === ($unidadEmpaquetado['nombre_corto'] ?? null)) {
+        return (float)$unidadEmpaquetado['equivalencia'];
+    }
+
+    return (float)$unidadEmpaquetado['equivalencia'] / (float)$unidadOrigen[0]['equivalencia'];
+}
+
 function crearEmpaquetado()
 {
     $conectar = conectar_oll_BD();
@@ -678,8 +714,15 @@ function crearEmpaquetado()
         responder(false, 'Este producto no tiene configurada su unidad de empaquetado ("Salida en Empaquetado"). Configúrala en el módulo de Productos antes de empaquetar.');
     }
     $unidadMedida = (int) $unidadEmpaquetado['id'];
-    $equivalenciaCapacidad = (float)($unidadEmpaquetado['equivalencia'] ?? 0);
-
+    $origenesRef = executeQuery($conectar, "
+        SELECT unidad_salida_codigo FROM (
+            SELECT us.nombre_corto AS unidad_salida_codigo
+            FROM ensamblaje e LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
+            WHERE e.producto_id = :pid AND e.deleted_at IS NULL LIMIT 1
+        ) t
+    ", ['pid' => $productoId]);
+    $unidadOrigenCodigo = $origenesRef[0]['unidad_salida_codigo'] ?? null;
+    $equivalenciaCapacidad = obtenerCapacidadPaqueteEnUnidadOrigen($conectar, $unidadEmpaquetado, $unidadOrigenCodigo) ?? 0;
     if ($sucursalId !== null) {
         $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
         if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');

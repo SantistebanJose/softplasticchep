@@ -376,7 +376,7 @@ let bolsasProducidasValor = '';
 let contadorBulto = 0;
 let contadorColorRow = 0;
 let estOperariosSeleccionados = []; // ids de operario elegidos en la estación de armado
-
+let capacidadEnUnidadOrigenActual = null; // NUEVO
 // ── Estado del MODAL (solo listado / edición / eliminación de registros ya guardados) ──
 let modalProductoIdActual = 0;
 let empIdEnEdicion = 0;
@@ -803,6 +803,7 @@ async function cargarOrigenesDisponibles(productoId) {
     origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
+    capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null; // <-- NUEVO
 }
 
 function aplicarUnidadEmpaquetadoFija() {
@@ -972,8 +973,7 @@ function tocarSacoBulto(origenTipo, origenId) {
     if (bultosState.length === 0) agregarBulto();
     let bulto = bultosState[bultosState.length - 1];
 
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual ?? null;
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     const incremento = granularidad > 1 ? granularidad : 1;
 
@@ -1208,16 +1208,14 @@ function distribuirParejoBulto(bultoTempId) {
     const colores = bulto.colores.filter(c => c.origen_tipo && c.origen_id);
     if (colores.length < 2) return;
 
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual ?? null;
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     if (!capacidad) return;
 
     const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
 
-    // ACTUAL (bug):
     colores.forEach(c => {
-        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) + (parseFloat(c.cantidad) || 0);
+        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId);
         c.cantidad = Math.min(base, restante);
     });
 
@@ -1275,9 +1273,7 @@ function renderBultos() {
     renderSacosBultoGrid();
 
     const cont = document.getElementById('listaBultos');
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
-        : null;
+    const capacidad = capacidadEnUnidadOrigenActual ?? null;
     const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || ''; // <-- NUEVO: se declara aquí, junto a capacidad
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
 
@@ -1373,8 +1369,7 @@ function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
 
-    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const capacidad = capacidadEnUnidadOrigenActual ?? null;
     const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
     const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
 
@@ -1462,9 +1457,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             return;
         }
 
-        const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
-            ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
-            : null;
+        const capacidad = capacidadEnUnidadOrigenActual ?? null;
         if (capacidad !== null) {
             const totalesExcedidos = bultosParsed
                 .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
