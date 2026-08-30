@@ -1091,41 +1091,6 @@ function renderSacosMezclaGrid() {
     }
 
     cont.innerHTML = origenesDisponiblesCache.map(o => {
-        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
-        const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
-        const agotado = restante <= 0.0001;
-        const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
-        const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
-        const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);   // ← revisa que esta línea exista
-        const metaHtml = infoExtra
-            ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
-            : '';
-        return `
-        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
-                onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
-            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
-            <div class="swatch" style="background:${hex};"></div>
-            <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
-            <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
-            <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
-            ${metaHtml}
-        </button>`;
-    }).join('');
-}
-
-// Grilla de sacos disponibles (modo BULTO/docena): tocar agrega al paquete actual.
-function renderSacosBultoGrid() {
-    const cont = document.getElementById('sacosBultoGrid');
-    if (!cont) return;
-
-    if (origenesDisponiblesCache.length === 0) {
-        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">No hay sacos disponibles para este producto.</div>';
-        return;
-    }
-
-    cont.innerHTML = origenesDisponiblesCache.map(o => {
         const restante = disponibleKgOrigen(o.origen_tipo, o.origen_id);
         const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
         const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
@@ -1133,7 +1098,7 @@ function renderSacosBultoGrid() {
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
         const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);   // ← revisa que esta línea exista
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
                <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
@@ -1150,7 +1115,40 @@ function renderSacosBultoGrid() {
         </button>`;
     }).join('');
 }
+// Grilla de sacos disponibles (modo BULTO/docena): tocar agrega al paquete actual.
+function renderSacosBultoGrid() {
+    const cont = document.getElementById('sacosBultoGrid');
+    if (!cont) return;
 
+    if (origenesDisponiblesCache.length === 0) {
+        cont.innerHTML = '<div class="text-muted" style="font-size:.85em;">No hay sacos disponibles para este producto.</div>';
+        return;
+    }
+
+    cont.innerHTML = origenesDisponiblesCache.map(o => {
+        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
+        const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
+        const agotado = restante <= 0.0001;
+        const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+        const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
+        const hex = colorHexPara(o.color_nombre, o.color_hex);
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
+        const metaHtml = infoExtra
+            ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
+               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
+            : '';
+        return `
+        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
+                onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
+            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
+            <div class="swatch" style="background:${hex};"></div>
+            <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
+            <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)}${unidadOrigenLabel ? ' ' + unidadOrigenLabel : ''}</p>
+            ${metaHtml}
+        </button>`;
+    }).join('');
+}
 function renderMezcla() {
     renderSacosMezclaGrid();
 
