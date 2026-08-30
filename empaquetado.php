@@ -633,10 +633,6 @@ function seleccionarTabEmp(clave) {
     actualizarEstacionArmado();
 }
 
-// Info adicional (ya empaquetado / fecha de finalización) de un origen tipo
-// "ensamblaje", cruzando con el cache de ensamblajes usado para los tabs.
-// Los origenes tipo "produccion" no tienen equivalente en ese cache (esa
-// lista solo trae ensamblajes), así que para esos se omite silenciosamente.
 function infoOrigenExtra(origenTipo, origenId) {
     return cacheFilasEmpaquetado.find(f => f.origen_tipo === origenTipo && f.origen_id == origenId) || null;
 }
@@ -1095,25 +1091,25 @@ function renderSacosMezclaGrid() {
     }
 
     cont.innerHTML = origenesDisponiblesCache.map(o => {
-        const restante = disponibleKgOrigen(o.origen_tipo, o.origen_id);
-        const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
-        const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
+        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
+        const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
         const agotado = restante <= 0.0001;
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
-        const hex = colorHexPara(o.color_nombre, o.color_hex);   // ← FALTABA        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
+        const hex = colorHexPara(o.color_nombre, o.color_hex);
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);   // ← revisa que esta línea exista
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-            <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
+               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
             : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
-                onclick="tocarSacoMezcla('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar a la mezcla">
-            ${enMezclaKg > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(enMezclaKg)} kg</span>` : ''}
+                onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
+            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
             <div class="swatch" style="background:${hex};"></div>
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
-            <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
             ${metaHtml}
         </button>`;
     }).join('');
@@ -1130,24 +1126,26 @@ function renderSacosBultoGrid() {
     }
 
     cont.innerHTML = origenesDisponiblesCache.map(o => {
-        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
-        const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
+        const restante = disponibleKgOrigen(o.origen_tipo, o.origen_id);
+        const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
+        const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
         const agotado = restante <= 0.0001;
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
-        const hex = colorHexPara(o.color_nombre, o.color_hex);   // ← FALTABA        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
+        const hex = colorHexPara(o.color_nombre, o.color_hex);
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);   // ← revisa que esta línea exista
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-            <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
+               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
             : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
-                onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
-            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
+                onclick="tocarSacoMezcla('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar a la mezcla">
+            ${enMezclaKg > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(enMezclaKg)} kg</span>` : ''}
             <div class="swatch" style="background:${hex};"></div>
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
-            <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
             ${metaHtml}
         </button>`;
     }).join('');
