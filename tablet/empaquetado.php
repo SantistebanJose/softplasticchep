@@ -649,7 +649,15 @@ function actualizarResumenBarraAccion() {
         el.textContent = `${formatearCantidadEmp(kgTotal)} kg mezclados · ${formatearCantidadEmp(bolsas)} bolsas`;
     } else {
         const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
-        el.textContent = `${bultosState.length} paquete(s) · total ${formatearCantidadEmp(total)}`;
+        const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+            ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+        const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
+        let texto = `${bultosState.length} paquete(s) · total ${formatearCantidadEmp(total)}${unidadBase ? ' ' + unidadBase : ''}`;
+        if (capacidad) {
+            const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
+            texto += ` (= ${formatearCantidadEmp(total / capacidad)} ${unidadPaquete})`;
+        }
+        el.textContent = texto;
     }
 }
 
@@ -1256,7 +1264,7 @@ function distribuirParejoBulto(bultoTempId) {
     if (!capacidad) return;
     const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
     colores.forEach(c => {
-        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) + (parseFloat(c.cantidad) || 0);
+        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId);
         c.cantidad = Math.min(base, restante);
     });
     renderBultos();
@@ -1371,7 +1379,7 @@ function renderBultos() {
             <div class="pc-bulto-card-head" style="${excedido ? 'color:#c94a4a;' : ''}">
                 <span>Bulto ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
                 <div>
-                    ${reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme' && b.colores.length > 1 ? `
+                    ${b.colores.length > 1 ? `
                         <button type="button" class="btn btn-sm btn-outline-primary" style="margin-right:6px;" onclick="distribuirParejoBulto(${b.tempId})">
                             <i class="fa-solid fa-scale-balanced"></i> Repartir parejo
                         </button>` : ''}
@@ -1392,7 +1400,17 @@ function renderBultos() {
 function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
-    document.getElementById('bultosTotal').textContent = formatearCantidadEmp(total);
+
+    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
+    const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
+
+    let texto = `${formatearCantidadEmp(total)}${unidadBase ? ' ' + unidadBase : ''}`;
+    if (capacidad) {
+        texto += ` (= ${formatearCantidadEmp(total / capacidad)} ${unidadPaquete})`;
+    }
+    document.getElementById('bultosTotal').textContent = texto;
     actualizarResumenBarraAccion();
 }
 
