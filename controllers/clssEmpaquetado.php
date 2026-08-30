@@ -120,51 +120,81 @@ function buscarUnidadesMedida()
     responder(true, 'OK', ['unidades' => $result]);
 }
 
-// FIX: se agregó validación de producto_id y el filtro necesita_ensamblaje
-// en la rama de producciones directas (antes faltaba: una producción que
-// SÍ requería pasar por ensamblaje podía colarse como "disponible para
-// empaquetar directo", permitiendo consumirla dos veces).
-// disponible = cantidad_producida_total - SUM(cantidad ya consumida en rel_empaquetado_origen activos)
+// FIX: ahora también trae orígenes tipo "producción" para productos que van
+// directo de producción a empaquetado (necesita_ensamblaje = 'no', ej.
+// COLGADOR ADULTO, MATAMOSCA CUADRADA). Antes esta función solo miraba la
+// tabla ensamblaje, así que esos productos nunca tenían sacos disponibles
+// para armar un paquete.
 //
-// FIX (unidad de empaquetado): ahora también devuelve la unidad de
-// empaquetado configurada para el producto (producto.js_configuracion_
-// empaquetado.salida_empaquetado_unidad_medida_id), para que el frontend
-// la cargue sola en el formulario en vez de pedírsela al operario.
-//
-// FIX (color_hex): se agregó co.rgb AS color_hex al subselect de color,
-// para que la grilla visual de sacos pinte el swatch con el color real
-// del catálogo (columna color.rgb, sincronizada con material.rgb cuando
-// el color viene de un tinte) en vez de solo mostrar el nombre.
+// FIX (unidad de origen): ahora devuelve unidad_salida_codigo (DOC, KG, etc.)
+// por origen — no necesariamente es la misma unidad del paquete final
+// (empaquetado), así que el frontend la muestra por separado en cada saco.
 function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
 {
     if (!$productoId) responder(false, 'Debes indicar el producto.');
     $conectar = conectar_oll_BD();
 
     $sql = "
-        SELECT
-            'ensamblaje' AS origen_tipo,
-            e.id AS origen_id,
-            e.cantidad_peso_kg AS cantidad_total,
-            e.unidad_salida_id,
-            col.color_id, col.color_nombre, col.color_hex,
-            e.cantidad_peso_kg - COALESCE((
-                SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
-                WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
-            ), 0) AS disponible
-        FROM ensamblaje e
-        LEFT JOIN LATERAL (
-            SELECT pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex
-            FROM rel_ensamblaje_producto rep
-            JOIN produccion pd ON pd.id = rep.molde_produccion_id
+        SELECT * FROM (
+            SELECT
+                'ensamblaje' AS origen_tipo,
+                e.id AS origen_id,
+                e.cantidad_peso_kg AS cantidad_total,
+                e.unidad_salida_id,
+                us.nombre_corto AS unidad_salida_codigo,
+                col.color_id, col.color_nombre, col.color_hex,
+                e.cantidad_peso_kg - COALESCE((
+                    SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
+                    WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
+                ), 0) AS disponible
+            FROM ensamblaje e
+            LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
+            LEFT JOIN LATERAL (
+                SELECT pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex
+                FROM rel_ensamblaje_producto rep
+                JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                LEFT JOIN color co ON co.id = pd.color_id
+                WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
+                LIMIT 1
+            ) col ON true
+            WHERE e.producto_id = :producto_id
+              AND e.deleted_at IS NULL AND e.fin IS NOT NULL
+              AND e.ensamblaje_id_referido IS NULL
+
+            UNION ALL
+
+            SELECT
+                'produccion' AS origen_tipo,
+                pd.id AS origen_id,
+                pd.cantidad_producida_kg AS cantidad_total,
+                cfgu.uid AS unidad_salida_id,
+                umx.nombre_corto AS unidad_salida_codigo,
+                pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex,
+                pd.cantidad_producida_kg - COALESCE((
+                    SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
+                    WHERE reo.produccion_id = pd.id AND reo.deleted_at IS NULL
+                ), 0) AS disponible
+            FROM produccion pd
+            INNER JOIN producto pr ON pr.id = :producto_id2
+            LEFT JOIN molde mo ON mo.id = pd.molde_id
             LEFT JOIN color co ON co.id = pd.color_id
-            WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
-            LIMIT 1
-        ) col ON true
-        WHERE e.producto_id = :producto_id
-          AND e.deleted_at IS NULL AND e.fin IS NOT NULL
-          AND e.ensamblaje_id_referido IS NULL
+            LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
+                ON (x.item->>'molde_id')::bigint = mo.id
+            LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+            LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
+            LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
+            WHERE split_part(pd.unico_molde_producto, '-', 2)::bigint = :producto_id3
+              AND pd.deleted_at IS NULL
+              AND pd.enviado_ensamblaje = TRUE
+              AND pd.fecha_hora_fin IS NOT NULL
+              AND COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'
+        ) t
     ";
-        $result = executeQuery($conectar, $sql, ['producto_id' => $productoId]);
+    $result = executeQuery($conectar, $sql, [
+        'producto_id'  => $productoId,
+        'producto_id2' => $productoId,
+        'producto_id3' => $productoId,
+    ]);
 
     // Filtra los que ya no tienen nada disponible (redondeo)
     $result = array_values(array_filter($result, fn($r) => (float)$r['disponible'] > 0.0001));
@@ -172,10 +202,6 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
     $unidadEmpaquetado = obtenerUnidadEmpaquetadoProducto($conectar, $productoId);
     $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
 
-    // Si el producto requiere conversión kg -> unidades (ej. Pinza Palanita),
-    // el "disponible" se muestra en unidades (redondeado hacia ABAJO, para
-    // nunca prometer más de lo que en la práctica hay). Se conserva el
-    // valor original en kg como disponible_kg, por si se necesita auditar.
     if ($reglas['conversion_peso_a_unidad'] && $reglas['peso_unitario_g']) {
         foreach ($result as &$r) {
             $r['disponible_kg'] = $r['disponible'];
@@ -262,9 +288,6 @@ function listarEnsamblajesParaEmpaquetado()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['ensamblajes' => $result]);
 }
-
-// FIX: mismo problema que en listarEnsamblajesParaEmpaquetado — ahora
-// calcula disponibilidad/consumo contra rel_empaquetado_origen.
 function listarProduccionesParaEmpaquetado()
 {
     $conectar          = conectar_oll_BD();
@@ -310,6 +333,7 @@ function listarProduccionesParaEmpaquetado()
             mo.nombre AS molde_nombre,
             co.nombre AS color_nombre,
             op.nombre_completo AS operario_produccion_nombre,
+            umx.nombre_corto AS unidad_salida_codigo,
             (
                 SELECT COUNT(DISTINCT reo.empaquetado_id) FROM rel_empaquetado_origen reo
                 WHERE reo.produccion_id = pd.id AND reo.deleted_at IS NULL
@@ -330,6 +354,8 @@ function listarProduccionesParaEmpaquetado()
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
             ON (x.item->>'molde_id')::bigint = mo.id
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+        LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
+        LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.fecha_hora_fin DESC
     ";
@@ -337,6 +363,8 @@ function listarProduccionesParaEmpaquetado()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
 }
+
+
 
 // =============================================================================
 // OPERARIOS (múltiples por registro de empaquetado)

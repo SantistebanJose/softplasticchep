@@ -539,23 +539,49 @@ function toggleOperarioModalEdicion(id) {
 // =============================================================================
 // GRID DE ENSAMBLAJES FINALIZADOS + TABS + ESTACIÓN DE ARMADO
 // =============================================================================
-
 async function cargarPendientesEmpaquetado() {
     const params = {
         texto: document.getElementById('femp_texto').value.trim(),
         solo_sin_empaquetar: document.getElementById('femp_solo_sin').checked ? '1' : '0',
     };
-    const json = await llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', params);
 
-    if (!json.success) {
-        console.error('Error LISTARENSAMBLAJESPARAEMPAQUETADO:', json.message);
-        cacheFilasEmpaquetado = [];
-        renderTabsEmp();
-        actualizarEstacionArmado();
-        return;
-    }
+    const [jsonEns, jsonProd] = await Promise.all([
+        llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', params),
+        llamarEmpaquetado('LISTARPRODUCCIONESPARAEMPAQUETADO', params),
+    ]);
 
-    cacheFilasEmpaquetado = json.ensamblajes || [];
+    if (!jsonEns.success) console.error('Error LISTARENSAMBLAJESPARAEMPAQUETADO:', jsonEns.message);
+    if (!jsonProd.success) console.error('Error LISTARPRODUCCIONESPARAEMPAQUETADO:', jsonProd.message);
+
+    // Normaliza ambas fuentes a una forma común para que tabs / estación
+    // de armado no necesiten saber de dónde vino cada fila.
+    const filasEns = (jsonEns.success ? jsonEns.ensamblajes : []).map(f => ({
+        origen_tipo: 'ensamblaje',
+        origen_id: f.ensamblaje_id,
+        producto_id: f.producto_id,
+        producto_codigo: f.producto_codigo,
+        producto_descripcion: f.producto_descripcion,
+        unidad_salida_codigo: f.unidad_salida_codigo,
+        cantidad_disponible: f.cantidad_disponible,
+        cantidad_total_empaquetada: f.cantidad_total_empaquetada,
+        empaquetados_count: f.empaquetados_count,
+        fecha_fin: f.fin,
+    }));
+
+    const filasProd = (jsonProd.success ? jsonProd.producciones : []).map(f => ({
+        origen_tipo: 'produccion',
+        origen_id: f.produccion_id,
+        producto_id: f.producto_id,
+        producto_codigo: f.producto_codigo,
+        producto_descripcion: f.producto_descripcion,
+        unidad_salida_codigo: f.unidad_salida_codigo,
+        cantidad_disponible: f.cantidad_disponible,
+        cantidad_total_empaquetada: f.cantidad_total_empaquetada,
+        empaquetados_count: f.empaquetados_count,
+        fecha_fin: f.fecha_hora_fin,
+    }));
+
+    cacheFilasEmpaquetado = [...filasEns, ...filasProd];
 
     if (tabActivoEmp !== '__todos__' && !cacheFilasEmpaquetado.some(f => claveTabEmp(f) === tabActivoEmp)) {
         tabActivoEmp = '__todos__';
@@ -611,9 +637,8 @@ function seleccionarTabEmp(clave) {
 // "ensamblaje", cruzando con el cache de ensamblajes usado para los tabs.
 // Los origenes tipo "produccion" no tienen equivalente en ese cache (esa
 // lista solo trae ensamblajes), así que para esos se omite silenciosamente.
-function infoEnsamblajeOrigen(origenTipo, origenId) {
-    if (origenTipo !== 'ensamblaje') return null;
-    return cacheFilasEmpaquetado.find(f => f.ensamblaje_id === origenId) || null;
+function infoOrigenExtra(origenTipo, origenId) {
+    return cacheFilasEmpaquetado.find(f => f.origen_tipo === origenTipo && f.origen_id == origenId) || null;
 }
 
 // ── Estación de armado: se activa/actualiza según la pestaña de producto elegida ──
@@ -1074,12 +1099,13 @@ function renderSacosMezclaGrid() {
         const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
         const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
         const agotado = restante <= 0.0001;
+        // (dentro de ambas funciones, reemplaza el bloque de infoExtra/metaHtml y origenLabel)
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
-        const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoEnsamblajeOrigen(o.origen_tipo, o.origen_id);
+        const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fin)}</p>`
+            <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
             : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
@@ -1087,7 +1113,7 @@ function renderSacosMezclaGrid() {
             ${enMezclaKg > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(enMezclaKg)} kg</span>` : ''}
             <div class="swatch" style="background:${hex};"></div>
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
-            <p class="origen">${origenLabel}</p>
+            <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
             <p class="disp">disp: ${formatearCantidadEmp(restante)} kg</p>
             ${metaHtml}
         </button>`;
@@ -1108,12 +1134,13 @@ function renderSacosBultoGrid() {
         const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
         const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
         const agotado = restante <= 0.0001;
+        // (dentro de ambas funciones, reemplaza el bloque de infoExtra/metaHtml y origenLabel)
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
-        const hex = colorHexPara(o.color_nombre, o.color_hex);
-        const infoExtra = infoEnsamblajeOrigen(o.origen_tipo, o.origen_id);
+        const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
+        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
-               <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fin)}</p>`
+            <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
             : '';
         return `
         <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
@@ -1121,7 +1148,7 @@ function renderSacosBultoGrid() {
             ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
             <div class="swatch" style="background:${hex};"></div>
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
-            <p class="origen">${origenLabel}</p>
+            <p class="origen">${origenLabel}${unidadOrigenLabel ? ` · <b>${unidadOrigenLabel}</b>` : ''}</p>
             <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
             ${metaHtml}
         </button>`;
@@ -1254,6 +1281,7 @@ function renderBultos() {
     const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
         ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia)
         : null;
+    const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || ''; // <-- NUEVO: se declara aquí, junto a capacidad
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
 
     if (bultosState.length === 0) {
@@ -1266,8 +1294,8 @@ function renderBultos() {
         const total = totalBulto(b);
         const excedido = capacidad !== null && total > capacidad + 0.0001;
         const textoTotal = capacidad !== null
-            ? `total: ${formatearCantidadEmp(total)} / ${formatearCantidadEmp(capacidad)}`
-            : `total: ${formatearCantidadEmp(total)}`;
+            ? `total: ${formatearCantidadEmp(total)} / ${formatearCantidadEmp(capacidad)} ${unidadPaquete}`
+            : `total: ${formatearCantidadEmp(total)} ${unidadPaquete}`;
 
         const filasColores = b.colores.map(c => {
             const valorActual = c.origen_tipo ? claveOrigen(c.origen_tipo, c.origen_id) : '';
@@ -1280,7 +1308,7 @@ function renderBultos() {
                 const hex = colorHexPara(o.color_nombre, o.color_hex);
                 const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
                 return `<button type="button" class="pc-swatch-chip ${clave === valorActual ? 'activo' : ''} ${deshabilitado ? 'agotado' : ''}"
-                    style="background:${hex};" title="${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)})"
+                    style="background:${hex};" title="${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)} ${o.unidad_salida_codigo ?? ''})"
                     onclick="elegirColorEnFilaBulto(${b.tempId}, ${c.tempColorId}, '${o.origen_tipo}', ${o.origen_id})"></button>`;
             }).join('');
 
@@ -1346,7 +1374,8 @@ function renderBultos() {
 function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
-    document.getElementById('bultosTotal').textContent = formatearCantidadEmp(total);
+    const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
+    document.getElementById('bultosTotal').textContent = `${formatearCantidadEmp(total)}${unidadPaquete ? ' ' + unidadPaquete : ''}`;
 }
 
 function obtenerBultosJsonEmp() {
