@@ -1479,52 +1479,28 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             }
         }
 
-        const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
-        if (granularidad > 1) {
-            for (const b of bultosParsed) {
-                for (const c of b.colores) {
-                    if (c.cantidad % granularidad !== 0) {
-                        Swal.fire('Cantidad inválida', `Cada color debe ser múltiplo de ${granularidad} (docena) — revisa las cantidades.`, 'warning');
-                        return;
-                    }
-                }
-            }
-        }
-
-        if (reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme') {
-            for (let i = 0; i < bultosParsed.length; i++) {
-                const b = bultosParsed[i];
-                const n = b.colores.length;
-                if (n < 2) continue;
-                const total = b.colores.reduce((s, c) => s + c.cantidad, 0);
-                if (total % n !== 0) {
-                    Swal.fire('Reparto no uniforme posible',
-                        `El bulto ${i + 1} tiene ${formatearCantidadEmp(total)} unidades entre ${n} colores — no se puede repartir exactamente parejo.`,
-                        'warning');
-                    return;
-                }
-                const esperado = total / n;
-                if (granularidad > 1 && esperado % granularidad !== 0) {
-                    Swal.fire('Reparto no uniforme posible',
-                        `El bulto ${i + 1}: repartido parejo tocarían ${formatearCantidadEmp(esperado)} unidades por color, pero cada color debe ser múltiplo de ${granularidad}.`,
-                        'warning');
-                    return;
-                }
-                const desparejo = b.colores.some(c => c.cantidad !== esperado);
-                if (desparejo) {
-                    Swal.fire('Reparto desparejo', `El bulto ${i + 1} debe repartirse parejo entre colores (${esperado} c/u).`, 'warning');
-                    return;
-                }
+                const capacidad = capacidadEnUnidadOrigenActual; // o unidadEmpaquetadoProductoActual?.equivalencia en escritorio
+        if (capacidad !== null) {
+            const totalesExcedidos = bultosParsed
+                .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
+                .filter(b => b.total > capacidad + 0.0001);
+            if (totalesExcedidos.length > 0) {
+                const detalle = totalesExcedidos.map(b => `Bulto ${b.idx}: ${formatearCantidadEmp(b.total)}`).join(', ');
+                Swal.fire('Bulto excede la capacidad',
+                    `${detalle} — la capacidad de ${unidadEmpaquetadoProductoActual.nombre} es ${formatearCantidadEmp(capacidad)}. Ajusta las cantidades.`,
+                    'warning');
+                return;
             }
         }
 
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: estSucursalSeleccionada || '',
+            sucursal_id: /* según la vista */,
             bultos: bultosJson,
         };
-    }
+
+
 
     const json = await llamarEmpaquetado('CREAREMPAQUETADO', params);
 

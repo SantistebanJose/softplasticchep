@@ -1471,59 +1471,24 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             }
         }
 
-        const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
-        if (granularidad > 1) {
-            for (const b of bultosParsed) {
-                for (const c of b.colores) {
-                    if (c.cantidad % granularidad !== 0) {
-                        Swal.fire('Cantidad inválida', `Cada color debe ser múltiplo de ${granularidad} (docena) — revisa las cantidades ingresadas.`, 'warning');
-                        return;
-                    }
-                }
-            }
-        }
-
-        // ── Validación de reparto UNIFORME entre colores ────────────────────────
-        // Antes: si el total del bulto no era exactamente divisible entre el
-        // número de colores, este bloque se saltaba entero y dejaba pasar
-        // repartos desparejos sin ningún aviso. Ahora se valida explícitamente
-        // que (a) el total sea divisible entre n colores, y (b) el "esperado"
-        // resultante respete la granularidad (docena) del producto, antes de
-        // comparar que cada color tenga esa cantidad exacta.
-        if (reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme') {
-            for (let i = 0; i < bultosParsed.length; i++) {
-                const b = bultosParsed[i];
-                const n = b.colores.length;
-                if (n < 2) continue;
-                const total = b.colores.reduce((s, c) => s + c.cantidad, 0);
-
-                if (total % n !== 0) {
-                    Swal.fire('Reparto no uniforme posible',
-                        `El bulto ${i + 1} tiene ${formatearCantidadEmp(total)} unidades entre ${n} colores — no se puede repartir exactamente parejo. Ajusta la cantidad total o el número de colores.`,
-                        'warning');
-                    return;
-                }
-
-                const esperado = total / n;
-                if (granularidad > 1 && esperado % granularidad !== 0) {
-                    Swal.fire('Reparto no uniforme posible',
-                        `El bulto ${i + 1}: repartido parejo tocarían ${formatearCantidadEmp(esperado)} unidades por color, pero cada color debe ser múltiplo de ${granularidad} (docena). Ajusta la cantidad total o el número de colores.`,
-                        'warning');
-                    return;
-                }
-
-                const desparejo = b.colores.some(c => c.cantidad !== esperado);
-                if (desparejo) {
-                    Swal.fire('Reparto desparejo', `El bulto ${i + 1} debe repartirse parejo entre colores (${esperado} c/u).`, 'warning');
-                    return;
-                }
+                const capacidad = capacidadEnUnidadOrigenActual; // o unidadEmpaquetadoProductoActual?.equivalencia en escritorio
+        if (capacidad !== null) {
+            const totalesExcedidos = bultosParsed
+                .map((b, i) => ({ idx: i + 1, total: b.colores.reduce((s, c) => s + c.cantidad, 0) }))
+                .filter(b => b.total > capacidad + 0.0001);
+            if (totalesExcedidos.length > 0) {
+                const detalle = totalesExcedidos.map(b => `Bulto ${b.idx}: ${formatearCantidadEmp(b.total)}`).join(', ');
+                Swal.fire('Bulto excede la capacidad',
+                    `${detalle} — la capacidad de ${unidadEmpaquetadoProductoActual.nombre} es ${formatearCantidadEmp(capacidad)}. Ajusta las cantidades.`,
+                    'warning');
+                return;
             }
         }
 
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: document.getElementById('est_sucursal_id').value,
+            sucursal_id: /* según la vista */,
             bultos: bultosJson,
         };
     }

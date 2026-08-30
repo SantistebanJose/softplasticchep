@@ -762,12 +762,6 @@ function crearEmpaquetado()
                 $cant = floatval($d['cantidad'] ?? 0);
                 if ($cant <= 0) continue;
 
-                if ($reglas['granularidad_color'] > 1 && fmod($cant, $reglas['granularidad_color']) > 0.0001) {
-                    throw new Exception(
-                        "La cantidad de color debe ser múltiplo de {$reglas['granularidad_color']} (docena) — recibido: $cant."
-                    );
-                }
-
                 $tipo = ($d['origen_tipo'] ?? '') === 'produccion' ? 'produccion' : 'ensamblaje';
                 $oid  = intval($d['origen_id'] ?? 0);
                 if (!$oid) continue;
@@ -787,20 +781,6 @@ function crearEmpaquetado()
             }
             if ($totalBulto <= 0) continue;
 
-            if ($reglas['modo_distribucion_color'] === 'uniforme') {
-                $nColores = count($detalleLimpio);
-                if ($nColores > 1 && fmod($totalBulto, $nColores) < 0.0001) {
-                    $esperadoPorColor = $totalBulto / $nColores;
-                    foreach ($detalleLimpio as $linea) {
-                        if (abs($linea['cantidad'] - $esperadoPorColor) > 0.0001) {
-                            throw new Exception(
-                                "El bulto " . ($idxBulto + 1) . " debe repartirse parejo entre colores ($esperadoPorColor c/u), "
-                                . "pero \"{$linea['color_nombre']}\" tiene {$linea['cantidad']}."
-                            );
-                        }
-                    }
-                }
-            }
 
             if ($equivalenciaCapacidad > 0 && $totalBulto > $equivalenciaCapacidad + 0.0001) {
                 throw new Exception(
