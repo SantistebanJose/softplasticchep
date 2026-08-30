@@ -156,6 +156,9 @@ include("header.php");
         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="abrirModalRegistrosProducto()">
             <i class="fa-solid fa-list"></i> Ver registros de este producto
         </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refrescarEstacionActual()">
+            <i class="fa-solid fa-rotate"></i> Actualizar disponibles
+        </button>
     </div>
 
     <form id="formEstacionArmado">
@@ -1311,8 +1314,9 @@ function renderBultos() {
                 const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
                 const deshabilitado = restante <= 0.0001 && clave !== valorActual;
                 const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
+                // en renderBultos(), dentro de "opciones":
                 return `<option value="${clave}" ${clave === valorActual ? 'selected' : ''} ${deshabilitado ? 'disabled' : ''}>
-                    ${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)})
+                    ${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)}${o.unidad_salida_codigo ? ' ' + o.unidad_salida_codigo : ''})
                 </option>`;
             }).join('');
 
@@ -1347,7 +1351,7 @@ function renderBultos() {
             <div class="pc-bulto-card-head" style="${excedido ? 'color:#c94a4a;' : ''}">
                 <span>Bulto ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
                 <div>
-                    ${reglasEmpaquetadoActuales?.modo_distribucion_color === 'uniforme' && b.colores.length > 1 ? `
+                    ${b.colores.length > 1 ? `
                         <button type="button" class="btn btn-sm btn-outline-primary" style="margin-right:6px;" onclick="distribuirParejoBulto(${b.tempId})">
                             <i class="fa-solid fa-scale-balanced"></i> Repartir parejo
                         </button>` : ''}
@@ -1547,6 +1551,21 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
     }
 });
 
+async function refrescarEstacionActual() {
+    if (!estacionProductoIdActual) return;
+    await cargarOrigenesDisponibles(estacionProductoIdActual);
+    aplicarUnidadEmpaquetadoFija();
+    if (esModoMezcla()) renderMezcla(); else renderBultos();
+}
+
+// Poll cada 20s, solo si la pestaña está visible y hay un producto activo
+setInterval(() => {
+    if (document.visibilityState === 'visible' && estacionProductoIdActual) {
+        refrescarEstacionActual();
+        cargarPendientesEmpaquetado();
+        cargarListadoGeneralEmp();
+    }
+}, 20000);
 // =============================================================================
 // FORMULARIO: MODAL DE EDICIÓN (registros ya existentes)
 // =============================================================================

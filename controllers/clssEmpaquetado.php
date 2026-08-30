@@ -178,8 +178,12 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             INNER JOIN producto pr ON pr.id = :producto_id2
             LEFT JOIN molde mo ON mo.id = pd.molde_id
             LEFT JOIN color co ON co.id = pd.color_id
-            LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
-                ON (x.item->>'molde_id')::bigint = mo.id
+            LEFT JOIN LATERAL (
+                SELECT elem.item
+                FROM jsonb_array_elements(pr.js_configuracion) AS elem(item)
+                WHERE (elem.item->>'molde_id')::bigint = mo.id
+                LIMIT 1
+            ) x ON true
             LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
             LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
             LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
@@ -351,8 +355,12 @@ function listarProduccionesParaEmpaquetado()
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN operario op ON op.id = pd.operario_id
-        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
-            ON (x.item->>'molde_id')::bigint = mo.id
+        LEFT JOIN LATERAL (
+            SELECT elem.item
+            FROM jsonb_array_elements(pr.js_configuracion) AS elem(item)
+            WHERE (elem.item->>'molde_id')::bigint = mo.id
+            LIMIT 1
+        ) x ON true
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
         LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
         LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
