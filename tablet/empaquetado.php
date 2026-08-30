@@ -7,7 +7,7 @@ if (empty($_SESSION['operario_id'])) {
     exit;
 }
 
-exigirAccesoEtapa('EMPAQUET', 'Empaquetado'); // TODO: confirmar que esta es la clave de etapa correcta
+exigirAccesoEtapa('EMPAQUET', 'EMPAQUETADO'); // TODO: confirmar que esta es la clave de etapa correcta
 
 $operarioId     = (int) $_SESSION['operario_id'];
 $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
