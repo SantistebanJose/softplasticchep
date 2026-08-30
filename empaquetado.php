@@ -1099,10 +1099,9 @@ function renderSacosMezclaGrid() {
         const enMezcla = mezclaOrigenes.find(m => m.origen_tipo === o.origen_tipo && m.origen_id == o.origen_id);
         const enMezclaKg = enMezcla ? (parseFloat(enMezcla.cantidad_kg) || 0) : 0;
         const agotado = restante <= 0.0001;
-        // (dentro de ambas funciones, reemplaza el bloque de infoExtra/metaHtml y origenLabel)
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
-        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
+        const hex = colorHexPara(o.color_nombre, o.color_hex);   // ← FALTABA        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
             <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
@@ -1134,10 +1133,9 @@ function renderSacosBultoGrid() {
         const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
         const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
         const agotado = restante <= 0.0001;
-        // (dentro de ambas funciones, reemplaza el bloque de infoExtra/metaHtml y origenLabel)
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const unidadOrigenLabel = o.unidad_salida_codigo ? o.unidad_salida_codigo.toUpperCase() : '';
-        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
+        const hex = colorHexPara(o.color_nombre, o.color_hex);   // ← FALTABA        const infoExtra = infoOrigenExtra(o.origen_tipo, o.origen_id);
         const metaHtml = infoExtra
             ? `<p class="meta">empaq: ${formatearCantidadEmp(infoExtra.cantidad_total_empaquetada)} · ${infoExtra.empaquetados_count ?? 0} reg.</p>
             <p class="meta">fin: ${formatearFechaHoraLegibleEmp(infoExtra.fecha_fin)}</p>`
