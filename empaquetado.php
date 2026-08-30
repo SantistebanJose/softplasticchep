@@ -1213,17 +1213,17 @@ function distribuirParejoBulto(bultoTempId) {
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     if (!capacidad) return;
 
-    // Reparto base: capacidad / nColores, redondeado hacia abajo al
-    // múltiplo de granularidad más cercano.
     const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
 
+    // ACTUAL (bug):
     colores.forEach(c => {
         const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) + (parseFloat(c.cantidad) || 0);
-        c.cantidad = Math.min(base, restante); // nunca más de lo disponible real de ese origen
+        c.cantidad = Math.min(base, restante);
     });
 
     renderBultos();
 }
+
 function agregarColorABulto(bultoTempId) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
@@ -1372,10 +1372,18 @@ function renderBultos() {
 function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
-    const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
-    document.getElementById('bultosTotal').textContent = `${formatearCantidadEmp(total)}${unidadPaquete ? ' ' + unidadPaquete : ''}`;
-}
 
+    const capacidad = unidadEmpaquetadoProductoActual?.equivalencia
+        ? parseFloat(unidadEmpaquetadoProductoActual.equivalencia) : null;
+    const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
+    const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
+
+    let texto = `${formatearCantidadEmp(total)}${unidadBase ? ' ' + unidadBase : ''}`;
+    if (capacidad) {
+        texto += ` (= ${formatearCantidadEmp(total / capacidad)} ${unidadPaquete})`;
+    }
+    document.getElementById('bultosTotal').textContent = texto;
+}
 function obtenerBultosJsonEmp() {
     const bultos = bultosState.map(b => ({
         colores: b.colores

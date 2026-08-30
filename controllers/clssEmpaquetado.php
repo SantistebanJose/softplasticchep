@@ -192,6 +192,10 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
               AND pd.enviado_ensamblaje = TRUE
               AND pd.fecha_hora_fin IS NOT NULL
               AND COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'
+              AND NOT EXISTS (
+                  SELECT 1 FROM rel_ensamblaje_producto rep_chk
+                  WHERE rep_chk.molde_produccion_id = pd.id AND rep_chk.deleted_at IS NULL
+              )
         ) t
     ";
     $result = executeQuery($conectar, $sql, [
@@ -304,6 +308,10 @@ function listarProduccionesParaEmpaquetado()
         "pd.enviado_ensamblaje = TRUE",
         "pd.fecha_hora_fin IS NOT NULL",
         "COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'",
+        "NOT EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep_chk
+            WHERE rep_chk.molde_produccion_id = pd.id AND rep_chk.deleted_at IS NULL
+        )",
         "(pd.cantidad_producida_kg - COALESCE((
             SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
             WHERE reo.produccion_id = pd.id AND reo.deleted_at IS NULL
@@ -371,7 +379,6 @@ function listarProduccionesParaEmpaquetado()
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
 }
-
 
 
 // =============================================================================
