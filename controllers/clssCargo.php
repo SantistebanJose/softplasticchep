@@ -4,6 +4,8 @@
  * controllers/clssCargo.php
  * Controlador del módulo de Cargo
  * Tabla real: cargo (id, nombre, orden, deleted_at, area_id)
+ * nombre se normaliza a MAYÚSCULAS al guardar (mb_strtoupper) para
+ * consistencia visual con área/operario/usuario.
  * area_id -> area.id (FK real). Cada vez que un cargo se crea, se edita
  * (cambiando o no de área), se desactiva o se reactiva, se recalcula el
  * js_cargos denormalizado de la(s) área(s) involucrada(s) llamando a
@@ -112,7 +114,7 @@ function guardarCargo()
 {
     $conectar = conectar_oll_BD();
     $id      = intval($_POST['id'] ?? 0);
-    $nombre  = mb_strtoupper(trim($_POST['nombre'] ?? ''), 'UTF-8');   // ← antes: trim($_POST['nombre'] ?? '')
+    $nombre  = mb_strtoupper(trim($_POST['nombre'] ?? ''), 'UTF-8');
     $orden   = $_POST['orden'] ?? null;
     $orden   = ($orden === '' || $orden === null) ? 0 : intval($orden);
     $areaId  = intval($_POST['area_id'] ?? 0);

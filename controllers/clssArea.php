@@ -9,6 +9,8 @@
  *   Se recalcula automáticamente desde clssCargo.php cada vez que se
  *   crea/edita/desactiva/reactiva un cargo — no se edita a mano desde aquí.
  * Soft delete vía deleted_at (no existe columna 'activo').
+ * nombre se normaliza a MAYÚSCULAS al guardar (mb_strtoupper) para
+ * consistencia visual con cargo/operario/usuario.
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  *
  * IMPORTANTE: este archivo es incluido con require_once desde clssCargo.php
@@ -116,7 +118,7 @@ function guardarArea()
 {
     $conectar    = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
-    $nombre      = mb_strtoupper(trim($_POST['nombre'] ?? ''), 'UTF-8');   // ← antes: trim($_POST['nombre'] ?? '')
+    $nombre      = mb_strtoupper(trim($_POST['nombre'] ?? ''), 'UTF-8');
     $descripcion = trim($_POST['descripcion'] ?? '');
     $orden       = $_POST['orden'] ?? null;
     $orden       = ($orden === '' || $orden === null) ? 0 : intval($orden);
@@ -265,10 +267,8 @@ if (!function_exists('responder')) {
     }
 }
 
-
-
 // =============================================================================
-// DISPATCHER — solo se ejecuta si ESTE archivo fue llamado directamente
+// DISPATCH — solo se ejecuta si ESTE archivo fue llamado directamente
 // (no cuando clssCargo.php lo incluye vía require_once para reutilizar
 // sincronizarJsCargosArea)
 // =============================================================================

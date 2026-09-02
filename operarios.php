@@ -3,6 +3,7 @@ $pageTitle    = 'Operarios';
 $pageSubtitle = 'Personal de planta';
 $activePage = 'operarios';
 
+
 include("header.php");
 ?>
 
@@ -307,9 +308,9 @@ async function cargarOperarios() {
                 </button>
                 ${!o.deleted_at
                     ? `<button class="pc-icon-btn" onclick="eliminarOperario(${o.id})" title="Desactivar">
-                           <i class="fa-solid fa-trash"></i></button>`
+                        <i class="fa-solid fa-trash"></i></button>`
                     : `<button class="pc-icon-btn" onclick="reactivarOperario(${o.id})" title="Reactivar">
-                           <i class="fa-solid fa-rotate-left"></i></button>`
+                        <i class="fa-solid fa-rotate-left"></i></button>`
                 }
             </td>
         </tr>

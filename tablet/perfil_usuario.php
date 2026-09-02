@@ -187,6 +187,25 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
                 </button>
             </span>
         </div>
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-id-badge"></i> DNI</span>
+            <span class="pc-perfil-valor" id="pfDni">-</span>
+        </div>
+
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-briefcase"></i> Cargo</span>
+            <span class="pc-perfil-valor" id="pfCargo">-</span>
+        </div>
+
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-building"></i> Área</span>
+            <span class="pc-perfil-valor" id="pfArea">-</span>
+        </div>
+
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-store"></i> Sucursales</span>
+            <span class="pc-perfil-valor" id="pfSucursales">-</span>
+        </div>
 
         <div class="pc-perfil-row">
             <span class="pc-perfil-label"><i class="fa-solid fa-calendar-check"></i> Miembro desde</span>
@@ -235,6 +254,13 @@ async function cargarPerfil() {
     document.getElementById('pfRol2').textContent = json.rol;
     document.getElementById('pfNombreCompleto').textContent = json.nombre_completo;
     document.getElementById('pfMiembroDesde').textContent = json.miembro_desde || '-';
+
+    document.getElementById('pfDni').textContent = json.dni || '-';
+    document.getElementById('pfCargo').textContent = json.cargo || '-';
+    document.getElementById('pfArea').textContent = json.area || '-';
+
+    const nombresSucursales = (json.sucursales || []).map(s => s.nombre).join(', ');
+    document.getElementById('pfSucursales').textContent = nombresSucursales || '-';
 
     const pfPin = document.getElementById('pfPin');
     pfPin.dataset.pin = json.pin || '';

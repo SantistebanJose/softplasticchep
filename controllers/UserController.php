@@ -43,10 +43,19 @@ class UserController
             return ['ok' => false, 'msg' => 'El usuario y nombre completo son obligatorios.'];
         }
 
+        // Normalización: login siempre en minúsculas (evita colisiones tipo
+        // "Admin" / "admin" / "ADMIN" como si fueran cuentas distintas),
+        // nombre completo en mayúsculas para consistencia con área/cargo/operario.
+        $data['user_']           = mb_strtolower(trim($data['user_']), 'UTF-8');
+        $data['nombre_completo'] = mb_strtoupper(trim($data['nombre_completo']), 'UTF-8');
+
         $isEditing = !empty($data['id']);
 
-        // Evita logins duplicados, sea cuenta manual u originada desde un operario
-        $stmtDup = $this->pdo->prepare('SELECT id FROM usuario WHERE user_ = :user_ AND id <> :id');
+        // Evita logins duplicados, sea cuenta manual u originada desde un operario.
+        // Comparación case-insensitive: aunque ya normalizamos el nuevo valor
+        // arriba, esto también protege contra registros viejos que aún no
+        // hayan pasado por la migración de normalización.
+        $stmtDup = $this->pdo->prepare('SELECT id FROM usuario WHERE LOWER(user_) = LOWER(:user_) AND id <> :id');
         $stmtDup->execute(['user_' => $data['user_'], 'id' => $data['id'] ?? 0]);
         if ($stmtDup->fetch()) {
             return ['ok' => false, 'msg' => 'Ya existe un usuario con ese login.'];
