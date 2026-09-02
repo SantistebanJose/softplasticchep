@@ -10,12 +10,25 @@
  * etapas está realmente asignado, en vez de dejar entrar a cualquier
  * operario logueado a cualquier página solo por tener sesión activa.
  *
- * FIX: las etapas se resolvían buscando en `operario` por usuario.id, pero
+ * FIX 1: las etapas se resolvían buscando en `operario` por usuario.id, pero
  * `usuario` y `operario` son secuencias independientes — la relación real
  * es usuario.operario_id (FK) -> operario.id. Usar usuario.id directamente
  * hacía que, cuando ambos ids se desalineaban, el login leyera las etapas
  * de OTRO operario (el que casualmente tuviera ese mismo id en la tabla
  * operario), dejando al usuario real con acceso incorrecto o incompleto.
+ *
+ * FIX 2 (el importante): guardarSesionOperario() guardaba
+ * $_SESSION['operario_id'] = $usuario['id'] (PK de 'usuario'), en vez de
+ * $usuario['operario_id'] (PK real de 'operario'). Toda página tablet que
+ * usa $_SESSION['operario_id'] para consultar 'operario' directamente
+ * (perfil, etc.) terminaba mostrando datos de OTRA persona cuando ambos
+ * PKs no coincidían. Corregido para guardar el PK correcto.
+ *
+ * FIX 3: usuario.operario_id puede ser NULL (cuentas creadas manualmente
+ * desde el panel admin, ver UserController::saveUser()). Si una de esas
+ * cuentas tiene rol 'operario' y un user_ de 8 dígitos, podía loguearse
+ * en la tablet y quedar con $_SESSION['operario_id'] = NULL. Se bloquea
+ * ahora explícitamente en verificarPinOperario().
  */
 
 require_once __DIR__ . '/../controllers/bd.php';
@@ -107,7 +120,14 @@ function verificarPinOperario(string $dni, string $pin): array
         return ['success' => false, 'error' => 'PIN incorrecto.'];
     }
 
-    $etapas = resolverEtapasOperario($conectar, (int) ($usuario['operario_id'] ?? 0));
+    // FIX 3: cuenta sin operario vinculado (creada manualmente desde el
+    // panel admin) -> no puede loguearse en la tablet, aunque tenga rol
+    // 'operario' y un user_ de 8 dígitos.
+    if (empty($usuario['operario_id'])) {
+        return ['success' => false, 'error' => 'Esta cuenta no está vinculada a un registro de operario. Contacta a un administrador.'];
+    }
+
+    $etapas = resolverEtapasOperario($conectar, (int) $usuario['operario_id']);
 
     session_regenerate_id(true);
     guardarSesionOperario($usuario, $etapas);
@@ -195,11 +215,12 @@ function guardarSesionOperario(array $usuario, array $etapas = []): void
 {
     $rolPerfiles = decodificarRolPerfiles($usuario['rol_y_perfiles']);
 
-    $_SESSION['operario_id']     = $usuario['id'];
+    // FIX 2: PK real de 'operario' (FK), no el PK propio de 'usuario'.
+    $_SESSION['operario_id']     = $usuario['operario_id'];
     $_SESSION['operario_dni']    = $usuario['user_'];
     $_SESSION['operario_nombre'] = $usuario['nombre_completo'];
     $_SESSION['operario_rol']    = $rolPerfiles['rol'] ?? null;
-    $_SESSION['operario_etapas'] = $etapas; // NUEVO
+    $_SESSION['operario_etapas'] = $etapas;
 }
 
 function cerrarSesionOperario(): void

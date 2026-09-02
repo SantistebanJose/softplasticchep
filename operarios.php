@@ -1,5 +1,5 @@
 <?php
-$pageTitle    = 'Operarios';
+$pageTitle    = 'Trabajadores / Operarios';
 $pageSubtitle = 'Personal de planta';
 $activePage = 'operarios';
 
@@ -11,7 +11,7 @@ include("header.php");
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2>Operarios</h2>
+        <h2>Trabajadores / Operarios</h2>
         <button class="pc-btn pc-btn-primary" onclick="abrirModalCrearOperario()">
             <i class="fa-solid fa-plus"></i> Nuevo operario
         </button>
