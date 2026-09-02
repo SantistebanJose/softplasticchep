@@ -323,11 +323,12 @@ function listarOperarios()
 
     // LEFT JOIN contra cargo para traer el nombre a mostrar en la tabla,
     // sin obligar al frontend a resolverlo aparte.
-    $sql = "SELECT o.*, c.nombre AS cargo_nombre
-            FROM operario o
-            LEFT JOIN cargo c ON c.id = o.cargo_id
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY o.nombre_completo";
+    $sql = "SELECT o.*, c.nombre AS cargo_nombre, ar.nombre AS area_nombre
+        FROM operario o
+        LEFT JOIN cargo c ON c.id = o.cargo_id
+        LEFT JOIN area ar ON ar.id = c.area_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY o.nombre_completo";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['operarios' => decodificarJsonFilas($result)]);
@@ -339,10 +340,11 @@ function obtenerOperario($id)
     if (!$id) responder(false, 'ID inválido.');
 
     $result = executeQuery($conectar, "
-        SELECT o.*, c.nombre AS cargo_nombre,
-               u.id AS usuario_id, u.user_ AS usuario_login
+        SELECT o.*, c.nombre AS cargo_nombre, ar.nombre AS area_nombre,
+            u.id AS usuario_id, u.user_ AS usuario_login
         FROM operario o
         LEFT JOIN cargo c ON c.id = o.cargo_id
+        LEFT JOIN area ar ON ar.id = c.area_id
         LEFT JOIN usuario u ON u.operario_id = o.id
         WHERE o.id = :id
     ", ['id' => $id]);
@@ -379,7 +381,7 @@ function guardarOperario()
     $conectar = conectar_oll_BD();
 
     $id              = intval($_POST['id'] ?? 0);
-    $nombre_completo = trim($_POST['nombre_completo'] ?? '');
+    $nombre_completo = mb_strtoupper(trim($_POST['nombre_completo'] ?? ''), 'UTF-8');   // ← antes: trim(...)
     $cargo_id        = intval($_POST['cargo_id'] ?? 0) ?: null;
     $dni             = trim($_POST['dni'] ?? '');
 

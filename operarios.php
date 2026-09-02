@@ -40,6 +40,7 @@ include("header.php");
                 <th>Nombre completo</th>
                 <th>DNI</th>
                 <th>Cargo</th>
+                <th>Área</th>
                 <th>Sucursales</th>
                 <th>Etapas</th>
                 <th>Estado</th>
@@ -296,6 +297,7 @@ async function cargarOperarios() {
             <td data-label="Nombre completo">${o.nombre_completo}</td>
             <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo_nombre ?? '-'}</td>
+            <td data-label="Área">${o.area_nombre ?? '<span class="text-muted">-</span>'}</td>
             <td data-label="Sucursales">${badgesSucursales(o.js_sucursales)}</td>
             <td data-label="Etapas">${badgesEtapas(o.js_etapas_relacionadas)}</td>
             <td data-label="Estado">${badgeEstadoOperario(o.deleted_at)}</td>
