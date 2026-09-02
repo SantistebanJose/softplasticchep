@@ -610,9 +610,8 @@ function crearUsuarioDesdeOperario($conectar, int $operarioId, string $dni, stri
 
     $rolYPerfiles = json_encode(['rol' => 'operario', 'perfiles' => []], JSON_UNESCAPED_UNICODE);
     $passHash     = password_hash($dni, PASSWORD_DEFAULT);
+    $pinPorDefecto = '1111'; // NUEVO: PIN inicial de acceso al panel operario (char(4))
 
-    // json_historial de usuario sigue un patrón parecido a js_historial de
-    // operario: guardamos quién/cómo se creó la cuenta, no solo la fila.
     $movimiento    = obtenerMovimientoSesion('crear_auto_desde_operario', [[
         'campo' => 'Origen', 'valor_antes' => '(nuevo)', 'valor_despues' => 'Autogenerado al registrar operario #' . $operarioId,
     ]]);
@@ -620,12 +619,13 @@ function crearUsuarioDesdeOperario($conectar, int $operarioId, string $dni, stri
 
     executeQuery($conectar, "
         INSERT INTO usuario
-            (user_, pass_, nombre_completo, rol_y_perfiles, operario_id, json_historial, fecha_cambio_pass, created_at, updated_at)
+            (user_, pass_, pin, nombre_completo, rol_y_perfiles, operario_id, json_historial, fecha_cambio_pass, created_at, updated_at)
         VALUES
-            (:user_, :pass_, :nombre_completo, :rol_y_perfiles, :operario_id, :json_historial, NOW(), NOW(), NOW())
+            (:user_, :pass_, :pin, :nombre_completo, :rol_y_perfiles, :operario_id, :json_historial, NOW(), NOW(), NOW())
     ", [
         'user_'            => $dni,
         'pass_'            => $passHash,
+        'pin'              => $pinPorDefecto,
         'nombre_completo'  => $nombreCompleto,
         'rol_y_perfiles'   => $rolYPerfiles,
         'operario_id'      => $operarioId,
@@ -634,7 +634,6 @@ function crearUsuarioDesdeOperario($conectar, int $operarioId, string $dni, stri
 
     return ['ok' => true];
 }
-
 /**
  * Acción manual (botón en el modal de edición) para vincular/crear la
  * cuenta de acceso de un operario que quedó sin 'usuario' — ya sea por

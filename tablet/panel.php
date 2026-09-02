@@ -10,11 +10,16 @@ if (empty($_SESSION['operario_id'])) {
 $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
 
-// NUEVO: solo se ofrecen los accesos a los módulos cuya etapa tiene asignada.
 $puedeProduccion  = operarioTieneEtapa('PRODUC');
 $puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
 $puedeEmpaquetado = operarioTieneEtapa('EMPAQUET');
 $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
+
+// Saludo dinámico según la hora
+$hora = (int) date('H');
+if ($hora < 12)      $saludo = 'Buenos días';
+elseif ($hora < 19)  $saludo = 'Buenas tardes';
+else                 $saludo = 'Buenas noches';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -38,13 +43,19 @@ $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
                 <span class="pc-op-brand-tag">Hecho a mano, hecho para durar</span>
             </div>
         </div>
-        <a href="logoutoperario.php" class="pc-op-panel-logout">
-            <i class="fa-solid fa-right-from-bracket"></i> Salir
-        </a>
+
+        <div class="pc-op-actions">
+            <a href="perfil_usuario.php" class="pc-op-panel-perfil">
+                <i class="fa-solid fa-user"></i> Mi perfil
+            </a>
+            <a href="logoutoperario.php" class="pc-op-panel-logout">
+                <i class="fa-solid fa-right-from-bracket"></i> Salir
+            </a>
+        </div>
     </header>
 
     <div class="pc-op-panel-greeting">
-        <span class="pc-op-panel-hello">Hola, <?= htmlspecialchars($primerNombre) ?> <i class="fa-solid fa-hand-sparkles"></i></span>
+        <span class="pc-op-panel-hello"><?= $saludo ?>, <?= htmlspecialchars($primerNombre) ?> <i class="fa-solid fa-hand-sparkles"></i></span>
         <h1>¿Qué vas a registrar hoy?</h1>
     </div>
 
@@ -54,6 +65,7 @@ $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
             <div class="pc-op-panel-icon"><i class="fa-solid fa-industry"></i></div>
             <span class="pc-op-panel-label">Producción</span>
             <span class="pc-op-panel-sub">Registra tu avance de moldeado</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
 
@@ -62,6 +74,7 @@ $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
             <div class="pc-op-panel-icon"><i class="fa-solid fa-puzzle-piece"></i></div>
             <span class="pc-op-panel-label">Ensamblaje</span>
             <span class="pc-op-panel-sub">Arma y une las piezas</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
 
@@ -70,16 +83,15 @@ $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
             <div class="pc-op-panel-icon"><i class="fa-solid fa-box-open"></i></div>
             <span class="pc-op-panel-label">Empaquetado</span>
             <span class="pc-op-panel-sub">Prepara sacos y bultos</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
     </div>
 
     <?php if (!$tieneAlgunAcceso): ?>
-    <div class="pc-op-panel-greeting" style="margin-top:20px;">
-        <span class="pc-op-panel-hello" style="color:#c94a4a;">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            No tienes ninguna etapa asignada todavía. Pide a un administrador que te configure el acceso.
-        </span>
+    <div class="pc-op-panel-empty">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        No tienes ninguna etapa asignada todavía. Pide a un administrador que te configure el acceso.
     </div>
     <?php endif; ?>
 

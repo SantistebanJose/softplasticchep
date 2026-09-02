@@ -113,3 +113,72 @@ body .pc-op-card {
 @supports not (height: 100dvh) {
   body .pc-op-shell { min-height: 100vh; }
 }
+
+/* =====================================================================
+   NUEVO: Modal de PIN (paso 2 del login de operario)
+   Mismo diseño de "candado" que el modal de información confidencial
+   del panel de administración, adaptado a la paleta pc- y a tablet.
+   ===================================================================== */
+
+.pc-op-pin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 28, 51, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vmin;
+  z-index: 1000;
+  box-sizing: border-box;
+}
+
+.pc-op-pin-modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--pc-surface);
+  border-radius: var(--pc-radius);
+  padding: 32px 28px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(12, 28, 51, 0.28);
+  box-sizing: border-box;
+}
+
+.pc-op-pin-icon { font-size: 38px; margin-bottom: 6px; }
+.pc-op-pin-title { color: var(--pc-navy); font-size: 24px; margin: 0 0 6px; }
+.pc-op-pin-sub { color: var(--pc-muted); font-size: 14px; margin: 0 0 22px; }
+
+.pc-op-pin-boxes { display: flex; justify-content: center; gap: 12px; margin-bottom: 6px; }
+.pc-op-pin-box {
+  width: 50px; height: 58px;
+  border: 2px solid var(--pc-border);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700;
+  color: var(--pc-navy);
+  background: #fbfbfd;
+  transition: border-color .15s, background .15s;
+}
+.pc-op-pin-box-active { border-color: var(--pc-navy); background: #fff; }
+.pc-op-pin-box-filled { border-color: var(--pc-navy); }
+
+.pc-op-pin-actions { display: flex; gap: 10px; margin-top: 16px; }
+.pc-op-pin-btn {
+  flex: 1; padding: 13px; border: none; border-radius: 999px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: transform .1s, opacity .1s;
+}
+.pc-op-pin-btn:active { transform: scale(0.97); }
+.pc-op-pin-btn-primary { background: var(--pc-navy); color: #fff; }
+.pc-op-pin-btn-secondary { background: #eceef4; color: var(--pc-navy); }
+
+/* Reutiliza el mismo teclado circular dentro del modal */
+.pc-op-pin-modal .pc-op-keypad { margin: 16px 0 6px; }
+
+@media (min-width: 768px) {
+  .pc-op-pin-modal { max-width: 500px; padding: 42px 44px; }
+  .pc-op-pin-icon { font-size: 46px; }
+  .pc-op-pin-title { font-size: 27px; }
+  .pc-op-pin-sub { font-size: 15px; }
+  .pc-op-pin-box { width: 62px; height: 70px; font-size: 28px; border-radius: 14px; }
+  .pc-op-pin-btn { padding: 15px; font-size: 16px; }
+}

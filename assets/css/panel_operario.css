@@ -1,16 +1,21 @@
 .pc-op-panel-shell {
   min-height: 100vh;
-  background: linear-gradient(180deg, #eef1f8 0%, #e6eaf4 100%);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(47,111,237,0.08), transparent 45%),
+    linear-gradient(180deg, #eef1f8 0%, #e6eaf4 100%);
   padding: 28px 32px 40px;
   display: flex;
   flex-direction: column;
 }
 
+/* ===== Barra superior ===== */
 .pc-op-brand-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 36px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .pc-op-brand {
@@ -47,21 +52,44 @@
   font-style: italic;
 }
 
-.pc-op-panel-logout {
+.pc-op-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-op-panel-logout,
+.pc-op-panel-perfil {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--pc-surface);
-  color: var(--pc-navy);
-  border: 1px solid var(--pc-border);
   border-radius: 999px;
   padding: 10px 20px;
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
+  border: 1px solid transparent;
+  transition: transform .15s ease, box-shadow .15s ease;
 }
 
+.pc-op-panel-perfil {
+  background: #fff;
+  color: var(--pc-navy);
+  border-color: var(--pc-border);
+  box-shadow: 0 4px 12px rgba(12, 28, 51, 0.05);
+}
+.pc-op-panel-perfil i { color: #2F6FED; }
+.pc-op-panel-perfil:active { transform: scale(0.96); }
+
+.pc-op-panel-logout {
+  background: transparent;
+  color: #b23b3b;
+  border-color: rgba(178, 59, 59, 0.25);
+}
+.pc-op-panel-logout:active { transform: scale(0.96); }
+
+/* ===== Saludo ===== */
 .pc-op-panel-greeting {
   margin-bottom: 30px;
 }
@@ -85,10 +113,14 @@
   margin: 0;
 }
 
+/* ===== Grid de módulos =====
+   auto-fit + justify-content:center evita el "hueco" cuando
+   el operario solo tiene 1 o 2 etapas asignadas en vez de 3. */
 .pc-op-panel-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(230px, 280px));
+  justify-content: center;
   gap: 22px;
   align-content: start;
 }
@@ -101,7 +133,7 @@
   justify-content: center;
   gap: 10px;
   min-height: 240px;
-  border-radius: 20px;
+  border-radius: 22px;
   color: #fff;
   text-decoration: none;
   overflow: hidden;
@@ -115,6 +147,18 @@
   inset: 0;
   background: linear-gradient(160deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 55%);
   pointer-events: none;
+}
+
+/* decoración: círculo grande translúcido en la esquina */
+.pc-op-panel-btn::before {
+  content: "";
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  top: -50px;
+  right: -50px;
 }
 
 .pc-op-panel-btn:active {
@@ -132,12 +176,14 @@
   justify-content: center;
   font-size: 30px;
   margin-bottom: 4px;
+  z-index: 1;
 }
 
 .pc-op-panel-label {
   font-family: 'Poppins', sans-serif;
   font-size: 20px;
   font-weight: 700;
+  z-index: 1;
 }
 
 .pc-op-panel-sub {
@@ -145,11 +191,42 @@
   opacity: 0.85;
   text-align: center;
   padding: 0 20px;
+  z-index: 1;
+}
+
+.pc-op-panel-arrow {
+  position: absolute;
+  bottom: 16px;
+  right: 18px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  z-index: 1;
 }
 
 .pc-op-panel-btn.q-blue   { background: linear-gradient(160deg, #2f6fed, #1c4fc2); }
 .pc-op-panel-btn.q-navy   { background: linear-gradient(160deg, #16215c, #0b1538); }
 .pc-op-panel-btn.q-amber  { background: linear-gradient(160deg, #f0a500, #c67c00); }
+
+/* ===== Aviso sin acceso ===== */
+.pc-op-panel-empty {
+  margin-top: 20px;
+  background: #fdeaea;
+  border-left: 4px solid #d64545;
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #9a3a3a;
+  font-size: 14px;
+}
+.pc-op-panel-empty i { font-size: 18px; }
 
 @media (max-width: 720px) {
   .pc-op-panel-shell {
@@ -175,4 +252,5 @@
     text-align: left;
     padding: 0;
   }
+  .pc-op-panel-arrow { display: none; }
 }

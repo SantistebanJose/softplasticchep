@@ -18,7 +18,7 @@ if (!empty($_SESSION['operario_id'])) {
 </head>
 <body>
 <div class="pc-op-shell">
-    <div class="pc-op-card">
+    <div class="pc-op-card" id="pcOpCardDni">
         <img src="../assets/img/logo.png" alt="Plásticos Chepito" class="pc-op-logo">
 
         <h1>Bienvenido</h1>
@@ -43,9 +43,13 @@ if (!empty($_SESSION['operario_id'])) {
             <button type="button" class="pc-op-key" data-key="7">7</button>
             <button type="button" class="pc-op-key" data-key="8">8</button>
             <button type="button" class="pc-op-key" data-key="9">9</button>
-            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpBorrar"><i class="fa-solid fa-delete-left"></i></button>
+            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpBorrar">
+                <i class="fa-solid fa-delete-left"></i>
+            </button>
             <button type="button" class="pc-op-key" data-key="0">0</button>
-            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpLimpiar"><i class="fa-solid fa-xmark"></i></button>
+            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpLimpiar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
 
         <button type="button" class="pc-btn pc-btn-primary pc-op-btn" id="pcOpIngresar">
@@ -54,6 +58,48 @@ if (!empty($_SESSION['operario_id'])) {
 
         <p class="pc-op-footer">Plásticos Chepito · Sistema de control de producción</p>
     </div>
+</div>
+
+<!-- Modal de PIN (paso 2), oculto hasta validar el DNI -->
+<div class="pc-op-pin-overlay" id="pcOpPinOverlay" style="display:none;">
+  <div class="pc-op-pin-modal" id="pcOpPinModal">
+    <div class="pc-op-pin-icon">🔒</div>
+    <h2 class="pc-op-pin-title">Ingresa tu PIN</h2>
+    <p class="pc-op-pin-sub">Hola, <strong id="pcOpPinNombre"></strong>. Ingresa tu PIN de 4 dígitos para continuar.</p>
+
+    <div class="pc-op-pin-boxes" id="pcOpPinBoxes">
+      <div class="pc-op-pin-box" data-idx="0"></div>
+      <div class="pc-op-pin-box" data-idx="1"></div>
+      <div class="pc-op-pin-box" data-idx="2"></div>
+      <div class="pc-op-pin-box" data-idx="3"></div>
+    </div>
+
+    <div class="pc-op-msg" id="pcOpMsgPin"></div>
+
+    <div class="pc-op-keypad" id="pcOpKeypadPin">
+      <button type="button" class="pc-op-key" data-key="1">1</button>
+      <button type="button" class="pc-op-key" data-key="2">2</button>
+      <button type="button" class="pc-op-key" data-key="3">3</button>
+      <button type="button" class="pc-op-key" data-key="4">4</button>
+      <button type="button" class="pc-op-key" data-key="5">5</button>
+      <button type="button" class="pc-op-key" data-key="6">6</button>
+      <button type="button" class="pc-op-key" data-key="7">7</button>
+      <button type="button" class="pc-op-key" data-key="8">8</button>
+      <button type="button" class="pc-op-key" data-key="9">9</button>
+      <button type="button" class="pc-op-key pc-op-key-action" id="pcOpPinBorrar">
+        <i class="fa-solid fa-delete-left"></i>
+      </button>
+      <button type="button" class="pc-op-key" data-key="0">0</button>
+      <button type="button" class="pc-op-key pc-op-key-action" id="pcOpPinLimpiar">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="pc-op-pin-actions">
+      <button type="button" class="pc-op-pin-btn pc-op-pin-btn-primary" id="pcOpIngresarPin">Ingresar</button>
+      <button type="button" class="pc-op-pin-btn pc-op-pin-btn-secondary" id="pcOpCancelarPin">Cancelar</button>
+    </div>
+  </div>
 </div>
 
 <script src="../assets/js/loginoperarios.js"></script>

@@ -21,7 +21,19 @@
 require_once __DIR__ . '/../controllers/bd.php';
 require_once __DIR__ . '/../controllers/executeQuery.php';
 
-function intentarLoginOperario(string $dni): array
+
+/**
+ * Login de operario en dos pasos: DNI -> PIN.
+ * Reemplaza a la antigua intentarLoginOperario() por estas dos funciones.
+ * No hacen echo ni exit: cada ajax_*.php es quien decide el JSON de salida.
+ */
+
+/**
+ * PASO 1: valida el DNI (existe, activo, rol = operario).
+ * NO crea sesión todavía — solo confirma identidad y devuelve el nombre
+ * para saludarlo en el modal del PIN.
+ */
+function verificarDniOperario(string $dni): array
 {
     $dni = trim($dni);
 
@@ -33,7 +45,7 @@ function intentarLoginOperario(string $dni): array
 
     $result = executeQuery(
         $conectar,
-        "SELECT id, operario_id, user_, nombre_completo, rol_y_perfiles, deleted_at
+        "SELECT id, user_, nombre_completo, rol_y_perfiles, deleted_at
          FROM usuario
          WHERE user_ = :user_",
         ['user_' => $dni]
@@ -56,12 +68,45 @@ function intentarLoginOperario(string $dni): array
         return ['success' => false, 'error' => 'Este DNI no corresponde a un operario.'];
     }
 
-    // NUEVO: se resuelven las etapas asignadas a este operario en la tabla
-    // `operario` (misma fila que usa el resto del sistema para
-    // js_etapas_relacionadas / js_sucursales), usando usuario.operario_id
-    // (FK real hacia operario.id) y NO usuario.id. Si el usuario no tiene
-    // operario_id vinculado, simplemente queda sin etapas (sin acceso a
-    // ningún módulo) hasta que un admin lo configure.
+    return ['success' => true, 'error' => null, 'nombre' => $usuario['nombre_completo']];
+}
+
+/**
+ * PASO 2: recibe DNI + PIN juntos. Vuelve a validar el DNI completo
+ * (no confía en lo ya mostrado en el modal) y compara el PIN contra
+ * usuario.pin. Si todo coincide, recién ahí resuelve etapas y crea
+ * la sesión real (mismo comportamiento que la vieja intentarLoginOperario()).
+ */
+function verificarPinOperario(string $dni, string $pin): array
+{
+    $dni = trim($dni);
+    $pin = trim($pin);
+
+    if ($pin === '' || !ctype_digit($pin) || strlen($pin) !== 4) {
+        return ['success' => false, 'error' => 'Ingresa un PIN válido de 4 dígitos.'];
+    }
+
+    $verificacionDni = verificarDniOperario($dni);
+    if (!$verificacionDni['success']) {
+        return $verificacionDni;
+    }
+
+    $conectar = conectar_oll_BD();
+
+    $result = executeQuery(
+        $conectar,
+        "SELECT id, operario_id, user_, nombre_completo, rol_y_perfiles, pin
+         FROM usuario
+         WHERE user_ = :user_",
+        ['user_' => $dni]
+    );
+    $usuario = $result[0];
+
+    $pinGuardado = trim((string) ($usuario['pin'] ?? ''));
+    if ($pinGuardado === '' || !hash_equals($pinGuardado, $pin)) {
+        return ['success' => false, 'error' => 'PIN incorrecto.'];
+    }
+
     $etapas = resolverEtapasOperario($conectar, (int) ($usuario['operario_id'] ?? 0));
 
     session_regenerate_id(true);
@@ -69,7 +114,30 @@ function intentarLoginOperario(string $dni): array
 
     return ['success' => true, 'error' => null];
 }
+// =============================================================================
+// DISPATCH (mismo patrón que los demás clss*.php)
+// =============================================================================
 
+function controladorAuthOperario($accion)
+{
+    switch ($accion) {
+        case 'INTENTARDNI':
+            echo json_encode(verificarDniOperario($_POST['dni'] ?? ''));
+            break;
+        case 'INTENTARPIN':
+            echo json_encode(verificarPinOperario($_POST['dni'] ?? '', $_POST['pin'] ?? ''));
+            break;
+        default:
+            echo json_encode(['success' => false, 'error' => 'Acción no reconocida.']);
+    }
+}
+
+if (isset($_POST['accion'])) {
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    header('Content-Type: application/json');
+    controladorAuthOperario($_POST['accion']);
+    exit;
+}
 /**
  * Decodifica rol_y_perfiles sin importar si executeQuery ya lo devolvió
  * como array (jsonb auto-decodificado) o como string JSON crudo.

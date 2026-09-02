@@ -1,0 +1,61 @@
+<!-- Fila PIN dentro de la sección "Información Personal" del perfil -->
+<div class="pc-perfil-row">
+    <span><i class="fa-solid fa-hashtag"></i> PIN</span>
+    <span>
+        <span id="perfilPinValor" data-pin="1051">••••</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnTogglePin" title="Mostrar/ocultar">
+            <i class="fa-solid fa-eye"></i>
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnEditarPin">
+            <i class="fa-solid fa-pen"></i> Editar
+        </button>
+    </span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+(function () {
+    const valorEl = document.getElementById('perfilPinValor');
+    const btnToggle = document.getElementById('btnTogglePin');
+    const btnEditar = document.getElementById('btnEditarPin');
+    let visible = false;
+
+    btnToggle.addEventListener('click', () => {
+        visible = !visible;
+        valorEl.textContent = visible ? valorEl.dataset.pin : '••••';
+        btnToggle.querySelector('i').className = visible ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+    });
+
+    btnEditar.addEventListener('click', async () => {
+        const { value: nuevoPin } = await Swal.fire({
+            title: 'Nuevo PIN',
+            input: 'text',
+            inputLabel: 'Ingresa un PIN de 4 dígitos',
+            inputAttributes: { maxlength: 4, inputmode: 'numeric', autocapitalize: 'off' },
+            showCancelButton: true,
+            confirmButtonText: 'Guardar',
+            cancelButtonText: 'Cancelar',
+            inputValidator: (value) => {
+                if (!/^\d{4}$/.test(value || '')) return 'El PIN debe tener exactamente 4 dígitos.';
+            }
+        });
+
+        if (!nuevoPin) return;
+
+        const resp = await fetch('controllers/ajax_actualizar_pin.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'pin=' + encodeURIComponent(nuevoPin)
+        });
+        const json = await resp.json();
+
+        if (json.success) {
+            valorEl.dataset.pin = nuevoPin;
+            valorEl.textContent = visible ? nuevoPin : '••••';
+            Swal.fire('Listo', 'PIN actualizado correctamente.', 'success');
+        } else {
+            Swal.fire('Error', json.message || 'No se pudo actualizar el PIN.', 'error');
+        }
+    });
+})();
+</script>
