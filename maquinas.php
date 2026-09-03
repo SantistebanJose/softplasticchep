@@ -36,13 +36,14 @@ include("header.php");
             <tr>
                 <th>Nombre</th>
                 <th>Descripción</th>
+                <th>Sucursal</th>
                 <th>Estado</th>
                 <th>Registro</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="tbodyMaquinas">
-            <tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -71,6 +72,13 @@ include("header.php");
           </div>
 
           <div class="mb-2">
+            <label class="form-label">Sucursal</label>
+            <select class="form-select" name="sucursal_id" id="maquina_sucursal_id">
+                <option value="">Seleccione...</option>
+            </select>
+          </div>
+
+          <div class="mb-2">
             <label class="form-label">Estado</label>
             <select class="form-select" name="estado" id="maquina_estado">
                 <option value="A">Activa</option>
@@ -94,10 +102,12 @@ const CONTROLADOR_MAQUINAS = 'controllers/clssMaquina.php';
 const modalMaquina = new bootstrap.Modal(document.getElementById('modalMaquina'));
 
 document.addEventListener('DOMContentLoaded', () => {
+    cargarSucursalesCombo();
+
     cargarMaquinas().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyMaquinas').innerHTML =
-            `<tr><td colspan="5" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
@@ -141,6 +151,21 @@ function textoEstado(estado) {
     return '<span class="badge bg-secondary">-</span>';
 }
 
+// ── Combo de sucursales ───────────────────────────────────────────────────────
+async function cargarSucursalesCombo() {
+    const json = await llamarMaquinas('LISTARSUCURSALES');
+    const select = document.getElementById('maquina_sucursal_id');
+
+    if (!json.success) {
+        console.error('No se pudo cargar el combo de sucursales:', json.message);
+        return;
+    }
+
+    const sucursales = json.sucursales || [];
+    select.innerHTML = '<option value="">Seleccione...</option>' +
+        sucursales.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+}
+
 // ── Listado ──────────────────────────────────────────────────────────────────
 async function cargarMaquinas() {
     const texto      = document.getElementById('fmaq_texto').value.trim();
@@ -151,13 +176,13 @@ async function cargarMaquinas() {
     const tbody = document.getElementById('tbodyMaquinas');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const maquinas = json.maquinas || [];
     if (maquinas.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay máquinas registradas.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay máquinas registradas.</td></tr>';
         return;
     }
 
@@ -165,6 +190,7 @@ async function cargarMaquinas() {
     <tr id="fila-maquina-${m.id}">
         <td data-label="Nombre">${m.nombre}</td>
         <td data-label="Descripción">${m.descripcion ?? '-'}</td>
+        <td data-label="Sucursal">${m.sucursal_nombre ?? '-'}</td>
         <td data-label="Estado">${textoEstado(m.estado)}</td>
         <td data-label="Registro">${!m.deleted_at
             ? '<span class="badge bg-success">Activo</span>'
@@ -190,6 +216,7 @@ function abrirModalCrearMaquina() {
     document.getElementById('formMaquina').reset();
     document.getElementById('maquina_id').value = '';
     document.getElementById('maquina_estado').value = 'A';
+    document.getElementById('maquina_sucursal_id').value = '';
     document.getElementById('modalMaquinaTitulo').textContent = 'Nueva máquina';
     modalMaquina.show();
 }
@@ -204,6 +231,7 @@ async function abrirModalEditarMaquina(id) {
     document.getElementById('maquina_nombre').value = m.nombre ?? '';
     document.getElementById('maquina_descripcion').value = m.descripcion ?? '';
     document.getElementById('maquina_estado').value = m.estado ?? 'A';
+    document.getElementById('maquina_sucursal_id').value = m.sucursal_id ?? '';
 
     modalMaquina.show();
 }

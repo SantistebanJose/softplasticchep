@@ -13,20 +13,7 @@ $nombreUsuario = $_SESSION['nombre_usuario'] ?? 'Usuario';
 
 require __DIR__ . '/controllers/bd.php';
 $pdo = conectar_oll_BD();
-/*
- * Ejemplo de consultas reales (comentadas). Descoméntalas cuando existan
- * las tablas correspondientes en tu base de datos.
- *
- * $unidadesHoy = $pdo->query("SELECT COALESCE(SUM(cantidad),0) FROM produccion WHERE fecha = CURRENT_DATE")->fetchColumn();
- * $maquinasActivas = $pdo->query("SELECT COUNT(*) FROM maquinas WHERE estado = 'activa'")->fetchColumn();
- */
 
-// Datos de ejemplo mientras se conecta la base de datos real.
-$unidadesHoy     = 4280;
-$maquinasActivas = 6;
-$maquinasTotal   = 8;
-$mermaPorcentaje = 2.4;
-$stockCritico    = 3;
 
 try {
     $totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuario')->fetchColumn();
@@ -36,19 +23,7 @@ try {
     $usuariosActivos = 0;
 }
 
-$ordenes = [
-    ['codigo' => 'OP-0184', 'producto' => 'Pinza de ropa 8cm',   'maquina' => 'Inyectora 03', 'cantidad' => 1200, 'estado' => 'proceso'],
-    ['codigo' => 'OP-0183', 'producto' => 'Gancho reforzado',    'maquina' => 'Inyectora 01', 'cantidad' => 800,  'estado' => 'pendiente'],
-    ['codigo' => 'OP-0182', 'producto' => 'Matamoscas clásico',  'maquina' => 'Inyectora 05', 'cantidad' => 2000, 'estado' => 'completada'],
-    ['codigo' => 'OP-0181', 'producto' => 'Colgador universal',  'maquina' => 'Inyectora 02', 'cantidad' => 1500, 'estado' => 'completada'],
-];
 
-$estadoPill = [
-    'proceso'    => ['label' => 'En proceso',  'class' => 'success'],
-    'pendiente'  => ['label' => 'Pendiente',   'class' => 'warning'],
-    'completada' => ['label' => 'Completada',  'class' => 'info'],
-    'detenida'   => ['label' => 'Detenida',    'class' => 'danger'],
-];
 include("header.php");
 ?>
 
@@ -156,6 +131,9 @@ window.addEventListener('load', function () {
             <a href="moldes.php" class="pc-quick-btn q-dark">
                 <i class="fa-solid fa-shapes"></i> Moldes
             </a>
+            <a href="sucursal.php" class="pc-quick-btn q-navy">
+                <i class="fa-solid fa-map-location-dot"></i> Sucursales
+            </a>
         </div>
 
         <!-- Sección 3: Reportes -->
@@ -163,8 +141,11 @@ window.addEventListener('load', function () {
             <i class="fa-solid fa-chart-column" style="color:var(--pc-navy);margin-right:6px;"></i> Reportes
         </h4>
         <div class="pc-quick-grid">
-            <a href="disponibilidad_venta.php" class="pc-quick-btn q-dark">
-                <i class="fa-solid fa-chart-column"></i> REPORTES
+            <a href="stock.php" class="pc-quick-btn q-dark">
+                <i class="fa-solid fa-boxes-stacked"></i> Stock
+            </a>
+            <a href="produccion_operario.php" class="pc-quick-btn q-dark">
+                <i class="fa-solid fa-chart-column"></i> Producción por Operario
             </a>
         </div>
 

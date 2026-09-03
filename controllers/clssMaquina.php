@@ -4,10 +4,18 @@
  * controllers/clssMaquina.php
  * Controlador del módulo de Máquinas
  * Tabla real: maquina (id, nombre, descripcion, estado, js_session, js_historial,
- *             created_at, update_at, deleted_at)
+ *             created_at, update_at, deleted_at, sucursal_id)
  * estado: 'A' = Activa | 'M' = Mantenimiento
  * Soft delete vía deleted_at.
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
+ *
+ * NOTA (sucursal_id):
+ * - El usuario elige la sucursal desde un <select> en el modal de crear/editar.
+ * - El listado NO filtra por sucursal (se muestran todas), solo se informa la
+ *   sucursal de cada máquina como columna adicional.
+ * - Se asume que la tabla `sucursal` tiene al menos las columnas (id, nombre).
+ *   Si `sucursal` maneja soft delete (columna deleted_at), ajustar
+ *   listarSucursalesCombo() para agregar "WHERE deleted_at IS NULL".
  */
 
 require_once __DIR__ . '/bd.php';
@@ -36,6 +44,9 @@ function controladorMaquina($accion)
         case 'REACTIVARMAQUINA':
             reactivarMaquina();
             break;
+        case 'LISTARSUCURSALES':
+            listarSucursalesCombo();
+            break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
@@ -57,24 +68,28 @@ function listarMaquinas()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "LOWER(nombre) LIKE LOWER(:texto)";
+        $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
-        $where[] = "deleted_at IS NULL";
+        $where[] = "m.deleted_at IS NULL";
     } elseif ($estado === 'inactiva') {
-        $where[] = "deleted_at IS NOT NULL";
+        $where[] = "m.deleted_at IS NOT NULL";
     }
     if (in_array($estadoMaquina, ['A', 'M'], true)) {
-        $where[] = "estado = :estado_maquina";
+        $where[] = "m.estado = :estado_maquina";
         $params['estado_maquina'] = $estadoMaquina;
     }
 
+    // Se muestran TODAS las sucursales (sin filtro), solo se informa el nombre
+    // de la sucursal de cada máquina vía LEFT JOIN.
     $sql = "
-        SELECT *
-        FROM maquina
+        SELECT m.*,
+               s.nombre AS sucursal_nombre
+        FROM maquina m
+        LEFT JOIN sucursal s ON s.id = m.sucursal_id
         WHERE " . implode(' AND ', $where) . "
-        ORDER BY nombre
+        ORDER BY m.nombre
     ";
 
     $result = executeQuery($conectar, $sql, $params);
@@ -88,11 +103,29 @@ function obtenerMaquina($id)
 
     $result = executeQuery(
         $conectar,
-        "SELECT * FROM maquina WHERE id = :id",
+        "SELECT m.*, s.nombre AS sucursal_nombre
+         FROM maquina m
+         LEFT JOIN sucursal s ON s.id = m.sucursal_id
+         WHERE m.id = :id",
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Máquina no encontrada.');
     responder(true, 'OK', ['maquina' => $result[0]]);
+}
+
+/**
+ * Combo de sucursales para el <select> del modal.
+ * Ajustar el WHERE si `sucursal` maneja soft delete (deleted_at).
+ */
+function listarSucursalesCombo()
+{
+    $conectar = conectar_oll_BD();
+
+    $result = executeQuery(
+        $conectar,
+        "SELECT id, nombre FROM sucursal ORDER BY nombre"
+    );
+    responder(true, 'OK', ['sucursales' => $result]);
 }
 
 /**
@@ -171,6 +204,22 @@ function textoEstadoMaquina(?string $estado): string
     return '(sin estado)';
 }
 
+/**
+ * Resuelve el nombre de una sucursal a partir de su id, para dejar el
+ * historial legible (en vez de solo el id numérico).
+ */
+function obtenerNombreSucursal($conectar, $sucursalId): ?string
+{
+    if (empty($sucursalId)) return null;
+
+    $result = executeQuery(
+        $conectar,
+        "SELECT nombre FROM sucursal WHERE id = :id",
+        ['id' => $sucursalId]
+    );
+    return $result[0]['nombre'] ?? null;
+}
+
 function guardarMaquina()
 {
     $conectar    = conectar_oll_BD();
@@ -178,6 +227,7 @@ function guardarMaquina()
     $nombre      = trim($_POST['nombre'] ?? '');
     $descripcion = trim($_POST['descripcion'] ?? '');
     $estado      = trim($_POST['estado'] ?? 'A');
+    $sucursalId  = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
@@ -193,17 +243,25 @@ function guardarMaquina()
     );
     if (!empty($chk)) responder(false, 'Ya existe una máquina con ese nombre.');
 
+    // Si mandaron sucursal_id, verificamos que exista.
+    if ($sucursalId !== null) {
+        $chkSuc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id", ['id' => $sucursalId]);
+        if (empty($chkSuc)) responder(false, 'La sucursal seleccionada no existe.');
+    }
+
     // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
         'nombre'          => 'Nombre',
         'descripcion'     => 'Descripción',
         'estado_legible'  => 'Estado de la máquina',
+        'sucursal_legible'=> 'Sucursal',
     ];
 
     $datosNuevos = [
-        'nombre'          => $nombre,
-        'descripcion'     => $descripcion !== '' ? $descripcion : null,
-        'estado_legible'  => textoEstadoMaquina($estado),
+        'nombre'           => $nombre,
+        'descripcion'      => $descripcion !== '' ? $descripcion : null,
+        'estado_legible'   => textoEstadoMaquina($estado),
+        'sucursal_legible' => obtenerNombreSucursal($conectar, $sucursalId),
     ];
 
     if ($id === 0) {
@@ -215,13 +273,14 @@ function guardarMaquina()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO maquina (nombre, descripcion, estado, created_at, js_session, js_historial)
-            VALUES (:nombre, :descripcion, :estado, NOW(), :js_session, :js_historial)
+            INSERT INTO maquina (nombre, descripcion, estado, sucursal_id, created_at, js_session, js_historial)
+            VALUES (:nombre, :descripcion, :estado, :sucursal_id, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'       => $nombre,
             'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'estado'       => $estado,
+            'sucursal_id'  => $sucursalId,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
@@ -233,8 +292,9 @@ function guardarMaquina()
         if (empty($actual)) responder(false, 'Máquina no encontrada.');
         $registroAnterior = $actual[0];
 
-        // Traducimos el estado anterior a texto legible antes de comparar
-        $registroAnterior['estado_legible'] = textoEstadoMaquina($registroAnterior['estado']);
+        // Traducimos estado y sucursal anteriores a texto legible antes de comparar
+        $registroAnterior['estado_legible']   = textoEstadoMaquina($registroAnterior['estado']);
+        $registroAnterior['sucursal_legible'] = obtenerNombreSucursal($conectar, $registroAnterior['sucursal_id'] ?? null);
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -247,6 +307,7 @@ function guardarMaquina()
                 nombre       = :nombre,
                 descripcion  = :descripcion,
                 estado       = :estado,
+                sucursal_id  = :sucursal_id,
                 update_at    = NOW(),
                 js_session   = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -255,6 +316,7 @@ function guardarMaquina()
             'nombre'       => $nombre,
             'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'estado'       => $estado,
+            'sucursal_id'  => $sucursalId,
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,

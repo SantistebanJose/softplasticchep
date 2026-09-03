@@ -843,10 +843,10 @@ function guardarEnsamblaje()
     $producto = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id AND activo = true", ['id' => $producto_id]);
     if (empty($producto)) responder(false, 'El producto seleccionado no existe o está inactivo.');
 
-    if ($operario_ortorgado !== null) {
-    $operario = executeQuery($conectar, "SELECT id FROM operario WHERE id = :id AND activo = true", ['id' => $operario_ortorgado]);
-        if (empty($operario)) responder(false, 'El operario seleccionado no existe o está inactivo.');
+    if (empty($operariosInput)) {
+        responder(false, 'Debes indicar al menos un operario que participó en este armado.');
     }
+
     if ($sucursal_id !== null) {
         $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
         if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
