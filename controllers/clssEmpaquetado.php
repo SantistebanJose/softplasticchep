@@ -1023,6 +1023,9 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
 // = eliminar este registro (libera el consumo) y crear uno nuevo.
 function editarEmpaquetado()
 {
+    if (!empty($_SESSION['operario_id'])) {
+        responder(false, 'Los operarios no pueden editar registros de empaquetado. Comunícate con el administrador.');
+    }
     $conectar = conectar_oll_BD();
 
     $id           = intval($_POST['id'] ?? 0);
@@ -1111,6 +1114,9 @@ function editarEmpaquetado()
 
 function eliminarEmpaquetado(int $id)
 {
+    if (!empty($_SESSION['operario_id'])) {
+        responder(false, 'Los operarios no pueden eliminar registros de empaquetado. Comunícate con el administrador.');
+    }
     if (!$id) responder(false, 'ID inválido.');
     $conectar = conectar_oll_BD();
 

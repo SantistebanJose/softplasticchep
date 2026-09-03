@@ -361,7 +361,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             </div>
 
             <div class="pc-list-section" id="seccionRegistros" style="display:none;">
-                <p class="pc-panel-lead">Solo consulta. Para corregir un error reciente, elimina el registro.</p>
+                <p class="pc-panel-lead">Solo consulta. Si hay un error, comunícate con el administrador.</p>
                 <div class="pc-mis-registros" id="misRegistrosLista">
                     <div class="pc-est-empty">Cargando...</div>
                 </div>
@@ -876,10 +876,7 @@ async function cargarMisRegistros() {
             <div class="pc-reg-fecha">${formatearFechaHoraLegibleEmp(r.created_at)}</div>
             ${vendido
                 ? `<span class="pc-reg-badge-vendido">Vendido</span>`
-                : `<span class="pc-reg-badge-disp">Disponible</span>
-                   <button type="button" class="pc-reg-del-btn" onclick="eliminarMiRegistro(${r.id})" title="Eliminar (corregir un error)">
-                       <i class="fa-solid fa-trash"></i>
-                   </button>`}
+                : `<span class="pc-reg-badge-disp">Disponible</span>`}
         </div>`;
     }).join('');
 }
