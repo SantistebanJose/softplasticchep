@@ -165,83 +165,8 @@ window.addEventListener('load', function () {
     margin-top: 0;
 }
 </style>
-<!--
-<div class="pc-metric-grid">
-    <div class="pc-card pc-metric-card">
-        <div class="top">
-            <span class="label">Unidades hoy</span>
-            <i class="fa-solid fa-box icon"></i>
-        </div>
-        <div class="value"><?= number_format($unidadesHoy, 0, ',', ',') ?></div>
-        <div class="delta up"><i class="fa-solid fa-arrow-up"></i> 8% vs. ayer</div>
-    </div>
 
-    <div class="pc-card pc-metric-card">
-        <div class="top">
-            <span class="label">Máquinas activas</span>
-            <i class="fa-solid fa-gears icon"></i>
-        </div>
-        <div class="value"><?= $maquinasActivas ?> / <?= $maquinasTotal ?></div>
-        <div class="delta neutral"><?= $maquinasTotal - $maquinasActivas ?> en mantenimiento</div>
-    </div>
-
-    <div class="pc-card pc-metric-card">
-        <div class="top">
-            <span class="label">Usuarios activos</span>
-            <i class="fa-solid fa-user-check icon"></i>
-        </div>
-        <div class="value"><?= $usuariosActivos ?> / <?= $totalUsuarios ?></div>
-        <div class="delta neutral"><?= max(0, $totalUsuarios - $usuariosActivos) ?> inactivos</div>
-    </div>
-
-    <div class="pc-card pc-metric-card">
-        <div class="top">
-            <span class="label">Merma del día</span>
-            <i class="fa-solid fa-triangle-exclamation icon" style="color:var(--pc-red);"></i>
-        </div>
-        <div class="value"><?= $mermaPorcentaje ?>%</div>
-        <div class="delta down">Sobre el promedio</div>
-    </div>
-
-    <div class="pc-card pc-metric-card">
-        <div class="top">
-            <span class="label">Stock crítico</span>
-            <i class="fa-solid fa-flask icon"></i>
-        </div>
-        <div class="value"><?= $stockCritico ?></div>
-        <div class="delta neutral">materias primas</div>
-    </div>
-</div>
--->
-<!--
-<div class="pc-panel">
-    <div class="pc-panel-head">
-        <h3>Órdenes de producción recientes</h3>
-        <a href="ordenes.php" class="link">Ver todas</a>
-    </div>
-    <table class="pc-table">
-        <thead>
-            <tr>
-                <th>Orden</th>
-                <th>Producto</th>
-                <th>Máquina</th>
-                <th>Cantidad</th>
-                <th>Estado</th>
-            </tr>
-        </thead>
-        <tbody>
             
-        <?php foreach ($ordenes as $o): $pill = $estadoPill[$o['estado']]; ?>
-            <tr>
-                <td><?= htmlspecialchars($o['codigo']) ?></td>
-                <td><?= htmlspecialchars($o['producto']) ?></td>
-                <td><?= htmlspecialchars($o['maquina']) ?></td>
-                <td><?= number_format($o['cantidad'], 0, ',', ',') ?></td>
-                <td><span class="pc-pill <?= $pill['class'] ?>"><?= $pill['label'] ?></span></td>
-            </tr>
-        <?php endforeach; ?> 
-        </tbody>
-    </table>
-</div> -->
+
 
 <?php include("footer.php");?>
