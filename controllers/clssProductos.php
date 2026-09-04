@@ -10,6 +10,10 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
 
+// Carpeta donde se guardan las fotos de producto (sube 1 nivel desde controllers/)
+define('CARPETA_IMAGENES_PRODUCTO', __DIR__ . '/../uploads/productos/');
+define('RUTA_WEB_IMAGENES_PRODUCTO', 'uploads/productos/');
+
 if (isset($_POST["accion"])) {
     controladorProductos($_POST["accion"]);
 }
@@ -200,6 +204,62 @@ function obtenerProducto($id)
 
     responder(true, 'OK', ['producto' => $producto]);
 }
+
+/**
+ * Sube la foto del producto (si vino una en $_FILES['imagen']) y devuelve la
+ * ruta relativa (RUTA_WEB_IMAGENES_PRODUCTO . nombre) a guardar en
+ * producto.img_ruta. Devuelve null si no vino archivo nuevo.
+ * Mismo patrón que subirComprobante() en clssCompra.php.
+ */
+function subirImagenProducto(): ?string
+{
+    if (empty($_FILES['imagen']) || $_FILES['imagen']['error'] === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    $archivo = $_FILES['imagen'];
+
+    if ($archivo['error'] !== UPLOAD_ERR_OK) {
+        responder(false, 'Error al subir la imagen (código ' . $archivo['error'] . ').');
+    }
+    if ($archivo['size'] > 5 * 1024 * 1024) {
+        responder(false, 'La imagen no puede pesar más de 5MB.');
+    }
+
+    $extension = strtolower(pathinfo($archivo['name'], PATHINFO_EXTENSION));
+    $permitidas = ['jpg', 'jpeg', 'png', 'webp'];
+    if (!in_array($extension, $permitidas, true)) {
+        responder(false, 'Formato de imagen no permitido. Usa JPG, PNG o WEBP.');
+    }
+
+    // Validación extra: confirma que el archivo realmente sea una imagen
+    // (evita que alguien suba un .php disfrazado con extensión .jpg).
+    if (@getimagesize($archivo['tmp_name']) === false) {
+        responder(false, 'El archivo subido no es una imagen válida.');
+    }
+
+    if (!is_dir(CARPETA_IMAGENES_PRODUCTO)) {
+        mkdir(CARPETA_IMAGENES_PRODUCTO, 0755, true);
+    }
+
+    $nombreArchivo = 'producto_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+    $rutaDestino   = CARPETA_IMAGENES_PRODUCTO . $nombreArchivo;
+
+    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
+        responder(false, 'No se pudo guardar la imagen en el servidor.');
+    }
+
+    return RUTA_WEB_IMAGENES_PRODUCTO . $nombreArchivo;
+}
+
+function borrarImagenProductoArchivo(?string $rutaRelativa): void
+{
+    if (empty($rutaRelativa)) return;
+    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
+    if (is_file($rutaFisica)) {
+        @unlink($rutaFisica);
+    }
+}
+
 function guardarProducto()
 {
     $conectar           = conectar_oll_BD();
@@ -210,6 +270,7 @@ function guardarProducto()
     $cant_equivale      = is_numeric($_POST['cant_equivale'] ?? '') ? floatval($_POST['cant_equivale']) : null;
     $unidad_equivale_id = intval($_POST['unidad_equivale_id'] ?? 0) ?: null;
     $peso_unitario_g    = is_numeric($_POST['peso_unitario_g'] ?? '') ? floatval($_POST['peso_unitario_g']) : null;
+    $eliminarImagen     = ($_POST['eliminar_imagen'] ?? '') === '1';
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($codigo))          responder(false, 'El código es obligatorio.');
@@ -224,11 +285,16 @@ function guardarProducto()
     );
     if (!empty($chk)) responder(false, 'Ya existe un producto con ese código.');
 
+    // Se procesa la imagen ANTES del insert/update: si algo falla en la
+    // validación del archivo, subirImagenProducto() corta con responder()
+    // y no se llega a tocar la fila del producto.
+    $rutaNuevaImagen = subirImagenProducto(); // null si no vino archivo nuevo
+
     if ($id === 0) {
         $result = executeQuery($conectar, "
             INSERT INTO producto
-                (codigo, descripcion, unidad_venta_id, cant_equivale, unidad_equivale_id, peso_unitario_g, activo)
-            VALUES (:cod, :desc, :uv, :ceq, :ueq, :peso, TRUE)
+                (codigo, descripcion, unidad_venta_id, cant_equivale, unidad_equivale_id, peso_unitario_g, img_ruta, activo)
+            VALUES (:cod, :desc, :uv, :ceq, :ueq, :peso, :img, TRUE)
             RETURNING id
         ", [
             'cod'  => $codigo,
@@ -237,10 +303,31 @@ function guardarProducto()
             'ceq'  => $cant_equivale,
             'ueq'  => $unidad_equivale_id,
             'peso' => $peso_unitario_g,
+            'img'  => $rutaNuevaImagen,
         ]);
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Producto creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
+        // Se necesita la imagen actual para poder borrar el archivo físico
+        // viejo si se reemplaza o se elimina.
+        $actual = executeQuery($conectar, "SELECT img_ruta FROM producto WHERE id = :id", ['id' => $id]);
+        if (empty($actual)) {
+            if ($rutaNuevaImagen !== null) borrarImagenProductoArchivo($rutaNuevaImagen);
+            responder(false, 'Producto no encontrado.');
+        }
+        $imagenActual = $actual[0]['img_ruta'] ?? null;
+
+        $imagenFinal = $imagenActual;
+        if ($rutaNuevaImagen !== null) {
+            // Subieron una foto nueva: reemplaza a la anterior.
+            borrarImagenProductoArchivo($imagenActual);
+            $imagenFinal = $rutaNuevaImagen;
+        } elseif ($eliminarImagen) {
+            // Pidieron quitar la foto sin reemplazarla.
+            borrarImagenProductoArchivo($imagenActual);
+            $imagenFinal = null;
+        }
+
         executeQuery($conectar, "
             UPDATE producto SET
                 codigo = :cod,
@@ -249,6 +336,7 @@ function guardarProducto()
                 cant_equivale = :ceq,
                 unidad_equivale_id = :ueq,
                 peso_unitario_g = :peso,
+                img_ruta = :img,
                 updated_at = NOW()
             WHERE id = :id
         ", [
@@ -258,6 +346,7 @@ function guardarProducto()
             'ceq'  => $cant_equivale,
             'ueq'  => $unidad_equivale_id,
             'peso' => $peso_unitario_g,
+            'img'  => $imagenFinal,
             'id'   => $id,
         ]);
         responder(true, 'Producto actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
@@ -456,6 +545,9 @@ function reactivarProducto()
 
 function responder(bool $ok, string $msg, array $extra = []): void
 {
+    if (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     header('Content-Type: application/json');
     echo json_encode(array_merge(['success' => $ok, 'message' => $msg], $extra));
     exit;

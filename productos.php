@@ -123,6 +123,50 @@ include("header.php");
         color: #9ca3af;
     }
 
+    /* ── Miniatura de producto en el listado ── */
+    .pc-thumb {
+        width: 42px;
+        height: 42px;
+        border-radius: 8px;
+        object-fit: cover;
+        border: 1px solid #eceef1;
+        background: #f8f9fb;
+        cursor: zoom-in;
+    }
+    .pc-thumb-placeholder {
+        width: 42px;
+        height: 42px;
+        border-radius: 8px;
+        background: #f1f2f4;
+        color: #b0b4bb;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #eceef1;
+    }
+
+    /* ── Foto del producto dentro del modal Crear/Editar ── */
+    .pc-img-producto-wrap {
+        width: 130px;
+        height: 130px;
+        margin: 0 auto;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid #eceef1;
+        background: #f8f9fb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .pc-img-producto-wrap img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .pc-img-placeholder {
+        color: #b0b4bb;
+    }
+
     /* ── Modal de configuración por molde ── */
     #configNavTabs .nav-link {
         font-weight: 500;
@@ -167,6 +211,7 @@ include("header.php");
         <table class="pc-table" id="tablaProductos">
             <thead>
                 <tr>
+                    <th>Foto</th>
                     <th>Código</th>
                     <th>Descripción</th>
                     <th>U. Medida</th>
@@ -177,7 +222,7 @@ include("header.php");
                 </tr>
             </thead>
             <tbody id="tbodyProductos">
-                <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
+                <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
             </tbody>
         </table>
     </div>
@@ -194,6 +239,27 @@ include("header.php");
         </div>
         <div class="modal-body">
           <input type="hidden" name="id" id="prod_id">
+
+          <!-- ── Foto del producto ─────────────────────────────────────── -->
+          <div class="mb-3 text-center">
+            <div class="pc-img-producto-wrap">
+                <img id="prod_imagen_preview" src="" alt="Foto del producto" style="display:none;">
+                <div id="prod_imagen_placeholder" class="pc-img-placeholder">
+                    <i class="fa-solid fa-image fa-2x"></i>
+                </div>
+            </div>
+            <div class="mt-2 d-flex gap-2 justify-content-center flex-wrap">
+                <label class="btn btn-sm btn-outline-secondary mb-0" for="prod_imagen">
+                    <i class="fa-solid fa-camera"></i> Tomar / subir foto
+                </label>
+                <input type="file" class="d-none" id="prod_imagen" name="imagen" accept="image/*" capture="environment">
+                <button type="button" class="btn btn-sm btn-outline-danger" id="btn_quitar_imagen_producto" style="display:none;">
+                    <i class="fa-solid fa-xmark"></i> Quitar foto
+                </button>
+            </div>
+            <input type="hidden" name="eliminar_imagen" id="prod_eliminar_imagen" value="0">
+            <small class="text-muted d-block mt-1">JPG, PNG o WEBP, máx. 5MB. En celular abre la cámara directamente.</small>
+          </div>
 
           <div class="mb-2">
             <label class="form-label">Código *</label>
@@ -240,6 +306,21 @@ include("header.php");
           <button type="submit" class="btn btn-primary">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Ver Foto (zoom de la miniatura del listado) -->
+<div class="modal fade" id="modalVerFotoProducto" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Foto del producto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="fotoProductoAmpliada" src="" alt="" style="max-width:100%; border-radius:10px;">
+      </div>
     </div>
   </div>
 </div>
@@ -332,8 +413,9 @@ include("header.php");
 const CONTROLADOR        = 'controllers/clssProductos.php'; // clssProductos.php vive en su propia carpeta
 const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php';     // se reutiliza para saber qué moldes tiene el producto
 
-const modalProducto       = new bootstrap.Modal(document.getElementById('modalProducto'));
-const modalConfigProducto = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
+const modalProducto        = new bootstrap.Modal(document.getElementById('modalProducto'));
+const modalConfigProducto  = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
+const modalVerFotoProducto = new bootstrap.Modal(document.getElementById('modalVerFotoProducto'));
 
 let unidadesCache  = [];
 let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
@@ -344,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(err => {
             console.error('Error cargando datos iniciales:', err);
             document.getElementById('tbodyProductos').innerHTML =
-                `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+                `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
         });
 
     // ── Filtrado automático ──────────────────────────────────────────────
@@ -361,6 +443,48 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 document.getElementById('config_conversion_peso_a_unidad').addEventListener('change', actualizarAvisoPesoUnitario);
+
+// ── Foto del producto: selección/cámara, vista previa y "quitar" ────────────
+const inputImagenProducto      = document.getElementById('prod_imagen');
+const previewImagenProducto    = document.getElementById('prod_imagen_preview');
+const placeholderImagenProducto = document.getElementById('prod_imagen_placeholder');
+const btnQuitarImagenProducto  = document.getElementById('btn_quitar_imagen_producto');
+const inputEliminarImagenProducto = document.getElementById('prod_eliminar_imagen');
+
+function mostrarPreviewImagenProducto(src) {
+    if (src) {
+        previewImagenProducto.src = src;
+        previewImagenProducto.style.display = '';
+        placeholderImagenProducto.style.display = 'none';
+        btnQuitarImagenProducto.style.display = '';
+    } else {
+        previewImagenProducto.src = '';
+        previewImagenProducto.style.display = 'none';
+        placeholderImagenProducto.style.display = '';
+        btnQuitarImagenProducto.style.display = 'none';
+    }
+}
+
+inputImagenProducto.addEventListener('change', () => {
+    const archivo = inputImagenProducto.files[0];
+    if (!archivo) return;
+    inputEliminarImagenProducto.value = '0'; // si eligió una foto nueva, ya no aplica el "quitar" previo
+    const lector = new FileReader();
+    lector.onload = e => mostrarPreviewImagenProducto(e.target.result);
+    lector.readAsDataURL(archivo);
+});
+
+btnQuitarImagenProducto.addEventListener('click', () => {
+    inputImagenProducto.value = '';
+    inputEliminarImagenProducto.value = '1';
+    mostrarPreviewImagenProducto(null);
+});
+
+function verFotoProducto(url) {
+    if (!url) return;
+    document.getElementById('fotoProductoAmpliada').src = url;
+    modalVerFotoProducto.show();
+}
 
 // ── Llamada genérica a un controlador (por defecto, el de Productos) ────────
 async function llamar(accion, params = {}, controlador = CONTROLADOR) {
@@ -406,7 +530,7 @@ async function cargarProductos() {
     const tbody = document.getElementById('tbodyProductos');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
         productosCache = [];
         return;
     }
@@ -415,12 +539,16 @@ async function cargarProductos() {
     productosCache = productos; // se guarda para el export
 
     if (productos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7"><div class="pc-empty-state"><i class="fa-solid fa-box-open fa-2x mb-2"></i><br>No hay productos registrados.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8"><div class="pc-empty-state"><i class="fa-solid fa-box-open fa-2x mb-2"></i><br>No hay productos registrados.</div></td></tr>';
         return;
     }
 
     tbody.innerHTML = productos.map(p => `
         <tr id="fila-${p.id}">
+            <td>${p.img_ruta
+                ? `<img src="${p.img_ruta}" class="pc-thumb" alt="" onclick="verFotoProducto('${p.img_ruta}')">`
+                : `<span class="pc-thumb-placeholder"><i class="fa-solid fa-image"></i></span>`}
+            </td>
             <td>${p.codigo}</td>
             <td>${p.descripcion}</td>
             <td>${p.unidad_venta_codigo ?? '-'}</td>
@@ -495,6 +623,8 @@ function abrirModalCrear() {
     document.getElementById('formProducto').reset();
     document.getElementById('prod_id').value = '';
     document.getElementById('modalProductoTitulo').textContent = 'Nuevo producto';
+    inputEliminarImagenProducto.value = '0';
+    mostrarPreviewImagenProducto(null);
     modalProducto.show();
 }
 
@@ -512,12 +642,16 @@ async function abrirModalEditar(id) {
     document.getElementById('prod_cant_equivale').value = p.cant_equivale ?? '';
     document.getElementById('prod_peso').value = p.peso_unitario_g ?? '';
 
+    inputImagenProducto.value = '';
+    inputEliminarImagenProducto.value = '0';
+    mostrarPreviewImagenProducto(p.img_ruta || null);
+
     modalProducto.show();
 }
 
 document.getElementById('formProducto').addEventListener('submit', async function (e) {
     e.preventDefault();
-    const formData = new FormData(this);
+    const formData = new FormData(this); // incluye el archivo de "imagen" automáticamente
     formData.append('accion', 'GUARDARPRODUCTO');
 
     const resp = await fetch(CONTROLADOR, { method: 'POST', body: formData });
