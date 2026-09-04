@@ -157,9 +157,17 @@ function reporteOperarioDetalle()
         responder(false, 'La fecha de inicio no puede ser posterior a la fecha final.');
     }
 
+    // NOTA: producción ahora es multi-operario (pd.js_operarios jsonb array).
+    // Este JOIN LATERAL + filtro por operario_id deja, en la práctica, una
+    // sola fila por avance (la del operario buscado), igual que antes con
+    // operario_id escalar — pero ahora "op" trae la cantidad_producida que
+    // le corresponde específicamente a ESE operario dentro del avance.
+    $joinOperario = "CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS op";
+    $producidoOperario = "COALESCE((op->>'cantidad_producida')::numeric, 0)";
+
     $condiciones = [
         "pd.deleted_at IS NULL",
-        "pd.operario_id = :operario_id",
+        "(op->>'operario_id')::bigint = :operario_id",
         "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta",
     ];
     $params = [
@@ -186,13 +194,14 @@ function reporteOperarioDetalle()
     $condicionBase = implode(' AND ', $condiciones);
     $unidadSql = unidadCaseSql('pd');
 
-    // ── Resumen general (no depende de la unidad) ───────────────────────
+    // ── Resumen general (no depende de la unidad; cantidad insertada sigue siendo a nivel de avance) ─
     $sqlResumenGeneral = "
         SELECT
             COUNT(pd.id) AS total_avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
             COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado
         FROM produccion pd
+        $joinOperario
         WHERE $condicionBase
     ";
     $resumenGeneralFilas = executeQuery($conectar, $sqlResumenGeneral, $params);
@@ -202,43 +211,46 @@ function reporteOperarioDetalle()
         'total_kg_insertado' => 0,
     ];
 
-    // ── Resumen de lo PRODUCIDO, separado por unidad de salida ──────────
+    // ── Resumen de lo PRODUCIDO por ESTE operario, separado por unidad de salida ─
     $sqlResumenPorUnidad = "
         SELECT
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS total_producido,
-            ROUND(COALESCE(SUM(pd.cantidad_producida_kg), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio
+            COALESCE(SUM($producidoOperario), 0) AS total_producido,
+            ROUND(COALESCE(SUM($producidoOperario), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio
         FROM produccion pd
+        $joinOperario
         WHERE $condicionBase
         GROUP BY 1
         ORDER BY total_producido DESC
     ";
     $resumenPorUnidad = executeQuery($conectar, $sqlResumenPorUnidad, $params);
 
-    // ── Distribución por turno, separada por unidad ─────────────────────
+    // ── Distribución por turno, separada por unidad ──
     $sqlPorTurno = "
         SELECT
             $turnoCase AS turno,
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS cantidad
+            COALESCE(SUM($producidoOperario), 0) AS cantidad
         FROM produccion pd
+        $joinOperario
         WHERE $condicionBase
         GROUP BY 1, 2
         ORDER BY unidad, cantidad DESC
     ";
     $porTurno = executeQuery($conectar, $sqlPorTurno, $params);
 
-    // ── Distribución por máquina, separada por unidad ────────────────────
+    // ── Distribución por máquina, separada por unidad ──
     $sqlPorMaquina = "
         SELECT
             COALESCE(ma.nombre, 'Sin máquina') AS maquina,
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS cantidad
+            COALESCE(SUM($producidoOperario), 0) AS cantidad
         FROM produccion pd
+        $joinOperario
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         WHERE $condicionBase
         GROUP BY ma.nombre, 2
@@ -246,16 +258,17 @@ function reporteOperarioDetalle()
     ";
     $porMaquina = executeQuery($conectar, $sqlPorMaquina, $params);
 
-    // ── Top 5 moldes trabajados en el periodo ────────────────────────────
+    // ── Top 5 moldes trabajados en el periodo ──
     $sqlTopMoldes = "
         SELECT
             mo.id AS molde_id,
             mo.nombre AS molde_nombre,
             pr.descripcion AS producto_descripcion,
             COUNT(pd.id) AS avances,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS kg_producido,
+            COALESCE(SUM($producidoOperario), 0) AS kg_producido,
             MAX($unidadSql) AS unidad
         FROM produccion pd
+        $joinOperario
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint = pr.id
         WHERE $condicionBase
@@ -265,7 +278,7 @@ function reporteOperarioDetalle()
     ";
     $topMoldes = executeQuery($conectar, $sqlTopMoldes, $params);
 
-    // ── Detalle completo (avance a avance) ──────────────────────────────
+    // ── Detalle completo (avance a avance) ──
     $sqlDetalle = "
         SELECT
             pd.id,
@@ -277,10 +290,11 @@ function reporteOperarioDetalle()
             COALESCE(ma.nombre, 'Sin máquina') AS maquina_nombre,
             co.nombre AS color_nombre,
             pd.cantidad AS kg_insertado,
-            pd.cantidad_producida_kg AS kg_producido,
+            $producidoOperario AS kg_producido,
             $unidadSql AS unidad,
             pd.observaciones
         FROM produccion pd
+        $joinOperario
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint = pr.id
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
@@ -306,7 +320,6 @@ function reporteOperarioDetalle()
         'detalle'     => $detalle,
     ]);
 }
-
 // =============================================================================
 // HELPERS
 // =============================================================================
