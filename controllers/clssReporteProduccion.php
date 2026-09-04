@@ -2,30 +2,35 @@
 
 /**
  * controllers/clssReporteProduccion.php
- * Controlador del módulo de Reportes -> Producción (por operario y por molde)
+ * Controlador del módulo de Reportes -> Producción por operario
+ *
+ * REDISEÑO (referencia: dashboard "Tipificaciones por Ejecutivo"):
+ * en vez de un ranking general con pestañas por operario/molde, el flujo
+ * ahora es "busco al operario -> veo todo lo referente a su producción"
+ * dentro del periodo y filtros elegidos. Se eliminó la pestaña "Por molde"
+ * (ahora el detalle de moldes trabajados aparece dentro del propio reporte
+ * del operario, como Top 5).
  *
  * Este controlador NO escribe nada en la base de datos: solo lee y agrega
- * lo que ya registra clssProduccion.php. Vive aparte (no dentro de
- * clssProduccion.php) porque conceptualmente es un reporte, no parte del
- * flujo de registro de avances.
+ * lo que ya registra clssProduccion.php.
  *
- * MÉTRICA PRINCIPAL: se usa `produccion.cantidad` (kg insertados en
- * máquina) como base del ranking, porque SIEMPRE está presente y es un
- * valor entero. `cantidad_producida_kg` (kg realmente producidos) también
- * se suma aparte como "kg confirmados", pero solo existe en los avances
- * que ya fueron enviados a ensamblaje/empaquetado (enviado_ensamblaje =
- * true); por eso no se usa como base del ranking, para no penalizar a
- * operarios con corridas todavía en curso.
+ * MÉTRICA PRINCIPAL: `produccion.cantidad` (kg insertados en máquina),
+ * porque siempre está presente. `cantidad_producida_kg` (kg realmente
+ * producidos) se suma aparte como "kg confirmados", pero solo existe en
+ * avances ya enviados a ensamblaje/empaquetado.
+ *
+ * TURNO: calculado a partir de la hora del avance (pd.fecha::time), igual
+ * criterio que se venía usando en consultas manuales:
+ *   - 06:00 a 11:59:59  -> Día
+ *   - 12:00 a 17:59:59  -> Tarde
+ *   - 18:00 a 23:59:59  -> Noche
+ *   - resto (00:00-05:59:59) -> Madrugada
  *
  * PERIODOS:
  *   - dia:    la fecha indicada (un solo día).
  *   - semana: semana ISO (lunes a domingo) que contiene la fecha indicada.
  *   - mes:    mes calendario completo de la fecha indicada.
  *   - rango:  fecha_desde / fecha_hasta indicadas directamente.
- *
- * "Operario destacado" del periodo = el de mayor total de kg insertados
- * (con total de avances como criterio de desempate). Se calcula sobre los
- * mismos filtros que el ranking (máquina/sucursal/operario si se aplican).
  *
  * Solo se cuentan avances activos (produccion.deleted_at IS NULL).
  *
@@ -53,12 +58,6 @@ if (isset($_POST["accion"])) {
 function controladorReporteProduccion($accion)
 {
     switch ($accion) {
-        case 'REPORTEOPERARIOS':
-            reporteOperarios();
-            break;
-        case 'REPORTEDETALLEOPERARIO':
-            reporteDetalleOperario();
-            break;
         case 'BUSCAROPERARIOSREPORTE':
             buscarOperariosReporte();
             break;
@@ -68,17 +67,8 @@ function controladorReporteProduccion($accion)
         case 'BUSCARSUCURSALESREPORTE':
             buscarSucursalesReporte();
             break;
-        case 'REPORTEMOLDES':
-            reporteMoldes();
-            break;
-        case 'REPORTEDETALLEMOLDE':
-            reporteDetalleMolde();
-            break;
-        case 'BUSCARMOLDESREPORTE':
-            buscarMoldesReporte();
-            break;
-        case 'BUSCARCOLORESREPORTE':
-            buscarColoresReporte();
+        case 'REPORTEOPERARIODETALLE':
+            reporteOperarioDetalle();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -86,7 +76,7 @@ function controladorReporteProduccion($accion)
 }
 
 // =============================================================================
-// LISTADOS AUXILIARES (para los <select> de filtros)
+// LISTADOS AUXILIARES (para el buscador de operario y los filtros)
 // =============================================================================
 
 function buscarOperariosReporte()
@@ -124,240 +114,34 @@ function buscarSucursalesReporte()
     responder(true, 'OK', ['sucursales' => $result]);
 }
 
-function buscarMoldesReporte()
-{
-    $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre FROM molde WHERE deleted_at IS NULL ORDER BY nombre";
-    $result = executeQuery($conectar, $sql, []);
-    responder(true, 'OK', ['moldes' => $result]);
-}
-
-function buscarColoresReporte()
-{
-    $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre, rgb FROM color WHERE deleted_at IS NULL ORDER BY nombre";
-    $result = executeQuery($conectar, $sql, []);
-    responder(true, 'OK', ['colores' => $result]);
-}
-
-// =============================================================================
-// REPORTE PRINCIPAL — POR OPERARIO
-// =============================================================================
-
-/**
- * Ranking de operarios en un periodo, más la serie diaria (para la
- * tabla/gráfico de tendencia) y el resumen general del periodo.
- */
-function reporteOperarios()
+function reporteOperarioDetalle()
 {
     $conectar = conectar_oll_BD();
 
+    $operarioId       = intval($_POST['operario_id'] ?? 0);
     $modo             = trim($_POST['modo'] ?? 'dia'); // dia | semana | mes | rango
     $fechaRef         = trim($_POST['fecha'] ?? date('Y-m-d'));
     $fechaDesdeInput  = trim($_POST['fecha_desde'] ?? '');
     $fechaHastaInput  = trim($_POST['fecha_hasta'] ?? '');
-    $operarioId       = intval($_POST['operario_id'] ?? 0);
+    $turno            = trim($_POST['turno'] ?? ''); // '' = todos | dia | tarde | noche | madrugada
     $maquinaId        = intval($_POST['maquina_id'] ?? 0);
     $sucursalId       = intval($_POST['sucursal_id'] ?? 0);
-    $soloConActividad = ($_POST['solo_con_actividad'] ?? '1') !== '0';
 
-    [$fechaDesde, $fechaHasta, $etiquetaPeriodo] = calcularRangoPeriodo(
-        $modo,
-        $fechaRef,
-        $fechaDesdeInput,
-        $fechaHastaInput
-    );
-
-    if (!$fechaDesde || !$fechaHasta) {
-        responder(false, 'Debes indicar un rango de fechas válido.');
+    if (!$operarioId) {
+        responder(false, 'Debes indicar un operario.');
     }
-    if (strtotime($fechaDesde) > strtotime($fechaHasta)) {
-        responder(false, 'La fecha de inicio no puede ser posterior a la fecha final.');
-    }
-
-    // Condiciones que filtran los AVANCES (se usan en el JOIN, para no
-    // excluir operarios que simplemente no tuvieron actividad).
-    $joinConditions = ["pd.deleted_at IS NULL", "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta"];
-    $params = ['fecha_desde' => $fechaDesde, 'fecha_hasta' => $fechaHasta];
-
-    if ($maquinaId > 0) {
-        $joinConditions[] = "pd.maquina_id = :maquina_id";
-        $params['maquina_id'] = $maquinaId;
-    }
-    if ($sucursalId > 0) {
-        $joinConditions[] = "pd.sucursal = :sucursal_id";
-        $params['sucursal_id'] = $sucursalId;
-    }
-    $condicionJoin = implode(' AND ', $joinConditions);
-
-    // Condiciones que filtran los OPERARIOS mostrados.
-    $whereOperario = [
-        "op.activo = true",
-        "EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(op.js_etapas_relacionadas, '[]'::jsonb)) AS et
-            WHERE et->>'nombre' ILIKE '%PRODUC%'
-        )"
-    ];
-    if ($operarioId > 0) {
-        $whereOperario[] = "op.id = :operario_id";
-        $params['operario_id'] = $operarioId;
-    }
-    $condicionOperario = implode(' AND ', $whereOperario);
-
-    $having = $soloConActividad ? "HAVING COUNT(pd.id) > 0" : "";
-
-    $sql = "
-        SELECT
-            op.id AS operario_id,
-            op.nombre_completo AS operario_nombre,
-            c.nombre AS cargo,
-            COUNT(pd.id) AS total_avances,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS total_kg_producido,
-            COUNT(pd.cantidad_producida_kg) AS avances_finalizados,
-            ROUND(COALESCE(SUM(pd.cantidad), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio_kg_avance
-        FROM operario op
-        LEFT JOIN cargo c ON c.id = op.cargo_id
-        LEFT JOIN produccion pd ON pd.operario_id = op.id AND $condicionJoin
-        WHERE $condicionOperario
-        GROUP BY op.id, op.nombre_completo, c.nombre
-        $having
-        ORDER BY total_kg_insertado DESC, total_avances DESC, operario_nombre ASC
-    ";
-
-    $filas = executeQuery($conectar, $sql, $params);
-
-    // El primero de la lista con actividad real es el destacado del periodo.
-    $destacado = null;
-    foreach ($filas as $f) {
-        if ((int) $f['total_avances'] > 0) {
-            $destacado = $f;
-            break;
-        }
-    }
-
-    // Serie diaria del periodo (todos los operarios filtrados juntos),
-    // para la tabla/tendencia de "kg por día".
-    $sqlSerie = "
-        SELECT
-            pd.fecha::date AS dia,
-            COUNT(pd.id) AS total_avances,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg
-        FROM produccion pd
-        JOIN operario op ON op.id = pd.operario_id
-        WHERE $condicionJoin AND $condicionOperario
-        GROUP BY pd.fecha::date
-        ORDER BY dia
-    ";
-    $serie = executeQuery($conectar, $sqlSerie, $params);
-
-    // Resumen general del periodo (sobre las filas ya filtradas).
-    $totalKg      = 0;
-    $totalAvances = 0;
-    $operariosConActividad = 0;
-    foreach ($filas as $f) {
-        $totalKg      += (float) $f['total_kg_insertado'];
-        $totalAvances += (int) $f['total_avances'];
-        if ((int) $f['total_avances'] > 0) $operariosConActividad++;
-    }
-
-    responder(true, 'OK', [
-        'periodo' => [
-            'modo'      => $modo,
-            'desde'     => $fechaDesde,
-            'hasta'     => $fechaHasta,
-            'etiqueta'  => $etiquetaPeriodo,
-        ],
-        'resumen' => [
-            'total_kg_insertado'     => $totalKg,
-            'total_avances'          => $totalAvances,
-            'operarios_con_actividad' => $operariosConActividad,
-        ],
-        'destacado'    => $destacado,
-        'filas'        => $filas,
-        'serie_diaria' => $serie,
-    ]);
-}
-
-/**
- * Detalle día por día de UN operario dentro de un rango de fechas ya
- * calculado por el reporte principal (se usa para el modal "Ver detalle").
- */
-function reporteDetalleOperario()
-{
-    $conectar = conectar_oll_BD();
-
-    $operarioId = intval($_POST['operario_id'] ?? 0);
-    $fechaDesde = trim($_POST['fecha_desde'] ?? '');
-    $fechaHasta = trim($_POST['fecha_hasta'] ?? '');
-
-    if (!$operarioId) responder(false, 'Debes indicar un operario.');
-    if (!$fechaDesde || !$fechaHasta) responder(false, 'Debes indicar el rango de fechas del periodo.');
 
     $operario = executeQuery(
         $conectar,
-        "SELECT nombre_completo FROM operario WHERE id = :id",
+        "SELECT o.id, o.nombre_completo, c.nombre AS cargo
+         FROM operario o
+         LEFT JOIN cargo c ON c.id = o.cargo_id
+         WHERE o.id = :id",
         ['id' => $operarioId]
     );
-    if (empty($operario)) responder(false, 'Operario no encontrado.');
-
-    $sql = "
-        SELECT
-            pd.fecha::date AS dia,
-            COUNT(pd.id) AS avances,
-            COALESCE(SUM(pd.cantidad), 0) AS kg_insertado,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS kg_producido,
-            STRING_AGG(DISTINCT mo.nombre, ', ') AS moldes,
-            STRING_AGG(DISTINCT co.nombre, ', ') AS colores
-        FROM produccion pd
-        LEFT JOIN molde mo ON mo.id = pd.molde_id
-        LEFT JOIN color co ON co.id = pd.color_id
-        WHERE pd.operario_id = :operario_id
-          AND pd.deleted_at IS NULL
-          AND pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta
-        GROUP BY pd.fecha::date
-        ORDER BY dia
-    ";
-    $detalle = executeQuery($conectar, $sql, [
-        'operario_id' => $operarioId,
-        'fecha_desde' => $fechaDesde,
-        'fecha_hasta' => $fechaHasta,
-    ]);
-
-    responder(true, 'OK', [
-        'operario_nombre' => $operario[0]['nombre_completo'],
-        'detalle'         => $detalle,
-    ]);
-}
-
-// =============================================================================
-// REPORTE PRINCIPAL — POR MOLDE
-// =============================================================================
-
-/**
- * Ranking de moldes en un periodo. Se agrupa por (molde_id, unico_molde_producto)
- * y NO solo por molde_id, porque un mismo molde puede fabricar más de un
- * producto (js_producto de molde) y eso es información relevante: separa
- * "MOLDE X haciendo el producto A" de "MOLDE X haciendo el producto B" en
- * vez de mezclarlos en una sola fila.
- *
- * "Molde destacado" del periodo = el de mayor total de kg insertados
- * (con total de avances como desempate), igual criterio que en operarios.
- */
-function reporteMoldes()
-{
-    $conectar = conectar_oll_BD();
-
-    $modo             = trim($_POST['modo'] ?? 'dia'); // dia | semana | mes | rango
-    $fechaRef         = trim($_POST['fecha'] ?? date('Y-m-d'));
-    $fechaDesdeInput  = trim($_POST['fecha_desde'] ?? '');
-    $fechaHastaInput  = trim($_POST['fecha_hasta'] ?? '');
-    $moldeId          = intval($_POST['molde_id'] ?? 0);
-    $operarioId       = intval($_POST['operario_id'] ?? 0);
-    $maquinaId        = intval($_POST['maquina_id'] ?? 0);
-    $sucursalId       = intval($_POST['sucursal_id'] ?? 0);
-    $colorId          = intval($_POST['color_id'] ?? 0);
-    $soloConActividad = ($_POST['solo_con_actividad'] ?? '1') !== '0';
+    if (empty($operario)) {
+        responder(false, 'Operario no encontrado.');
+    }
 
     [$fechaDesde, $fechaHasta, $etiquetaPeriodo] = calcularRangoPeriodo(
         $modo,
@@ -373,172 +157,184 @@ function reporteMoldes()
         responder(false, 'La fecha de inicio no puede ser posterior a la fecha final.');
     }
 
-    // Condiciones que filtran los AVANCES (van en el JOIN, para no excluir
-    // moldes que simplemente no tuvieron actividad en el periodo).
-    $joinConditions = ["pd.deleted_at IS NULL", "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta"];
-    $params = ['fecha_desde' => $fechaDesde, 'fecha_hasta' => $fechaHasta];
+    $condiciones = [
+        "pd.deleted_at IS NULL",
+        "pd.operario_id = :operario_id",
+        "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta",
+    ];
+    $params = [
+        'operario_id' => $operarioId,
+        'fecha_desde' => $fechaDesde,
+        'fecha_hasta' => $fechaHasta,
+    ];
 
-    if ($operarioId > 0) {
-        $joinConditions[] = "pd.operario_id = :operario_id";
-        $params['operario_id'] = $operarioId;
-    }
     if ($maquinaId > 0) {
-        $joinConditions[] = "pd.maquina_id = :maquina_id";
+        $condiciones[] = "pd.maquina_id = :maquina_id";
         $params['maquina_id'] = $maquinaId;
     }
     if ($sucursalId > 0) {
-        $joinConditions[] = "pd.sucursal = :sucursal_id";
+        $condiciones[] = "pd.sucursal = :sucursal_id";
         $params['sucursal_id'] = $sucursalId;
     }
-    if ($colorId > 0) {
-        $joinConditions[] = "pd.color_id = :color_id";
-        $params['color_id'] = $colorId;
+
+    $turnoCase = turnoCaseSql('pd.fecha');
+    if ($turno !== '' && in_array($turno, ['dia', 'tarde', 'noche', 'madrugada'], true)) {
+        $condiciones[] = "$turnoCase = :turno";
+        $params['turno'] = $turno;
     }
-    $condicionJoin = implode(' AND ', $joinConditions);
 
-    // Condiciones que filtran los MOLDES mostrados.
-    $whereMolde = ["mo.deleted_at IS NULL"];
-    if ($moldeId > 0) {
-        $whereMolde[] = "mo.id = :molde_id";
-        $params['molde_id'] = $moldeId;
-    }
-    $condicionMolde = implode(' AND ', $whereMolde);
+    $condicionBase = implode(' AND ', $condiciones);
+    $unidadSql = unidadCaseSql('pd');
 
-    $having = $soloConActividad ? "HAVING COUNT(pd.id) > 0" : "";
+    // ── Resumen general (no depende de la unidad) ───────────────────────
+    $sqlResumenGeneral = "
+        SELECT
+            COUNT(pd.id) AS total_avances,
+            COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
+            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado
+        FROM produccion pd
+        WHERE $condicionBase
+    ";
+    $resumenGeneralFilas = executeQuery($conectar, $sqlResumenGeneral, $params);
+    $resumenGeneral = $resumenGeneralFilas[0] ?? [
+        'total_avances' => 0,
+        'moldes_distintos' => 0,
+        'total_kg_insertado' => 0,
+    ];
 
-    $sql = "
+    // ── Resumen de lo PRODUCIDO, separado por unidad de salida ──────────
+    $sqlResumenPorUnidad = "
+        SELECT
+            $unidadSql AS unidad,
+            COUNT(pd.id) AS avances,
+            COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
+            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS total_producido,
+            ROUND(COALESCE(SUM(pd.cantidad_producida_kg), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio
+        FROM produccion pd
+        WHERE $condicionBase
+        GROUP BY 1
+        ORDER BY total_producido DESC
+    ";
+    $resumenPorUnidad = executeQuery($conectar, $sqlResumenPorUnidad, $params);
+
+    // ── Distribución por turno, separada por unidad ─────────────────────
+    $sqlPorTurno = "
+        SELECT
+            $turnoCase AS turno,
+            $unidadSql AS unidad,
+            COUNT(pd.id) AS avances,
+            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS cantidad
+        FROM produccion pd
+        WHERE $condicionBase
+        GROUP BY 1, 2
+        ORDER BY unidad, cantidad DESC
+    ";
+    $porTurno = executeQuery($conectar, $sqlPorTurno, $params);
+
+    // ── Distribución por máquina, separada por unidad ────────────────────
+    $sqlPorMaquina = "
+        SELECT
+            COALESCE(ma.nombre, 'Sin máquina') AS maquina,
+            $unidadSql AS unidad,
+            COUNT(pd.id) AS avances,
+            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS cantidad
+        FROM produccion pd
+        LEFT JOIN maquina ma ON ma.id = pd.maquina_id
+        WHERE $condicionBase
+        GROUP BY ma.nombre, 2
+        ORDER BY unidad, cantidad DESC
+    ";
+    $porMaquina = executeQuery($conectar, $sqlPorMaquina, $params);
+
+    // ── Top 5 moldes trabajados en el periodo ────────────────────────────
+    $sqlTopMoldes = "
         SELECT
             mo.id AS molde_id,
             mo.nombre AS molde_nombre,
-            pd.unico_molde_producto,
             pr.descripcion AS producto_descripcion,
-            COUNT(pd.id) AS total_avances,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS total_kg_producido,
-            COUNT(pd.cantidad_producida_kg) AS avances_finalizados,
-            ROUND(COALESCE(SUM(pd.cantidad), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio_kg_avance
-        FROM molde mo
-        LEFT JOIN produccion pd ON pd.molde_id = mo.id AND $condicionJoin
-        LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint = pr.id
-        WHERE $condicionMolde
-        GROUP BY mo.id, mo.nombre, pd.unico_molde_producto, pr.descripcion
-        $having
-        ORDER BY total_kg_insertado DESC, total_avances DESC, molde_nombre ASC
-    ";
-
-    $filas = executeQuery($conectar, $sql, $params);
-
-    $destacado = null;
-    foreach ($filas as $f) {
-        if ((int) $f['total_avances'] > 0) {
-            $destacado = $f;
-            break;
-        }
-    }
-
-    // Serie diaria del periodo (todos los moldes filtrados juntos).
-    $sqlSerie = "
-        SELECT
-            pd.fecha::date AS dia,
-            COUNT(pd.id) AS total_avances,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg
+            COUNT(pd.id) AS avances,
+            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS kg_producido,
+            MAX($unidadSql) AS unidad
         FROM produccion pd
-        JOIN molde mo ON mo.id = pd.molde_id
-        WHERE $condicionJoin AND $condicionMolde
-        GROUP BY pd.fecha::date
-        ORDER BY dia
+        LEFT JOIN molde mo ON mo.id = pd.molde_id
+        LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint = pr.id
+        WHERE $condicionBase
+        GROUP BY mo.id, mo.nombre, pr.descripcion
+        ORDER BY kg_producido DESC, avances DESC
+        LIMIT 5
     ";
-    $serie = executeQuery($conectar, $sqlSerie, $params);
+    $topMoldes = executeQuery($conectar, $sqlTopMoldes, $params);
 
-    $totalKg    = 0;
-    $totalAvances = 0;
-    $moldesConActividad = 0;
-    foreach ($filas as $f) {
-        $totalKg      += (float) $f['total_kg_insertado'];
-        $totalAvances += (int) $f['total_avances'];
-        if ((int) $f['total_avances'] > 0) $moldesConActividad++;
-    }
+    // ── Detalle completo (avance a avance) ──────────────────────────────
+    $sqlDetalle = "
+        SELECT
+            pd.id,
+            pd.fecha::date AS fecha,
+            pd.fecha::time AS hora,
+            $turnoCase AS turno,
+            mo.nombre AS molde_nombre,
+            pr.descripcion AS producto_descripcion,
+            COALESCE(ma.nombre, 'Sin máquina') AS maquina_nombre,
+            co.nombre AS color_nombre,
+            pd.cantidad AS kg_insertado,
+            pd.cantidad_producida_kg AS kg_producido,
+            $unidadSql AS unidad,
+            pd.observaciones
+        FROM produccion pd
+        LEFT JOIN molde mo ON mo.id = pd.molde_id
+        LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint = pr.id
+        LEFT JOIN maquina ma ON ma.id = pd.maquina_id
+        LEFT JOIN color co ON co.id = pd.color_id
+        WHERE $condicionBase
+        ORDER BY pd.fecha DESC
+    ";
+    $detalle = executeQuery($conectar, $sqlDetalle, $params);
 
     responder(true, 'OK', [
+        'operario' => $operario[0],
         'periodo' => [
             'modo'     => $modo,
             'desde'    => $fechaDesde,
             'hasta'    => $fechaHasta,
             'etiqueta' => $etiquetaPeriodo,
         ],
-        'resumen' => [
-            'total_kg_insertado'   => $totalKg,
-            'total_avances'        => $totalAvances,
-            'moldes_con_actividad' => $moldesConActividad,
-        ],
-        'destacado'    => $destacado,
-        'filas'        => $filas,
-        'serie_diaria' => $serie,
-    ]);
-}
-
-/**
- * Detalle día por día de UN molde (opcionalmente acotado a un
- * unico_molde_producto puntual, para distinguir el producto exacto cuando
- * el molde fabrica más de uno) dentro de un rango ya calculado por el
- * reporte principal.
- */
-function reporteDetalleMolde()
-{
-    $conectar = conectar_oll_BD();
-
-    $moldeId           = intval($_POST['molde_id'] ?? 0);
-    $unicoMoldeProducto = trim($_POST['unico_molde_producto'] ?? '');
-    $fechaDesde        = trim($_POST['fecha_desde'] ?? '');
-    $fechaHasta        = trim($_POST['fecha_hasta'] ?? '');
-
-    if (!$moldeId) responder(false, 'Debes indicar un molde.');
-    if (!$fechaDesde || !$fechaHasta) responder(false, 'Debes indicar el rango de fechas del periodo.');
-
-    $molde = executeQuery($conectar, "SELECT nombre FROM molde WHERE id = :id", ['id' => $moldeId]);
-    if (empty($molde)) responder(false, 'Molde no encontrado.');
-
-    $where = [
-        "pd.molde_id = :molde_id",
-        "pd.deleted_at IS NULL",
-        "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta",
-    ];
-    $params = [
-        'molde_id'    => $moldeId,
-        'fecha_desde' => $fechaDesde,
-        'fecha_hasta' => $fechaHasta,
-    ];
-    if ($unicoMoldeProducto !== '') {
-        $where[] = "pd.unico_molde_producto = :unico_molde_producto";
-        $params['unico_molde_producto'] = $unicoMoldeProducto;
-    }
-
-    $sql = "
-        SELECT
-            pd.fecha::date AS dia,
-            COUNT(pd.id) AS avances,
-            COALESCE(SUM(pd.cantidad), 0) AS kg_insertado,
-            COALESCE(SUM(pd.cantidad_producida_kg), 0) AS kg_producido,
-            STRING_AGG(DISTINCT op.nombre_completo, ', ') AS operarios,
-            STRING_AGG(DISTINCT co.nombre, ', ') AS colores
-        FROM produccion pd
-        LEFT JOIN operario op ON op.id = pd.operario_id
-        LEFT JOIN color co ON co.id = pd.color_id
-        WHERE " . implode(' AND ', $where) . "
-        GROUP BY pd.fecha::date
-        ORDER BY dia
-    ";
-    $detalle = executeQuery($conectar, $sql, $params);
-
-    responder(true, 'OK', [
-        'molde_nombre' => $molde[0]['nombre'],
-        'detalle'      => $detalle,
+        'resumen_general'    => $resumenGeneral,
+        'resumen_por_unidad' => $resumenPorUnidad,
+        'por_turno'   => $porTurno,
+        'por_maquina' => $porMaquina,
+        'top_moldes'  => $topMoldes,
+        'detalle'     => $detalle,
     ]);
 }
 
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/**
+ * Expresión SQL (CASE) que clasifica un timestamp en turno: dia | tarde |
+ * noche | madrugada. $columnaFecha debe ser un timestamp (ej. "pd.fecha").
+ */
+function turnoCaseSql(string $columnaFecha): string
+{
+    return "
+        CASE
+            WHEN $columnaFecha::time >= '06:00:00' AND $columnaFecha::time < '12:00:00' THEN 'dia'
+            WHEN $columnaFecha::time >= '12:00:00' AND $columnaFecha::time < '18:00:00' THEN 'tarde'
+            WHEN $columnaFecha::time >= '18:00:00' THEN 'noche'
+            ELSE 'madrugada'
+        END
+    ";
+}
+
+/**
+ * Expresión SQL que obtiene la unidad de salida de un avance desde el
+ * jsonb js_configuracion_moment. Si no está seteada, asume 'kg'.
+ */
+function unidadCaseSql(string $aliasProduccion): string
+{
+    return "COALESCE(NULLIF($aliasProduccion.js_configuracion_moment->>'salida_produccion', ''), 'kg')";
+}
 
 function calcularRangoPeriodo(string $modo, string $fechaRef, string $fechaDesdeInput, string $fechaHastaInput): array
 {
