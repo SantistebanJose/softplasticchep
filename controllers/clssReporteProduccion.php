@@ -34,6 +34,16 @@
  *
  * Solo se cuentan avances activos (produccion.deleted_at IS NULL).
  *
+ * ACCESO:
+ *   - REPORTEOPERARIODETALLE: uso administrativo (panel de reportes). El
+ *     operario_id viene del POST porque el admin puede consultar a
+ *     cualquier operario.
+ *   - MISPRODUCCIONESOPERARIO: uso desde la tablet del propio operario.
+ *     El operario_id JAMÁS se toma del POST; se fuerza desde
+ *     $_SESSION['operario_id'] (sesión operario_*, ver
+ *     controllers_tablet/clssAuthOperario.php) para que un operario no
+ *     pueda ver la producción de otro manipulando el request.
+ *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
 
@@ -69,6 +79,9 @@ function controladorReporteProduccion($accion)
             break;
         case 'REPORTEOPERARIODETALLE':
             reporteOperarioDetalle();
+            break;
+        case 'MISPRODUCCIONESOPERARIO':
+            misProduccionesOperario();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -114,22 +127,86 @@ function buscarSucursalesReporte()
     responder(true, 'OK', ['sucursales' => $result]);
 }
 
+// =============================================================================
+// REPORTE ADMINISTRATIVO (operario_id viene del POST; se usa desde el panel
+// de reportes, donde el admin elige a qué operario quiere consultar)
+// =============================================================================
+
 function reporteOperarioDetalle()
 {
     $conectar = conectar_oll_BD();
 
-    $operarioId       = intval($_POST['operario_id'] ?? 0);
-    $modo             = trim($_POST['modo'] ?? 'dia'); // dia | semana | mes | rango
-    $fechaRef         = trim($_POST['fecha'] ?? date('Y-m-d'));
-    $fechaDesdeInput  = trim($_POST['fecha_desde'] ?? '');
-    $fechaHastaInput  = trim($_POST['fecha_hasta'] ?? '');
-    $turno            = trim($_POST['turno'] ?? ''); // '' = todos | dia | tarde | noche | madrugada
-    $maquinaId        = intval($_POST['maquina_id'] ?? 0);
-    $sucursalId       = intval($_POST['sucursal_id'] ?? 0);
-
+    $operarioId = intval($_POST['operario_id'] ?? 0);
     if (!$operarioId) {
         responder(false, 'Debes indicar un operario.');
     }
+
+    $payload = reporteOperarioDetalleInterno($conectar, $operarioId, [
+        'modo'         => trim($_POST['modo'] ?? 'dia'),
+        'fecha'        => trim($_POST['fecha'] ?? date('Y-m-d')),
+        'fecha_desde'  => trim($_POST['fecha_desde'] ?? ''),
+        'fecha_hasta'  => trim($_POST['fecha_hasta'] ?? ''),
+        'turno'        => trim($_POST['turno'] ?? ''),
+        'maquina_id'   => intval($_POST['maquina_id'] ?? 0),
+        'sucursal_id'  => intval($_POST['sucursal_id'] ?? 0),
+    ]);
+
+    responder(true, 'OK', $payload);
+}
+
+// =============================================================================
+// "MIS PRODUCCIONES" (tablet del propio operario)
+// El operario_id se fuerza desde la sesión, nunca desde el POST.
+// =============================================================================
+
+function misProduccionesOperario()
+{
+    // Sesión de la tablet del operario (ver controllers_tablet/clssAuthOperario.php,
+    // mismo namespace operario_* que usa panel_operario.php).
+    $operarioId = intval($_SESSION['operario_id'] ?? 0);
+    if (!$operarioId) {
+        responder(false, 'Sesión de operario no válida. Vuelve a iniciar sesión.');
+    }
+
+    $conectar = conectar_oll_BD();
+
+    // Filtros reducidos: el operario ve su propio periodo, sin necesidad de
+    // buscador de operario/máquina/sucursal (eso es para el reporte admin).
+    $payload = reporteOperarioDetalleInterno($conectar, $operarioId, [
+        'modo'         => trim($_POST['modo'] ?? 'dia'),
+        'fecha'        => trim($_POST['fecha'] ?? date('Y-m-d')),
+        'fecha_desde'  => trim($_POST['fecha_desde'] ?? ''),
+        'fecha_hasta'  => trim($_POST['fecha_hasta'] ?? ''),
+        'turno'        => '',
+        'maquina_id'   => 0,
+        'sucursal_id'  => 0,
+    ]);
+
+    responder(true, 'OK', $payload);
+}
+
+// =============================================================================
+// LÓGICA COMPARTIDA (usada por el reporte admin y por "Mis producciones")
+// =============================================================================
+
+/**
+ * Arma todo el reporte de un operario (resumen, por turno, por máquina,
+ * top moldes y detalle) para el periodo y filtros indicados.
+ *
+ * $operarioId siempre llega ya resuelto y validado por el caller
+ * (nunca se lee $_POST['operario_id'] aquí adentro), de modo que esta
+ * función es segura de usar tanto para el reporte admin como para el
+ * endpoint de "Mis producciones" del operario.
+ */
+function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtros): array
+{
+    $modo            = $filtros['modo'] ?? 'dia';
+    $fechaRef        = $filtros['fecha'] ?? date('Y-m-d');
+    $fechaDesdeInput = $filtros['fecha_desde'] ?? '';
+    $fechaHastaInput = $filtros['fecha_hasta'] ?? '';
+    $turno           = $filtros['turno'] ?? '';
+    $maquinaId       = (int) ($filtros['maquina_id'] ?? 0);
+    $sucursalId      = (int) ($filtros['sucursal_id'] ?? 0);
 
     $operario = executeQuery(
         $conectar,
@@ -304,7 +381,7 @@ function reporteOperarioDetalle()
     ";
     $detalle = executeQuery($conectar, $sqlDetalle, $params);
 
-    responder(true, 'OK', [
+    return [
         'operario' => $operario[0],
         'periodo' => [
             'modo'     => $modo,
@@ -318,8 +395,9 @@ function reporteOperarioDetalle()
         'por_maquina' => $porMaquina,
         'top_moldes'  => $topMoldes,
         'detalle'     => $detalle,
-    ]);
+    ];
 }
+
 // =============================================================================
 // HELPERS
 // =============================================================================

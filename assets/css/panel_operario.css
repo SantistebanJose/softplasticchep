@@ -212,6 +212,8 @@
 .pc-op-panel-btn.q-blue   { background: linear-gradient(160deg, #2f6fed, #1c4fc2); }
 .pc-op-panel-btn.q-navy   { background: linear-gradient(160deg, #16215c, #0b1538); }
 .pc-op-panel-btn.q-amber  { background: linear-gradient(160deg, #f0a500, #c67c00); }
+.pc-op-panel-btn.q-teal { background: linear-gradient(160deg, #0EA5A5, #096e6e); }
+
 
 /* ===== Aviso sin acceso ===== */
 .pc-op-panel-empty {
@@ -227,6 +229,8 @@
   font-size: 14px;
 }
 .pc-op-panel-empty i { font-size: 18px; }
+
+
 
 @media (max-width: 720px) {
   .pc-op-panel-shell {

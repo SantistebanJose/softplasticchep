@@ -29,7 +29,6 @@ else                 $saludo = 'Buenas noches';
     <title>Panel operario · Plásticos Chepito</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/panel_operario.css">
 </head>
 <body>
@@ -65,6 +64,14 @@ else                 $saludo = 'Buenas noches';
             <div class="pc-op-panel-icon"><i class="fa-solid fa-industry"></i></div>
             <span class="pc-op-panel-label">Producción</span>
             <span class="pc-op-panel-sub">Registra tu avance de moldeado</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+        <?php endif; ?>
+        <?php if ($puedeProduccion): ?>
+        <a href="mis_producciones.php" class="pc-op-panel-btn q-teal">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-chart-column"></i></div>
+            <span class="pc-op-panel-label">Mis producciones</span>
+            <span class="pc-op-panel-sub">Revisa tu reporte de avances</span>
             <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
