@@ -249,16 +249,25 @@ include("header.php");
                 </div>
             </div>
             <div class="mt-2 d-flex gap-2 justify-content-center flex-wrap">
-                <label class="btn btn-sm btn-outline-secondary mb-0" for="prod_imagen">
-                    <i class="fa-solid fa-camera"></i> Tomar / subir foto
+                <label class="btn btn-sm btn-outline-secondary mb-0" for="prod_imagen_camara">
+                    <i class="fa-solid fa-camera"></i> Tomar foto
                 </label>
-                <input type="file" class="d-none" id="prod_imagen" name="imagen" accept="image/*" capture="environment">
+                <label class="btn btn-sm btn-outline-secondary mb-0" for="prod_imagen_galeria">
+                    <i class="fa-solid fa-image"></i> Subir de galería
+                </label>
                 <button type="button" class="btn btn-sm btn-outline-danger" id="btn_quitar_imagen_producto" style="display:none;">
                     <i class="fa-solid fa-xmark"></i> Quitar foto
                 </button>
             </div>
+            <!-- Dos triggers separados: uno fuerza la cámara (capture), el otro
+                 no lleva capture y por eso abre el selector de archivos/galería.
+                 Ambos vuelcan el archivo elegido al input real (prod_imagen,
+                 el que sí se manda en el form) vía DataTransfer. -->
+            <input type="file" class="d-none" id="prod_imagen_camara" accept="image/*" capture="environment">
+            <input type="file" class="d-none" id="prod_imagen_galeria" accept="image/*">
+            <input type="file" class="d-none" id="prod_imagen" name="imagen" accept="image/*">
             <input type="hidden" name="eliminar_imagen" id="prod_eliminar_imagen" value="0">
-            <small class="text-muted d-block mt-1">JPG, PNG o WEBP, máx. 5MB. En celular abre la cámara directamente.</small>
+            <small class="text-muted d-block mt-1">JPG, PNG o WEBP, máx. 5MB.</small>
           </div>
 
           <div class="mb-2">
@@ -444,11 +453,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.getElementById('config_conversion_peso_a_unidad').addEventListener('change', actualizarAvisoPesoUnitario);
 
-// ── Foto del producto: selección/cámara, vista previa y "quitar" ────────────
-const inputImagenProducto      = document.getElementById('prod_imagen');
-const previewImagenProducto    = document.getElementById('prod_imagen_preview');
-const placeholderImagenProducto = document.getElementById('prod_imagen_placeholder');
-const btnQuitarImagenProducto  = document.getElementById('btn_quitar_imagen_producto');
+// ── Foto del producto: cámara / galería, vista previa y "quitar" ────────────
+const inputImagenProducto        = document.getElementById('prod_imagen');         // el que se manda en el form (name="imagen")
+const inputImagenProductoCamara  = document.getElementById('prod_imagen_camara');  // capture="environment" -> fuerza cámara
+const inputImagenProductoGaleria = document.getElementById('prod_imagen_galeria'); // sin capture -> selector de archivos/galería
+const previewImagenProducto      = document.getElementById('prod_imagen_preview');
+const placeholderImagenProducto  = document.getElementById('prod_imagen_placeholder');
+const btnQuitarImagenProducto    = document.getElementById('btn_quitar_imagen_producto');
 const inputEliminarImagenProducto = document.getElementById('prod_eliminar_imagen');
 
 function mostrarPreviewImagenProducto(src) {
@@ -465,13 +476,28 @@ function mostrarPreviewImagenProducto(src) {
     }
 }
 
-inputImagenProducto.addEventListener('change', () => {
-    const archivo = inputImagenProducto.files[0];
+// Toma el archivo elegido en cualquiera de los dos triggers (cámara o
+// galería) y lo copia al input real que viaja en el FormData del form.
+function usarArchivoImagenProducto(archivo) {
     if (!archivo) return;
+
+    const dt = new DataTransfer();
+    dt.items.add(archivo);
+    inputImagenProducto.files = dt.files;
+
     inputEliminarImagenProducto.value = '0'; // si eligió una foto nueva, ya no aplica el "quitar" previo
     const lector = new FileReader();
     lector.onload = e => mostrarPreviewImagenProducto(e.target.result);
     lector.readAsDataURL(archivo);
+}
+
+inputImagenProductoCamara.addEventListener('change', () => {
+    usarArchivoImagenProducto(inputImagenProductoCamara.files[0]);
+    inputImagenProductoCamara.value = '';
+});
+inputImagenProductoGaleria.addEventListener('change', () => {
+    usarArchivoImagenProducto(inputImagenProductoGaleria.files[0]);
+    inputImagenProductoGaleria.value = '';
 });
 
 btnQuitarImagenProducto.addEventListener('click', () => {
