@@ -374,10 +374,10 @@ include("header.php");
 
           <div class="row">
             <div class="col-md-3 mb-2">
-                <label class="form-label">Operario</label>
-                <select class="form-select" id="prod_operario_id">
-                    <option value="">Selecciona...</option>
+                <label class="form-label">Operario(s) *</label>
+                <select class="form-select" id="prod_operario_id" multiple>
                 </select>
+                <div class="form-text">El primero que agregues queda como responsable principal.</div>
             </div>
             <div class="col-md-3 mb-2">
                 <label class="form-label">Máquina</label>
@@ -608,11 +608,15 @@ function seleccionarTabMaterial(tipo) {
 }
 function inicializarTomSelectOperario() {
     if (tsOperario) return;
+    // maxItems: null -> permite marcar varios operarios en el mismo avance.
+    // El primero que se agregue queda como responsable principal
+    // (operario_id), y la lista completa se guarda en js_operarios.
     tsOperario = new TomSelect('#prod_operario_id', {
         valueField: 'id',
         labelField: 'nombre_completo',
         searchField: ['nombre_completo', 'dni'],
         options: [],
+        maxItems: null,
         placeholder: 'Buscar por nombre o DNI...',
         render: {
             option: function (data, escape) {
@@ -870,6 +874,17 @@ function estadoCorridaTexto(p) {
     return `Inicio <b>${formatearFechaHoraLegible(p.fecha_hora_inicio)}</b> — Fin <b>${formatearFechaHoraLegible(p.fecha_hora_fin)}</b>`;
 }
 
+// ── Nombres de los operarios que participaron en el avance ──────────────────
+// Prioriza la lista completa (js_operarios); si por alguna razón viene
+// vacía (avances viejos sin migrar, o datos incompletos) cae de vuelta al
+// nombre único que ya traía el JOIN (operario_nombre).
+function operariosTexto(p) {
+    if (Array.isArray(p.js_operarios) && p.js_operarios.length > 0) {
+        return p.js_operarios.map(o => o.nombre_completo).filter(Boolean).join(', ');
+    }
+    return p.operario_nombre || '';
+}
+
 // ── Estética de cada material: color y ícono estables por nombre, para
 //    reconocer un material de un vistazo entre compras repetidas. No
 //    depende de datos de categoría (no existen), solo de un hash simple. ──
@@ -961,8 +976,9 @@ async function cargarSelectsModal(seleccion = {}) {
         obtenerSucursalesProd(),
     ]);
 
-    // Operario: ahora usa Tom Select (buscador por nombre o DNI) en vez
-    // de un <select> nativo con insertAdjacentHTML.
+    // Operario: Tom Select en modo múltiple (buscador por nombre o DNI).
+    // `seleccion.operarios_ids` trae la lista completa (edición); si no
+    // viene, se cae a un solo operario_id (compatibilidad / creación).
     inicializarTomSelectOperario();
     tsOperario.clearOptions();
     if (operario.success) operario.operario.forEach(o => {
@@ -973,8 +989,11 @@ async function cargarSelectsModal(seleccion = {}) {
             dni: o.dni,
         });
     });
-    if (seleccion.operario_id) {
-        tsOperario.setValue(seleccion.operario_id);
+    const operariosParaMarcar = Array.isArray(seleccion.operarios_ids) && seleccion.operarios_ids.length
+        ? seleccion.operarios_ids
+        : (seleccion.operario_id ? [seleccion.operario_id] : []);
+    if (operariosParaMarcar.length) {
+        tsOperario.setValue(operariosParaMarcar.map(String));
     } else {
         tsOperario.clear();
     }
@@ -1094,7 +1113,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     if (p.color_nombre) {
         metaPartes.push(`${p.color_rgb ? `<span class="pc-color-dot" style="background:${p.color_rgb}"></span>` : ''}${p.color_nombre}`);
     }
-    if (p.operario_nombre) metaPartes.push(p.operario_nombre);
+    const nombresOperarios = operariosTexto(p);
+    if (nombresOperarios) metaPartes.push(nombresOperarios);
     if (p.maquina_nombre) metaPartes.push(p.maquina_nombre);
     if (p.sucursal_nombre) metaPartes.push(p.sucursal_nombre);
     if (p.fecha) metaPartes.push(formatearFechaCorta(p.fecha));
@@ -1445,8 +1465,17 @@ async function abrirModalEditarProduccion(id) {
     const partesUnico = (p.unico_molde_producto || '').split('-');
     const productoIdDesdeUnico = partesUnico.length > 1 ? partesUnico[1] : null;
 
+    // Lista completa de operarios que participaron (para preseleccionar
+    // el Tom Select en modo múltiple). Si el avance es viejo y no tiene
+    // js_operarios, se cae de vuelta al operario_id único.
+    const operariosIdsExistentes = Array.isArray(p.js_operarios) && p.js_operarios.length
+        ? p.js_operarios.map(o => o.operario_id)
+        : (p.operario_id ? [p.operario_id] : []);
+
     await cargarSelectsModal({
-        operario_id: p.operario_id, maquina_id: p.maquina_id,
+        operarios_ids: operariosIdsExistentes,
+        operario_id: p.operario_id,
+        maquina_id: p.maquina_id,
         producto_id: productoIdDesdeUnico,
         unico_molde: p.unico_molde_producto,
         color_id: p.color_id,
@@ -1506,9 +1535,20 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     const uniqueMolde  = moldeSelect.value;                          // ej: "7-2"
     const moldeProducto = opcionMolde?.dataset.etiqueta || '';       // ej: "MOLDE BASTON OVALADO — COLGADOR OVALADO MULTIUSO"
 
+    // Operarios: Tom Select en modo múltiple. El PRIMERO que aparece
+    // seleccionado queda como responsable principal (operario_id, se sigue
+    // mandando por compatibilidad con reportes/filtros viejos); la lista
+    // completa se manda en "operarios" y el backend arma js_operarios.
+    const operariosIds = tsOperario ? tsOperario.getValue() : [];
+    if (!operariosIds.length) {
+        Swal.fire('Falta un dato', 'Debes seleccionar al menos un operario.', 'warning');
+        return;
+    }
+
     const params = {
         id: produccionIdActual,
-        operario_id: document.getElementById('prod_operario_id').value,
+        operario_id: operariosIds[0],
+        operarios: JSON.stringify(operariosIds),
         maquina_id: document.getElementById('prod_maquina_id').value,
         categoria_material_id: document.getElementById('prod_categoria_material_id').value,
         sucursal_id: document.getElementById('prod_sucursal_id').value,

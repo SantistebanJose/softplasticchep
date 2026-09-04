@@ -445,6 +445,38 @@ function crearEnsamblajeAutomaticoParaProduccion(
     return $ensamblajeId;
 }
 
+// Construye el array [{operario_id, nombre_completo, cargo}, ...] a partir
+// de una lista de IDs de operario, para guardarlo en produccion.js_operarios.
+// Ignora IDs inválidos o inactivos y deduplica.
+function construirJsOperarios($conectar, array $operarioIds): string
+{
+    $ids = array_values(array_unique(array_map('intval', array_filter($operarioIds))));
+    if (empty($ids)) return '[]';
+
+    $placeholders = [];
+    $params = [];
+    foreach ($ids as $i => $oid) {
+        $key = "o$i";
+        $placeholders[] = ":$key";
+        $params[$key] = $oid;
+    }
+
+    $rows = executeQuery($conectar, "
+        SELECT o.id, o.nombre_completo, c.nombre AS cargo
+        FROM operario o
+        LEFT JOIN cargo c ON c.id = o.cargo_id
+        WHERE o.id IN (" . implode(',', $placeholders) . ")
+    ", $params);
+
+    $lista = array_map(fn($r) => [
+        'operario_id'     => (int) $r['id'],
+        'nombre_completo' => $r['nombre_completo'],
+        'cargo'           => $r['cargo'],
+    ], $rows);
+
+    return json_encode($lista, JSON_UNESCAPED_UNICODE);
+}
+
 // =============================================================================
 // PRODUCCIÓN (avances)
 // =============================================================================
@@ -472,9 +504,15 @@ function listarProducciones()
         $where[] = "(LOWER(pd.observaciones) LIKE LOWER(:texto) OR LOWER(mo.nombre) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
-    if ($operario_id !== '') {
-        $where[] = "pd.operario_id = :operario_id";
-        $params['operario_id'] = $operario_id;
+        if ($operario_id !== '') {
+        // Coincide si es el responsable principal (operario_id) O si aparece
+        // como participante en js_operarios (avances con varios operarios).
+        $where[] = "(pd.operario_id = :operario_id OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS op
+            WHERE (op->>'operario_id')::bigint = :operario_id_js
+        ))";
+        $params['operario_id']    = $operario_id;
+        $params['operario_id_js'] = $operario_id;
     }
     if ($maquina_id !== '') {
         $where[] = "pd.maquina_id = :maquina_id";
@@ -543,6 +581,10 @@ function listarProducciones()
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
 
+            $fila['js_operarios'] = !empty($fila['js_operarios'])   // <-- AGREGAR ESTO
+                ? json_decode($fila['js_operarios'], true)
+                : [];
+
             $itemFoto = !empty($fila['js_configuracion_moment']) ? json_decode($fila['js_configuracion_moment'], true) : null;
             $itemVivo = !empty($fila['item_vivo']) ? json_decode($fila['item_vivo'], true) : null;
             $forzarVigente = empty($fila['enviado_ensamblaje']);
@@ -600,9 +642,14 @@ function obtenerProduccion($id)
     // Esto hacía fallar OBTENERPRODUCCION (usado al editar un avance) el
     // 100% de las veces. Ahora sí corta la ejecución únicamente cuando el
     // registro no existe.
-    if (empty($produccion)) {
+        if (empty($produccion)) {
         responder(false, 'Registro de producción no encontrado.');
     }
+
+    $produccion[0]['js_operarios'] = !empty($produccion[0]['js_operarios'])   // <-- AGREGAR ESTO
+        ? json_decode($produccion[0]['js_operarios'], true)
+        : [];
+
     $itemFoto = !empty($produccion[0]['js_configuracion_moment']) ? json_decode($produccion[0]['js_configuracion_moment'], true) : null;
     $itemVivo = !empty($produccion[0]['item_vivo']) ? json_decode($produccion[0]['item_vivo'], true) : null;
     $forzarVigente = empty($produccion[0]['enviado_ensamblaje']);
@@ -660,6 +707,26 @@ function verificarPropietarioOperario($conectar, int $produccionId): void
 
     if ((int)($fila[0]['operario_id'] ?? 0) !== (int)$_SESSION['operario_id']) {
         responder(false, 'No puedes modificar un avance de producción que no es tuyo.');
+    }
+}
+
+// Un operario (sesión operario_id) solo puede editar/eliminar un avance
+// MIENTRAS esté corriendo (aún no enviado a ensamblaje/empaquetado). Una
+// vez enviado, solo el administrador (sin operario_id en sesión) puede
+// modificarlo o desactivarlo.
+function verificarNoEnviadoParaOperario($conectar, int $produccionId): void
+{
+    if (empty($_SESSION['operario_id'])) return; // admin, sin restricción
+
+    $fila = executeQuery(
+        $conectar,
+        "SELECT enviado_ensamblaje FROM produccion WHERE id = :id",
+        ['id' => $produccionId]
+    );
+    if (empty($fila)) return; // el flujo normal ya valida "no encontrado"
+
+    if (!empty($fila[0]['enviado_ensamblaje'])) {
+        responder(false, 'Este avance ya fue enviado a ensamblaje/empaquetado. Solo un administrador puede editarlo o eliminarlo.');
     }
 }
 
@@ -885,6 +952,12 @@ function guardarProduccion()
 
     $id = intval($_POST['id'] ?? 0);
 
+    // Lista de IDs de operarios participantes en este avance. Si viene desde
+    // la tablet (sesión de operario), solo hay uno: el propio operario. Si
+    // viene del panel de admin, puede traer varios vía $_POST['operarios']
+    // (JSON array de IDs), además del operario_id "principal".
+    $operariosParticipantesIds = [];   // <-- NUEVO
+
     if (!empty($_SESSION['operario_id'])) {
         $operario_id = intval($_SESSION['operario_id']);
         $chk = executeQuery($conectar, "
@@ -898,9 +971,23 @@ function guardarProduccion()
         if (empty($chk)) {
             responder(false, 'Tu usuario ya no tiene acceso al módulo de Producción. Contacta a un administrador.');
         }
+        $operariosParticipantesIds[] = $operario_id;   // <-- NUEVO
     } else {
         $operario_id = !empty($_POST['operario_id']) ? intval($_POST['operario_id']) : null;
+        if ($operario_id) $operariosParticipantesIds[] = $operario_id;   // <-- NUEVO
     }
+
+    // Operarios adicionales enviados desde el panel de admin (opcional).
+    // <-- NUEVO (bloque completo)
+    $operariosExtraRaw = json_decode($_POST['operarios'] ?? '[]', true);
+    if (is_array($operariosExtraRaw)) {
+        foreach ($operariosExtraRaw as $oid) {
+            $oid = intval($oid);
+            if ($oid > 0) $operariosParticipantesIds[] = $oid;
+        }
+    }
+    $operariosParticipantesIds = array_values(array_unique($operariosParticipantesIds));
+    // --- fin bloque nuevo ---
 
     $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
     $maquina_id  = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
@@ -910,7 +997,6 @@ function guardarProduccion()
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
 
-    
     $partesUnico = explode('-', $unico_molde);
     $productoIdParaConfig = isset($partesUnico[1]) ? intval($partesUnico[1]) : 0;
 
@@ -942,18 +1028,14 @@ function guardarProduccion()
     $observaciones      = trim($_POST['observaciones'] ?? '');
     $detalleJson        = trim($_POST['detalle'] ?? '[]');
 
-    // La empresa ya no maneja órdenes de producción ni el concepto de
-    // "emergencia" (que solo existía para justificar romper el orden de
-    // una orden). Ambos campos se conservan en la tabla por compatibilidad
-    // pero siempre se guardan vacíos/false.
     $orden_id     = null;
     $esEmergencia = false;
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
     if ($categoria_material_id !== null) {
-    $cat = executeQuery($conectar, "SELECT id FROM categoria_material WHERE id = :id AND deleted_at IS NULL", ['id' => $categoria_material_id]);
-    if (empty($cat)) responder(false, 'La categoría de material seleccionada no existe o está inactiva.');
-}
+        $cat = executeQuery($conectar, "SELECT id FROM categoria_material WHERE id = :id AND deleted_at IS NULL", ['id' => $categoria_material_id]);
+        if (empty($cat)) responder(false, 'La categoría de material seleccionada no existe o está inactiva.');
+    }
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
@@ -972,19 +1054,36 @@ function guardarProduccion()
     $color = executeQuery($conectar, "SELECT id FROM color WHERE id = :id AND deleted_at IS NULL", ['id' => $color_id]);
     if (empty($color)) responder(false, 'El color seleccionado no existe o está inactivo.');
 
+    // Validar que los operarios participantes existan y estén activos.  <-- NUEVO
+    if (!empty($operariosParticipantesIds)) {
+        $placeholders = [];
+        $params = [];
+        foreach ($operariosParticipantesIds as $i => $oid) {
+            $key = "op$i";
+            $placeholders[] = ":$key";
+            $params[$key] = $oid;
+        }
+        $filasOp = executeQuery(
+            $conectar,
+            "SELECT id FROM operario WHERE id IN (" . implode(',', $placeholders) . ") AND activo = true",
+            $params
+        );
+        if (count($filasOp) !== count($operariosParticipantesIds)) {
+            responder(false, 'Uno o más operarios seleccionados no existen o están inactivos.');
+        }
+    }
+    $jsOperarios = construirJsOperarios($conectar, $operariosParticipantesIds);   // <-- NUEVO
+
     $detalleEntrada = json_decode($detalleJson, true);
     if (!is_array($detalleEntrada)) $detalleEntrada = [];
 
-    // El detalle que llega del formulario ahora es solo material + cantidad
-    // total + comentario (ya no trae rel_compra_material_id: el usuario no
-    // elige lote). El reparto FIFO se hace en insertarLineasYRestarStock().
     $detalle = [];
     foreach ($detalleEntrada as $linea) {
         $materialId = intval($linea['material_id'] ?? 0);
         $cant       = floatval($linea['cantidad'] ?? 0);
         $comentario = trim($linea['comentario'] ?? '');
 
-        if ($materialId <= 0 || $cant <= 0) continue; // fila incompleta, se ignora
+        if ($materialId <= 0 || $cant <= 0) continue;
 
         $detalle[] = [
             'material_id' => $materialId,
@@ -992,11 +1091,6 @@ function guardarProduccion()
             'comentario'  => $comentario ?: null,
         ];
     }
-
-    // El detalle de materiales es opcional: puede haber avances de producción
-    // (ej. reproceso, control de calidad) que no consuman material nuevo.
-    // Si quieres forzarlo obligatorio, descomenta la validación siguiente:
-    // if (empty($detalle)) responder(false, 'Debes agregar al menos un material.');
 
     $conectar->beginTransaction();
     try {
@@ -1010,17 +1104,16 @@ function guardarProduccion()
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-            // DESPUÉS
             $nuevaProduccion = executeQuery($conectar, "
                 INSERT INTO produccion (
                     operario_id, maquina_id, molde_id, color_id, cantidad,
                     categoria_material_id, sucursal, unico_molde_producto, molde_producto,
-                    fecha, observaciones, js_configuracion_moment,
+                    fecha, observaciones, js_configuracion_moment, js_operarios,
                     created_at, updated_at, js_session, js_historial
                 ) VALUES (
                     :operario_id, :maquina_id, :molde_id, :color_id, :cantidad,
                     :categoria_material_id, :sucursal_id, :unico_molde, :molde_producto,
-                    :fecha, :observaciones, :js_config_moment,
+                    :fecha, :observaciones, :js_config_moment, :js_operarios,
                     NOW(), NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
@@ -1036,6 +1129,7 @@ function guardarProduccion()
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
                 'js_config_moment'       => $jsConfigMoment,
+                'js_operarios'           => $jsOperarios,   // <-- NUEVO
                 'js_session'             => $js_session,
                 'js_historial'           => $js_historial,
             ]);
@@ -1057,13 +1151,14 @@ function guardarProduccion()
             if (!empty($_SESSION['operario_id']) && (int)$actual[0]['operario_id'] !== (int)$_SESSION['operario_id']) {
                 throw new Exception('No puedes editar un avance de producción que no es tuyo.');
             }
+            if (!empty($_SESSION['operario_id']) && !empty($actual[0]['enviado_ensamblaje'])) {
+                throw new Exception('Este avance ya fue enviado a ensamblaje/empaquetado. Solo un administrador puede editarlo.');
+            }
             if (!empty($actual[0]['deleted_at'])) {
                 throw new Exception('No puedes editar un registro inactivo. Reactívalo primero.');
             }
             $produccionAnterior = $actual[0];
 
-            // Revertimos el consumo de las líneas activas actuales (devolvemos
-            // stock) y las eliminamos físicamente
             $lineasAnteriores = executeQuery(
                 $conectar,
                 "SELECT * FROM rel_produccion_material WHERE produccion_id = :id AND deleted_at IS NULL",
@@ -1078,7 +1173,6 @@ function guardarProduccion()
             }
             executeNonQuery($conectar, "DELETE FROM rel_produccion_material WHERE produccion_id = :id", ['id' => $id]);
 
-            // Insertamos las líneas nuevas (reparte FIFO automáticamente y resta stock)
             if (!empty($detalle)) {
                 insertarLineasYRestarStock($conectar, $id, $detalle);
             }
@@ -1092,7 +1186,6 @@ function guardarProduccion()
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
-            // DESPUÉS
             executeNonQuery($conectar, "
                 UPDATE produccion SET
                     operario_id            = :operario_id,
@@ -1107,6 +1200,7 @@ function guardarProduccion()
                     fecha                  = :fecha,
                     observaciones          = :observaciones,
                     js_configuracion_moment = :js_config_moment,
+                    js_operarios           = :js_operarios,
                     updated_at             = NOW(),
                     js_session             = :js_session,
                     js_historial           = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -1124,6 +1218,7 @@ function guardarProduccion()
                 'fecha'                  => $fecha,
                 'observaciones'          => $observaciones ?: null,
                 'js_config_moment'       => $jsConfigMoment,
+                'js_operarios'           => $jsOperarios,   // <-- NUEVO
                 'js_session'             => $js_session,
                 'js_historial'           => $js_historial,
                 'id'                     => $id,
@@ -1139,7 +1234,6 @@ function guardarProduccion()
         responder(false, 'No se pudo guardar la producción: ' . $e->getMessage());
     }
 }
-
 /**
  * Valida y descuenta cada línea del detalle directamente contra
  * material.stock_actual. Ya NO reparte por lotes/FIFO: se inserta una
@@ -1209,6 +1303,7 @@ function eliminarProduccion()
     if (!$id) responder(false, 'ID inválido.');
 
     verificarPropietarioOperario($conectar, $id);
+    verificarNoEnviadoParaOperario($conectar, $id);
 
     $existe = executeQuery($conectar, "SELECT id, deleted_at FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
@@ -1330,6 +1425,19 @@ function enviarAEnsamblaje()
     $id = intval($_POST['id'] ?? 0);
     $cantidadProducida = floatval($_POST['cantidad_producida'] ?? 0);
 
+    // Desglose opcional: cuánto produjo cada operario cuando el avance
+    // tiene varios participantes. Si viene vacío (avance de un solo
+    // operario), simplemente no se toca js_operarios.
+    $desgloseRaw = json_decode($_POST['desglose_operarios'] ?? '[]', true);
+    $desglosePorOperario = [];
+    if (is_array($desgloseRaw)) {
+        foreach ($desgloseRaw as $item) {
+            $oid  = intval($item['operario_id'] ?? 0);
+            $cant = floatval($item['cantidad'] ?? 0);
+            if ($oid > 0 && $cant > 0) $desglosePorOperario[$oid] = $cant;
+        }
+    }
+
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
@@ -1337,7 +1445,7 @@ function enviarAEnsamblaje()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto
+        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto, js_operarios
          FROM produccion WHERE id = :id",
         ['id' => $id]
     );
@@ -1357,10 +1465,27 @@ function enviarAEnsamblaje()
     if (empty($existe[0]['fecha_hora_fin'])) responder(false, 'Primero debes finalizar la corrida.');
     if (!empty($existe[0]['enviado_ensamblaje'])) responder(false, "Este avance ya fue enviado a $destino.");
 
+    // Si vino desglose, se inyecta 'cantidad_producida' dentro de cada
+    // entrada de js_operarios que ya existía (id, nombre, cargo).
+    $jsOperariosActualizado = $existe[0]['js_operarios'];
+    if (!empty($desglosePorOperario)) {
+        $listaOperarios = json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [];
+        foreach ($listaOperarios as &$op) {
+            $oid = intval($op['operario_id'] ?? 0);
+            if (isset($desglosePorOperario[$oid])) {
+                $op['cantidad_producida'] = $desglosePorOperario[$oid];
+                $op['unidad_producida'] = $unidadProduccion;
+            }
+        }
+        unset($op);
+        $jsOperariosActualizado = json_encode($listaOperarios, JSON_UNESCAPED_UNICODE);
+    }
+
     $cambios = [[
         'campo' => "Envío a $destino",
         'valor_antes' => '(no enviado)',
-        'valor_despues' => "Enviado, {$cantidadProducida} " . strtolower($unidadProduccion) . " producidos",
+        'valor_despues' => "Enviado, {$cantidadProducida} " . strtolower($unidadProduccion) . " producidos"
+            . (!empty($desglosePorOperario) ? ' (con desglose por operario)' : ''),
     ]];
     $movimiento   = obtenerMovimientoSesion('enviar_' . $destino, $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1374,6 +1499,7 @@ function enviarAEnsamblaje()
                 fecha_envio_ensamblaje  = NOW(),
                 enviado_ensamblaje      = true,
                 js_configuracion_moment = :js_config_final,
+                js_operarios            = :js_operarios,
                 updated_at              = NOW(),
                 js_session              = :js_session,
                 js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -1382,9 +1508,11 @@ function enviarAEnsamblaje()
             'id'                 => $id,
             'cantidad_producida' => $cantidadProducida,
             'js_config_final'    => json_encode($item, JSON_UNESCAPED_UNICODE),
+            'js_operarios'       => $jsOperariosActualizado,
             'js_session'         => $js_session,
             'js_historial'       => $js_historial,
         ]);
+
         $ensamblajeAutoId = null;
         if ($destino === 'empaquetado') {
             $partes = explode('-', $existe[0]['unico_molde_producto'] ?? '');
@@ -1392,11 +1520,8 @@ function enviarAEnsamblaje()
             if ($productoId <= 0) {
                 throw new Exception('No se pudo determinar el producto de este avance para generar el ensamblaje automático.');
             }
-
             $unidadSalidaId = !empty($item['salida_produccion_unidad_medida_id'])
-                ? intval($item['salida_produccion_unidad_medida_id'])
-                : null;
-
+                ? intval($item['salida_produccion_unidad_medida_id']) : null;
             $ensamblajeAutoId = crearEnsamblajeAutomaticoParaProduccion(
                 $conectar, $id, $productoId, $cantidadProducida, $unidadSalidaId
             );

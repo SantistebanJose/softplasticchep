@@ -193,6 +193,9 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
 .pc-prod-corrida-line{ font-size:.82em; color:#9a9585; display:flex; align-items:center; gap:6px; }
 .pc-prod-corrida-line b{ color:#5c5947; font-weight:600; }
+.pc-prod-operarios{ font-size:.82em; color:#9a9585; display:flex; align-items:flex-start; gap:6px; }
+.pc-prod-operarios i{ margin-top:2px; }
+.pc-prod-operarios b{ color:#5c5947; font-weight:600; }
 .pc-prod-sin-ensamblaje{ font-size:.78em; color:#a7a293; font-style:italic; display:flex; align-items:center; gap:5px; margin-top:-2px; }
 .pc-prod-card-foot{ display:flex; align-items:center; gap:6px; padding-top:12px; margin-top:2px; border-top:1px solid #f1efe8; flex-wrap:wrap; }
 .pc-prod-ghost-btn{ border:none; background:#f6f4ee; color:#5c5947; font-size:.85em; font-weight:600; padding:12px 14px; border-radius:10px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; min-height:44px; }
@@ -246,6 +249,26 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     display:flex; align-items:center; justify-content:center; flex:0 0 auto;
     box-shadow:0 3px 8px rgba(21,34,56,.25);
 }
+.pc-operario-cantidad-lista{ display:flex; flex-direction:column; gap:10px; }
+.pc-operario-cantidad-item{
+    display:flex; align-items:center; gap:12px;
+    border:1.5px solid #e2ddcd; border-radius:12px; padding:10px 14px;
+}
+.pc-operario-cantidad-item .nombre{
+    flex:1; min-width:0; font-weight:600; color:#3a3730;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.pc-operario-cantidad-item input{
+    width:110px; text-align:center; font-weight:700; font-size:1.05em;
+    border:1.5px solid #eee1c4; border-radius:9px; padding:8px 4px;
+}
+.pc-operario-cantidad-item input:focus{ outline:none; border-color:#2F6FED; }
+.pc-operario-cantidad-total{
+    display:flex; align-items:center; justify-content:flex-end; gap:8px;
+    margin-top:14px; padding-top:12px; border-top:1px dashed #eee1c4;
+    font-size:.95em; color:#5c5947;
+}
+.pc-operario-cantidad-total b{ font-size:1.3em; color:#152238; }
 .pc-ens-stepper-main button:active{ background:#0d1626; transform:scale(.93); }
 .pc-ens-stepper-main .valor-wrap{
     flex:1 1 auto; max-width:240px; text-align:center;
@@ -426,6 +449,17 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     <div class="pc-sel-label">Color <span class="req">*</span></div>
                     <div class="pc-chip-strip" id="chips_color"></div>
                 </div>
+                <div class="pc-selector-block">
+                    <div class="pc-sel-label">
+                        Otros operarios en este avance
+                        <span style="font-weight:500; text-transform:none; letter-spacing:0; color:#a7a293;">(opcional)</span>
+                    </div>
+                    <input type="text" id="prod_operarios_buscar" class="form-control form-control-lg mb-2" placeholder="Buscar operario...">
+                    <div class="pc-chip-strip" id="chips_operarios_extra">
+                        <div class="pc-sel-vacio">Cargando operarios...</div>
+                    </div>
+                    <div class="form-text" id="operarios_extra_contador">Ninguno adicional</div>
+                </div>
 
                 <div class="pc-selector-row-compact">
                     <button type="button" class="pc-select-btn" id="btnSel_maquina" onclick="abrirSelectorGenerico('maquina')">
@@ -601,16 +635,30 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <div class="sub">Ingresa cuánto se produjo en esta corrida</div>
                         </div>
                     </div>
-                    <div class="pc-ens-stepper-main">
-                        <button type="button" onclick="ajustarCantidadProducida(-1)"><i class="fa-solid fa-minus"></i></button>
-                        <div class="valor-wrap">
-                            <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
-                                id="cantidad_producida_ensamblaje" placeholder="0" required autofocus>
-                            <span class="pc-stepper-unidad" id="unidad_producida_badge">UND</span>
+
+                    <!-- Un solo operario: stepper de siempre -->
+                    <div id="bloque_cantidad_individual">
+                        <div class="pc-ens-stepper-main">
+                            <button type="button" onclick="ajustarCantidadProducida(-1)"><i class="fa-solid fa-minus"></i></button>
+                            <div class="valor-wrap">
+                                <input type="number" step="0.0001" min="0.0001" class="form-control form-control-lg"
+                                    id="cantidad_producida_ensamblaje" placeholder="0" required autofocus>
+                                <span class="pc-stepper-unidad" id="unidad_producida_badge">UND</span>
+                            </div>
+                            <button type="button" onclick="ajustarCantidadProducida(1)"><i class="fa-solid fa-plus"></i></button>
                         </div>
-                        <button type="button" onclick="ajustarCantidadProducida(1)"><i class="fa-solid fa-plus"></i></button>
+                        <div class="pc-stepper-chips" id="chips_cantidad_producida"></div>
                     </div>
-                    <div class="pc-stepper-chips" id="chips_cantidad_producida"></div>
+
+                    <!-- Varios operarios: cantidad por persona, total automático -->
+                    <div id="bloque_cantidad_por_operario" style="display:none;">
+                        <div class="pc-operario-cantidad-lista" id="lista_cantidad_operarios"></div>
+                        <div class="pc-operario-cantidad-total">
+                            <span>Total producido</span>
+                            <b id="total_cantidad_operarios">0</b>
+                            <span id="unidad_producida_badge_multi">UND</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Paso 2: merma -->
@@ -701,6 +749,8 @@ let sucursalesProdCache = null;
 let coloresProdCache = null;
 let moldesProdCache = [];
 
+let operariosProdCache = null;   // <-- NUEVO
+
 let selEstado = {
     maquina_id: '', maquina_nombre: '',
     categoria_material_id: '', categoria_nombre: '',
@@ -708,6 +758,7 @@ let selEstado = {
     producto_id: '', producto_nombre: '',
     molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
     color_id: '', color_nombre: '', color_rgb: '',
+    operarios_extra_ids: [],   // <-- NUEVO
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -719,6 +770,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
     document.getElementById('cantidad_producida_ensamblaje').addEventListener('input', actualizarResumenEnsamblaje);
+    document.getElementById('prod_operarios_buscar').addEventListener('input', buscarOperariosExtra);   // <-- NUEVO
     iniciarAutoRefresh();
 });
 
@@ -1241,6 +1293,58 @@ function seleccionarColor(id) {
     selEstado.color_id = id; selEstado.color_nombre = c.nombre; selEstado.color_rgb = c.rgb;
     pintarBloqueColor(coloresProdCache);
 }
+// ---- Otros operarios (multi-selección, opcional) ----
+async function obtenerOperariosProd(texto = '') {
+    const json = await llamarProduccion('BUSCAROPERARIOS', { texto });
+    return json.success ? json.operario : [];
+}
+
+async function buscarOperariosExtra() {
+    const texto = document.getElementById('prod_operarios_buscar').value.trim();
+    operariosProdCache = await obtenerOperariosProd(texto);
+    pintarBloqueOperariosExtra(operariosProdCache);
+}
+
+function pintarBloqueOperariosExtra(operarios) {
+    const cont = document.getElementById('chips_operarios_extra');
+    if (!cont) return;
+
+    // El operario de la sesión ya va incluido automáticamente por el backend;
+    // aquí solo se listan los DEMÁS para no duplicar la selección.
+    const disponibles = (operarios || []).filter(o => String(o.id) !== String(OPERARIO_ID));
+
+    if (disponibles.length === 0) {
+        cont.innerHTML = '<div class="pc-sel-vacio">No hay otros operarios disponibles.</div>';
+        return;
+    }
+
+    cont.innerHTML = disponibles.map(o => {
+        const activo = selEstado.operarios_extra_ids.includes(Number(o.id));
+        const nombreEscapado = (o.nombre_completo || '').replace(/'/g, "\\'");
+        return `<button type="button" class="pc-chip-card ${activo ? 'activo' : ''}" onclick="toggleOperarioExtra(${o.id}, '${nombreEscapado}')">
+            <span class="ico"><i class="fa-solid fa-user"></i></span>${o.nombre_completo}
+        </button>`;
+    }).join('');
+}
+
+function toggleOperarioExtra(id) {
+    id = Number(id);
+    const idx = selEstado.operarios_extra_ids.indexOf(id);
+    if (idx >= 0) selEstado.operarios_extra_ids.splice(idx, 1);
+    else selEstado.operarios_extra_ids.push(id);
+
+    pintarBloqueOperariosExtra(operariosProdCache);
+    actualizarContadorOperariosExtra();
+}
+
+function actualizarContadorOperariosExtra() {
+    const el = document.getElementById('operarios_extra_contador');
+    if (!el) return;
+    const n = selEstado.operarios_extra_ids.length;
+    el.textContent = n === 0
+        ? 'Ninguno adicional'
+        : `${n} operario${n === 1 ? '' : 's'} adicional${n === 1 ? '' : 'es'} seleccionado${n === 1 ? '' : 's'}`;
+}
 
 // ---- Máquina (opcional) ----
 function pintarBloqueMaquina(maquinas) {
@@ -1292,14 +1396,16 @@ function refrescarValoresSelectorGenerico() {
 
 // ---- Carga inicial de todos los selectores del modal ----
 async function cargarSelectoresModal(seleccion = {}) {
-    const [maquinasJson, colores, categorias, productos, sucursales] = await Promise.all([
+    const [maquinasJson, colores, categorias, productos, sucursales, operarios] = await Promise.all([
         llamarProduccion('BUSCARMAQUINAS'),
         obtenerColoresProd(),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
         obtenerSucursalesProd(),
+        obtenerOperariosProd(''),   // <-- NUEVO
     ]);
     maquinasProdCache = maquinasJson.success ? maquinasJson.maquinas : [];
+    operariosProdCache = operarios;   // <-- NUEVO
 
     selEstado = {
         maquina_id: seleccion.maquina_id ?? '', maquina_nombre: '',
@@ -1308,6 +1414,7 @@ async function cargarSelectoresModal(seleccion = {}) {
         producto_id: seleccion.producto_id ?? '', producto_nombre: '',
         molde_id: '', unico_molde: seleccion.unico_molde ?? '', molde_etiqueta: '', molde_nombre: '',
         color_id: seleccion.color_id ?? '', color_nombre: '', color_rgb: '',
+        operarios_extra_ids: seleccion.operarios_extra_ids ?? [],   // <-- NUEVO
     };
 
     const maq = maquinasProdCache.find(x => String(x.id) === String(selEstado.maquina_id));
@@ -1326,6 +1433,9 @@ async function cargarSelectoresModal(seleccion = {}) {
     pintarBloqueSucursal(sucursales);
     pintarBloqueProducto(productos);
     pintarBloqueColor(colores);
+    document.getElementById('prod_operarios_buscar').value = '';   // <-- NUEVO
+    pintarBloqueOperariosExtra(operariosProdCache);                // <-- NUEVO
+    actualizarContadorOperariosExtra();                            // <-- NUEVO
     refrescarValoresSelectorGenerico();
 
     if (selEstado.producto_id) {
@@ -1407,9 +1517,12 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            <button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
-                <i class="fa-solid fa-pen"></i>
-            </button>
+            ${!p.deleted_at && !p.enviado_ensamblaje
+                ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+                    <i class="fa-solid fa-pen"></i>
+                </button>`
+                : ''
+            }      
         </div>
         <div class="pc-prod-title">${p.molde_nombre ?? '-'}</div>
         <div class="pc-prod-meta">${metaPartes.map(t => `<span>${t}</span>`).join('')}</div>
@@ -1419,6 +1532,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         </div>
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
+        ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
+        <div class="pc-prod-operarios">
+            <i class="fa-solid fa-users"></i>
+            <span><b>${p.js_operarios.length === 1 ? 'Operario' : 'Operarios'}:</b> ${p.js_operarios.map(o => o.nombre_completo).join(', ')}</span>
+        </div>` : ''}
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
         <div class="pc-prod-card-foot">
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
@@ -1630,13 +1748,13 @@ function limpiarFormularioProduccion() {
         producto_id: '', producto_nombre: '',
         molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
         color_id: '', color_nombre: '', color_rgb: '',
+        operarios_extra_ids: [],   // <-- NUEVO
     };
     document.getElementById('bloque_molde').style.display = 'none';
     document.getElementById('chips_molde').innerHTML = '';
     refrescarValoresSelectorGenerico();
     renderTicket();
 }
-
 async function abrirModalCrearProduccion() {
     limpiarFormularioProduccion();
     modoEdicionProduccion = false;
@@ -1665,10 +1783,16 @@ async function abrirModalEditarProduccion(id) {
     const partesUnico = (p.unico_molde_producto || '').split('-');
     const productoIdDesdeUnico = partesUnico.length > 1 ? partesUnico[1] : null;
 
+    // Operarios ya guardados en el avance, sin contar al de la sesión actual.  <-- NUEVO
+    const operariosExtraExistentes = (Array.isArray(p.js_operarios) ? p.js_operarios : [])
+        .map(o => Number(o.operario_id))
+        .filter(oid => oid && String(oid) !== String(OPERARIO_ID));
+
     await cargarSelectoresModal({
         maquina_id: p.maquina_id, producto_id: productoIdDesdeUnico,
         unico_molde: p.unico_molde_producto, color_id: p.color_id,
         categoria_material_id: p.categoria_material_id, sucursal_id: p.sucursal_id,
+        operarios_extra_ids: operariosExtraExistentes,   // <-- NUEVO
     });
     await renderGridMateriales();
 
@@ -1705,6 +1829,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     const params = {
         id: produccionIdActual,
         operario_id: OPERARIO_ID,
+        operarios: JSON.stringify(selEstado.operarios_extra_ids),   // <-- NUEVO
         maquina_id: selEstado.maquina_id,
         categoria_material_id: selEstado.categoria_material_id,
         sucursal_id: selEstado.sucursal_id,
@@ -1758,6 +1883,8 @@ let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;
 let mermaColoresSeleccionados = [];
 
+let cantidadesPorOperario = {}; // { operario_id: cantidad }
+
 function abrirModalCantidadParaEnsamblaje(produccionId) {
     produccionIdParaEnsamblaje = produccionId;
     document.getElementById('formCantidadEnsamblaje').reset();
@@ -1769,9 +1896,60 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
 
     aplicarUnidadesEtapaModal(p);
+    inicializarCantidadProducidaPorOperario(p);   // <-- NUEVO
     renderInfoMermaModal(p);
 
     modalCantidadEnsamblaje.show();
+}
+
+// Decide si se muestra el stepper único o el desglose por operario.
+function inicializarCantidadProducidaPorOperario(p) {
+    const operarios = Array.isArray(p?.js_operarios) ? p.js_operarios : [];
+    const bloqueIndividual = document.getElementById('bloque_cantidad_individual');
+    const bloqueMulti = document.getElementById('bloque_cantidad_por_operario');
+    const unidad = document.getElementById('cantidad_producida_ensamblaje').dataset.unidad || 'kg';
+
+    cantidadesPorOperario = {};
+
+    if (operarios.length <= 1) {
+        bloqueIndividual.style.display = '';
+        bloqueMulti.style.display = 'none';
+        return;
+    }
+
+    bloqueIndividual.style.display = 'none';
+    bloqueMulti.style.display = '';
+    document.getElementById('unidad_producida_badge_multi').textContent = unidad.toUpperCase();
+
+    operarios.forEach(o => { cantidadesPorOperario[o.operario_id] = 0; });
+
+    document.getElementById('lista_cantidad_operarios').innerHTML = operarios.map(o => `
+        <div class="pc-operario-cantidad-item">
+            <span class="nombre">${o.nombre_completo}</span>
+            <input type="number" step="${esUnidadEntera(unidad) ? '1' : '0.0001'}" min="0"
+                   inputmode="decimal" placeholder="0"
+                   onchange="actualizarCantidadOperario(${o.operario_id}, this.value)">
+        </div>
+    `).join('');
+
+    actualizarTotalCantidadOperarios();
+}
+
+function actualizarCantidadOperario(operarioId, valor) {
+    let v = parseFloat(valor);
+    if (isNaN(v) || v < 0) v = 0;
+    cantidadesPorOperario[operarioId] = v;
+    actualizarTotalCantidadOperarios();
+}
+
+// Suma todos los valores y sincroniza el input "oculto" que usa el resto
+// del flujo (resumen inferior, validación de submit) — así no hay que
+// tocar nada más de la lógica existente.
+function actualizarTotalCantidadOperarios() {
+    const total = Object.values(cantidadesPorOperario).reduce((s, v) => s + (Number(v) || 0), 0);
+    document.getElementById('total_cantidad_operarios').textContent = formatearCantidadProd(total);
+    document.getElementById('cantidad_producida_ensamblaje').value = Math.round(total * 10000) / 10000;
+    actualizarResumenEnsamblaje();
 }
 
 async function obtenerColoresParaMerma() {
@@ -1856,7 +2034,28 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
         return;
     }
 
-    const json = await llamarProduccion('ENVIARAENSAMBLAJE', { id: produccionIdParaEnsamblaje, cantidad_producida: valor, unidad: unidadProducida });
+    const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
+    const esMultiOperario = Array.isArray(p?.js_operarios) && p.js_operarios.length > 1;
+
+    let desglose = [];
+    if (esMultiOperario) {
+        desglose = Object.entries(cantidadesPorOperario)
+            .map(([operario_id, cantidad]) => ({ operario_id: Number(operario_id), cantidad: Number(cantidad) || 0 }))
+            .filter(d => d.cantidad > 0);
+
+        if (desglose.length === 0) {
+            Swal.fire('Falta el desglose', 'Asigna la cantidad producida de cada operario.', 'warning');
+            return;
+        }
+    }
+
+    const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
+        id: produccionIdParaEnsamblaje,
+        cantidad_producida: valor,
+        unidad: unidadProducida,
+        desglose_operarios: JSON.stringify(desglose),   // <-- NUEVO
+    });
+
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
     modalCantidadEnsamblaje.hide();

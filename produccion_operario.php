@@ -8,7 +8,7 @@ include("header.php");
 
 <style>
     .rep-buscador {
-        background: linear-gradient(135deg, var(--pc-navy, #1f2937), #2d3d5c);
+        background: linear-gradient(135deg, var(--pc-navy, #1f2937), #3016d5);
         color: #fff;
         border-radius: 14px;
         padding: 22px 24px;
@@ -613,17 +613,19 @@ function pintarTop5(filas) {
 
 function etiquetaUnidad(u) {
     const unidad = (u || 'kg').toString().trim().toLowerCase();
-    return (unidad === 'und' || unidad === 'unidad' || unidad === 'unidades') ? 'und' : 'kg';
-}
-function formatearCantidad(valor, unidad) {
-    const n = parseFloat(valor) || 0;
-    const u = (unidad || 'kg').toString().trim().toLowerCase();
-    if (u === 'und' || u === 'unidad' || u === 'unidades') {
-        return n.toLocaleString('es-PE', { maximumFractionDigits: 0 }) + ' und';
-    }
-    return n.toLocaleString('es-PE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' kg';
+    return unidad || 'kg';
 }
 
+function formatearCantidad(valor, unidad) {
+    const n = parseFloat(valor) || 0;
+    const u = etiquetaUnidad(unidad);
+    // unidades que naturalmente no llevan decimales
+    const esEntero = ['und', 'unidad', 'unidades', 'doc', 'docena', 'docenas'].includes(u);
+    return n.toLocaleString('es-PE', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: esEntero ? 0 : 2
+    }) + ' ' + u;
+}
 function pintarTablaDetalle(detalle) {
     const tbody = document.getElementById('rep_tbody_detalle');
     if (detalle.length === 0) {
