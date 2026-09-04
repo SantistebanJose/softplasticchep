@@ -380,8 +380,7 @@ include("header.php");
                     <div class="pc-tk-resumen-texto">
                         <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
                         <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
-                        <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
-                    </div>
+                        <span class="detalle">Cantidad producida vinculada: <b id="ens_ticket_peso_producido">0</b></span>                    </div>
                 </div>
                 <div class="form-text" style="padding:0 14px 10px 14px;">
                     El peso real de salida de este armado se registrará al pulsar <b>Finalizar</b> desde la card del listado.
@@ -1088,10 +1087,11 @@ async function renderGridDetalle() {
                         cantidad_kg: p.cantidad_kg ?? p.cantidad,
                         fecha_hora_fin: p.fecha_hora_fin,
                         categoria_material_id: p.categoria_material_id,
+                        unidad_codigo: p.unidad_produccion_codigo || 'KG',
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> kg</span>
+                <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <b>${colorNombre || '-'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
@@ -1189,10 +1189,11 @@ function agregarLineaDetalle(tipo, datos) {
             derivado_id: null,
             ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
-            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} ${datos.unidad_codigo || 'KG'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
+            unidad_codigo: datos.unidad_codigo || 'KG',
             categoria_material_id: datos.categoria_material_id,
         });
     } else if (tipo === 'derivado') {
@@ -1299,10 +1300,15 @@ function renderTicketDetalle() {
     total.textContent = ticketDetalleEns.length;
     detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s) · ${nComp} complemento(s)`;
 
-    const pesoProducido = ticketDetalleEns
-        .filter(l => l.tipo === 'produccion')
-        .reduce((s, l) => s + Number(l.cantidad_kg || 0), 0);
-    pesoEl.textContent = formatearCantidadEns(pesoProducido);
+    const gruposCantidad = {};
+    ticketDetalleEns.filter(l => l.tipo === 'produccion').forEach(l => {
+        const u = l.unidad_codigo || 'KG';
+        gruposCantidad[u] = (gruposCantidad[u] || 0) + Number(l.cantidad_kg || 0);
+    });
+    const textoCantidad = Object.entries(gruposCantidad)
+        .map(([u, v]) => `${formatearCantidadEns(v)} ${u}`)
+        .join(' + ') || '0';
+    pesoEl.textContent = textoCantidad;
 }
 
 function obtenerDetalleJsonEns() {
@@ -1360,6 +1366,7 @@ async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadPr
         color_nombre: p.color_nombre_verif ?? p.color_nombre,
         cantidad_kg: p.cantidad_kg ?? p.cantidad,
         fecha_hora_fin: p.fecha_hora_fin,
+        unidad_codigo: p.unidad_produccion_codigo || 'KG',
     });
 
     await renderGridDetalle();
@@ -1397,12 +1404,13 @@ async function abrirModalEditarEnsamblaje(id) {
             derivado_id: null,
             ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
-            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} kg`
+            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
                 + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
                 + (item.fecha ? ` · ${formatearFechaHoraLegibleEns(item.fecha)}` : ''),
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(item.cantidad_kg) || 0,
+            unidad_codigo: item.unidad_produccion_codigo || 'KG',
         });
     });
 

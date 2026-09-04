@@ -122,6 +122,22 @@
  *   están se liberan (soft-delete para producción/derivado, o
  *   ensamblaje_id_referido = NULL para complemento), las nuevas se insertan/vinculan.
  *
+ * PERMISOS ADMIN vs OPERARIO (NUEVO 2026-09-04):
+ *   Un ensamblaje con enviado_empaquetado = TRUE ya no puede editarse ni
+ *   desactivarse... PERO solo desde la tablet de operario. Confirmado por
+ *   el usuario: el admin (panel de escritorio) SÍ debe conservar la
+ *   posibilidad de editar o eliminar un ensamblaje aunque ya esté en
+ *   Empaquetado, para poder corregir errores. El operario, en cambio,
+ *   solo puede registrar (crear) y ver sus propios ensamblajes: una vez
+ *   que un armado pasó a Empaquetado, la tablet lo muestra en modo
+ *   solo-lectura (ver ensamblaje.php de la tablet, soloLecturaEns) y
+ *   ahora el backend también lo bloquea si de todos modos llega la
+ *   petición. La detección de "sesión de operario" usa el mismo criterio
+ *   que loginoperarios.php / clssAuthOperario.php: presencia de
+ *   $_SESSION['operario_id']. El panel de admin nunca setea esa variable
+ *   de sesión, así que para él esImplica esOperarioSesion() = false y las
+ *   validaciones de enviado_empaquetado simplemente no aplican.
+ *
  * Este controlador NO crea/edita producto, operario, material ni produccion
  * (cada uno tiene su propio CRUD); aquí solo se listan/consultan para elegir
  * contra qué se arma el ensamblaje.
@@ -207,6 +223,26 @@ function controladorEnsamblaje($accion)
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
+}
+
+// =============================================================================
+// PERMISOS: admin (panel de escritorio) vs operario (tablet)
+// =============================================================================
+
+/**
+ * true si la petición viene de una sesión de operario (tablet), es decir,
+ * pasó por loginoperarios.php / clssAuthOperario.php y tiene
+ * $_SESSION['operario_id'] seteado. El panel de admin nunca setea esa
+ * variable, así que para admin esto siempre es false.
+ *
+ * Se usa para las restricciones de "no editar/eliminar si ya está en
+ * Empaquetado": esa restricción es solo para la tablet. El admin conserva
+ * la posibilidad de corregir errores editando o eliminando un ensamblaje
+ * aunque ya haya sido enviado a Empaquetado.
+ */
+function esOperarioSesion(): bool
+{
+    return !empty($_SESSION['operario_id']);
 }
 
 // =============================================================================
@@ -531,26 +567,28 @@ function buscarProduccionesDisponibles()
     }
 
     $sql = "SELECT
-                t1.id AS produccion_id,
-                t1.fecha_envio_ensamblaje,
-                t2.nombre AS molde_nombre,
-                t1.cantidad_producida_kg AS cantidad_kg,
-                t1.fecha_hora_fin,
-                t4.id AS producto_id,
-                t1.color_id,
-                t3.nombre AS color_nombre_verif,
-                t1.categoria_material_id,
-                cm.nombre AS categoria_material_nombre_verif
-            FROM produccion t1
-            LEFT JOIN molde t2 ON t2.id = t1.molde_id
-            LEFT JOIN color t3 ON t3.id = t1.color_id
-            INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
-            LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
-            LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
-                ON (x.item->>'molde_id')::bigint = t2.id
-            LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY t1.fecha_hora_fin DESC";
+            t1.id AS produccion_id,
+            t1.fecha_envio_ensamblaje,
+            t2.nombre AS molde_nombre,
+            t1.cantidad_producida_kg AS cantidad_kg,
+            t1.fecha_hora_fin,
+            t4.id AS producto_id,
+            t1.color_id,
+            t3.nombre AS color_nombre_verif,
+            t1.categoria_material_id,
+            cm.nombre AS categoria_material_nombre_verif,
+            COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo
+        FROM produccion t1
+        LEFT JOIN molde t2 ON t2.id = t1.molde_id
+        LEFT JOIN color t3 ON t3.id = t1.color_id
+        INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint
+        LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
+        LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
+            ON (x.item->>'molde_id')::bigint = t2.id
+        LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
+        LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY t1.fecha_hora_fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['producciones' => $result]);
@@ -573,7 +611,8 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
              t1.color_id,
              t3.nombre AS color_nombre_verif,
              cm.nombre AS categoria_material_nombre_verif,
-             COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') AS necesita_ensamblaje
+             COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') AS necesita_ensamblaje,
+             COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo
          FROM produccion t1
          LEFT JOIN molde t2 ON t2.id = t1.molde_id
          LEFT JOIN color t3 ON t3.id = t1.color_id
@@ -582,6 +621,7 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
          LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
              ON (x.item->>'molde_id')::bigint = t2.id
          LEFT JOIN LATERAL (SELECT COALESCE(t1.js_configuracion_moment, x.item) AS item) cfg ON true
+         LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
          WHERE t1.id = :id
            AND t1.deleted_at IS NULL
            AND t1.fecha_hora_fin IS NOT NULL
@@ -601,7 +641,6 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 
     responder(true, 'OK', ['produccion' => $data[0]]);
 }
-
 // =============================================================================
 // AUDITORÍA (idéntico patrón al resto de controladores)
 // =============================================================================
@@ -947,6 +986,17 @@ function guardarEnsamblaje()
                 throw new Exception('No puedes editar un ensamblaje inactivo. Reactívalo primero.');
             }
 
+            // NUEVO: la restricción de "ya enviado a Empaquetado, no se
+            // puede editar" solo aplica a la tablet de operario. El admin
+            // (panel de escritorio) SÍ puede seguir editando para corregir
+            // errores; esa edición queda registrada en js_historial con una
+            // nota especial para que quede claro que fue una corrección
+            // posterior al envío a empaquetado.
+            $eraEnviadoEmpaquetado = !empty($actual[0]['enviado_empaquetado']);
+            if ($eraEnviadoEmpaquetado && esOperarioSesion()) {
+                throw new Exception('Este ensamblaje ya fue enviado a Empaquetado y no puede editarse desde la tablet. Solo puedes visualizarlo.');
+            }
+
             // Producción / derivado: siguen viviendo en rel_ensamblaje_producto.
             $lineasActuales = executeQuery(
                 $conectar,
@@ -1028,7 +1078,8 @@ function guardarEnsamblaje()
             $cambios = [[
                 'campo' => 'Ensamblaje',
                 'valor_antes' => count($lineasActuales) + count($complementosActuales) . ' ítem(s)',
-                'valor_despues' => count($detalle) . ' ítem(s)',
+                'valor_despues' => count($detalle) . ' ítem(s)'
+                    . ($eraEnviadoEmpaquetado ? ' (corrección de admin: el ensamblaje ya estaba enviado a Empaquetado)' : ''),
             ]];
             $movimiento   = obtenerMovimientoSesion('editar', $cambios);
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1057,7 +1108,10 @@ function guardarEnsamblaje()
             recalcularResumenesEnsamblaje($conectar, $id);
 
             $conectar->commit();
-            responder(true, 'Ensamblaje actualizado correctamente.', [
+            $mensajeEdicion = $eraEnviadoEmpaquetado
+                ? 'Ensamblaje actualizado correctamente. Nota: este armado ya estaba enviado a Empaquetado; revisa si el stock de empaquetado necesita ajustarse también.'
+                : 'Ensamblaje actualizado correctamente.';
+            responder(true, $mensajeEdicion, [
                 'id' => $id, 'modo' => 'editar',
             ]);
         }
@@ -1223,13 +1277,19 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
     $moldes = executeQuery($conectar, "
         SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
-               pd.cantidad_producida_kg AS cantidad_kg, pd.fecha,
-               pd.categoria_material_id,
-               cm.nombre AS categoria_material_nombre
+            pd.cantidad_producida_kg AS cantidad_kg, pd.fecha,
+            pd.categoria_material_id,
+            cm.nombre AS categoria_material_nombre,
+            COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo
         FROM rel_ensamblaje_producto rep
         JOIN produccion pd ON pd.id = rep.molde_produccion_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
+        LEFT JOIN producto pr ON pr.id = split_part(pd.unico_molde_producto, '-', 2)::bigint
+        LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
+            ON (x.item->>'molde_id')::bigint = mo.id
+        LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+        LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.molde_produccion_id IS NOT NULL
     ", ['id' => $ensamblajeId]);
 
@@ -1268,15 +1328,27 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 // rel_ensamblaje_producto (producción/derivado) Y libera los complementos
 // que tuviera tomados (ensamblaje_id_referido = NULL en esos otros
 // ensamblajes).
+//
+// NUEVO: la restricción de "ya está en Empaquetado, no se puede
+// desactivar" solo aplica a la tablet de operario. El admin sí puede
+// desactivar un ensamblaje aunque ya haya sido enviado a Empaquetado
+// (por ejemplo, para corregir un error), y recibe un aviso extra
+// recordándole revisar el stock de empaquetado, ya que desactivar el
+// ensamblaje NO revierte automáticamente lo que ya se generó allá.
 function eliminarEnsamblaje()
 {
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, deleted_at FROM ensamblaje WHERE id = :id", ['id' => $id]);
+    $existe = executeQuery($conectar, "SELECT id, deleted_at, enviado_empaquetado FROM ensamblaje WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
     if (!empty($existe[0]['deleted_at'])) responder(false, 'Este registro ya estaba inactivo.');
+
+    $eraEnviadoEmpaquetado = !empty($existe[0]['enviado_empaquetado']);
+    if ($eraEnviadoEmpaquetado && esOperarioSesion()) {
+        responder(false, 'Este ensamblaje ya fue enviado a Empaquetado y no puede desactivarse desde la tablet.');
+    }
 
     $conectar->beginTransaction();
     try {
@@ -1295,7 +1367,9 @@ function eliminarEnsamblaje()
         );
 
         $cambios = [[
-            'campo' => 'Estado', 'valor_antes' => 'Activo', 'valor_despues' => 'Inactivo (producciones/complementos liberados)',
+            'campo' => 'Estado', 'valor_antes' => 'Activo',
+            'valor_despues' => 'Inactivo (producciones/complementos liberados)'
+                . ($eraEnviadoEmpaquetado ? ' — corrección de admin: ya estaba enviado a Empaquetado' : ''),
         ]];
         $movimiento   = obtenerMovimientoSesion('desactivar', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1313,7 +1387,10 @@ function eliminarEnsamblaje()
         );
 
         $conectar->commit();
-        responder(true, 'Ensamblaje desactivado correctamente. Las producciones y complementos vinculados quedaron libres.');
+        $mensajeFinal = $eraEnviadoEmpaquetado
+            ? 'Ensamblaje desactivado correctamente. Nota: este registro ya había sido enviado a Empaquetado; revisa si el stock de empaquetado generado a partir de él necesita corregirse también.'
+            : 'Ensamblaje desactivado correctamente. Las producciones y complementos vinculados quedaron libres.';
+        responder(true, $mensajeFinal);
     } catch (Throwable $e) {
         $conectar->rollBack();
         error_log("Error desactivando ensamblaje: " . $e->getMessage());

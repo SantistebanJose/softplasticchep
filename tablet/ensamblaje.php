@@ -379,7 +379,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <div class="pc-tk-resumen-texto">
                                 <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
                                 <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
-                                <span class="detalle">Peso producido vinculado: <b id="ens_ticket_peso_producido">0</b> kg</span>
+                                <span class="detalle">Cantidad producida vinculada: <b id="ens_ticket_peso_producido">0</b></span>
                             </div>
                         </div>
                     </div>
@@ -442,6 +442,8 @@ let productosDisponiblesEnsCache = null;
 let ensamblajesCache = [];
 let productoTabActivoEns = null;
 let sucursalesEnsCache = null;
+
+let soloLecturaEns = false;
 
 // ── Estado de selección "en cards" (reemplaza a los <select>) ──────────
 let productoSeleccionadoEns = { producto_id: null, color_id: null };
@@ -867,8 +869,8 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
             <span class="pc-ens-id">#${e.ensamblaje_id}</span>
             <span class="pc-ens-estado-txt">${textoEstadoMap[estado]}</span>
             <span class="pc-ens-card-spacer"></span>
-            <button type="button" class="pc-ens-edit-btn" onclick="abrirModalEditarEnsamblaje(${e.ensamblaje_id})" title="Editar">
-                <i class="fa-solid fa-pen"></i>
+            <button type="button" class="pc-ens-edit-btn" onclick="abrirModalEditarEnsamblaje(${e.ensamblaje_id})" title="${e.enviado_empaquetado ? 'Ver detalle (solo lectura)' : 'Editar'}">
+                <i class="fa-solid ${e.enviado_empaquetado ? 'fa-eye' : 'fa-pen'}"></i>
             </button>
         </div>
         <div class="pc-ens-title">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</div>
@@ -1060,17 +1062,18 @@ async function renderGridDetalle() {
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
-                    onclick='agregarLineaDetalle("produccion", ${JSON.stringify({
-                        produccion_id: p.produccion_id,
-                        molde_nombre: p.molde_nombre,
-                        color_nombre: colorNombre,
-                        cantidad_kg: p.cantidad_kg ?? p.cantidad,
-                        fecha_hora_fin: p.fecha_hora_fin,
-                        categoria_material_id: p.categoria_material_id,
-                    })})'>
+            onclick='agregarLineaDetalle("produccion", ${JSON.stringify({
+                produccion_id: p.produccion_id,
+                molde_nombre: p.molde_nombre,
+                color_nombre: colorNombre,
+                cantidad_kg: p.cantidad_kg ?? p.cantidad,
+                fecha_hora_fin: p.fecha_hora_fin,
+                categoria_material_id: p.categoria_material_id,
+                unidad_codigo: p.unidad_produccion_codigo || 'KG',
+            })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> kg</span>
+                <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <b>${colorNombre || '-'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
@@ -1154,9 +1157,10 @@ function agregarLineaDetalle(tipo, datos) {
             tempId: ++contadorLineaTicketEns, tipo: 'produccion',
             molde_produccion_id: datos.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
-            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} kg · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} ${datos.unidad_codigo || 'KG'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry', color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
+            unidad_codigo: datos.unidad_codigo || 'KG',
             categoria_material_id: datos.categoria_material_id,
         });
     } else if (tipo === 'derivado') {
@@ -1190,7 +1194,6 @@ function renderTicketDetalle() {
     const total = document.getElementById('ens_ticket_total');
     const detalle = document.getElementById('ens_ticket_detalle');
     const pesoEl = document.getElementById('ens_ticket_peso_producido');
-
     if (ticketDetalleEns.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de arriba para empezar.</li>`;
     } else {
@@ -1213,11 +1216,17 @@ function renderTicketDetalle() {
     const nComp = ticketDetalleEns.filter(l => l.tipo === 'complemento').length;
     total.textContent = ticketDetalleEns.length;
     detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s) · ${nComp} complemento(s)`;
-
+    // NUEVO: agrupa por unidad real en vez de sumar todo como "kg"
+    const gruposCantidad = {};
+    ticketDetalleEns.filter(l => l.tipo === 'produccion').forEach(l => {
+        const u = l.unidad_codigo || 'KG';
+        gruposCantidad[u] = (gruposCantidad[u] || 0) + Number(l.cantidad_kg || 0);
+    });
     const pesoProducido = ticketDetalleEns
         .filter(l => l.tipo === 'produccion')
         .reduce((s, l) => s + Number(l.cantidad_kg || 0), 0);
     pesoEl.textContent = formatearCantidadEns(pesoProducido);
+
 }
 
 function obtenerDetalleJsonEns() {
@@ -1245,6 +1254,7 @@ function limpiarFormularioEnsamblaje() {
     document.getElementById('tab_complementos').classList.remove('activo');
     cerrarPickerOperarios();
     renderTicketDetalle();
+    soloLecturaEns = false;
 }
 
 async function abrirModalCrearEnsamblaje() {
@@ -1265,8 +1275,12 @@ async function abrirModalEditarEnsamblaje(id) {
     ensamblajeIdActual = id;
 
     const e = json.ensamblaje;
-    document.getElementById('modalEnsamblajeTitulo').textContent = 'Editar ensamblaje #' + id;
-    const operariosVinculados = parseJsonColumna(e.js_operarios).map(o => o.operario_id);
+    soloLecturaEns = !!e.enviado_empaquetado;
+
+    document.getElementById('modalEnsamblajeTitulo').textContent = soloLecturaEns
+        ? `Ensamblaje #${id} · Solo lectura (ya en Empaquetado)`
+        : 'Editar ensamblaje #' + id;
+        const operariosVinculados = parseJsonColumna(e.js_operarios).map(o => o.operario_id);
 
     await cargarSelectsModalEns({
         producto_id: e.producto_id,
@@ -1285,11 +1299,12 @@ async function abrirModalEditarEnsamblaje(id) {
             tempId: ++contadorLineaTicketEns, tipo: 'produccion',
             molde_produccion_id: item.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
-            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} kg`
+            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
                 + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
                 + (item.fecha ? ` · ${formatearFechaHoraLegibleEns(item.fecha)}` : ''),
             icono: 'fa-industry', color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(item.cantidad_kg) || 0,
+            unidad_codigo: item.unidad_produccion_codigo || 'KG',
         });
     });
 
@@ -1316,7 +1331,31 @@ async function abrirModalEditarEnsamblaje(id) {
 
     renderTicketDetalle();
     await renderGridDetalle();
+    aplicarModoSoloLecturaEns(); // <-- nuevo, al final
     modalEnsamblaje.show();
+}
+
+function aplicarModoSoloLecturaEns() {
+    const modalBody = document.querySelector('#modalEnsamblaje .modal-body');
+    modalBody.querySelectorAll('button, input').forEach(el => {
+        // No deshabilitamos el buscador de detalle porque no hace daño,
+        // pero sí todo lo que agrega/quita/selecciona.
+        if (el.closest('#ens_ticket_list') || el.id === 'ens_buscar_detalle' || el.id === 'ens_buscar_producto') return;
+        el.disabled = soloLecturaEns;
+    });
+
+    // Oculta el panel de "elegir qué vincular" (no tiene sentido agregar nada más)
+    document.getElementById('pc_panel_vincular').style.display = soloLecturaEns ? 'none' : '';
+
+    // Quita el botón "quitar" de cada línea del ticket ya renderizado
+    document.querySelectorAll('#ens_ticket_list .pc-tk-remove').forEach(btn => {
+        btn.style.display = soloLecturaEns ? 'none' : '';
+    });
+
+    // Footer: solo "Cerrar" en modo lectura
+    const footer = document.querySelector('#modalEnsamblaje .pc-ens-footer');
+    footer.querySelector('button[type="submit"]').style.display = soloLecturaEns ? 'none' : '';
+    footer.querySelector('button[data-bs-dismiss]').textContent = soloLecturaEns ? 'Cerrar' : 'Cancelar';
 }
 
 document.getElementById('formEnsamblaje').addEventListener('submit', async function (e) {
