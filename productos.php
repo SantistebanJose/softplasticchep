@@ -476,10 +476,55 @@ function mostrarPreviewImagenProducto(src) {
     }
 }
 
+// Redimensiona/comprime la foto en el navegador antes de subirla. Las fotos
+// que salen directo de la cámara del celular pueden pesar 4-10MB sin
+// comprimir y reventar el límite de upload_max_filesize del servidor; esto
+// evita ese error sin depender de tocar el php.ini.
+function comprimirImagenProducto(archivo, maxDimension = 1600, calidad = 0.82) {
+    return new Promise((resolve) => {
+        // Si por lo que sea falla la compresión (formato raro, etc.), se
+        // sube el archivo original tal cual, para no bloquear al usuario.
+        const imagen = new Image();
+        const url = URL.createObjectURL(archivo);
+
+        imagen.onload = () => {
+            URL.revokeObjectURL(url);
+
+            let { width, height } = imagen;
+            if (width > maxDimension || height > maxDimension) {
+                const escala = maxDimension / Math.max(width, height);
+                width  = Math.round(width * escala);
+                height = Math.round(height * escala);
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width  = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(imagen, 0, 0, width, height);
+
+            canvas.toBlob((blob) => {
+                if (!blob) { resolve(archivo); return; }
+                const nombre = (archivo.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+                resolve(new File([blob], nombre, { type: 'image/jpeg' }));
+            }, 'image/jpeg', calidad);
+        };
+
+        imagen.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(archivo); // no se pudo leer como imagen: se sube tal cual y que la valide el backend
+        };
+
+        imagen.src = url;
+    });
+}
+
 // Toma el archivo elegido en cualquiera de los dos triggers (cámara o
-// galería) y lo copia al input real que viaja en el FormData del form.
-function usarArchivoImagenProducto(archivo) {
-    if (!archivo) return;
+// galería), lo comprime y lo copia al input real que viaja en el FormData
+// del form.
+async function usarArchivoImagenProducto(archivoOriginal) {
+    if (!archivoOriginal) return;
+
+    const archivo = await comprimirImagenProducto(archivoOriginal);
 
     const dt = new DataTransfer();
     dt.items.add(archivo);
