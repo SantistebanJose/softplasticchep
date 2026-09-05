@@ -516,7 +516,6 @@ function eliminarMolde(id) {
         }
     });
 }
-
 function reactivarMolde(id) {
     llamarMoldes('REACTIVARMOLDE', { id }).then(json => {
         if (json.success) {
