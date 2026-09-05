@@ -20,6 +20,15 @@ include("header.php");
 .pc-venta-color-dot.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 2px, #fff 2px, #fff 4px); border:1px solid #bbb; }
 .pc-venta-color-dot.mezcla{ background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg); }
 .pc-venta-item-resultados .disp b{ color:#2F6FED; }
+
+
+.pc-venta-item-thumb, .pc-venta-item-thumb-vacio{
+    width:28px; height:28px; border-radius:7px; object-fit:cover; flex-shrink:0;
+    display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; margin-right:6px;
+}
+.pc-venta-item-thumb-vacio{ background:#f1efe9; color:#c8c3b3; font-size:.7em; }
+.pc-venta-item-resultados div{ display:flex; align-items:center; flex-wrap:wrap; gap:0; }
+.pc-venta-item-thumb-mini{ width:20px; height:20px; border-radius:5px; object-fit:cover; vertical-align:middle; margin-right:5px; }
 </style>
 
 <div class="pc-card">
@@ -286,14 +295,22 @@ function agregarFilaItemVenta() {
                 const esLegado = d.color_id === null || d.color_id === undefined;
                 const esMezcla = d.color_id === -1;
                 let dotClase = 'pc-venta-color-dot';
+                let dotStyle = '';
                 if (esLegado) dotClase += ' sin-color';
                 else if (esMezcla) dotClase += ' mezcla';
+                else dotStyle = `style="background:${colorHexParaVenta(d.color, d.color_hex)};"`;
+
+                const imagen = resolverImagenVenta(d.producto_imagen);
+                const thumbHtml = imagen
+                    ? `<img class="pc-venta-item-thumb" src="${imagen}" loading="lazy" alt="" onerror="this.remove()">`
+                    : `<span class="pc-venta-item-thumb-vacio"><i class="fa-regular fa-image"></i></span>`;
 
                 return `
                 <div onclick='seleccionarItemVenta("${idFila}", ${JSON.stringify(d)})'>
-                    <span class="${dotClase}"></span>
+                    ${thumbHtml}
+                    <span class="${dotClase}" ${dotStyle}></span>
                     <b>${d.producto_codigo}</b> - ${d.producto} · ${d.color ?? '-'}
-                    <div class="disp">
+                    <div class="disp" style="flex-basis:100%;">
                         Disponible: <b>${formatearCantidadVenta(d.paquetes_disponibles)} ${d.unidad_venta_corto ?? 'paq.'}</b>
                     </div>
                 </div>`;
@@ -319,12 +336,16 @@ function seleccionarItemVenta(idFila, datos) {
     fila.querySelector('.item-unidad').value = datos.unidad_venta_corto ?? '';
     fila.querySelector('.pc-venta-item-resultados').style.display = 'none';
 
+    const imagen = resolverImagenVenta(datos.producto_imagen);
+    const thumbHtml = imagen ? `<img class="pc-venta-item-thumb-mini" src="${imagen}" loading="lazy" alt="" onerror="this.remove()">` : '';
+    fila.querySelector('.pc-venta-item-nombre').innerHTML =
+        `${thumbHtml}Disponible: ${formatearCantidadVenta(datos.paquetes_disponibles)} ${datos.unidad_venta_corto ?? 'paq.'}`;
+
     const cantidadInput = fila.querySelector('.item-cantidad');
     cantidadInput.max = datos.paquetes_disponibles;
     cantidadInput.placeholder = `Máx. ${formatearCantidadVenta(datos.paquetes_disponibles)} ${datos.unidad_venta_corto ?? 'paq.'}`;
     actualizarSubtotalFila(fila);
 }
-
 function actualizarSubtotalFila(fila) {
     const cantidadInput = fila.querySelector('.item-cantidad');
     const cantidad = parseFloat(cantidadInput.value) || 0;
@@ -435,6 +456,26 @@ function anularVenta(id) {
             Swal.fire('Error', json.message, 'error');
         }
     });
+}
+const PALETA_COLOR_FALLBACK_VENTA = {
+    'VERDE': '#639922', 'AZUL': '#378ADD', 'CELESTE': '#5DB8E8', 'ROJO': '#E24B4A',
+    'AMARILLO': '#EF9F27', 'NARANJA': '#D85A30', 'MORADO': '#7F77DD', 'VIOLETA': '#7F77DD',
+    'ROSADO': '#D4537E', 'ROSA': '#D4537E', 'NEGRO': '#2C2C2A', 'BLANCO': '#D3D1C7',
+    'GRIS': '#888780', 'MARRON': '#712B13', 'CAFE': '#712B13', 'TURQUESA': '#1D9E75',
+    'PLOMO': '#5F5E5A', 'BEIGE': '#B4B2A9',
+};
+function colorHexParaVenta(colorNombre, colorHexBD) {
+    if (colorHexBD) return colorHexBD.startsWith('#') ? colorHexBD : `#${colorHexBD}`;
+    const clave = String(colorNombre ?? '').trim().toUpperCase();
+    if (PALETA_COLOR_FALLBACK_VENTA[clave]) return PALETA_COLOR_FALLBACK_VENTA[clave];
+    let hash = 0;
+    for (let i = 0; i < clave.length; i++) hash = clave.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 45%, 55%)`;
+}
+function resolverImagenVenta(ruta) {
+    if (!ruta) return null;
+    return ruta.startsWith('http') ? ruta : ruta;
 }
 
 // ── Ticket (PDF, generado por el servidor) ──────────────────────────────────

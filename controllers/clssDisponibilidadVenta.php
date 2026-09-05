@@ -91,12 +91,16 @@ function listarDisponibilidadVenta()
     $texto           = trim($_POST['texto'] ?? '');
     $colorId         = trim($_POST['color_id'] ?? '');
     $incluirVendidos = ($_POST['incluir_vendidos'] ?? '0') === '1';
- 
+
     $whereDetalle = ["dc.deleted_at IS NULL"];
     $params       = [];
- 
+
     if (!$incluirVendidos) {
-        $whereDetalle[] = "dc.pasado_venta IS NULL";
+        // CAMBIO: antes se filtraba por pasado_venta IS NULL (todo o nada).
+        // Ahora la venta descuenta de cantidad_disponible_tmp, así que un
+        // registro puede estar parcialmente vendido y seguir con stock.
+        // La fuente de verdad de "hay stock" es cantidad_disponible_tmp > 0.
+        $whereDetalle[] = "dc.cantidad_disp > 0.0001";
     }
     if ($texto !== '') {
         $whereDetalle[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
@@ -106,10 +110,13 @@ function listarDisponibilidadVenta()
         $whereDetalle[] = "dc.color_id_efectivo = :color_id";
         $params['color_id'] = $colorId;
     }
- 
+
+    // Si se incluyen vendidos, no se oculta ningún grupo por total en 0
+    // (queremos ver el histórico completo, aunque esté agotado).
+    $havingClause = $incluirVendidos ? '' : 'HAVING SUM(dc.cantidad_base) > 0';
+
     $sql = "
         WITH color_stats AS (
-            -- Solo para decidir el COLOR del registro (único / mezcla / legado).
             SELECT
                 reo.empaquetado_id,
                 COUNT(DISTINCT reo.color_id) AS colores_distintos,
@@ -127,12 +134,14 @@ function listarDisponibilidadVenta()
                 CASE
                     WHEN cs.colores_distintos IS NULL THEN NULL   -- legado
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
-                    ELSE -1                                        -- mezcla
+                    ELSE -1                                        -- surtido
                 END AS color_id_efectivo,
-                -- Uso INTERNO para calcular paquetes_disponibles. No se expone tal cual.
-                emp.cantidad_tota * COALESCE(um.equivalencia, 1) AS cantidad_base,
-                -- Cantidad en la unidad OPERATIVA de empaquetado (ej. bolsas/GRU).
-                emp.cantidad_tota AS cantidad_bolsas,
+                -- CAMBIO: el disponible real para venta es cantidad_disponible_tmp,
+                -- no cantidad_tota (que ahora es el histórico inmutable de lo
+                -- armado). COALESCE por si algún registro aún no tiene backfill.
+                COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) AS cantidad_disp,
+                COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) * COALESCE(um.equivalencia, 1) AS cantidad_base,
+                COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) AS cantidad_bolsas,
                 um.nombre_corto AS unidad_bolsa_corto
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
@@ -148,8 +157,6 @@ function listarDisponibilidadVenta()
                         THEN p.cant_equivale * COALESCE(ue.equivalencia, 1)
                     ELSE NULL
                 END AS capacidad_paquete_venta_base,
-                -- Compara la config básica (unidad_venta_id) contra la del
-                -- modal de Configuración (se_vende_por_unidad_medida_id).
                 (
                     p.unidad_venta_id IS DISTINCT FROM
                     NULLIF(p.js_configuracion_empaquetado->>'se_vende_por_unidad_medida_id','')::bigint
@@ -162,12 +169,14 @@ function listarDisponibilidadVenta()
             dc.producto_id,
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
+            p.img_ruta AS producto_imagen,          -- NUEVO
             dc.color_id_efectivo AS color_id,
             CASE
                 WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
-                WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
+                WHEN dc.color_id_efectivo = -1 THEN 'Surtido'
                 ELSE co.nombre
             END AS color,
+            co.rgb AS color_hex,                    -- NUEVO
             COUNT(*) AS registros_count,
             CASE
                 WHEN pv.capacidad_paquete_venta_base > 0
@@ -185,14 +194,14 @@ function listarDisponibilidadVenta()
         LEFT JOIN producto_venta pv ON pv.producto_id = dc.producto_id
         LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
-        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre,
-                 pv.unidad_venta_corto, pv.capacidad_paquete_venta_base, pv.config_venta_inconsistente
-        HAVING SUM(dc.cantidad_base) > 0
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, p.img_ruta, dc.color_id_efectivo, co.nombre, co.rgb,
+                pv.unidad_venta_corto, pv.capacidad_paquete_venta_base, pv.config_venta_inconsistente
+        $havingClause
         ORDER BY p.descripcion,
-                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
-                 co.nombre NULLS LAST
+                CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
+                co.nombre NULLS LAST
     ";
- 
+
     $result = executeQuery($conectar, $sql, $params);
     responderDV(true, 'OK', ['disponibilidad' => $result]);
 }

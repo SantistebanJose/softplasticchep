@@ -208,16 +208,19 @@ function buscarDisponiblesVenta()
                 emp.id AS empaquetado_id,
                 emp.producto_id,
                 CASE
-                    WHEN cs.colores_distintos IS NULL THEN NULL   -- legado
+                    WHEN cs.colores_distintos IS NULL THEN NULL
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
-                    ELSE -1                                        -- mezcla
+                    ELSE -1
                 END AS color_id_efectivo,
-                -- Cantidad en unidad base: uso interno para calcular paquetes.
-                emp.cantidad_tota * COALESCE(um.equivalencia, 1) AS cantidad_base
+                -- CAMBIO: cantidad_disponible_tmp es el disponible real para
+                -- venta (cantidad_tota es histórico inmutable de lo armado).
+                -- COALESCE por si algún registro no tiene backfill todavía.
+                COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) * COALESCE(um.equivalencia, 1) AS cantidad_base
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
-            WHERE emp.deleted_at IS NULL AND emp.pasado_venta IS NULL
+            WHERE emp.deleted_at IS NULL
+              AND COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) > 0.0001
         ),
         producto_venta AS (
             SELECT
@@ -233,12 +236,14 @@ function buscarDisponiblesVenta()
             dc.producto_id,
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
+            p.img_ruta AS producto_imagen,
             dc.color_id_efectivo AS color_id,
             CASE
                 WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
                 WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
                 ELSE co.nombre
             END AS color,
+            co.rgb AS color_hex,
             FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) AS paquetes_disponibles,
             pv.unidad_venta_corto
         FROM detalle dc
@@ -247,7 +252,7 @@ function buscarDisponiblesVenta()
                                 AND pv.capacidad_paquete_venta_base > 0
         LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
-        GROUP BY dc.producto_id, p.codigo, p.descripcion, dc.color_id_efectivo, co.nombre,
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, p.img_ruta, dc.color_id_efectivo, co.nombre, co.rgb,
                  pv.unidad_venta_corto, pv.capacidad_paquete_venta_base
         HAVING FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) > 0
         ORDER BY p.descripcion,
@@ -259,7 +264,6 @@ function buscarDisponiblesVenta()
     $result = executeQuery($conectar, $sql, $params);
     responderVenta(true, 'OK', ['disponibles' => $result]);
 }
-
 // =============================================================================
 // CONSUMO FIFO DE STOCK (empaquetado)
 // Sigue operando en UNIDAD BASE por dentro — eso no cambia. Lo que cambia
@@ -272,13 +276,12 @@ function buscarDisponiblesVenta()
 function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectivo, float $cantidadNecesariaBase): array
 {
     $stmt = $conectar->prepare("
-        SELECT t1.id, t1.cantidad_tota, um.equivalencia, um.unidad_base_id
+        SELECT t1.id, t1.cantidad_disponible_tmp, um.equivalencia, um.unidad_base_id
         FROM empaquetado t1
         JOIN unidad_medida um ON um.id = t1.unidad_medida
         WHERE t1.producto_id = :producto_id
           AND t1.deleted_at IS NULL
-          AND t1.pasado_venta IS NULL
-          AND t1.cantidad_tota > 0
+          AND t1.cantidad_disponible_tmp > 0
           AND (
               SELECT CASE
                   WHEN COUNT(DISTINCT reo.color_id) = 0 THEN NULL
@@ -305,19 +308,19 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
 
         $equivalencia   = !empty($reg['equivalencia']) ? (float)$reg['equivalencia'] : 1.0;
         $esConvertible  = !empty($reg['unidad_base_id']);
-        $cantidadTota   = (float)$reg['cantidad_tota'];
-        $disponibleBase = $esConvertible ? $cantidadTota * $equivalencia : $cantidadTota;
+        $cantidadDisp   = (float)$reg['cantidad_disponible_tmp'];
+        $disponibleBase = $esConvertible ? $cantidadDisp * $equivalencia : $cantidadDisp;
 
         if ($disponibleBase <= 0.0001) continue;
 
         $aConsumirBase   = min($restante, $disponibleBase);
         $aConsumirPropio = $esConvertible ? ($aConsumirBase / $equivalencia) : $aConsumirBase;
-        $nuevaCantidad   = round($cantidadTota - $aConsumirPropio, 4);
+        $nuevaCantidad   = round($cantidadDisp - $aConsumirPropio, 4);
         if ($nuevaCantidad < 0) $nuevaCantidad = 0;
 
         $consumo[] = [
             'empaquetado_id'      => (int)$reg['id'],
-            'cantidad_antes'      => $cantidadTota,
+            'cantidad_antes'      => $cantidadDisp,
             'cantidad_consumida'  => round($aConsumirPropio, 4),
             'cantidad_despues'    => $nuevaCantidad,
         ];
@@ -333,11 +336,13 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
     }
 
     foreach ($consumo as $c) {
+        // CAMBIO: se descuenta cantidad_disponible_tmp, NUNCA cantidad_tota
+        // (esa queda fija como el histórico de lo que se armó).
         $upd = $conectar->prepare("
             UPDATE empaquetado SET
-                cantidad_tota = :cantidad,
-                pasado_venta  = CASE WHEN :cantidad2 <= 0 THEN NOW() ELSE pasado_venta END,
-                update_at     = NOW()
+                cantidad_disponible_tmp = :cantidad,
+                pasado_venta            = CASE WHEN :cantidad2 <= 0 THEN NOW() ELSE pasado_venta END,
+                update_at               = NOW()
             WHERE id = :id
         ");
         $upd->execute([
@@ -353,7 +358,7 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
 function restaurarStockVenta($conectar, array $consumo): void
 {
     foreach ($consumo as $c) {
-        $stmt = $conectar->prepare("SELECT cantidad_tota FROM empaquetado WHERE id = :id FOR UPDATE");
+        $stmt = $conectar->prepare("SELECT cantidad_disponible_tmp FROM empaquetado WHERE id = :id FOR UPDATE");
         $stmt->execute(['id' => $c['empaquetado_id']]);
         $actual = $stmt->fetchColumn();
         if ($actual === false) continue;
@@ -362,15 +367,14 @@ function restaurarStockVenta($conectar, array $consumo): void
 
         $upd = $conectar->prepare("
             UPDATE empaquetado SET
-                cantidad_tota = :cantidad,
-                pasado_venta  = NULL,
-                update_at     = NOW()
+                cantidad_disponible_tmp = :cantidad,
+                pasado_venta            = NULL,
+                update_at               = NOW()
             WHERE id = :id
         ");
         $upd->execute(['cantidad' => $nuevaCantidad, 'id' => $c['empaquetado_id']]);
     }
 }
-
 // =============================================================================
 // VENTAS
 // =============================================================================
