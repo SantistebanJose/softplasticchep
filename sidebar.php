@@ -10,7 +10,7 @@
  *   enlazadas: ensamblaje.php, empaquetado.php, ventas.php, sucursal.php,
  *   area.php, cargo.php.
  * - Se separó "Producción" en dos grupos: "Operaciones" (el flujo diario:
- *   producción → ensamblaje → empaquetado → ventas) y "Personal"
+ *   producción → ensamblaje → empaquetado) y "Personal"
  *   (operarios, cargos). Ajustar si tu criterio de negocio es otro.
  * - Se asume que area.php = maestro de áreas/zonas de planta y
  *   cargo.php = maestro de cargos/puestos de operario. Si no es así,
@@ -22,6 +22,12 @@
  * - Bug corregido: los reportes usaban el mismo valor de $activePage
  *   ('reportes'), por lo que nunca se resaltaba el ítem activo individualmente.
  *   Ahora cada reporte tiene su propia clave.
+ *
+ * ACTUALIZADO (2026-09-05): la vista de Ventas se dividió en dos páginas
+ * (puntoVenta.php y listadoVentas.php), reemplazando a ventas.php. Se
+ * sacó "Ventas" del grupo Operaciones y se creó un grupo propio "Ventas"
+ * con esas dos páginas como submenú, siguiendo el mismo patrón visual
+ * de los demás grupos.
  */
 function pc_nav_class($page, $active)
 {
@@ -36,13 +42,15 @@ function pc_group_summary_class($isOpen)
     return 'pc-nav-item' . ($isOpen ? ' active' : '');
 }
 
-$operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado', 'ventas'];
+$operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
+$ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
 $administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion'];
 $reportesPages       = ['stock', 'produccion_operario'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
+$ventasOpen         = in_array($activePage, $ventasPages);
 $personalOpen       = in_array($activePage, $personalPages);
 $mantenimientoOpen  = in_array($activePage, $mantenimientoPages);
 $administracionOpen = in_array($activePage, $administracionPages);
@@ -79,8 +87,21 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="empaquetado.php" class="<?= pc_sub_class('empaquetado', $activePage) ?>">
                 <span class="dot"></span> Empaquetado
             </a>
-            <a href="ventas.php" class="<?= pc_sub_class('ventas', $activePage) ?>">
-                <span class="dot"></span> Ventas
+        </div>
+    </details>
+
+    <!-- Ventas -->
+    <details class="pc-nav-group" <?= $ventasOpen ? 'open' : '' ?>>
+        <summary class="<?= pc_group_summary_class($ventasOpen) ?>">
+            <span class="pc-nav-icon"><i class="fa-solid fa-cart-shopping"></i></span>
+            Ventas
+        </summary>
+        <div class="pc-nav-sublist">
+            <a href="puntoVenta.php" class="<?= pc_sub_class('punto_venta', $activePage) ?>">
+                <span class="dot"></span> Punto de Venta
+            </a>
+            <a href="listadoVentas.php" class="<?= pc_sub_class('listado_ventas', $activePage) ?>">
+                <span class="dot"></span> Listado de Ventas
             </a>
         </div>
     </details>

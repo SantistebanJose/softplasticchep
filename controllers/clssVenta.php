@@ -27,6 +27,13 @@
  * fallaba al guardar, con nombres de campo que además no coincidían con
  * los que leía el frontend: unidad_paquete_corto/cantidad_disponible no
  * existían en la respuesta — el frontend fue corregido junto con esto).
+ *
+ * FIX (2026-09-05): la vista de Ventas se dividió en dos páginas
+ * (puntoVenta.php y listadoVentas.php). listarVentas() ahora acepta un
+ * filtro adicional de rango de fechas ('hoy' | 'semana' | 'todas' |
+ * 'personalizado' + fecha_inicio/fecha_fin) para el listado con tabs.
+ * No cambia nada más del contrato existente (los parámetros texto/estado
+ * siguen funcionando igual que antes).
  */
 
 ob_start();
@@ -178,6 +185,10 @@ function buscarClientes()
 // configurada simplemente no aparece en el buscador (antes aparecía y
 // recién fallaba al guardar). Se quita el campo sin_config_venta, que ya
 // no aplica.
+//
+// Nota (2026-09-05): con "texto" vacío devuelve los primeros disponibles
+// sin filtrar (usado ahora por el grid de Venta Rápida al cargar la
+// página, no solo por el buscador de texto).
 // =============================================================================
 
 function buscarDisponiblesVenta()
@@ -379,12 +390,20 @@ function restaurarStockVenta($conectar, array $consumo): void
 // VENTAS
 // =============================================================================
 
+// ACTUALIZADO (2026-09-05): se agrega el filtro opcional de rango de
+// fechas usado por la nueva vista listadoVentas.php (tabs Día / Semana /
+// Todas / Personalizado). texto/estado se mantienen exactamente igual
+// que antes, así que cualquier otra pantalla que llame LISTARVENTAS sin
+// mandar "rango" sigue funcionando sin cambios.
 function listarVentas()
 {
     $conectar = conectar_oll_BD();
 
-    $texto  = trim($_POST['texto'] ?? '');
-    $estado = trim($_POST['estado'] ?? '');
+    $texto       = trim($_POST['texto'] ?? '');
+    $estado      = trim($_POST['estado'] ?? '');
+    $rango       = trim($_POST['rango'] ?? '');       // 'hoy' | 'semana' | 'todas' | 'personalizado'
+    $fechaInicio = trim($_POST['fecha_inicio'] ?? '');
+    $fechaFin    = trim($_POST['fecha_fin'] ?? '');
 
     $where  = ["1=1"];
     $params = [];
@@ -399,6 +418,17 @@ function listarVentas()
         $where[] = "v.estado = :estado";
         $params['estado'] = $estado;
     }
+
+    if ($rango === 'hoy') {
+        $where[] = "v.fecha_venta::date = CURRENT_DATE";
+    } elseif ($rango === 'semana') {
+        $where[] = "v.fecha_venta >= date_trunc('week', CURRENT_DATE)";
+    } elseif ($rango === 'personalizado' && $fechaInicio !== '' && $fechaFin !== '') {
+        $where[] = "v.fecha_venta::date BETWEEN :fecha_inicio AND :fecha_fin";
+        $params['fecha_inicio'] = $fechaInicio;
+        $params['fecha_fin']    = $fechaFin;
+    }
+    // 'todas' (o cualquier otro valor no reconocido) no agrega filtro de fecha.
 
     $sql = "SELECT v.id, v.codigo, v.cliente_ruc, p.razon_social AS cliente_nombre,
                    v.fecha_venta, v.monto_total, v.estado,
