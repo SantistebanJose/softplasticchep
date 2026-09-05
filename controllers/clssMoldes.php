@@ -15,6 +15,10 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 session_start();
 
+// Carpeta donde se guardan las fotos de molde (sube 1 nivel desde controllers/)
+define('CARPETA_IMAGENES_MOLDE', __DIR__ . '/../uploads/moldes/');
+define('RUTA_WEB_IMAGENES_MOLDE', 'uploads/moldes/');
+
 if (isset($_POST["accion"])) {
     controladorMoldes($_POST["accion"]);
 }
@@ -219,6 +223,7 @@ function guardarMolde()
     $nombre      = trim($_POST['nombre'] ?? '');
     $forma       = trim($_POST['forma'] ?? '');
     $productoIds = $_POST['producto_ids'] ?? []; // array del multi-select
+    $eliminarImagen = ($_POST['eliminar_imagen'] ?? '') === '1';
 
     if (!is_array($productoIds)) $productoIds = [$productoIds];
     $productoIds = array_values(array_unique(array_filter(array_map('intval', $productoIds))));
@@ -261,6 +266,11 @@ function guardarMolde()
     ], $productos);
     $jsProductoJson = json_encode($jsProducto, JSON_UNESCAPED_UNICODE);
 
+    // Se procesa la imagen ANTES del insert/update: si algo falla en la
+    // validación del archivo, subirImagenMolde() corta con responder()
+    // y no se llega a tocar la fila del molde.
+    $rutaNuevaImagen = subirImagenMolde(); // null si no vino archivo nuevo
+
     $mapaCampos  = ['nombre' => 'Nombre', 'forma' => 'Forma'];
     $datosNuevos = ['nombre' => $nombre, 'forma' => $forma];
 
@@ -278,13 +288,14 @@ function guardarMolde()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO molde (nombre, forma, js_producto, created_at, js_session, js_historial)
-            VALUES (:nombre, :forma, :js_producto, NOW(), :js_session, :js_historial)
+            INSERT INTO molde (nombre, forma, js_producto, img_ruta, created_at, js_session, js_historial)
+            VALUES (:nombre, :forma, :js_producto, :img, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'       => $nombre,
             'forma'        => $forma,
             'js_producto'  => $jsProductoJson,
+            'img'          => $rutaNuevaImagen,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
@@ -293,8 +304,23 @@ function guardarMolde()
     } else {
         // Edición: traemos el registro actual para comparar campo por campo
         $actual = executeQuery($conectar, "SELECT * FROM molde WHERE id = :id", ['id' => $id]);
-        if (empty($actual)) responder(false, 'Molde no encontrado.');
+        if (empty($actual)) {
+            if ($rutaNuevaImagen !== null) borrarImagenMoldeArchivo($rutaNuevaImagen);
+            responder(false, 'Molde no encontrado.');
+        }
         $registroAnterior = $actual[0];
+
+        // Se necesita la imagen actual para poder borrar el archivo físico
+        // viejo si se reemplaza o se elimina.
+        $imagenActual = $registroAnterior['img_ruta'] ?? null;
+        $imagenFinal  = $imagenActual;
+        if ($rutaNuevaImagen !== null) {
+            borrarImagenMoldeArchivo($imagenActual);
+            $imagenFinal = $rutaNuevaImagen;
+        } elseif ($eliminarImagen) {
+            borrarImagenMoldeArchivo($imagenActual);
+            $imagenFinal = null;
+        }
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
 
@@ -318,6 +344,7 @@ function guardarMolde()
                 nombre       = :nombre,
                 forma        = :forma,
                 js_producto  = :js_producto,
+                img_ruta     = :img,
                 update_at    = NOW(),
                 js_session   = :js_session,
                 js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -326,11 +353,64 @@ function guardarMolde()
             'nombre'       => $nombre,
             'forma'        => $forma,
             'js_producto'  => $jsProductoJson,
+            'img'          => $imagenFinal,
             'id'           => $id,
             'js_session'   => $js_session,
             'js_historial' => $js_historial_nuevo,
         ]);
         responder(true, 'Molde actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
+    }
+}
+/**
+ * Sube la foto del molde (si vino una en $_FILES['imagen']) y devuelve la
+ * ruta relativa (RUTA_WEB_IMAGENES_MOLDE . nombre) a guardar en
+ * molde.img_ruta. Devuelve null si no vino archivo nuevo.
+ * Mismo patrón que subirImagenProducto() en clssProductos.php.
+ */
+function subirImagenMolde(): ?string
+{
+    if (empty($_FILES['imagen']) || $_FILES['imagen']['error'] === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    $archivo = $_FILES['imagen'];
+
+    if ($archivo['error'] !== UPLOAD_ERR_OK) {
+        responder(false, 'Error al subir la imagen (código ' . $archivo['error'] . ').');
+    }
+    if ($archivo['size'] > 5 * 1024 * 1024) {
+        responder(false, 'La imagen no puede pesar más de 5MB.');
+    }
+
+    $extension = strtolower(pathinfo($archivo['name'], PATHINFO_EXTENSION));
+    $permitidas = ['jpg', 'jpeg', 'png', 'webp'];
+    if (!in_array($extension, $permitidas, true)) {
+        responder(false, 'Formato de imagen no permitido. Usa JPG, PNG o WEBP.');
+    }
+
+    if (@getimagesize($archivo['tmp_name']) === false) {
+        responder(false, 'El archivo subido no es una imagen válida.');
+    }
+
+    if (!is_dir(CARPETA_IMAGENES_MOLDE)) {
+        mkdir(CARPETA_IMAGENES_MOLDE, 0755, true);
+    }
+
+    $nombreArchivo = 'molde_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+    $rutaDestino   = CARPETA_IMAGENES_MOLDE . $nombreArchivo;
+
+    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
+        responder(false, 'No se pudo guardar la imagen en el servidor.');
+    }
+
+    return RUTA_WEB_IMAGENES_MOLDE . $nombreArchivo;
+}
+
+function borrarImagenMoldeArchivo(?string $rutaRelativa): void
+{
+    if (empty($rutaRelativa)) return;
+    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
+    if (is_file($rutaFisica)) {
+        @unlink($rutaFisica);
     }
 }
 
