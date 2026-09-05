@@ -830,9 +830,9 @@ function crearEmpaquetado()
 
         $nuevo = executeQuery($conectar, "
             INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
-                cantidad_tota, js_cantidades, created_at, js_session, js_historial)
+                cantidad_tota, cantidad_disponible_tmp, js_cantidades, created_at, js_session, js_historial)
             VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
-                :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
+                :cantidad_tota, :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
@@ -973,9 +973,9 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
 
         $nuevo = executeQuery($conectar, "
             INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
-                cantidad_tota, js_cantidades, created_at, js_session, js_historial)
+                cantidad_tota, cantidad_disponible_tmp, js_cantidades, created_at, js_session, js_historial)
             VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
-                :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
+                :cantidad_tota, :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
