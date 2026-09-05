@@ -5,15 +5,23 @@
  *
  * Sirve el archivo de comprobante (img_comprobante) de una compra,
  * validando que el usuario tenga sesión activa ANTES de entregar el
- * archivo. Se usa en vez de exponer la ruta física directa
- * (uploads/comprobantes/xxx.jpg) para que el link no se pueda copiar
- * y compartir libremente: sin sesión válida, no se ve nada.
+ * archivo. Desde que las imágenes se subieron a Cloudinary,
+ * img_comprobante ya guarda una URL absoluta (https://res.cloudinary.com/...)
+ * en vez de una ruta local, así que este script valida sesión y
+ * redirige a esa URL en vez de leer un archivo de disco.
  *
  * Uso: <img src="controllers/ver_comprobante.php?id=123">
  *      <iframe src="controllers/ver_comprobante.php?id=123">
  *
- * Content-Disposition: inline -> el navegador lo muestra embebido
- * (en el <img>/<iframe>) en vez de forzar descarga.
+ * NOTA: a diferencia de la versión con archivo local (que servía el
+ * contenido con Content-Disposition: inline sin exponer nunca la ruta
+ * real), esta redirige al navegador a la URL pública de Cloudinary.
+ * Eso significa que, una vez cargado el iframe/img, la URL de Cloudinary
+ * queda visible en la consola/red del navegador y se podría copiar y
+ * compartir sin pasar por esta validación de sesión. Si necesitas que
+ * el comprobante siga siendo inaccesible sin sesión incluso conociendo
+ * esa URL, usa "signed delivery" de Cloudinary (URLs firmadas con
+ * expiración) en vez de uploads públicos — dímelo si quieres esa versión.
  */
 
 session_start();
@@ -55,39 +63,14 @@ if (empty($compra) || empty($compra[0]['img_comprobante'])) {
     exit;
 }
 
-$rutaRelativa = $compra[0]['img_comprobante'];   // ej: uploads/comprobantes/comprobante_xxx.jpg
-$rutaFisica   = __DIR__ . '/../' . $rutaRelativa;
+$url = $compra[0]['img_comprobante']; // URL absoluta de Cloudinary
 
-if (!is_file($rutaFisica)) {
-    http_response_code(404);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'El archivo ya no existe en el servidor.';
-    exit;
-}
-
-// ── Content-Type según extensión ────────────────────────────────────────
-$extension = strtolower(pathinfo($rutaFisica, PATHINFO_EXTENSION));
-$mimes = [
-    'jpg'  => 'image/jpeg',
-    'jpeg' => 'image/jpeg',
-    'png'  => 'image/png',
-    'webp' => 'image/webp',
-    'pdf'  => 'application/pdf',
-];
-$mime = $mimes[$extension] ?? 'application/octet-stream';
-
-// Limpia cualquier buffer de salida previo (por si algo hizo echo antes)
 if (ob_get_level() > 0) {
     ob_end_clean();
 }
 
-header('Content-Type: ' . $mime);
-header('Content-Length: ' . filesize($rutaFisica));
-// "inline" = se muestra embebido en el navegador, no se descarga
-header('Content-Disposition: inline; filename="' . basename($rutaFisica) . '"');
-// Evita que el navegador cachee agresivamente un archivo que pudo cambiar
+// Redirige al navegador a la URL de Cloudinary. Evita cache del propio
+// redirect (no del archivo final, que Cloudinary sirve con su propio CDN).
 header('Cache-Control: private, max-age=0, must-revalidate');
-header('X-Content-Type-Options: nosniff');
-
-readfile($rutaFisica);
+header('Location: ' . $url);
 exit;

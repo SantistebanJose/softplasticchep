@@ -95,6 +95,8 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/cloudinaryHelper.php';
+
 session_start();
 
 // Carpeta donde se guardan los comprobantes subidos (sube 1 nivel desde controllers/)
@@ -349,6 +351,11 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
  * Sube el comprobante (si vino uno en $_FILES) y devuelve la ruta relativa a guardar en BD.
  * Devuelve null si no vino archivo.
  */
+/**
+ * Sube el comprobante (si vino uno en $_FILES) a Cloudinary y devuelve la
+ * URL absoluta a guardar en compra.img_comprobante. Devuelve null si no
+ * vino archivo nuevo.
+ */
 function subirComprobante(): ?string
 {
     if (empty($_FILES['img_comprobante']) || $_FILES['img_comprobante']['error'] === UPLOAD_ERR_NO_FILE) {
@@ -369,29 +376,14 @@ function subirComprobante(): ?string
         responder(false, 'Formato de comprobante no permitido. Usa JPG, PNG, WEBP o PDF.');
     }
 
-    if (!is_dir(CARPETA_COMPROBANTES)) {
-        mkdir(CARPETA_COMPROBANTES, 0755, true);
-    }
-
-    $nombreArchivo = 'comprobante_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
-    $rutaDestino   = CARPETA_COMPROBANTES . $nombreArchivo;
-
-    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
-        responder(false, 'No se pudo guardar el archivo del comprobante en el servidor.');
-    }
-
-    return RUTA_WEB_COMPROBANTES . $nombreArchivo;
+    $subida = subirImagenACloudinary($archivo['tmp_name'], $archivo['name'], 'comprobantes');
+    return $subida['url'];
 }
 
-function borrarArchivoComprobante(?string $rutaRelativa): void
+function borrarArchivoComprobante(?string $url): void
 {
-    if (empty($rutaRelativa)) return;
-    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
-    if (is_file($rutaFisica)) {
-        @unlink($rutaFisica);
-    }
+    borrarImagenCloudinary($url);
 }
-
 function guardarCompra()
 {
     $conectar = conectar_oll_BD();
