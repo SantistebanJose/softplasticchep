@@ -13,6 +13,8 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/cloudinaryHelper.php';
+
 session_start();
 
 // Carpeta donde se guardan las fotos de molde (sube 1 nivel desde controllers/)
@@ -386,34 +388,18 @@ function subirImagenMolde(): ?string
     if (!in_array($extension, $permitidas, true)) {
         responder(false, 'Formato de imagen no permitido. Usa JPG, PNG o WEBP.');
     }
-
     if (@getimagesize($archivo['tmp_name']) === false) {
         responder(false, 'El archivo subido no es una imagen válida.');
     }
 
-    if (!is_dir(CARPETA_IMAGENES_MOLDE)) {
-        mkdir(CARPETA_IMAGENES_MOLDE, 0755, true);
-    }
-
-    $nombreArchivo = 'molde_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
-    $rutaDestino   = CARPETA_IMAGENES_MOLDE . $nombreArchivo;
-
-    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
-        responder(false, 'No se pudo guardar la imagen en el servidor.');
-    }
-
-    return RUTA_WEB_IMAGENES_MOLDE . $nombreArchivo;
+    $subida = subirImagenACloudinary($archivo['tmp_name'], $archivo['name'], 'moldes');
+    return $subida['url'];
 }
 
-function borrarImagenMoldeArchivo(?string $rutaRelativa): void
+function borrarImagenMoldeArchivo(?string $url): void
 {
-    if (empty($rutaRelativa)) return;
-    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
-    if (is_file($rutaFisica)) {
-        @unlink($rutaFisica);
-    }
+    borrarImagenCloudinary($url);
 }
-
 // Soft delete: se marca deleted_at, no se borra físicamente.
 function eliminarMolde()
 {

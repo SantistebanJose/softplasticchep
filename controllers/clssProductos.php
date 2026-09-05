@@ -8,6 +8,8 @@ ini_set('log_errors', '1');
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/cloudinaryHelper.php';
+
 session_start();
 
 // Carpeta donde se guardan las fotos de producto (sube 1 nivel desde controllers/)
@@ -230,36 +232,18 @@ function subirImagenProducto(): ?string
     if (!in_array($extension, $permitidas, true)) {
         responder(false, 'Formato de imagen no permitido. Usa JPG, PNG o WEBP.');
     }
-
-    // Validación extra: confirma que el archivo realmente sea una imagen
-    // (evita que alguien suba un .php disfrazado con extensión .jpg).
     if (@getimagesize($archivo['tmp_name']) === false) {
         responder(false, 'El archivo subido no es una imagen válida.');
     }
 
-    if (!is_dir(CARPETA_IMAGENES_PRODUCTO)) {
-        mkdir(CARPETA_IMAGENES_PRODUCTO, 0755, true);
-    }
-
-    $nombreArchivo = 'producto_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
-    $rutaDestino   = CARPETA_IMAGENES_PRODUCTO . $nombreArchivo;
-
-    if (!move_uploaded_file($archivo['tmp_name'], $rutaDestino)) {
-        responder(false, 'No se pudo guardar la imagen en el servidor.');
-    }
-
-    return RUTA_WEB_IMAGENES_PRODUCTO . $nombreArchivo;
+    $subida = subirImagenACloudinary($archivo['tmp_name'], $archivo['name'], 'productos');
+    return $subida['url'];
 }
 
-function borrarImagenProductoArchivo(?string $rutaRelativa): void
+function borrarImagenProductoArchivo(?string $url): void
 {
-    if (empty($rutaRelativa)) return;
-    $rutaFisica = __DIR__ . '/../' . $rutaRelativa;
-    if (is_file($rutaFisica)) {
-        @unlink($rutaFisica);
-    }
+    borrarImagenCloudinary($url);
 }
-
 function guardarProducto()
 {
     $conectar           = conectar_oll_BD();
