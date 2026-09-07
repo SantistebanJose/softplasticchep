@@ -36,7 +36,41 @@ class UserController
         $stmt->execute(['id' => $id]);
         return $stmt->fetch() ?: [];
     }
+    public function getProfileById(int $id): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, user_, nombre_completo, rol_y_perfiles, operario_id, created_at
+             FROM usuario WHERE id = :id'
+        );
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch() ?: [];
+    }
 
+    public function changeOwnPassword(int $id, string $currentPassword, string $newPassword, string $confirmPassword): array
+    {
+        if ($newPassword === '' || $confirmPassword === '') {
+            return ['ok' => false, 'msg' => 'Debes completar la nueva contraseña y su confirmación.'];
+        }
+        if ($newPassword !== $confirmPassword) {
+            return ['ok' => false, 'msg' => 'La nueva contraseña y su confirmación no coinciden.'];
+        }
+        if (strlen($newPassword) < 6) {
+            return ['ok' => false, 'msg' => 'La nueva contraseña debe tener al menos 6 caracteres.'];
+        }
+
+        $stmt = $this->pdo->prepare('SELECT pass_ FROM usuario WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+        $usuario = $stmt->fetch();
+
+        if (!$usuario || !password_verify($currentPassword, $usuario['pass_'])) {
+            return ['ok' => false, 'msg' => 'La contraseña actual es incorrecta.'];
+        }
+
+        $update = $this->pdo->prepare('UPDATE usuario SET pass_ = :pass_, updated_at = NOW() WHERE id = :id');
+        $update->execute(['pass_' => password_hash($newPassword, PASSWORD_DEFAULT), 'id' => $id]);
+
+        return ['ok' => true, 'msg' => 'Contraseña actualizada correctamente.'];
+    }
     public function saveUser(array $data): array
     {
         if (empty($data['user_']) || empty($data['nombre_completo'])) {
@@ -105,3 +139,5 @@ class UserController
         return ['ok' => true, 'msg' => 'Usuario eliminado correctamente.'];
     }
 }
+
+
