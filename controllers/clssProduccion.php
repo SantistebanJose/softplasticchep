@@ -1467,9 +1467,17 @@ function enviarAEnsamblaje()
 
     // Si vino desglose, se inyecta 'cantidad_producida' dentro de cada
     // entrada de js_operarios que ya existía (id, nombre, cargo).
+    $listaOperarios = json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [];
+
+    if (empty($desglosePorOperario) && count($listaOperarios) === 1) {
+        $unicoId = intval($listaOperarios[0]['operario_id'] ?? 0);
+        if ($unicoId > 0) {
+            $desglosePorOperario[$unicoId] = $cantidadProducida;
+        }
+    }
+
     $jsOperariosActualizado = $existe[0]['js_operarios'];
     if (!empty($desglosePorOperario)) {
-        $listaOperarios = json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [];
         foreach ($listaOperarios as &$op) {
             $oid = intval($op['operario_id'] ?? 0);
             if (isset($desglosePorOperario[$oid])) {
