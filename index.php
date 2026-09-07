@@ -112,7 +112,7 @@ window.addEventListener('load', function () {
             <a href="empaquetado.php" class="pc-quick-btn q-warning">
                 <i class="fa-solid fa-box-open"></i> Empaquetado
             </a>
-            <a href="ventas.php" class="pc-quick-btn q-success">
+            <a href="puntoVenta.php" class="pc-quick-btn q-success">
                 <i class="fa-solid fa-cash-register"></i> Ventas
             </a>
         </div>
