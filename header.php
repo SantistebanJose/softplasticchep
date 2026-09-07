@@ -64,6 +64,9 @@ if (empty($_SESSION['usuario_id'])) {
             </div>
         </div>
         <div class="pc-topbar-right">
+            <a href="perfil.php" class="pc-icon-btn" title="Mi perfil">
+                <i class="fa-regular fa-user"></i>
+            </a>
             <div class="pc-icon-btn">
                 <i class="fa-regular fa-bell"></i>
                 <span class="pc-badge-dot"></span>
