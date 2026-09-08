@@ -1174,13 +1174,14 @@ async function renderGridDetalle() {
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
                     onclick='agregarLineaDetalle("complemento", ${JSON.stringify({
-                        ensamblaje_id: c.ensamblaje_id,
-                        producto_codigo: c.producto_codigo,
-                        producto_descripcion: c.producto_descripcion,
-                        cantidad_peso_kg: c.cantidad_peso_kg,
-                        unidad_salida_codigo: unidad,
-                        fin: c.fin,
-                    })})'>
+                    ensamblaje_id: c.ensamblaje_id,
+                    producto_codigo: c.producto_codigo,
+                    producto_descripcion: c.producto_descripcion,
+                    cantidad_peso_kg: c.cantidad_peso_kg,
+                    unidad_salida_codigo: unidad,
+                    nombre_mostrar: nombreMostrar,
+                    fin: c.fin,
+                })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
                 <span class="nombre">${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
