@@ -751,10 +751,38 @@ function crearEmpaquetado()
     $origenesRef = executeQuery($conectar, "
         SELECT unidad_salida_codigo FROM (
             SELECT us.nombre_corto AS unidad_salida_codigo
-            FROM ensamblaje e LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
-            WHERE e.producto_id = :pid AND e.deleted_at IS NULL LIMIT 1
+            FROM ensamblaje e
+            LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
+            WHERE e.producto_id = :pid AND e.deleted_at IS NULL
+
+            UNION ALL
+
+            -- Productos sin ensamblaje (necesita_ensamblaje = 'no'): la unidad
+            -- de origen sale directo de producción, resuelta vía la
+            -- configuración por molde en producto.js_configuracion (mismo
+            -- patrón que buscarOrigenesDisponiblesParaEmpaquetar()).
+            SELECT umx.nombre_corto AS unidad_salida_codigo
+            FROM produccion pd
+            INNER JOIN producto pr ON pr.id = :pid2
+            LEFT JOIN molde mo ON mo.id = pd.molde_id
+            LEFT JOIN LATERAL (
+                SELECT elem.item
+                FROM jsonb_array_elements(pr.js_configuracion) AS elem(item)
+                WHERE (elem.item->>'molde_id')::bigint = mo.id
+                LIMIT 1
+            ) x ON true
+            LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+            LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
+            LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
+            WHERE split_part(pd.unico_molde_producto, '-', 2)::bigint = :pid3
+            AND pd.deleted_at IS NULL
+            AND pd.enviado_ensamblaje = TRUE
+            AND pd.fecha_hora_fin IS NOT NULL
+            AND COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'
         ) t
-    ", ['pid' => $productoId]);
+        WHERE unidad_salida_codigo IS NOT NULL
+        LIMIT 1
+    ", ['pid' => $productoId, 'pid2' => $productoId, 'pid3' => $productoId]);
     $unidadOrigenCodigo = $origenesRef[0]['unidad_salida_codigo'] ?? null;
     $equivalenciaCapacidad = obtenerCapacidadPaqueteEnUnidadOrigen($conectar, $unidadEmpaquetado, $unidadOrigenCodigo) ?? 0;
     if ($sucursalId !== null) {
