@@ -1153,29 +1153,31 @@ async function renderGridDetalle() {
             return;
         }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, texto, categoria_material_id: categoriaActual });
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId, texto, categoria_material_id: categoriaActual });
         const complementos = json.success ? (json.complementos || []) : [];
+
         if (complementos.length === 0) {
             grid.innerHTML = '<div class="pc-mat-empty">No hay armados finalizados de la misma categoría de material marcados como complemento de este producto.</div>';
             return;
         }
+
         grid.innerHTML = complementos.map(c => {
             const nombreMostrar = c.moldes_nombres || `${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}`;
-            const est = estiloPorNombre(nombreMostrar);
             const unidad = c.unidad_salida_codigo || 'kg';
+            const est = estiloPorNombre(nombreMostrar);
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'complemento' && l.ensamblaje_complemento_id == c.ensamblaje_id);
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
                     onclick='agregarLineaDetalle("complemento", ${JSON.stringify({
-                    ensamblaje_id: c.ensamblaje_id,
-                    producto_codigo: c.producto_codigo,
-                    producto_descripcion: c.producto_descripcion,
-                    cantidad_peso_kg: c.cantidad_peso_kg,
-                    unidad_salida_codigo: unidad,
-                    nombre_mostrar: nombreMostrar,
-                    fin: c.fin,
-                })})'>
+                        ensamblaje_id: c.ensamblaje_id,
+                        producto_codigo: c.producto_codigo,
+                        producto_descripcion: c.producto_descripcion,
+                        cantidad_peso_kg: c.cantidad_peso_kg,
+                        unidad_salida_codigo: unidad,
+                        nombre_mostrar: nombreMostrar,
+                        fin: c.fin,
+                    })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
                 <span class="nombre">${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
@@ -1194,21 +1196,30 @@ function agregarLineaDetalle(tipo, datos) {
 
     if (tipo === 'produccion') {
         ticketDetalleEns.push({
-            tempId: ++contadorLineaTicketEns, tipo: 'produccion',
-            molde_produccion_id: datos.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'produccion',
+            molde_produccion_id: datos.produccion_id,
+            derivado_id: null,
+            ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
             meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} ${datos.unidad_codigo || 'KG'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
-            icono: 'fa-industry', color: est.color, bg: est.bg,
+            icono: 'fa-industry',
+            color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
             unidad_codigo: datos.unidad_codigo || 'KG',
             categoria_material_id: datos.categoria_material_id,
         });
     } else if (tipo === 'derivado') {
         ticketDetalleEns.push({
-            tempId: ++contadorLineaTicketEns, tipo: 'derivado',
-            molde_produccion_id: null, derivado_id: datos.derivado_id, ensamblaje_complemento_id: null,
-            nombre: datos.nombre, meta: `Derivado #${datos.derivado_id}`,
-            icono: 'fa-flask', color: est.color, bg: est.bg,
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'derivado',
+            molde_produccion_id: null,
+            derivado_id: datos.derivado_id,
+            ensamblaje_complemento_id: null,
+            nombre: datos.nombre,
+            meta: `Derivado #${datos.derivado_id}`,
+            icono: 'fa-flask',
+            color: est.color, bg: est.bg,
         });
     } else {
         ticketDetalleEns.push({
@@ -1383,7 +1394,7 @@ async function abrirModalEditarEnsamblaje(id) {
             derivado_id: null,
             ensamblaje_complemento_id: item.ensamblaje_complemento_id,
             nombre: nombreMostrar,
-            meta: `${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''} · Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} ${item.unidad_salida_codigo || 'kg'}`,
+            meta: `Complementa a ${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''} · Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} ${item.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece',
             color: est.color, bg: est.bg,
         });
