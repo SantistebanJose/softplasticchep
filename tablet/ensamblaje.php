@@ -312,7 +312,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
             </div>
 
-            <div class="pc-ens-requisito">
+            <div class="pc-ens-requisito" id="ens_requisito_banner">
                 <i class="fa-solid fa-circle-info"></i>
                 Vincula al menos una producción finalizada, un derivado o un complemento.
             </div>
@@ -963,28 +963,41 @@ async function obtenerProductosParaComplementar(excluirId) {
 }
 
 async function marcarComplementoAccion(id) {
-    const confirmacion = await Swal.fire({
+    const e = ensamblajesCache.find(x => x.ensamblaje_id === id);
+    const unidadCodigo = e?.producto_unidad_ensamblaje_codigo || e?.unidad_salida_codigo || 'kg';
+    const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
+    const cantidadActual = e?.cantidad_peso_kg ?? '';
+
+    const { value: cantidadEnsamblada } = await Swal.fire({
         title: '¿Pasar este armado a Complementar?',
-        text: 'Quedará disponible para ser consumido dentro de otro ensamblaje distinto y ya no podrá enviarse a empaquetado.',
+        html: `Indica la cantidad ensamblada (<b>${unidadCodigo}</b> · ${unidadNombre}) que va a complementar.<br>
+               <small style="color:#666;">Quedará disponible para usarse dentro de otro ensamblaje y ya no podrá enviarse a empaquetado.</small>`,
         icon: 'question',
+        input: 'number',
+        inputAttributes: { min: 0, step: '0.01' },
+        inputValue: cantidadActual,
+        inputPlaceholder: `Cantidad en ${unidadCodigo}`,
         showCancelButton: true,
-        confirmButtonText: 'Sí, continuar',
-        cancelButtonText: 'Cancelar'
+        confirmButtonText: 'Continuar',
+        cancelButtonText: 'Cancelar',
+        inputValidator: (value) => {
+            if (!value || parseFloat(value) <= 0) return 'Ingresa una cantidad válida mayor a 0.';
+        }
     });
-    if (!confirmacion.isConfirmed) return;
+    if (!cantidadEnsamblada) return;
 
     const productos = await obtenerProductosParaComplementar(id);
     if (!productos || productos.length === 0) {
-        Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre, de la misma categoría de material).', 'warning');
+        Swal.fire('Aviso', 'No hay productos disponibles para complementar.', 'warning');
         return;
     }
     const opciones = productos.map(p =>
-        `<option value="${p.producto_id}">${p.codigo} - ${p.producto}${p.color_nombre ? ' (' + p.color_nombre + ')' : ''}</option>`
+        `<option value="${p.producto_id}_${p.color_id ?? ''}">${p.es_mismo_producto ? '⭐ (Mismo producto) ' : ''}${p.codigo} - ${p.producto}${p.color_nombre ? ' (' + p.color_nombre + ')' : ''}</option>`
     ).join('');
 
-    const { value: productoObjetivoId } = await Swal.fire({
+    const { value: seleccion } = await Swal.fire({
         title: 'Marcar como complemento',
-        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto y color final al que este armado ya finalizado va a complementar.</p>
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto y color final al que este armado va a complementar.</p>
                <select id="swal-complemento-producto" class="form-select form-select-lg">
                    <option value="">Selecciona un producto...</option>
                    ${opciones}
@@ -999,9 +1012,15 @@ async function marcarComplementoAccion(id) {
             return val;
         }
     });
-    if (!productoObjetivoId) return;
+    if (!seleccion) return;
+    const [productoObjetivoId, colorObjetivoId] = seleccion.split('_');
 
-    const json = await llamarEnsamblaje('COMPLEMENTAR', { id, producto_objetivo_id: productoObjetivoId });
+    const json = await llamarEnsamblaje('COMPLEMENTAR', {
+        id,
+        producto_objetivo_id: productoObjetivoId,
+        color_objetivo_id: colorObjetivoId,
+        cantidad_ensamblada: cantidadEnsamblada,
+    });
     if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
     else { Swal.fire('Error', json.message, 'error'); }
 }
@@ -1255,6 +1274,8 @@ function limpiarFormularioEnsamblaje() {
     cerrarPickerOperarios();
     renderTicketDetalle();
     soloLecturaEns = false;
+    document.getElementById('ens_requisito_banner').innerHTML =
+        `<i class="fa-solid fa-circle-info"></i> Vincula al menos una producción finalizada, un derivado o un complemento.`;
 }
 
 async function abrirModalCrearEnsamblaje() {
@@ -1275,13 +1296,22 @@ async function abrirModalEditarEnsamblaje(id) {
     ensamblajeIdActual = id;
 
     const e = json.ensamblaje;
-    soloLecturaEns = !!e.enviado_empaquetado;
+    const yaComplementado = !!parseJsonObjetoColumna(e.js_producto_emsamblado);
+    soloLecturaEns = !!e.enviado_empaquetado || yaComplementado;
 
     document.getElementById('modalEnsamblajeTitulo').textContent = soloLecturaEns
-        ? `Ensamblaje #${id} · Solo lectura (ya en Empaquetado)`
-        : 'Editar ensamblaje #' + id;
+    ? (yaComplementado
+        ? `Ensamblaje #${id} · Solo lectura (ya marcado como complemento)`
+        : `Ensamblaje #${id} · Solo lectura (ya en Empaquetado)`)
+    : 'Editar ensamblaje #' + id;
         const operariosVinculados = parseJsonColumna(e.js_operarios).map(o => o.operario_id);
-
+    const requisitoEl = document.getElementById('ens_requisito_banner');
+    if (yaComplementado) {
+        const comp = parseJsonObjetoColumna(e.js_producto_emsamblado);
+        requisitoEl.innerHTML = `<i class="fa-solid fa-puzzle-piece"></i> Este armado ya fue marcado como complemento de <b>${comp.codigo ?? ''} - ${comp.descripcion ?? ''}</b>${comp.color_nombre ? ' (' + comp.color_nombre + ')' : ''}. No se puede editar.`;
+    } else {
+        requisitoEl.innerHTML = `<i class="fa-solid fa-circle-info"></i> Vincula al menos una producción finalizada, un derivado o un complemento.`;
+    }
     await cargarSelectsModalEns({
         producto_id: e.producto_id,
         color_id: e.color_id_actual,
