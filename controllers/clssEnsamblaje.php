@@ -175,9 +175,9 @@ function controladorEnsamblaje($accion)
         case 'GUARDARENSAMBLAJE':
             guardarEnsamblaje();
             break;
-        case 'FUSIONARENSAMBLAJE':
-            fusionarEnsamblaje();
-            break;
+        //case 'FUSIONARENSAMBLAJE':
+          //  fusionarEnsamblaje();
+            //break;
         case 'ELIMINARENSAMBLAJE':
             eliminarEnsamblaje();
             break;
@@ -396,6 +396,7 @@ function buscarComplementos()
     $conectar   = conectar_oll_BD();
     $texto      = trim($_POST['texto'] ?? '');
     $productoId = intval($_POST['producto_id'] ?? 0);
+    $colorId    = intval($_POST['color_id'] ?? 0) ?: null;
     $categoriaMaterialId = intval($_POST['categoria_material_id'] ?? 0) ?: null;
 
     if ($productoId <= 0) {
@@ -414,6 +415,10 @@ function buscarComplementos()
         $where[] = "e.categoria_material_id = :categoria_material_id";
         $params['categoria_material_id'] = $categoriaMaterialId;
     }
+    if ($colorId !== null) {
+        $where[] = "(e.js_producto_emsamblado->>'color_id')::bigint = :color_id";
+        $params['color_id'] = $colorId;
+    }
     if ($texto !== '') {
         $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
@@ -426,6 +431,7 @@ function buscarComplementos()
                 p.descripcion AS producto_descripcion,
                 e.cantidad_peso_kg,
                 e.fin,
+                e.js_producto_emsamblado->>'color_nombre' AS complemento_color_nombre,
                 cm.nombre AS categoria_material_nombre
             FROM ensamblaje e
             LEFT JOIN producto p ON p.id = e.producto_id
@@ -470,9 +476,6 @@ function buscarProductosParaComplementar()
         $categoriaMaterialNombrePropio = !empty($propio) ? $propio[0]['categoria_material_nombre'] : null;
     }
 
-    // Solo los armados de categoría "De Primera" pueden complementar a otro
-    // producto. Cualquier otra categoría (o sin categoría definida) va
-    // directo a Empaquetado — no se le ofrece ningún destino aquí.
     if ($categoriaMaterialIdPropio === null || strtolower(trim($categoriaMaterialNombrePropio ?? '')) !== 'de primera') {
         responder(true, 'OK', ['productos' => []]);
     }
@@ -482,28 +485,16 @@ function buscarProductosParaComplementar()
         "t1.fin IS NOT NULL",
         "t1.ensamblaje_id_referido IS NULL",
         "t1.categoria_material_id = :categoria_material_id_propio",
+        "t1.id != :excluir_id",
     ];
-    $params = ['categoria_material_id_propio' => $categoriaMaterialIdPropio];
-    if ($excluirId > 0) {
-        $where[] = "t1.id != :excluir_id";
-        $params['excluir_id'] = $excluirId;
-    }
-    if ($productoPropioId > 0) {
-        $where[] = "t2.id != :producto_propio_id";
-        $params['producto_propio_id'] = $productoPropioId;
-    }
+    $params = ['categoria_material_id_propio' => $categoriaMaterialIdPropio, 'excluir_id' => $excluirId];
+    // YA NO se excluye t2.id != producto_propio_id: el mismo producto es un
+    // destino válido (auto-complemento).
     if ($texto !== '') {
         $where[] = "(LOWER(t2.codigo) LIKE LOWER(:texto) OR LOWER(t2.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
 
-    // NUEVO: se agrega el color del armado candidato (resuelto desde la
-    // primera producción vinculada vía rel_ensamblaje_producto -> produccion)
-    // para que el select del modal pueda mostrar "Producto (Color)" y el
-    // usuario elija el destino exacto, no solo el producto en general.
-    // DISTINCT ON ahora es por (producto_id, color_id): si el mismo
-    // producto tiene armados libres de distintos colores, aparecen como
-    // opciones separadas.
     $sql = "SELECT DISTINCT ON (t2.id, col.color_id)
                 t1.id AS ensamblaje_id,
                 t2.id AS producto_id,
@@ -525,6 +516,32 @@ function buscarProductosParaComplementar()
             ORDER BY t2.id, col.color_id, t1.fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
+
+    // Siempre se ofrece primero la opción "auto-complemento": el mismo
+    // producto+color que ya trae ESTE ensamblaje desde su producción.
+    if ($excluirId > 0 && $productoPropioId > 0) {
+        $colorPropio = executeQuery($conectar, "
+            SELECT pd.color_id, co.nombre AS color_nombre
+            FROM rel_ensamblaje_producto rep
+            JOIN produccion pd ON pd.id = rep.molde_produccion_id
+            LEFT JOIN color co ON co.id = pd.color_id
+            WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL
+            LIMIT 1
+        ", ['id' => $excluirId]);
+        $propioProducto = executeQuery($conectar, "SELECT codigo, descripcion FROM producto WHERE id = :id", ['id' => $productoPropioId]);
+        if (!empty($propioProducto) && !empty($colorPropio)) {
+            array_unshift($result, [
+                'ensamblaje_id'      => null,
+                'producto_id'        => $productoPropioId,
+                'codigo'             => $propioProducto[0]['codigo'],
+                'producto'           => $propioProducto[0]['descripcion'],
+                'color_id'           => $colorPropio[0]['color_id'],
+                'color_nombre'       => $colorPropio[0]['color_nombre'],
+                'es_mismo_producto'  => true,
+            ]);
+        }
+    }
+
     responder(true, 'OK', ['productos' => $result]);
 }
 // Avances de producción finalizados y aún no consumidos por ningún
@@ -985,6 +1002,9 @@ function guardarEnsamblaje()
             if (!empty($actual[0]['deleted_at'])) {
                 throw new Exception('No puedes editar un ensamblaje inactivo. Reactívalo primero.');
             }
+            if (!empty($actual[0]['js_producto_emsamblado'])) {
+                throw new Exception('Este ensamblaje ya fue marcado como complemento y no puede editarse.');
+            }
 
             // NUEVO: la restricción de "ya enviado a Empaquetado, no se
             // puede editar" solo aplica a la tablet de operario. El admin
@@ -1341,10 +1361,13 @@ function eliminarEnsamblaje()
     $id = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, deleted_at, enviado_empaquetado FROM ensamblaje WHERE id = :id", ['id' => $id]);
+    $existe = executeQuery($conectar, "SELECT id, deleted_at, enviado_empaquetado, js_producto_emsamblado FROM ensamblaje WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
     if (!empty($existe[0]['deleted_at'])) responder(false, 'Este registro ya estaba inactivo.');
 
+    if (!empty($existe[0]['js_producto_emsamblado'])) {
+        responder(false, 'Este ensamblaje ya fue marcado como complemento y no puede desactivarse.');
+    }
     $eraEnviadoEmpaquetado = !empty($existe[0]['enviado_empaquetado']);
     if ($eraEnviadoEmpaquetado && esOperarioSesion()) {
         responder(false, 'Este ensamblaje ya fue enviado a Empaquetado y no puede desactivarse desde la tablet.');
@@ -1602,9 +1625,10 @@ function marcarComplemento()
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     $productoObjetivoId = intval($_POST['producto_objetivo_id'] ?? 0);
+    $colorObjetivoId = intval($_POST['color_objetivo_id'] ?? 0) ?: null;
 
     if (!$id) responder(false, 'ID inválido.');
-    if ($productoObjetivoId <= 0) responder(false, 'Debes elegir el producto al que va a complementar.');
+    if ($productoObjetivoId <= 0) responder(false, 'Debes elegir el producto (y color) al que va a complementar.');
 
     $existe = executeQuery(
         $conectar,
@@ -1619,11 +1643,91 @@ function marcarComplemento()
     if (empty($e['fin'])) responder(false, 'Solo puedes marcar como complemento un ensamblaje ya finalizado.');
     if (!empty($e['js_producto_emsamblado'])) responder(false, 'Este ensamblaje ya fue marcado como complemento.');
     if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado; no puede marcarse como complemento.');
-    if ($productoObjetivoId == $e['producto_id']) {
-        responder(false, 'Un producto no puede complementarse a sí mismo.');
-    }
     if ($e['categoria_material_id'] === null) {
         responder(false, 'Este armado no tiene una categoría de material definida (o mezcla varias): no puede complementar. Envíalo a Empaquetado en su lugar.');
+    }
+    // Unidad de salida del PROPIO producto de este ensamblaje (misma lógica
+// que finalizarEnsamblaje).
+    $productoInfoConfig = executeQuery($conectar, "SELECT js_configuracion_empaquetado FROM producto WHERE id = :id", ['id' => $e['producto_id']]);
+    $configEmpaquetado = json_decode($productoInfoConfig[0]['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
+    $unidadSalidaId = !empty($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
+        ? intval($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
+        : null;
+    $unidadLabel = 'kg';
+    if ($unidadSalidaId) {
+        $u = executeQuery($conectar, "SELECT nombre_corto FROM unidad_medida WHERE id = :id", ['id' => $unidadSalidaId]);
+        if (!empty($u)) $unidadLabel = $u[0]['nombre_corto'];
+    }
+
+    $cantidadEnsamblada = isset($_POST['cantidad_ensamblada']) && $_POST['cantidad_ensamblada'] !== ''
+        ? floatval($_POST['cantidad_ensamblada']) : null;
+    if ($cantidadEnsamblada === null || $cantidadEnsamblada <= 0) {
+        responder(false, "Debes indicar la cantidad ensamblada ($unidadLabel) que va a complementar.");
+    }
+
+    // Color propio de ESTE ensamblaje, resuelto vía sus producciones vinculadas.
+    $colorPropioRow = executeQuery($conectar, "
+        SELECT pd.color_id, co.nombre AS color_nombre
+        FROM rel_ensamblaje_producto rep
+        JOIN produccion pd ON pd.id = rep.molde_produccion_id
+        LEFT JOIN color co ON co.id = pd.color_id
+        WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL
+        LIMIT 1
+    ", ['id' => $id]);
+    $colorPropioId = $colorPropioRow[0]['color_id'] ?? null;
+    $colorPropioNombre = $colorPropioRow[0]['color_nombre'] ?? null;
+
+    $esAutoComplemento = ($productoObjetivoId == $e['producto_id']);
+
+    if ($esAutoComplemento) {
+        // Auto-complemento: el color SIEMPRE es el propio (heredado de su
+        // producción). No requiere que exista ya otro armado abierto: el
+        // producto+color ya se conocen por definición.
+        if ($colorPropioId === null) {
+            responder(false, 'No se pudo determinar el color de este armado (no tiene producciones vinculadas con color). No se puede auto-complementar.');
+        }
+        $colorFinalId = $colorPropioId;
+        $colorFinalNombre = $colorPropioNombre;
+    } else {
+        // Complemento hacia OTRO producto: exige color EXACTO y que ese
+        // producto+color+categoría siga con al menos un armado propio,
+        // finalizado y libre (sigue "vivo" en el módulo).
+        if ($colorObjetivoId === null) {
+            responder(false, 'Debes elegir también el color del producto objetivo.');
+        }
+        if ($colorPropioId !== null && intval($colorPropioId) !== intval($colorObjetivoId)) {
+            responder(false, 'El color de este armado no coincide con el color del producto objetivo. Deben ser exactamente el mismo color.');
+        }
+
+        $objetivoConMismaCategoria = executeQuery(
+            $conectar,
+            "SELECT t1.id
+             FROM ensamblaje t1
+             LEFT JOIN LATERAL (
+                 SELECT pd.color_id
+                 FROM rel_ensamblaje_producto rep
+                 JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                 WHERE rep.ensamblaje_id = t1.id AND rep.deleted_at IS NULL
+                 LIMIT 1
+             ) col ON true
+             WHERE t1.producto_id = :producto_id AND t1.deleted_at IS NULL AND t1.fin IS NOT NULL
+               AND t1.ensamblaje_id_referido IS NULL AND t1.categoria_material_id = :categoria_material_id
+               AND t1.id != :propio_id
+               AND col.color_id = :color_id
+             LIMIT 1",
+            [
+                'producto_id' => $productoObjetivoId,
+                'categoria_material_id' => $e['categoria_material_id'],
+                'propio_id' => $id,
+                'color_id' => $colorObjetivoId,
+            ]
+        );
+        if (empty($objetivoConMismaCategoria)) {
+            responder(false, 'El producto/color objetivo no tiene un armado propio, de la misma categoría de material y mismo color, para complementar.');
+        }
+        $colorFinalId = $colorObjetivoId;
+        $colorRow = executeQuery($conectar, "SELECT nombre FROM color WHERE id = :id", ['id' => $colorObjetivoId]);
+        $colorFinalNombre = $colorRow[0]['nombre'] ?? null;
     }
 
     $productoObjetivo = executeQuery(
@@ -1634,29 +1738,18 @@ function marcarComplemento()
     if (empty($productoObjetivo)) responder(false, 'El producto objetivo no existe o está inactivo.');
     $p = $productoObjetivo[0];
 
-    // Debe existir al menos un armado propio, vivo y libre, del producto
-    // objetivo, con la MISMA categoría de material.
-    $objetivoConMismaCategoria = executeQuery(
-        $conectar,
-        "SELECT id FROM ensamblaje
-         WHERE producto_id = :producto_id AND deleted_at IS NULL AND fin IS NOT NULL
-           AND ensamblaje_id_referido IS NULL AND categoria_material_id = :categoria_material_id
-         LIMIT 1",
-        ['producto_id' => $productoObjetivoId, 'categoria_material_id' => $e['categoria_material_id']]
-    );
-    if (empty($objetivoConMismaCategoria)) {
-        responder(false, "El producto {$p['codigo']} - {$p['descripcion']} no tiene un armado propio de la misma categoría de material. No pueden complementarse.");
-    }
-
     $jsProductoEmsamblado = json_encode([
-        'producto_id' => $p['id'],
-        'codigo'      => $p['codigo'],
-        'descripcion' => $p['descripcion'],
+        'producto_id'  => $p['id'],
+        'codigo'       => $p['codigo'],
+        'descripcion'  => $p['descripcion'],
+        'color_id'     => $colorFinalId,
+        'color_nombre' => $colorFinalNombre,
     ], JSON_UNESCAPED_UNICODE);
 
     $cambios = [[
         'campo' => 'Complemento', 'valor_antes' => '(sin marcar)',
-        'valor_despues' => "Complementa a {$p['codigo']} - {$p['descripcion']}",
+        'valor_despues' => "Complementa a {$p['codigo']} - {$p['descripcion']}" . ($colorFinalNombre ? " ({$colorFinalNombre})" : '')
+            . ($esAutoComplemento ? ' [auto-complemento, mismo producto]' : ''),
     ]];
     $movimiento   = obtenerMovimientoSesion('marcar_complemento', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1665,6 +1758,8 @@ function marcarComplemento()
     executeNonQuery($conectar, "
         UPDATE ensamblaje SET
             js_producto_emsamblado = :js_producto_emsamblado,
+            cantidad_peso_kg       = :cantidad_ensamblada,
+            unidad_salida_id       = :unidad_salida_id,
             update_at              = NOW(),
             js_usuario              = :js_session,
             js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -1672,11 +1767,13 @@ function marcarComplemento()
     ", [
         'id'                     => $id,
         'js_producto_emsamblado' => $jsProductoEmsamblado,
+        'cantidad_ensamblada'    => $cantidadEnsamblada,
+        'unidad_salida_id'       => $unidadSalidaId,
         'js_session'             => $js_session,
         'js_historial'           => $js_historial,
     ]);
 
-    responder(true, "Ensamblaje marcado como complemento de {$p['codigo']} - {$p['descripcion']}.");
+    responder(true, "Ensamblaje marcado como complemento de {$p['codigo']} - {$p['descripcion']}" . ($colorFinalNombre ? " ({$colorFinalNombre})" : '') . ".");
 }
 // Envía un ensamblaje YA FINALIZADO directo a Empaquetado, como producto
 // terminado independiente, SIN pasar por COMPLEMENTAR. Mutuamente

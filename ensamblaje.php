@@ -774,7 +774,7 @@ function tarjetaEnsamblajeHtml(e) {
             <div class="pc-ens-field">
                 <span class="lbl">Complementa a</span>
                 <span class="val">
-                    <span class="badge-complemento"><i class="fa-solid fa-puzzle-piece"></i> ${productoEmsamblado.codigo ?? ''} - ${productoEmsamblado.descripcion ?? ''}</span>
+                    <span class="badge-complemento"><i class="fa-solid fa-puzzle-piece"></i> ${productoEmsamblado.codigo ?? ''} - ${productoEmsamblado.descripcion ?? ''}${productoEmsamblado.color_nombre ? ' (' + productoEmsamblado.color_nombre + ')' : ''}</span>
                     <br>
                     <span class="badge-complemento-estado ${complementoUsado ? 'usado' : 'disponible'}">
                         <i class="fa-solid ${complementoUsado ? 'fa-lock' : 'fa-circle-check'}"></i>
@@ -818,11 +818,7 @@ function tarjetaEnsamblajeHtml(e) {
                 <button type="button" class="pc-btn-empaquetado" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})" title="Enviar directo a empaquetado">
                     <i class="fa-solid fa-box"></i> A Empaquetado</button>
             ` : ''}
-            ${puedeFusionar
-                ? `<button type="button" class="pc-btn-fusionar" onclick="fusionarEnsamblajeAccion(${e.ensamblaje_id})" title="Fusionar con otro armado del mismo producto">
-                    <i class="fa-solid fa-code-merge"></i> Fusionar</button>`
-                : ''
-            }
+            
             ${!e.deleted_at
                 ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
@@ -979,31 +975,41 @@ async function fusionarEnsamblajeAccion(origenId) {
     else { Swal.fire('Error', json.message, 'error'); }
 }
 async function marcarComplementoAccion(id) {
-    const confirmacion = await Swal.fire({
+    const e = ensamblajesCache.find(x => x.ensamblaje_id === id);
+    const unidadCodigo = e?.producto_unidad_ensamblaje_codigo || e?.unidad_salida_codigo || 'kg';
+    const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
+    const cantidadActual = e?.cantidad_peso_kg ?? '';
+
+    const { value: cantidadEnsamblada } = await Swal.fire({
         title: '¿Pasar este armado a Complementar?',
-        text: 'Quedará disponible para ser consumido dentro de otro ensamblaje distinto y ya no podrá enviarse a empaquetado.',
+        html: `Indica la cantidad ensamblada (<b>${unidadCodigo}</b> · ${unidadNombre}) que va a complementar.<br>
+               <small style="color:#666;">Quedará disponible para usarse dentro de otro ensamblaje y ya no podrá enviarse a empaquetado.</small>`,
         icon: 'question',
+        input: 'number',
+        inputAttributes: { min: 0, step: '0.01' },
+        inputValue: cantidadActual,
+        inputPlaceholder: `Cantidad en ${unidadCodigo}`,
         showCancelButton: true,
-        confirmButtonText: 'Sí, continuar',
-        cancelButtonText: 'Cancelar'
+        confirmButtonText: 'Continuar',
+        cancelButtonText: 'Cancelar',
+        inputValidator: (value) => {
+            if (!value || parseFloat(value) <= 0) return 'Ingresa una cantidad válida mayor a 0.';
+        }
     });
-    if (!confirmacion.isConfirmed) return;
+    if (!cantidadEnsamblada) return;
 
     const productos = await obtenerProductosParaComplementar(id);
     if (!productos || productos.length === 0) {
-        Swal.fire('Aviso', 'No hay productos disponibles para complementar (deben tener al menos un ensamblaje propio finalizado y aún libre, de la misma categoría de material).', 'warning');
+        Swal.fire('Aviso', 'No hay productos disponibles para complementar.', 'warning');
         return;
     }
-    // Se muestra "Código - Descripción (Color)" para que el usuario elija
-    // el producto+color exacto al que va a complementar, ya que un mismo
-    // producto puede tener varios armados libres en colores distintos.
     const opciones = productos.map(p =>
-        `<option value="${p.producto_id}">${p.codigo} - ${p.producto}${p.color_nombre ? ' (' + p.color_nombre + ')' : ''}</option>`
+        `<option value="${p.producto_id}_${p.color_id ?? ''}">${p.es_mismo_producto ? '⭐ (Mismo producto) ' : ''}${p.codigo} - ${p.producto}${p.color_nombre ? ' (' + p.color_nombre + ')' : ''}</option>`
     ).join('');
 
-    const { value: productoObjetivoId } = await Swal.fire({
+    const { value: seleccion } = await Swal.fire({
         title: 'Marcar como complemento',
-        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto y color final al que este armado ya finalizado va a complementar.</p>
+        html: `<p style="font-size:.85em;color:#666;text-align:left;">Elige el producto y color final al que este armado va a complementar.</p>
                <select id="swal-complemento-producto" class="form-select">
                    <option value="">Selecciona un producto...</option>
                    ${opciones}
@@ -1018,13 +1024,18 @@ async function marcarComplementoAccion(id) {
             return val;
         }
     });
-    if (!productoObjetivoId) return;
+    if (!seleccion) return;
+    const [productoObjetivoId, colorObjetivoId] = seleccion.split('_');
 
-    const json = await llamarEnsamblaje('COMPLEMENTAR', { id, producto_objetivo_id: productoObjetivoId });
+    const json = await llamarEnsamblaje('COMPLEMENTAR', {
+        id,
+        producto_objetivo_id: productoObjetivoId,
+        color_objetivo_id: colorObjetivoId,
+        cantidad_ensamblada: cantidadEnsamblada,
+    });
     if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
     else { Swal.fire('Error', json.message, 'error'); }
 }
-
 async function pasarAEmpaquetadoAccion(id) {
     const confirmacion = await Swal.fire({
         title: '¿Enviar este armado a Empaquetado?',
@@ -1143,6 +1154,7 @@ async function renderGridDetalle() {
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', {
             producto_id: productoId,
+            color_id: colorId,
             texto,
             categoria_material_id: categoriaActual,
         });
