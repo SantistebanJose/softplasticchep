@@ -110,6 +110,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-ens-tag.usado{ background:#FDF1E0; color:#D97706; }
 .pc-ens-tag.libre{ background:#E8F7EE; color:#16A34A; }
 .pc-ens-tag.empaquetado{ background:#E2F5F3; color:#0E9488; }
+.pc-ens-tag.componente{ background:#EAF0FE; color:#2F6FED; }
 .pc-ens-corrida-line{ font-size:.85em; color:#9a9585; display:flex; align-items:center; gap:6px; }
 .pc-ens-corrida-line b{ color:#5c5947; font-weight:600; }
 .pc-ens-card-foot{ display:flex; align-items:center; gap:8px; padding-top:12px; margin-top:2px; border-top:1px solid #f1efe8; flex-wrap:wrap; }
@@ -841,6 +842,20 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const puedeComplementar = puedeDecidirDestino && esDePrimera;
     const complementoUsado = !!e.ensamblaje_id_referido;
 
+    // NUEVO: nombres de lo que compone este armado (moldes de producción +
+    // derivados vinculados), para saber de un vistazo QUÉ se está a punto
+    // de complementar antes de tocar el botón (ej. "Pinza Palanita").
+    const nombresComponentes = [
+        ...parseJsonColumna(e.js_moldes_utilizados).map(m => ({
+            nombre: m.molde_nombre ?? ('Producción #' + m.produccion_id),
+            icono: 'fa-industry',
+        })),
+        ...parseJsonColumna(e.js_derivados_utilizados).map(d => ({
+            nombre: d.derivado_nombre ?? ('Derivado #' + d.derivado_id),
+            icono: 'fa-flask',
+        })),
+    ];
+
     const metaPartes = [];
     if (parseJsonColumna(e.js_operarios).length > 0) {
         metaPartes.push(parseJsonColumna(e.js_operarios).map(o => o.nombre_completo).join(', '));
@@ -874,6 +889,7 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
             </button>
         </div>
         <div class="pc-ens-title">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</div>
+        ${nombresComponentes.length ? `<div class="pc-ens-tags">${nombresComponentes.map(c => `<span class="pc-ens-tag componente"><i class="fa-solid ${c.icono}"></i> ${c.nombre}</span>`).join('')}</div>` : ''}
         <div class="pc-ens-meta">${metaPartes.map(t => `<span>${t}</span>`).join('')}</div>
         <div class="pc-ens-stats">
             <div class="pc-ens-stat"><div class="num">${producciones}</div><div class="lbl">Producciones</div></div>
