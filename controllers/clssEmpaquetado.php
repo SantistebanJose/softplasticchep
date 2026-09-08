@@ -537,8 +537,9 @@ function listarEmpaquetadosPorProducto(int $productoId)
         ORDER BY emp.created_at DESC
     ", ['producto_id' => $productoId]);
 
-    responder(true, 'OK', ['empaquetados' => decodificarJsOperarios($result)]);
-}
+    responder(true, 'OK', ['empaquetados' => decorarConDesgloseEmp(decodificarJsOperarios($result))]);
+
+    }
 
 // Listado GENERAL para la tabla que vive debajo de los grids.
 // FIX: origen_tipo ahora se deriva de rel_empaquetado_origen (soporta
@@ -624,8 +625,9 @@ function listarTodosEmpaquetados()
         LIMIT 300";
 
     $result = executeQuery($conectar, $sql, $params);
-    responder(true, 'OK', ['empaquetados' => decodificarJsOperarios($result)]);
-}
+    responder(true, 'OK', ['empaquetados' => decorarConDesgloseEmp(decodificarJsOperarios($result))]);
+
+    }
 
 function obtenerEmpaquetado(int $id)
 {
@@ -633,7 +635,10 @@ function obtenerEmpaquetado(int $id)
     $conectar = conectar_oll_BD();
 
     $result = executeQuery($conectar, "
-        SELECT emp.*, um.nombre_corto AS unidad_corto,
+        SELECT emp.*,
+            um.nombre_corto AS unidad_corto,
+            um.equivalencia, um.unidad_base_id,
+            ub.nombre_corto AS unidad_base_corto,
             (
                 SELECT jsonb_agg(jsonb_build_object(
                     'origen_tipo', CASE WHEN reo.ensamblaje_id IS NOT NULL THEN 'ensamblaje' ELSE 'produccion' END,
@@ -647,14 +652,43 @@ function obtenerEmpaquetado(int $id)
             ) AS js_origenes
         FROM empaquetado emp
         LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+        LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         WHERE emp.id = :id AND emp.deleted_at IS NULL
     ", ['id' => $id]);
 
     if (empty($result)) responder(false, 'Registro de empaquetado no encontrado o inactivo.');
-    $filas = decodificarJsOperarios($result);
+    $filas = decorarConDesgloseEmp(decodificarJsOperarios($result));
     responder(true, 'OK', ['empaquetado' => $filas[0]]);
 }
 
+// Trae la conversión de VENTA configurada en el producto (unidad_venta_id,
+// cant_equivale, unidad_equivale_id) — ej. PI: 1 PK24 = 24 GRU.
+// OJO: esto es DISTINTO de unidad_medida.equivalencia/unidad_base_id (que es
+// una jerarquía global de unidades). Esta conversión es propia del producto
+// y vive en columnas de la tabla producto, no en json de configuración.
+function obtenerConversionVentaProducto($conectar, int $productoId): ?array
+{
+    $rows = executeQuery($conectar, "
+        SELECT p.unidad_venta_id, p.cant_equivale, p.unidad_equivale_id,
+               uv.nombre_corto AS unidad_venta_corto,
+               ue.nombre_corto AS unidad_equivale_corto
+        FROM producto p
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+        LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
+        WHERE p.id = :id
+    ", ['id' => $productoId]);
+
+    if (empty($rows) || empty($rows[0]['cant_equivale']) || empty($rows[0]['unidad_equivale_id'])) {
+        return null;
+    }
+    return [
+        'unidad_venta_id'       => (int)$rows[0]['unidad_venta_id'],
+        'unidad_venta_corto'    => $rows[0]['unidad_venta_corto'],
+        'cant_equivale'         => (float)$rows[0]['cant_equivale'],
+        'unidad_equivale_id'    => (int)$rows[0]['unidad_equivale_id'],
+        'unidad_equivale_corto' => $rows[0]['unidad_equivale_corto'],
+    ];
+}
 // Convierte la capacidad de la unidad de empaquetado (ej. 600, expresada
 // en la unidad BASE del sistema) a la unidad real en la que reportan los
 // orígenes (ej. DOC), dividiendo entre la equivalencia de esa unidad.
@@ -1018,6 +1052,138 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
     }
 }
 
+/**
+ * Descompone una cantidad expresada en su unidad "principal" (ej. Paquete)
+ * en unidades intermedias que comparten la misma unidad base, en vez de
+ * dejar un número fraccionario como "9.83 Paquetes".
+ *
+ * Ej: 9.83 Paquetes (equivalencia 3456 UND, base UND), con "Bolsa"
+ * (equivalencia 144 UND, misma base) en el catálogo
+ * -> [ {nombre_corto:'PAQ', cantidad:9}, {nombre_corto:'BOL', cantidad:20}, {nombre_corto:'UND', cantidad:X} ]
+ */
+function descomponerCantidadUnidad($conectar, float $cantidad, array $unidadPrincipal, ?float $equivalenciaMinima = null, ?array $conversionVenta = null): array
+{
+    $desglose = [];
+    $restante = $cantidad;
+
+    // 1) AGRUPAR HACIA ARRIBA: si la unidad en la que está registrado el
+    //    empaquetado (ej. GRU) coincide con la "unidad_equivale" configurada
+    //    en el producto para su unidad de venta (ej. PK24 = 24 GRU), primero
+    //    se extraen cuántas unidades de venta completas entran.
+    if (
+        $conversionVenta
+        && (int)($unidadPrincipal['id'] ?? 0) === $conversionVenta['unidad_equivale_id']
+        && $conversionVenta['cant_equivale'] > 0
+    ) {
+        $unidadesGrandes = floor(($restante + 0.0001) / $conversionVenta['cant_equivale']);
+        if ($unidadesGrandes > 0) {
+            $desglose[] = [
+                'unidad_id'    => $conversionVenta['unidad_venta_id'],
+                'nombre_corto' => $conversionVenta['unidad_venta_corto'],
+                'cantidad'     => (int)$unidadesGrandes,
+            ];
+            $restante = round($restante - ($unidadesGrandes * $conversionVenta['cant_equivale']), 4);
+        }
+    }
+
+    if ($restante <= 0.0001) {
+        return $desglose;
+    }
+
+    // 2) Con lo que sobra en la unidad principal (o toda la cantidad si el
+    //    paso 1 no aplicó), se sigue el desglose hacia unidades más chicas
+    //    que compartan la misma unidad base — comportamiento original.
+    if (empty($unidadPrincipal['unidad_base_id']) || empty($unidadPrincipal['equivalencia'])) {
+        $desglose[] = [
+            'unidad_id'    => $unidadPrincipal['id'],
+            'nombre_corto' => $unidadPrincipal['nombre_corto'],
+            'cantidad'     => round($restante, 2),
+        ];
+        return $desglose;
+    }
+
+    $baseId         = (int)$unidadPrincipal['unidad_base_id'];
+    $equivPrincipal = (float)$unidadPrincipal['equivalencia'];
+    $totalBase      = round($restante * $equivPrincipal, 4);
+
+    $paramsCand = ['base_id' => $baseId, 'equiv_principal' => $equivPrincipal];
+    $condMinima = '';
+    if ($equivalenciaMinima !== null && $equivalenciaMinima > 0) {
+        $condMinima = " AND COALESCE(equivalencia, 1) >= :equiv_minima";
+        $paramsCand['equiv_minima'] = $equivalenciaMinima;
+    }
+
+    $candidatas = executeQuery($conectar, "
+        SELECT id, nombre_corto, COALESCE(equivalencia, 1) AS equivalencia
+        FROM unidad_medida
+        WHERE deleted_at IS NULL
+          AND (unidad_base_id = :base_id OR id = :base_id)
+          AND COALESCE(equivalencia, 1) <= :equiv_principal
+          $condMinima
+        ORDER BY COALESCE(equivalencia, 1) DESC
+    ", $paramsCand);
+
+    $restanteBase = $totalBase;
+    foreach ($candidatas as $u) {
+        $equiv = (float)$u['equivalencia'];
+        if ($equiv <= 0) continue;
+
+        $esUltimaPermitida = $equivalenciaMinima !== null && abs($equiv - $equivalenciaMinima) < 0.0001;
+        $cant = $esUltimaPermitida
+            ? round(($restanteBase + 0.0001) / $equiv, 2)
+            : floor(($restanteBase + 0.0001) / $equiv);
+
+        if ($cant <= 0) continue;
+        $desglose[] = [
+            'unidad_id'    => (int)$u['id'],
+            'nombre_corto' => $u['nombre_corto'],
+            'cantidad'     => $esUltimaPermitida ? $cant : (int)$cant,
+        ];
+        $restanteBase = round($restanteBase - ($cant * $equiv), 4);
+        if ($restanteBase <= 0.0001) break;
+    }
+
+    if (empty($desglose)) {
+        $desglose[] = ['unidad_id' => $unidadPrincipal['id'], 'nombre_corto' => $unidadPrincipal['nombre_corto'], 'cantidad' => 0];
+    }
+
+    return $desglose;
+}
+// Agrega el campo 'desglose' a cada fila usando su propia unidad de empaquetado.
+function decorarConDesgloseEmp(array $filas): array
+{
+    $conectar = conectar_oll_BD();
+    $cacheReglas = [];
+    $cacheConversion = [];
+    foreach ($filas as &$fila) {
+        if (empty($fila['cantidad_tota'])) continue;
+        $unidadPrincipal = [
+            'id'             => $fila['unidad_medida'] ?? null,
+            'nombre_corto'   => $fila['unidad_corto'] ?? null,
+            'equivalencia'   => $fila['equivalencia'] ?? null,
+            'unidad_base_id' => $fila['unidad_base_id'] ?? null,
+        ];
+
+        $equivalenciaMinima = null;
+        $conversionVenta    = null;
+        $pid = $fila['producto_id'] ?? null;
+        if ($pid) {
+            if (!array_key_exists($pid, $cacheReglas)) {
+                $cacheReglas[$pid] = obtenerReglasEmpaquetadoProducto($conectar, (int)$pid);
+            }
+            $equivalenciaMinima = $cacheReglas[$pid]['unidad_minima_desglose_equivalencia'] ?? null;
+
+            if (!array_key_exists($pid, $cacheConversion)) {
+                $cacheConversion[$pid] = obtenerConversionVentaProducto($conectar, (int)$pid);
+            }
+            $conversionVenta = $cacheConversion[$pid];
+        }
+
+        $fila['js_desglose'] = descomponerCantidadUnidad($conectar, (float)$fila['cantidad_tota'], $unidadPrincipal, $equivalenciaMinima, $conversionVenta);
+    }
+    unset($fila);
+    return $filas;
+}
 // Edición LIMITADA a cabecera (unidad_medida, operarios, sucursal). NUNCA
 // toca rel_empaquetado_origen ni la mezcla de colores. Corregir la mezcla
 // = eliminar este registro (libera el consumo) y crear uno nuevo.
@@ -1311,10 +1477,19 @@ function obtenerReglasEmpaquetadoProducto($conectar, int $productoId): array
         ? json_decode($rows[0]['js_configuracion_empaquetado'], true)
         : [];
 
+    $unidadMinimaId = !empty($cfg['unidad_minima_desglose_id']) ? intval($cfg['unidad_minima_desglose_id']) : null;
+    $equivalenciaMinima = null;
+    if ($unidadMinimaId) {
+        $um = executeQuery($conectar, "SELECT equivalencia FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMinimaId]);
+        $equivalenciaMinima = !empty($um[0]['equivalencia']) ? floatval($um[0]['equivalencia']) : null;
+    }
+
     return [
-        'modo_distribucion_color'  => $cfg['modo_distribucion_color'] ?? 'libre',
-        'granularidad_color'       => intval($cfg['granularidad_color'] ?? 1),
-        'conversion_peso_a_unidad' => !empty($cfg['conversion_peso_a_unidad']),
-        'peso_unitario_g'          => !empty($rows[0]['peso_unitario_g']) ? floatval($rows[0]['peso_unitario_g']) : null,
+        'modo_distribucion_color'             => $cfg['modo_distribucion_color'] ?? 'libre',
+        'granularidad_color'                  => intval($cfg['granularidad_color'] ?? 1),
+        'conversion_peso_a_unidad'             => !empty($cfg['conversion_peso_a_unidad']),
+        'peso_unitario_g'                     => !empty($rows[0]['peso_unitario_g']) ? floatval($rows[0]['peso_unitario_g']) : null,
+        'unidad_minima_desglose_id'            => $unidadMinimaId,
+        'unidad_minima_desglose_equivalencia'  => $equivalenciaMinima,
     ];
 }

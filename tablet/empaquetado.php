@@ -872,13 +872,21 @@ async function cargarMisRegistros() {
                 <div class="pc-reg-detalle">${bultosTexto}</div>
                 <div class="pc-reg-detalle">${textoOperariosEmp(r)}</div>
             </div>
-            <div class="pc-reg-total">${formatearCantidadEmp(r.cantidad_tota)} ${r.unidad_corto ?? ''}</div>
+            <div class="pc-reg-total">${textoDesgloseEmp(r)}</div>
             <div class="pc-reg-fecha">${formatearFechaHoraLegibleEmp(r.created_at)}</div>
             ${vendido
                 ? `<span class="pc-reg-badge-vendido">Vendido</span>`
                 : `<span class="pc-reg-badge-disp">Disponible</span>`}
         </div>`;
     }).join('');
+}
+
+function textoDesgloseEmp(r) {
+    const desglose = parseJsonColumnaEmp(r.js_desglose);
+    if (!desglose || desglose.length === 0) {
+        return `${formatearCantidadEmp(r.cantidad_tota)} ${r.unidad_corto ?? ''}`;
+    }
+    return desglose.map(d => `${formatearCantidadEmp(d.cantidad)} ${d.nombre_corto}`).join(' + ');
 }
 
 function eliminarMiRegistro(id) {

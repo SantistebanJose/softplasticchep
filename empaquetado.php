@@ -429,10 +429,20 @@ async function llamarEmpaquetado(accion, params = {}) {
     }
 }
 
+function textoDesgloseEmp(r) {
+    const desglose = parseJsonColumnaEmp(r.js_desglose ?? r.desglose); // según cómo llegue
+    if (!desglose || desglose.length === 0) {
+        return `${formatearCantidadEmp(r.cantidad_tota)} ${r.unidad_corto ?? ''}`;
+    }
+    return desglose.map(d => `${formatearCantidadEmp(d.cantidad)} ${d.nombre_corto}`).join(' + ');
+}
+
 function formatearCantidadEmp(n) {
     if (n === null || n === undefined || n === '') return '-';
     return Number(n).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
+
+
 
 function formatearFechaHoraLegibleEmp(fechaIso) {
     if (!fechaIso) return '';
@@ -728,7 +738,7 @@ async function cargarListadoGeneralEmp() {
             <td>${r.producto_codigo ?? ''} - ${r.producto_descripcion ?? '-'}</td>
             <td>${r.sucursal_nombre ?? '-'}</td>
             <td class="bultos-detalle">${bultosTexto}</td>
-            <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
+            <td><b>${textoDesgloseEmp(r)}</b>${textoEquivalenteEmp(r)}</td>
             <td>${textoOperariosEmp(r)}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
             <td>${vendido
@@ -867,7 +877,7 @@ async function cargarRegistrosEmp() {
         return `
         <tr>
             <td class="bultos-detalle">${bultosTexto}</td>
-            <td><b>${formatearCantidadEmp(r.cantidad_tota)}</b> ${r.unidad_corto ?? ''}${textoEquivalenteEmp(r)}</td>
+            <td><b>${textoDesgloseEmp(r)}</b>${textoEquivalenteEmp(r)}</td>
             <td>${textoOperariosEmp(r)}</td>
             <td>${formatearFechaHoraLegibleEmp(r.created_at)}</td>
             <td>${vendido

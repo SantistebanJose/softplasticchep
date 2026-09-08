@@ -34,6 +34,17 @@
  * 'personalizado' + fecha_inicio/fecha_fin) para el listado con tabs.
  * No cambia nada más del contrato existente (los parámetros texto/estado
  * siguen funcionando igual que antes).
+ *
+ * NUEVO (2026-09-08): trazabilidad venta <-> empaquetado vía
+ * empaquetado.js_venta (jsonb, array). Como el consumo es FIFO y puede
+ * tocar VARIOS registros de empaquetado por venta (y un mismo
+ * empaquetado puede ser tocado por VARIAS ventas a lo largo del tiempo),
+ * js_venta guarda un arreglo de registros de consumo — mismo patrón que
+ * js_operarios/js_historial en otros módulos. La columna legacy
+ * venta.empaquetado (FK a un solo id) queda sin usar: ya no representa
+ * bien la realidad de "una venta puede tocar N empaquetados".
+ * Al anular, NO se borra el registro de js_venta: se marca 'anulado' =>
+ * true (se conserva el historial completo, igual que js_historial).
  */
 
 ob_start();
@@ -108,6 +119,63 @@ function obtenerMovimientoSesionVenta(string $accion, array $cambios = []): arra
         'cambios'   => $cambios,
         'timestamp' => date('Y-m-d H:i:s'),
     ];
+}
+
+// =============================================================================
+// TRAZABILIDAD VENTA <-> EMPAQUETADO (empaquetado.js_venta)
+// Un mismo empaquetado puede ser consumido por varias ventas a lo largo
+// del tiempo (FIFO parcial), así que js_venta es un ARRAY de registros,
+// no un objeto único. Se lee/decodifica/escribe en PHP (igual que
+// resolverOperariosEmpaquetado() en clssEmpaquetado.php) en vez de
+// manipular el jsonb directo en SQL, porque acá sí necesitamos modificar
+// un elemento puntual del arreglo al anular (no solo concatenar al final).
+// =============================================================================
+
+// Agrega un nuevo registro de consumo al js_venta del empaquetado indicado.
+// Se llama DENTRO de la misma transacción de guardarVenta(), una vez que
+// ya existen $ventaId y $codigo (se generan después del consumo FIFO).
+function agregarRegistroJsVentaEmpaquetado($conectar, int $empaquetadoId, array $registro): void
+{
+    $actual = executeQuery($conectar, "SELECT js_venta FROM empaquetado WHERE id = :id", ['id' => $empaquetadoId]);
+    $lista = [];
+    if (!empty($actual) && !empty($actual[0]['js_venta'])) {
+        $lista = json_decode($actual[0]['js_venta'], true) ?: [];
+    }
+    $lista[] = $registro;
+
+    executeNonQuery($conectar, "
+        UPDATE empaquetado SET js_venta = :js_venta WHERE id = :id
+    ", [
+        'js_venta' => json_encode($lista, JSON_UNESCAPED_UNICODE),
+        'id'       => $empaquetadoId,
+    ]);
+}
+
+// Marca como anulados (sin borrar) todos los registros de js_venta de un
+// empaquetado que pertenezcan a la venta indicada. Se usa en anularVenta().
+function marcarAnuladoJsVentaEmpaquetado($conectar, int $empaquetadoId, int $ventaId): void
+{
+    $actual = executeQuery($conectar, "SELECT js_venta FROM empaquetado WHERE id = :id", ['id' => $empaquetadoId]);
+    if (empty($actual) || empty($actual[0]['js_venta'])) return;
+
+    $lista = json_decode($actual[0]['js_venta'], true) ?: [];
+    $huboCambios = false;
+    foreach ($lista as &$reg) {
+        if ((int)($reg['venta_id'] ?? 0) === $ventaId && empty($reg['anulado'])) {
+            $reg['anulado']         = true;
+            $reg['fecha_anulacion'] = date('Y-m-d H:i:s');
+            $huboCambios = true;
+        }
+    }
+    unset($reg);
+    if (!$huboCambios) return;
+
+    executeNonQuery($conectar, "
+        UPDATE empaquetado SET js_venta = :js_venta WHERE id = :id
+    ", [
+        'js_venta' => json_encode($lista, JSON_UNESCAPED_UNICODE),
+        'id'       => $empaquetadoId,
+    ]);
 }
 
 // =============================================================================
@@ -495,6 +563,10 @@ function resolverInfoItemVenta($conectar, int $productoId, ?int $colorIdEfectivo
 // cantidad de paquetes ENTERA (no se venden fracciones de paquete). Si el
 // producto no tiene su unidad de venta configurada, se rechaza el ítem
 // con un mensaje claro en vez de vender en una unidad ambigua.
+//
+// NUEVO (2026-09-08): al final, con $ventaId y $codigo ya generados, se
+// registra en empaquetado.js_venta (por cada empaquetado_id tocado en el
+// consumo FIFO de cada ítem) qué venta lo consumió y cuánto.
 function guardarVenta()
 {
     $conectar = conectar_oll_BD();
@@ -593,6 +665,25 @@ function guardarVenta()
         $stmtCodigo = $conectar->prepare("UPDATE venta SET codigo = :codigo WHERE id = :id");
         $stmtCodigo->execute(['codigo' => $codigo, 'id' => $ventaId]);
 
+        // NUEVO: registrar en empaquetado.js_venta qué venta consumió cada
+        // registro y cuánto. Recién acá tenemos $ventaId/$codigo, por eso
+        // va después del INSERT y no dentro de consumirStockFIFOVenta().
+        foreach ($itemsFinal as $item) {
+            foreach ($item['js_consumo'] as $c) {
+                agregarRegistroJsVentaEmpaquetado($conectar, $c['empaquetado_id'], [
+                    'venta_id'           => $ventaId,
+                    'venta_codigo'       => $codigo,
+                    'producto_id'        => $item['producto_id'],
+                    'producto_codigo'    => $item['producto_codigo'],
+                    'color_id'           => $item['color_id'],
+                    'color'              => $item['color'],
+                    'cantidad_consumida' => $c['cantidad_consumida'], // en la unidad propia del empaquetado
+                    'fecha'              => date('Y-m-d H:i:s'),
+                    'anulado'            => false,
+                ]);
+            }
+        }
+
         $conectar->commit();
 
         responderVenta(true, 'Venta registrada correctamente.', ['venta_id' => $ventaId, 'codigo' => $codigo]);
@@ -622,6 +713,11 @@ function anularVenta(int $id)
             $consumo = $item['js_consumo'] ?? [];
             if (!empty($consumo)) {
                 restaurarStockVenta($conectar, $consumo);
+                // NUEVO: marcar (no borrar) los registros de js_venta de
+                // cada empaquetado tocado por esta venta.
+                foreach ($consumo as $c) {
+                    marcarAnuladoJsVentaEmpaquetado($conectar, (int)$c['empaquetado_id'], $id);
+                }
             }
         }
 
