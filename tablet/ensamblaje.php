@@ -1160,7 +1160,9 @@ async function renderGridDetalle() {
             return;
         }
         grid.innerHTML = complementos.map(c => {
-            const est = estiloPorNombre(c.producto_codigo || '');
+            const nombreMostrar = c.moldes_nombres || `${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}`;
+            const est = estiloPorNombre(nombreMostrar);
+            const unidad = c.unidad_salida_codigo || 'kg';
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'complemento' && l.ensamblaje_complemento_id == c.ensamblaje_id);
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
@@ -1170,11 +1172,13 @@ async function renderGridDetalle() {
                         producto_codigo: c.producto_codigo,
                         producto_descripcion: c.producto_descripcion,
                         cantidad_peso_kg: c.cantidad_peso_kg,
+                        unidad_salida_codigo: unidad,
                         fin: c.fin,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
-                <span class="nombre">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
-                <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> kg</span>
+                <span class="nombre">${nombreMostrar}</span>
+                <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
+                <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
                 <span class="meta">${formatearFechaHoraLegibleEns(c.fin)}</span>
             </button>`;
         }).join('');
@@ -1210,7 +1214,7 @@ function agregarLineaDetalle(tipo, datos) {
             tempId: ++contadorLineaTicketEns, tipo: 'complemento',
             molde_produccion_id: null, derivado_id: null, ensamblaje_complemento_id: datos.ensamblaje_id,
             nombre: `${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''}`,
-            meta: `Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} kg`,
+            meta: `Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece', color: est.color, bg: est.bg,
         });
     }
@@ -1365,13 +1369,18 @@ async function abrirModalEditarEnsamblaje(id) {
     });
 
     complementos.forEach(item => {
-        const est = estiloPorNombre(item.producto_codigo || '');
+        const nombreMostrar = item.moldes_nombres || `${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''}`;
+        const est = estiloPorNombre(nombreMostrar);
         ticketDetalleEns.push({
-            tempId: ++contadorLineaTicketEns, tipo: 'complemento',
-            molde_produccion_id: null, derivado_id: null, ensamblaje_complemento_id: item.ensamblaje_complemento_id,
-            nombre: `${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''}`,
-            meta: `Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} kg`,
-            icono: 'fa-puzzle-piece', color: est.color, bg: est.bg,
+            tempId: ++contadorLineaTicketEns,
+            tipo: 'complemento',
+            molde_produccion_id: null,
+            derivado_id: null,
+            ensamblaje_complemento_id: item.ensamblaje_complemento_id,
+            nombre: nombreMostrar,
+            meta: `${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''} · Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} ${item.unidad_salida_codigo || 'kg'}`,
+            icono: 'fa-puzzle-piece',
+            color: est.color, bg: est.bg,
         });
     });
 

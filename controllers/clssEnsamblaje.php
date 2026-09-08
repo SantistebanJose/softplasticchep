@@ -425,20 +425,29 @@ function buscarComplementos()
     }
 
     $sql = "SELECT
-                e.id AS ensamblaje_id,
-                e.producto_id,
-                p.codigo AS producto_codigo,
-                p.descripcion AS producto_descripcion,
-                e.cantidad_peso_kg,
-                e.fin,
-                e.js_producto_emsamblado->>'color_nombre' AS complemento_color_nombre,
-                cm.nombre AS categoria_material_nombre
-            FROM ensamblaje e
-            LEFT JOIN producto p ON p.id = e.producto_id
-            LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY e.fin DESC
-            LIMIT 100";
+            e.id AS ensamblaje_id,
+            e.producto_id,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto_descripcion,
+            e.cantidad_peso_kg,
+            e.fin,
+            COALESCE(us.nombre_corto, 'kg') AS unidad_salida_codigo,
+            e.js_producto_emsamblado->>'color_nombre' AS complemento_color_nombre,
+            cm.nombre AS categoria_material_nombre,
+            (
+                SELECT string_agg(DISTINCT mo.nombre, ', ' ORDER BY mo.nombre)
+                FROM rel_ensamblaje_producto rep
+                JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                LEFT JOIN molde mo ON mo.id = pd.molde_id
+                WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
+            ) AS moldes_nombres
+        FROM ensamblaje e
+        LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
+        LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY e.fin DESC
+        LIMIT 100";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['complementos' => $result]);
@@ -695,23 +704,24 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 
 function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): string
 {
-    // La clave 'ensamblaje_complemento_id' debe coincidir EXACTO con lo que
-    // lee el frontend en abrirModalEditarEnsamblaje() (ensamblaje.php), que
-    // arma cada línea del ticket con item.ensamblaje_complemento_id. Antes
-    // esta subquery devolvía 'ensamblaje_id', lo que hacía que al editar un
-    // ensamblaje con complementos ya vinculados, esas líneas se guardaran
-    // con ensamblaje_complemento_id = undefined y se descartaran solas al
-    // reenviar el formulario (liberando el complemento sin que el usuario
-    // lo pidiera).
     return "(
         SELECT jsonb_agg(jsonb_build_object(
                    'ensamblaje_complemento_id', ec.id,
                    'producto_codigo', pc.codigo,
                    'producto_descripcion', pc.descripcion,
-                   'cantidad_peso_kg', ec.cantidad_peso_kg
+                   'cantidad_peso_kg', ec.cantidad_peso_kg,
+                   'unidad_salida_codigo', COALESCE(uce.nombre_corto, 'kg'),
+                   'moldes_nombres', (
+                       SELECT string_agg(DISTINCT mo.nombre, ', ' ORDER BY mo.nombre)
+                       FROM rel_ensamblaje_producto repc
+                       JOIN produccion pdc ON pdc.id = repc.molde_produccion_id
+                       LEFT JOIN molde mo ON mo.id = pdc.molde_id
+                       WHERE repc.ensamblaje_id = ec.id AND repc.deleted_at IS NULL
+                   )
                ))
         FROM ensamblaje ec
         LEFT JOIN producto pc ON pc.id = ec.producto_id
+        LEFT JOIN unidad_medida uce ON uce.id = ec.unidad_salida_id
         WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id
           AND ec.deleted_at IS NULL
           AND ec.js_producto_emsamblado IS NOT NULL
