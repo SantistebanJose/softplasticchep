@@ -574,7 +574,7 @@ function buscarProduccionesDisponibles()
             $params['producto_id'] = $productoId;
         }
         if ($colorId > 0) {
-            $where[] = "t1.color_id = :color_id";
+            $where[] = "t1.color_id = :color_id or t2.fusion_ = true";
             $params['color_id'] = $colorId;
         }
     }

@@ -444,11 +444,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     <div class="pc-sel-label">Molde <span class="req">*</span></div>
                     <div class="pc-chip-strip" id="chips_molde"></div>
                 </div>
-
-                <div class="pc-selector-block">
-                    <div class="pc-sel-label">Color <span class="req">*</span></div>
-                    <div class="pc-chip-strip" id="chips_color"></div>
-                </div>
                 <div class="pc-selector-block">
                     <div class="pc-sel-label">
                         Otros operarios en este avance
@@ -746,7 +741,6 @@ let productoTabActivo = null;
 // ---- Estado de los selectores tipo card (reemplaza a los <select>) ----
 let maquinasProdCache = null;
 let sucursalesProdCache = null;
-let coloresProdCache = null;
 let moldesProdCache = [];
 
 let operariosProdCache = null;   // <-- NUEVO
@@ -1188,12 +1182,7 @@ async function obtenerProductosMoldeProd() {
     return productosMoldeProdCache;
 }
 
-async function obtenerColoresProd() {
-    if (coloresProdCache) return coloresProdCache;
-    const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
-    coloresProdCache = json.success ? json.colores : [];
-    return coloresProdCache;
-}
+
 
 // ===================== RENDER GENÉRICO DE CARDS SELECCIONABLES =====================
 // Sustituye a los <select>: siempre muestra las opciones como cards táctiles,
@@ -1280,19 +1269,8 @@ function seleccionarMolde(uniqueVal) {
     });
 }
 
-// ---- Color ----
-function pintarBloqueColor(colores) {
-    renderChipGrid('chips_color', colores, {
-        getId: c => c.id, getLabel: c => c.nombre, getColorDot: c => c.rgb,
-        seleccionadoId: selEstado.color_id, onSeleccionar: 'seleccionarColor',
-    });
-}
-function seleccionarColor(id) {
-    const c = (coloresProdCache || []).find(x => String(x.id) === String(id));
-    if (!c) return;
-    selEstado.color_id = id; selEstado.color_nombre = c.nombre; selEstado.color_rgb = c.rgb;
-    pintarBloqueColor(coloresProdCache);
-}
+
+
 // ---- Otros operarios (multi-selección, opcional) ----
 async function obtenerOperariosProd(texto = '') {
     const json = await llamarProduccion('BUSCAROPERARIOS', { texto });
@@ -1396,16 +1374,15 @@ function refrescarValoresSelectorGenerico() {
 
 // ---- Carga inicial de todos los selectores del modal ----
 async function cargarSelectoresModal(seleccion = {}) {
-    const [maquinasJson, colores, categorias, productos, sucursales, operarios] = await Promise.all([
+    const [maquinasJson, categorias, productos, sucursales, operarios] = await Promise.all([
         llamarProduccion('BUSCARMAQUINAS'),
-        obtenerColoresProd(),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
         obtenerSucursalesProd(),
-        obtenerOperariosProd(''),   // <-- NUEVO
+        obtenerOperariosProd(''),
     ]);
     maquinasProdCache = maquinasJson.success ? maquinasJson.maquinas : [];
-    operariosProdCache = operarios;   // <-- NUEVO
+    operariosProdCache = operarios;
 
     selEstado = {
         maquina_id: seleccion.maquina_id ?? '', maquina_nombre: '',
@@ -1413,8 +1390,7 @@ async function cargarSelectoresModal(seleccion = {}) {
         sucursal_id: seleccion.sucursal_id ?? '', sucursal_nombre: '',
         producto_id: seleccion.producto_id ?? '', producto_nombre: '',
         molde_id: '', unico_molde: seleccion.unico_molde ?? '', molde_etiqueta: '', molde_nombre: '',
-        color_id: seleccion.color_id ?? '', color_nombre: '', color_rgb: '',
-        operarios_extra_ids: seleccion.operarios_extra_ids ?? [],   // <-- NUEVO
+        operarios_extra_ids: seleccion.operarios_extra_ids ?? [],
     };
 
     const maq = maquinasProdCache.find(x => String(x.id) === String(selEstado.maquina_id));
@@ -1425,17 +1401,14 @@ async function cargarSelectoresModal(seleccion = {}) {
     if (suc) selEstado.sucursal_nombre = suc.nombre;
     const prod = (productos || []).find(x => String(x.producto_id) === String(selEstado.producto_id));
     if (prod) selEstado.producto_nombre = prod.descripcion;
-    const col = (colores || []).find(x => String(x.id) === String(selEstado.color_id));
-    if (col) { selEstado.color_nombre = col.nombre; selEstado.color_rgb = col.rgb; }
 
     pintarBloqueMaquina(maquinasProdCache);
     pintarBloqueCategoria(categorias);
     pintarBloqueSucursal(sucursales);
     pintarBloqueProducto(productos);
-    pintarBloqueColor(colores);
-    document.getElementById('prod_operarios_buscar').value = '';   // <-- NUEVO
-    pintarBloqueOperariosExtra(operariosProdCache);                // <-- NUEVO
-    actualizarContadorOperariosExtra();                            // <-- NUEVO
+    document.getElementById('prod_operarios_buscar').value = '';
+    pintarBloqueOperariosExtra(operariosProdCache);
+    actualizarContadorOperariosExtra();
     refrescarValoresSelectorGenerico();
 
     if (selEstado.producto_id) {
@@ -1445,7 +1418,6 @@ async function cargarSelectoresModal(seleccion = {}) {
         document.getElementById('chips_molde').innerHTML = '';
     }
 }
-
 async function obtenerOpcionesMaterialesProd() {
     if (materialesProdCache) return materialesProdCache;
     const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {});
@@ -1747,8 +1719,7 @@ function limpiarFormularioProduccion() {
         sucursal_id: '', sucursal_nombre: '',
         producto_id: '', producto_nombre: '',
         molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
-        color_id: '', color_nombre: '', color_rgb: '',
-        operarios_extra_ids: [],   // <-- NUEVO
+        operarios_extra_ids: [],
     };
     document.getElementById('bloque_molde').style.display = 'none';
     document.getElementById('chips_molde').innerHTML = '';
@@ -1790,7 +1761,7 @@ async function abrirModalEditarProduccion(id) {
 
     await cargarSelectoresModal({
         maquina_id: p.maquina_id, producto_id: productoIdDesdeUnico,
-        unico_molde: p.unico_molde_producto, color_id: p.color_id,
+        unico_molde: p.unico_molde_producto,
         categoria_material_id: p.categoria_material_id, sucursal_id: p.sucursal_id,
         operarios_extra_ids: operariosExtraExistentes,   // <-- NUEVO
     });
@@ -1821,22 +1792,21 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    if (!selEstado.producto_id || !selEstado.unico_molde || !selEstado.color_id) {
-        Swal.fire('Faltan datos', 'Selecciona producto, molde y color antes de guardar.', 'warning');
+    if (!selEstado.producto_id || !selEstado.unico_molde) {
+        Swal.fire('Faltan datos', 'Selecciona producto y molde antes de guardar.', 'warning');
         return;
     }
 
     const params = {
         id: produccionIdActual,
         operario_id: OPERARIO_ID,
-        operarios: JSON.stringify(selEstado.operarios_extra_ids),   // <-- NUEVO
+        operarios: JSON.stringify(selEstado.operarios_extra_ids),
         maquina_id: selEstado.maquina_id,
         categoria_material_id: selEstado.categoria_material_id,
         sucursal_id: selEstado.sucursal_id,
         molde_id: selEstado.molde_id,
         unico_molde: selEstado.unico_molde,
         molde_producto: selEstado.molde_etiqueta,
-        color_id: selEstado.color_id,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),

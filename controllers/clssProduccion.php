@@ -281,14 +281,15 @@ function buscarMaterialesProduccion()
     // material (sin el prefijo "TINTE ") contra color.nombre. Si tu
     // convención de nombres es distinta, ajusta el ON de este LEFT JOIN.
     $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color,
-                   COALESCE(NULLIF(TRIM(m.rgb), ''), co.rgb) AS rgb,
-                   u.nombre_corto AS unidad_corto
-            FROM material m
-            LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
-            LEFT JOIN color co ON m.color = true
-                AND co.deleted_at IS NULL
-                AND UPPER(TRIM(co.nombre)) = UPPER(TRIM(REGEXP_REPLACE(m.nombre, '^TINTE\\s+', '', 'i')))
-            WHERE " . implode(' AND ', $where) . " ORDER BY m.nombre LIMIT 100";
+               COALESCE(NULLIF(TRIM(m.rgb), ''), co.rgb) AS rgb,
+               co.id AS color_id,                                   -- NUEVO
+               u.nombre_corto AS unidad_corto
+        FROM material m
+        LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
+        LEFT JOIN color co ON m.color = true
+            AND co.deleted_at IS NULL
+            AND UPPER(TRIM(co.nombre)) = UPPER(TRIM(REGEXP_REPLACE(m.nombre, '^TINTE\\s+', '', 'i')))
+        WHERE " . implode(' AND ', $where) . " ORDER BY m.nombre LIMIT 100";
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['materiales' => $result]);
@@ -993,7 +994,6 @@ function guardarProduccion()
     $maquina_id  = !empty($_POST['maquina_id']) ? intval($_POST['maquina_id']) : null;
     $categoria_material_id = !empty($_POST['categoria_material_id']) ? intval($_POST['categoria_material_id']) : null;
     $molde_id           = intval($_POST['molde_id'] ?? 0);
-    $color_id           = intval($_POST['color_id'] ?? 0);
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
 
@@ -1038,7 +1038,6 @@ function guardarProduccion()
     }
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
-    if ($color_id <= 0) responder(false, 'Debes seleccionar el color usado en este avance.');
     if (empty($unico_molde) || empty($molde_producto)) {
         responder(false, 'Debes seleccionar un producto y su molde asociado.');
     }
@@ -1050,9 +1049,6 @@ function guardarProduccion()
 
     $molde = executeQuery($conectar, "SELECT id FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
     if (empty($molde)) responder(false, 'El molde seleccionado no existe o está inactivo.');
-
-    $color = executeQuery($conectar, "SELECT id FROM color WHERE id = :id AND deleted_at IS NULL", ['id' => $color_id]);
-    if (empty($color)) responder(false, 'El color seleccionado no existe o está inactivo.');
 
     // Validar que los operarios participantes existan y estén activos.  <-- NUEVO
     if (!empty($operariosParticipantesIds)) {
@@ -1091,6 +1087,7 @@ function guardarProduccion()
             'comentario'  => $comentario ?: null,
         ];
     }
+    $color_id = determinarColorDesdeDetalle($conectar, $detalle);
 
     $conectar->beginTransaction();
     try {
@@ -1233,6 +1230,51 @@ function guardarProduccion()
         error_log("Error guardando producción: " . $e->getMessage());
         responder(false, 'No se pudo guardar la producción: ' . $e->getMessage());
     }
+}
+
+// Deriva el color del avance a partir de los tintes consumidos en él — ya
+// no se pide un selector de color aparte porque el nombre del tinte ya lo
+// dice ("TINTE AZUL" -> color "AZUL"). Si el ticket trae varios tintes de
+// distinto color, gana el de mayor cantidad consumida. Si ningún material
+// del detalle es un tinte reconocido, el avance queda sin color (NULL) —
+// ej. material natural, sin tinte agregado.
+function determinarColorDesdeDetalle($conectar, array $detalle): ?int
+{
+    $materialIds = array_values(array_unique(array_map(fn($l) => intval($l['material_id']), $detalle)));
+    if (empty($materialIds)) return null;
+
+    $placeholders = [];
+    $params = [];
+    foreach ($materialIds as $i => $mid) {
+        $key = "m$i";
+        $placeholders[] = ":$key";
+        $params[$key] = $mid;
+    }
+
+    $rows = executeQuery($conectar, "
+        SELECT m.id AS material_id, co.id AS color_id
+        FROM material m
+        JOIN color co ON co.deleted_at IS NULL
+            AND UPPER(TRIM(co.nombre)) = UPPER(TRIM(REGEXP_REPLACE(m.nombre, '^TINTE\\s+', '', 'i')))
+        WHERE m.color = true AND m.id IN (" . implode(',', $placeholders) . ")
+    ", $params);
+
+    if (empty($rows)) return null;
+
+    $colorPorMaterial = [];
+    foreach ($rows as $r) $colorPorMaterial[$r['material_id']] = (int) $r['color_id'];
+
+    $cantidadPorColor = [];
+    foreach ($detalle as $linea) {
+        $mid = intval($linea['material_id']);
+        if (!isset($colorPorMaterial[$mid])) continue;
+        $cid = $colorPorMaterial[$mid];
+        $cantidadPorColor[$cid] = ($cantidadPorColor[$cid] ?? 0) + floatval($linea['cantidad']);
+    }
+    if (empty($cantidadPorColor)) return null;
+
+    arsort($cantidadPorColor);
+    return array_key_first($cantidadPorColor);
 }
 /**
  * Valida y descuenta cada línea del detalle directamente contra

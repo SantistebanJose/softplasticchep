@@ -416,12 +416,6 @@ include("header.php");
                     <option value="">Primero selecciona un producto...</option>
                 </select>
             </div>
-            <div class="col-md-4 mb-2">
-                <label class="form-label">Color *</label>
-                <select class="form-select" id="prod_color_id" required>
-                    <option value="">Selecciona un color...</option>
-                </select>
-            </div>
           </div>
 
           <div class="row">
@@ -967,10 +961,9 @@ async function cargarMoldesDeProducto(productoId, seleccion) {
 }
 
 async function cargarSelectsModal(seleccion = {}) {
-    const [operario, maquinas, colores, categorias, productos, sucursales] = await Promise.all([
+    const [operario, maquinas, categorias, productos, sucursales] = await Promise.all([
         llamarProduccion('BUSCAROPERARIOS'),
         llamarProduccion('BUSCARMAQUINAS'),
-        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
         obtenerSucursalesProd(),
@@ -1024,12 +1017,6 @@ async function cargarSelectsModal(seleccion = {}) {
         document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
         document.getElementById('prod_molde_id').disabled = true;
     }
-
-    const colorSelect = document.getElementById('prod_color_id');
-    colorSelect.innerHTML = '<option value="">Selecciona un color...</option>';
-    if (colores.success) colores.colores.forEach(c =>
-        colorSelect.insertAdjacentHTML('beforeend', `<option value="${c.id}">${c.nombre}</option>`));
-    if (seleccion.color_id) colorSelect.value = seleccion.color_id;
 }
 async function obtenerOpcionesMaterialesProd() {
     if (materialesProdCache) return materialesProdCache;
@@ -1478,7 +1465,6 @@ async function abrirModalEditarProduccion(id) {
         maquina_id: p.maquina_id,
         producto_id: productoIdDesdeUnico,
         unico_molde: p.unico_molde_producto,
-        color_id: p.color_id,
         categoria_material_id: p.categoria_material_id,
         sucursal_id: p.sucursal_id,
     });
@@ -1555,7 +1541,6 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         molde_id: moldeIdReal,
         unico_molde: uniqueMolde,
         molde_producto: moldeProducto,
-        color_id: document.getElementById('prod_color_id').value,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
