@@ -684,20 +684,39 @@ async function actualizarEstacionArmado() {
     await cargarEstacionParaProducto(productoId);
 }
 
+let tokenCargaEstacion = 0;
+
 async function cargarEstacionParaProducto(productoId) {
     estacionProductoIdActual = productoId;
+    const miToken = ++tokenCargaEstacion;   // <-- NUEVO
+
     bultosState = [];
     mezclaOrigenes = [];
     bolsasProducidasValor = '';
 
     await Promise.all([
         cargarSelectsEstacion(),
-        cargarOrigenesDisponibles(productoId),
+        cargarOrigenesDisponibles(productoId, miToken),   // <-- pasa el token
     ]);
+
+    if (miToken !== tokenCargaEstacion) return;   // <-- descarta si ya quedó obsoleto
+
     aplicarUnidadEmpaquetadoFija();
     inicializarBloqueFormulario();
+    actualizarResumenBarraAccion();
 }
 
+async function cargarOrigenesDisponibles(productoId, miToken) {
+    const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
+
+    if (miToken !== tokenCargaEstacion) return;   // <-- respuesta vieja, se ignora
+
+    if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
+    origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
+    unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
+    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
+    capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null;
+}
 // =============================================================================
 // LISTADO GENERAL
 // =============================================================================
