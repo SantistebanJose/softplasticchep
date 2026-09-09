@@ -29,20 +29,25 @@ include("header.php");
     }
     .pc-filtros .campo-acciones .pc-btn { white-space: nowrap; }
 
-    /* ── Tablet / mobile (≤768px) ────────────────────────────────────── */
-    @media (max-width: 768px) {
-        .pc-filtros { flex-direction: column; align-items: stretch; }
-        .pc-filtros .campo,
-        .pc-filtros .campo-acciones { width: 100%; margin-left: 0; }
-        .pc-filtros .campo-acciones .pc-btn { flex: 1 1 auto; }
+  @media (max-width: 768px) {
+    .pc-filtros { flex-direction: column; align-items: stretch; }
+    .pc-filtros .campo,
+    .pc-filtros .campo-acciones { width: 100%; margin-left: 0; }
+    .pc-filtros .campo-acciones .pc-btn { flex: 1 1 auto; }
 
-        .pc-card-header h2 { font-size: 1.15rem; }
-        #btnToggleStock { font-size: 0.85rem; }
-
-        #resumenKardex .col-md-4 { flex: 0 0 100%; max-width: 100%; }
-        #resumenKardex .pc-card { padding: 10px !important; }
-        #resumenKardex .fs-4 { font-size: 1.25rem !important; }
+    .pc-filtros .campo-item,
+    .pc-filtros .campo-fecha,
+    .pc-filtros .campo-movimiento {
+        flex: 1 1 auto;
     }
+
+    .pc-card-header h2 { font-size: 1.15rem; }
+    #btnToggleStock { font-size: 0.85rem; }
+
+    #resumenKardex .col-md-4 { flex: 0 0 100%; max-width: 100%; }
+    #resumenKardex .pc-card { padding: 10px !important; }
+    #resumenKardex .fs-4 { font-size: 1.25rem !important; }
+}
 
     /* ── Celulares chicos (≤480px) ───────────────────────────────────── */
     @media (max-width: 480px) {
@@ -87,7 +92,10 @@ include("header.php");
     .pc-stock-filtros .campo-tipo { flex: 0 1 160px; min-width: 140px; }
     @media (max-width: 768px) {
         .pc-stock-filtros { flex-direction: column; align-items: stretch; }
-        .pc-stock-filtros .campo { width: 100%; }
+        .pc-stock-filtros .campo {
+            width: 100%;
+            flex: 1 1 auto;
+        }
     }
     @media (max-width: 480px) {
         .pc-stock-filtros .campo button.pc-btn { width: 100%; }
