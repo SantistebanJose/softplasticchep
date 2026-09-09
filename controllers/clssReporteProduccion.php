@@ -207,7 +207,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
     $turno           = $filtros['turno'] ?? '';
     $maquinaId       = (int) ($filtros['maquina_id'] ?? 0);
     $sucursalId      = (int) ($filtros['sucursal_id'] ?? 0);
-
+ 
     $operario = executeQuery(
         $conectar,
         "SELECT o.id, o.nombre_completo, c.nombre AS cargo
@@ -219,21 +219,21 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
     if (empty($operario)) {
         responder(false, 'Operario no encontrado.');
     }
-
+ 
     [$fechaDesde, $fechaHasta, $etiquetaPeriodo] = calcularRangoPeriodo(
         $modo,
         $fechaRef,
         $fechaDesdeInput,
         $fechaHastaInput
     );
-
+ 
     if (!$fechaDesde || !$fechaHasta) {
         responder(false, 'Debes indicar un rango de fechas válido.');
     }
     if (strtotime($fechaDesde) > strtotime($fechaHasta)) {
         responder(false, 'La fecha de inicio no puede ser posterior a la fecha final.');
     }
-
+ 
     // NOTA: producción ahora es multi-operario (pd.js_operarios jsonb array).
     // Este JOIN LATERAL + filtro por operario_id deja, en la práctica, una
     // sola fila por avance (la del operario buscado), igual que antes con
@@ -241,7 +241,18 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
     // le corresponde específicamente a ESE operario dentro del avance.
     $joinOperario = "CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS op";
     $producidoOperario = "COALESCE((op->>'cantidad_producida')::numeric, 0)";
-
+ 
+    // Subconsulta correlacionada para sumar la merma real del avance desde
+    // pd.js_cantidades_merma (jsonb array). El monto real está en la clave
+    // 'cantidad' de cada item; la clave 'merma' queda en null y no se usa.
+    // Se usa subconsulta (no otro CROSS JOIN LATERAL) para no multiplicar
+    // pd.cantidad ni el resto de columnas del avance cuando hay varios
+    // items de merma en el mismo registro.
+    $mermaOperario = "
+        (SELECT COALESCE(SUM((elem->>'cantidad')::numeric), 0)
+         FROM jsonb_array_elements(COALESCE(pd.js_cantidades_merma, '[]'::jsonb)) AS elem)
+    ";
+ 
     $condiciones = [
         "pd.deleted_at IS NULL",
         "(op->>'operario_id')::bigint = :operario_id",
@@ -252,7 +263,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         'fecha_desde' => $fechaDesde,
         'fecha_hasta' => $fechaHasta,
     ];
-
+ 
     if ($maquinaId > 0) {
         $condiciones[] = "pd.maquina_id = :maquina_id";
         $params['maquina_id'] = $maquinaId;
@@ -261,22 +272,23 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         $condiciones[] = "pd.sucursal = :sucursal_id";
         $params['sucursal_id'] = $sucursalId;
     }
-
+ 
     $turnoCase = turnoCaseSql('pd.fecha');
     if ($turno !== '' && in_array($turno, ['dia', 'tarde', 'noche', 'madrugada'], true)) {
         $condiciones[] = "$turnoCase = :turno";
         $params['turno'] = $turno;
     }
-
+ 
     $condicionBase = implode(' AND ', $condiciones);
     $unidadSql = unidadCaseSql('pd');
-
+ 
     // ── Resumen general (no depende de la unidad; cantidad insertada sigue siendo a nivel de avance) ─
     $sqlResumenGeneral = "
         SELECT
             COUNT(pd.id) AS total_avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado
+            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado,
+            COALESCE(SUM($mermaOperario), 0) AS total_merma
         FROM produccion pd
         $joinOperario
         WHERE $condicionBase
@@ -286,8 +298,9 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         'total_avances' => 0,
         'moldes_distintos' => 0,
         'total_kg_insertado' => 0,
+        'total_merma' => 0,
     ];
-
+ 
     // ── Resumen de lo PRODUCIDO por ESTE operario, separado por unidad de salida ─
     $sqlResumenPorUnidad = "
         SELECT
@@ -303,7 +316,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         ORDER BY total_producido DESC
     ";
     $resumenPorUnidad = executeQuery($conectar, $sqlResumenPorUnidad, $params);
-
+ 
     // ── Distribución por turno, separada por unidad ──
     $sqlPorTurno = "
         SELECT
@@ -318,7 +331,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         ORDER BY unidad, cantidad DESC
     ";
     $porTurno = executeQuery($conectar, $sqlPorTurno, $params);
-
+ 
     // ── Distribución por máquina, separada por unidad ──
     $sqlPorMaquina = "
         SELECT
@@ -334,7 +347,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         ORDER BY unidad, cantidad DESC
     ";
     $porMaquina = executeQuery($conectar, $sqlPorMaquina, $params);
-
+ 
     // ── Top 5 moldes trabajados en el periodo ──
     $sqlTopMoldes = "
         SELECT
@@ -354,7 +367,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         LIMIT 5
     ";
     $topMoldes = executeQuery($conectar, $sqlTopMoldes, $params);
-
+ 
     // ── Detalle completo (avance a avance) ──
     $sqlDetalle = "
         SELECT
@@ -380,7 +393,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         ORDER BY pd.fecha DESC
     ";
     $detalle = executeQuery($conectar, $sqlDetalle, $params);
-
+ 
     return [
         'operario' => $operario[0],
         'periodo' => [

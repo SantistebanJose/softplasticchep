@@ -544,6 +544,10 @@ function pintarReporteOperario(json) {
                 <div class="rep-stat-valor">${formatearKg(resumen_general.total_kg_insertado)}</div>
                 <div class="rep-stat-label">Kg insertados</div>
             </div>
+            <div class="rep-stat-card">
+                <div class="rep-stat-valor">${formatearKg(resumen_general.total_merma)}</div>
+                <div class="rep-stat-label">Merma</div>
+            </div>
             ${cardsUnidad}
         </div>
 
