@@ -85,8 +85,14 @@ include("header.php");
           <div class="row">
             <div class="col-md-6 mb-2">
                 <label class="form-label">Comprobante</label>
-                <input type="file" class="form-control" id="compra_comprobante" accept=".jpg,.jpeg,.png,.webp,.pdf">
+                <div class="d-flex gap-2">
+                    <input type="file" class="form-control" id="compra_comprobante" accept=".jpg,.jpeg,.png,.webp,.pdf">
+                    <button type="button" class="btn btn-outline-secondary flex-shrink-0" onclick="abrirModalCamaraComprobante()" title="Tomar foto">
+                        <i class="fa-solid fa-camera"></i>
+                    </button>
+                </div>
                 <div class="form-text" id="compra_comprobante_actual"></div>
+                <div class="form-text" id="compra_comprobante_preview"></div>
             </div>
             <div class="col-md-6 mb-2">
                 <label class="form-label">Monto del comprobante (S/)</label>
@@ -146,7 +152,33 @@ include("header.php");
     </div>
   </div>
 </div>
-
+<div class="modal fade" id="modalCamaraComprobante" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Tomar foto del comprobante</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body text-center">
+        <video id="videoCamaraComprobante" autoplay playsinline
+               style="width:100%; max-height:60vh; background:#000; border-radius:8px;"></video>
+        <canvas id="canvasCamaraComprobante" style="display:none;"></canvas>
+        <div id="previewCamaraComprobante" style="display:none;">
+            <img id="imgPreviewCamaraComprobante" style="width:100%; max-height:60vh; object-fit:contain; border-radius:8px;">
+        </div>
+        <div class="form-text mt-2" id="camaraComprobanteError" style="color:#dc3545; display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-outline-primary" id="btnRepetirFotoComprobante" style="display:none;" onclick="repetirFotoComprobante()">Repetir</button>
+        <button type="button" class="btn btn-primary" id="btnCapturarFotoComprobante" onclick="capturarFotoComprobante()">
+            <i class="fa-solid fa-camera"></i> Capturar
+        </button>
+        <button type="button" class="btn btn-success" id="btnUsarFotoComprobante" style="display:none;" onclick="usarFotoComprobante()">Usar esta foto</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- Modal Ver Comprobante -->
 <div class="modal fade" id="modalVerComprobante" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -761,6 +793,80 @@ async function agregarFilaMaterial(datos = null) {
                 </div>`;
     }
 
+    const modalCamaraComprobante = new bootstrap.Modal(document.getElementById('modalCamaraComprobante'));
+let streamCamaraComprobante = null;
+let capturaComprobanteBlob = null; // si existe, tiene prioridad sobre el <input type="file"> al guardar
+
+async function abrirModalCamaraComprobante() {
+    const video = document.getElementById('videoCamaraComprobante');
+    const errorEl = document.getElementById('camaraComprobanteError');
+
+    video.style.display = '';
+    document.getElementById('previewCamaraComprobante').style.display = 'none';
+    errorEl.style.display = 'none';
+    document.getElementById('btnCapturarFotoComprobante').style.display = '';
+    document.getElementById('btnCapturarFotoComprobante').disabled = false;
+    document.getElementById('btnRepetirFotoComprobante').style.display = 'none';
+    document.getElementById('btnUsarFotoComprobante').style.display = 'none';
+
+    modalCamaraComprobante.show();
+
+    try {
+        // 'environment' pide la cámara trasera en celular; en PC sin esa
+        // cámara el navegador cae de vuelta a la única disponible (webcam).
+        streamCamaraComprobante = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false
+        });
+        video.srcObject = streamCamaraComprobante;
+    } catch (err) {
+        console.error('No se pudo acceder a la cámara:', err);
+        errorEl.textContent = 'No se pudo acceder a la cámara. Revisa los permisos del navegador o usa "Subir archivo".';
+        errorEl.style.display = 'block';
+        document.getElementById('btnCapturarFotoComprobante').disabled = true;
+    }
+}
+
+function detenerStreamCamara() {
+    if (streamCamaraComprobante) {
+        streamCamaraComprobante.getTracks().forEach(t => t.stop());
+        streamCamaraComprobante = null;
+    }
+}
+
+function capturarFotoComprobante() {
+    const video = document.getElementById('videoCamaraComprobante');
+    const canvas = document.getElementById('canvasCamaraComprobante');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+        capturaComprobanteBlob = blob;
+        document.getElementById('imgPreviewCamaraComprobante').src = URL.createObjectURL(blob);
+        video.style.display = 'none';
+        document.getElementById('previewCamaraComprobante').style.display = '';
+        document.getElementById('btnCapturarFotoComprobante').style.display = 'none';
+        document.getElementById('btnRepetirFotoComprobante').style.display = '';
+        document.getElementById('btnUsarFotoComprobante').style.display = '';
+        detenerStreamCamara(); // no hace falta la cámara prendida mientras revisa la foto
+    }, 'image/jpeg', 0.9);
+}
+
+function repetirFotoComprobante() {
+    capturaComprobanteBlob = null;
+    abrirModalCamaraComprobante();
+}
+
+function usarFotoComprobante() {
+    modalCamaraComprobante.hide();
+    document.getElementById('compra_comprobante').value = ''; // que no compita con el input de archivo
+    document.getElementById('compra_comprobante_preview').innerHTML =
+        '<span class="text-success"><i class="fa-solid fa-check"></i> Foto capturada, lista para subir</span>';
+}
+
+// Por si cierran el modal con el backdrop o Esc en vez del botón Cancelar
+document.getElementById('modalCamaraComprobante').addEventListener('hidden.bs.modal', detenerStreamCamara);
     const tomSelectMaterial = new TomSelect(matSelectEl, {
         valueField: 'id',
         labelField: 'nombre',
@@ -919,7 +1025,6 @@ function obtenerDetalleJson() {
     return JSON.stringify(detalle);
 }
 
-// ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioCompra() {
     document.getElementById('formCompra').reset();
     document.getElementById('compra_detalle_wrap').innerHTML = '';
@@ -930,6 +1035,8 @@ function limpiarFormularioCompra() {
     compraIdActual = 0;
     comprobanteActualRuta = null;
     eliminarComprobanteFlag = false;
+    capturaComprobanteBlob = null;
+    document.getElementById('compra_comprobante_preview').innerHTML = '';
 }
 
 async function abrirModalCrearCompra() {
@@ -983,6 +1090,7 @@ async function abrirModalEditarCompra(id) {
 function quitarComprobanteActual(e) {
     e.preventDefault();
     eliminarComprobanteFlag = true;
+    capturaComprobanteBlob = null; // si había una foto tomada con cámara, también se descarta
     document.getElementById('compra_comprobante_actual').innerHTML =
         '<span class="text-danger">El comprobante actual se eliminará al guardar.</span>';
 }
