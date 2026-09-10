@@ -807,11 +807,13 @@ async function agregarFilaMaterial(datos = null) {
 
     function actualizarConversion() {
         const unidadOpt = unidadSelect.selectedOptions[0];
-        const equiv = unidadOpt ? parseFloat(unidadOpt.dataset.equiv || '1') : 1;
+        const equivCompra = unidadOpt ? parseFloat(unidadOpt.dataset.equiv || '1') : 1;
         const matData = materialSeleccionado();
+        const equivMaterial = matData ? (parseFloat(matData.unidad_equivalencia) || 1) : 1;
+        const equiv = equivMaterial ? (equivCompra / equivMaterial) : equivCompra;
         const unidadBaseCorto = matData ? (matData.unidad_corto || '') : '';
         const cantidad = parseFloat(cantidadInput.value) || 0;
-        if (cantidad > 0 && equiv && equiv !== 1) {
+        if (cantidad > 0 && equiv && Math.abs(equiv - 1) > 1e-9) {
             conversionTexto.textContent = `= ${formatearCantidad(cantidad * equiv)} ${unidadBaseCorto}`.trim();
             conversionBadge.style.display = 'inline-flex';
         } else {

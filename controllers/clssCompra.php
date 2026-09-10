@@ -457,7 +457,10 @@ function guardarCompra()
     }
     $materialesInfo = executeQuery(
         $conectar,
-        "SELECT id, nombre, unidad_medida_id FROM material WHERE id IN (" . implode(',', $placeholders) . ")",
+        "SELECT m.id, m.nombre, m.unidad_medida_id, um.equivalencia AS unidad_equivalencia
+        FROM material m
+        LEFT JOIN unidad_medida um ON um.id = m.unidad_medida_id
+        WHERE m.id IN (" . implode(',', $placeholders) . ")",
         $paramsIn
     );
     $infoMaterial = [];
@@ -514,8 +517,9 @@ function guardarCompra()
             }
         }
 
-        $equivalencia = floatval($unidadElegida['equivalencia'] ?? 1);
-        $linea['cantidad_base'] = $linea['cantidad'] * $equivalencia;
+        $equivalencia         = floatval($unidadElegida['equivalencia'] ?? 1);
+        $equivalenciaMaterial = floatval($materialActual['unidad_equivalencia'] ?? 1) ?: 1;
+        $linea['cantidad_base'] = $linea['cantidad'] * ($equivalencia / $equivalenciaMaterial);
     }
     unset($linea);
 
