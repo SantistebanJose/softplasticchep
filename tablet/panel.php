@@ -67,14 +67,6 @@ else                 $saludo = 'Buenas noches';
             <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
-        <?php if ($puedeProduccion): ?>
-        <a href="mis_producciones.php" class="pc-op-panel-btn q-teal">
-            <div class="pc-op-panel-icon"><i class="fa-solid fa-chart-column"></i></div>
-            <span class="pc-op-panel-label">Mis producciones</span>
-            <span class="pc-op-panel-sub">Revisa tu reporte de avances</span>
-            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
-        </a>
-        <?php endif; ?>
 
         <?php if ($puedeEnsamblaje): ?>
         <a href="ensamblaje.php" class="pc-op-panel-btn q-navy">
@@ -90,6 +82,24 @@ else                 $saludo = 'Buenas noches';
             <div class="pc-op-panel-icon"><i class="fa-solid fa-box-open"></i></div>
             <span class="pc-op-panel-label">Empaquetado</span>
             <span class="pc-op-panel-sub">Prepara sacos y bultos</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+        <?php endif; ?>
+
+        <?php if ($puedeProduccion): ?>
+        <a href="mis_producciones.php" class="pc-op-panel-btn q-teal">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-chart-column"></i></div>
+            <span class="pc-op-panel-label">Mis producciones</span>
+            <span class="pc-op-panel-sub">Revisa tu reporte de avances</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+        <?php endif; ?>
+        
+        <?php if ($puedeEnsamblaje): ?>
+        <a href="mis_ensamblajes.php" class="pc-op-panel-btn q-teal">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-chart-column"></i></div>
+            <span class="pc-op-panel-label">Mis ensamblajes</span>
+            <span class="pc-op-panel-sub">Revisa tu reporte de armados</span>
             <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>

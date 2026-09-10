@@ -65,6 +65,9 @@ function controladorReporteEnsamblaje($accion)
         case 'REPORTEENSAMBLAJEOPERARIODETALLE':
             reporteEnsamblajeOperarioDetalle();
             break;
+        case 'MISENSAMBLAJESOPERARIO':
+            misEnsamblajesOperario();
+            break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
@@ -105,6 +108,136 @@ function buscarProductosReporteEnsamblaje()
     $result = executeQuery($conectar, $sql, []);
     responder(true, 'OK', ['productos' => $result]);
 }
+
+
+function misEnsamblajesOperario()
+{
+    $conectar = conectar_oll_BD();
+ 
+    if (empty($_SESSION['operario_id'])) {
+        responder(false, 'Sesión no válida. Vuelve a iniciar sesión.');
+    }
+    $operarioId = (int) $_SESSION['operario_id'];
+ 
+    $modo     = trim($_POST['modo'] ?? 'dia');
+    $fechaRef = trim($_POST['fecha'] ?? date('Y-m-d'));
+ 
+    [$fechaDesde, $fechaHasta, $etiquetaPeriodo] = calcularRangoPeriodoEnsamblaje($modo, $fechaRef, '', '');
+    if (!$fechaDesde || !$fechaHasta) {
+        responder(false, 'Debes indicar un rango de fechas válido.');
+    }
+ 
+    $joinOperario = joinOperarioEnsamblajeSql();
+    $joinUnidad   = unidadEnsamblajeJoinSql();
+    $unidadSql    = unidadEnsamblajeSql();
+ 
+    $condicionBase = "
+        e.deleted_at IS NULL
+        AND (op->>'operario_id')::bigint = :operario_id
+        AND e.inicio::date BETWEEN :fecha_desde AND :fecha_hasta
+    ";
+    $params = [
+        'operario_id' => $operarioId,
+        'fecha_desde' => $fechaDesde,
+        'fecha_hasta' => $fechaHasta,
+    ];
+ 
+    // ── Conteo general del operario en el periodo (unit-agnostic) ──
+    $sqlConteo = "
+        SELECT
+            COUNT(e.id) AS total_ensamblajes,
+            COUNT(DISTINCT e.producto_id) AS productos_distintos,
+            COUNT(e.id) FILTER (WHERE e.enviado_empaquetado IS NOT TRUE) AS pendientes,
+            COUNT(e.id) FILTER (WHERE e.enviado_empaquetado IS TRUE) AS enviados_empaquetado
+        FROM ensamblaje e
+        $joinOperario
+        WHERE $condicionBase
+    ";
+    $conteoFilas = executeQuery($conectar, $sqlConteo, $params);
+    $resumenGeneral = $conteoFilas[0] ?? [
+        'total_ensamblajes' => 0, 'productos_distintos' => 0, 'pendientes' => 0, 'enviados_empaquetado' => 0,
+    ];
+ 
+    // ── Cantidad total ensamblada por este operario, separada por unidad real ──
+    $sqlResumenPorUnidad = "
+        SELECT
+            $unidadSql AS unidad,
+            COUNT(e.id) AS ensamblajes,
+            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+        FROM ensamblaje e
+        $joinOperario
+        $joinUnidad
+        WHERE $condicionBase
+        GROUP BY 1
+        ORDER BY cantidad_total DESC
+    ";
+    $resumenPorUnidad = executeQuery($conectar, $sqlResumenPorUnidad, $params);
+ 
+    // ── Top productos que trabajó este operario, separado por unidad ──
+    $sqlTopProductos = "
+        SELECT
+            p.codigo,
+            p.descripcion,
+            $unidadSql AS unidad,
+            COUNT(e.id) AS ensamblajes,
+            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+        FROM ensamblaje e
+        $joinOperario
+        $joinUnidad
+        LEFT JOIN producto p ON p.id = e.producto_id
+        WHERE $condicionBase
+        GROUP BY p.codigo, p.descripcion, 3
+        ORDER BY cantidad_total DESC
+        LIMIT 6
+    ";
+    $topProductos = executeQuery($conectar, $sqlTopProductos, $params);
+ 
+    // ── Detalle registro a registro, para el toggle "ver detalle" ──
+    $sqlDetalle = "
+        SELECT
+            e.id,
+            e.inicio,
+            p.codigo AS producto_codigo,
+            p.descripcion AS producto,
+            cm.nombre AS categoria_material,
+            e.cantidad_peso_kg AS cantidad,
+            um.nombre AS unidad,
+            e.proveniente,
+            e.enviado_empaquetado
+        FROM ensamblaje e
+        $joinOperario
+        LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
+        LEFT JOIN unidad_medida um ON um.id = e.unidad_salida_id
+        WHERE $condicionBase
+        ORDER BY e.inicio DESC
+    ";
+    $detalleCrudo = executeQuery($conectar, $sqlDetalle, $params);
+ 
+    $detalle = array_map(function ($d) {
+        $ts = strtotime($d['inicio']);
+        return [
+            'producto_codigo'    => $d['producto_codigo'],
+            'producto'           => $d['producto'],
+            'categoria_material' => $d['categoria_material'],
+            'cantidad'           => $d['cantidad'],
+            'unidad'             => $d['unidad'] ?: 'kg',
+            'proveniente'        => $d['proveniente'],
+            'estado'             => $d['enviado_empaquetado'] ? 'enviado' : 'pendiente',
+            'fecha'              => $ts ? date('d/m/Y', $ts) : '',
+            'hora'               => $ts ? date('H:i', $ts) : '',
+        ];
+    }, $detalleCrudo);
+ 
+    responder(true, 'OK', [
+        'periodo'            => ['desde' => $fechaDesde, 'hasta' => $fechaHasta, 'etiqueta' => $etiquetaPeriodo],
+        'resumen_por_unidad' => $resumenPorUnidad,
+        'resumen_general'    => $resumenGeneral,
+        'top_productos'      => $topProductos,
+        'detalle'            => $detalle,
+    ]);
+}
+
 
 // Ajusta el nombre de tabla/columna si categoria_material se llama distinto.
 function buscarCategoriasMaterialReporte()
