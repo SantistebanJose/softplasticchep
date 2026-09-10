@@ -112,6 +112,7 @@ function listarMateriales()
     responder(true, 'OK', ['materiales' => $result]);
 }
 
+
 function obtenerMaterial($id)
 {
     $conectar = conectar_oll_BD();

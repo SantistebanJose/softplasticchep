@@ -278,8 +278,8 @@ async function cargarMateriales() {
         </td>
         <td data-label="Unidad">${m.unidad_nombre ? `${m.unidad_nombre} (${m.unidad_corto})` : '-'}</td>
         <td data-label="Stock actual">${stockBajo
-            ? `<span class="badge bg-danger" title="Por debajo del stock mínimo">${m.stock_actual}</span>`
-            : m.stock_actual}
+            ? `<span class="badge bg-danger" title="Por debajo del stock mínimo">${formatearStockConUnidad(m.stock_actual, m.unidad_corto)}</span>`
+            : formatearStockConUnidad(m.stock_actual, m.unidad_corto)}
         </td>
         <td data-label="Stock mínimo">${m.stock_minimo}</td>
         <td data-label="Estado">${!m.deleted_at
@@ -326,6 +326,11 @@ async function abrirModalEditarMaterial(id) {
     const idsSeleccionados = parseJsonColumnaMat(m.js_producto).map(x => x.producto_id);
     await cargarChecklistProductosMaterial(idsSeleccionados);
     modalMaterial.show();
+}
+
+function formatearStockConUnidad(valor, unidadCorto) {
+    const numero = Number(valor ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
+    return unidadCorto ? `${numero} ${unidadCorto}` : numero;
 }
 
 document.getElementById('formMaterial').addEventListener('submit', async function (e) {
