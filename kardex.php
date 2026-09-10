@@ -42,7 +42,7 @@ include("header.php");
     }
 
     .pc-card-header h2 { font-size: 1.15rem; }
-    #btnToggleStock { font-size: 0.85rem; }
+    #btnToggleGeneral { font-size: 0.85rem; }
 
     #resumenKardex .col-md-4 { flex: 0 0 100%; max-width: 100%; }
     #resumenKardex .pc-card { padding: 10px !important; }
@@ -61,17 +61,17 @@ include("header.php");
         .pc-page-title h1 { font-size: 1.1rem; }
         .pc-page-subtitle { font-size: 0.8rem; }
 
-        #kardexPaginacion {
+        #kardexPaginacion, #generalPaginacion {
             justify-content: center;
             text-align: center;
         }
-        #kardexPaginacion span { width: 100%; order: -1; margin-bottom: 4px; }
+        #kardexPaginacion span, #generalPaginacion span { width: 100%; order: -1; margin-bottom: 4px; }
 
         .pc-table-responsive-cards .badge { font-size: 0.7rem; }
     }
 
-    #kardexPaginacion { flex-wrap: wrap; gap: 8px; }
-    #kardexPaginacion span { font-size: 0.9rem; }
+    #kardexPaginacion, #generalPaginacion { flex-wrap: wrap; gap: 8px; }
+    #kardexPaginacion span, #generalPaginacion span { font-size: 0.9rem; }
 
     .text-saldo-cero { color: #dc3545; font-weight: 700; }
 
@@ -81,78 +81,104 @@ include("header.php");
         -webkit-overflow-scrolling: touch;
     }
 
-    .pc-stock-filtros {
+    .pc-general-filtros {
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
         align-items: flex-end;
         margin-bottom: 12px;
     }
-    .pc-stock-filtros .campo { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; min-width: 180px; }
-    .pc-stock-filtros .campo-tipo { flex: 0 1 160px; min-width: 140px; }
+    .pc-general-filtros .campo { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 160px; }
+    .pc-general-filtros .campo-corta { flex: 0 1 140px; min-width: 120px; }
     @media (max-width: 768px) {
-        .pc-stock-filtros { flex-direction: column; align-items: stretch; }
-        .pc-stock-filtros .campo {
-            width: 100%;
-            flex: 1 1 auto;
-        }
+        .pc-general-filtros { flex-direction: column; align-items: stretch; }
+        .pc-general-filtros .campo { width: 100%; flex: 1 1 auto; }
     }
     @media (max-width: 480px) {
-        .pc-stock-filtros .campo button.pc-btn { width: 100%; }
+        .pc-general-filtros .campo button.pc-btn { width: 100%; }
     }
 
-    #tablaStockGeneral tbody tr { cursor: pointer; }
-    #tablaStockGeneral tbody tr:hover { background: rgba(0,0,0,0.03); }
+    #tablaKardexGeneral tbody tr { cursor: pointer; }
+    #tablaKardexGeneral tbody tr:hover { background: rgba(0,0,0,0.03); }
 </style>
 
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Kardex</h2>
-        <button class="pc-btn pc-btn-outline-secondary" id="btnToggleStock" onclick="toggleStockGeneral()">
-            <i class="fa-solid fa-boxes-stacked"></i> Ver stock general
+        <button class="pc-btn pc-btn-outline-secondary" id="btnToggleGeneral" onclick="toggleKardexGeneral()">
+            <i class="fa-solid fa-list-check"></i> Ver kardex general
         </button>
     </div>
 
-    <!-- ── Stock general (todos los ítems con saldo actual) ─────────────────── -->
-    <div id="bloqueStockGeneral" style="display:none;" class="mb-4">
-        <div class="pc-stock-filtros">
+    <!-- ── Kardex general: todos los movimientos del mes/año, todos los ítems ── -->
+    <div id="bloqueKardexGeneral" style="display:none;" class="mb-4">
+        <div class="pc-general-filtros">
+            <div class="campo campo-corta">
+                <label class="form-label">Mes</label>
+                <select id="kg_mes" class="form-control"></select>
+            </div>
+            <div class="campo campo-corta">
+                <label class="form-label">Año</label>
+                <select id="kg_anio" class="form-control"></select>
+            </div>
             <div class="campo">
                 <label class="form-label">Buscar</label>
-                <input type="text" id="sg_texto" class="form-control" placeholder="Nombre de material o producto...">
+                <input type="text" id="kg_texto" class="form-control" placeholder="Nombre de material o producto...">
             </div>
-            <div class="campo campo-tipo">
+            <div class="campo campo-corta">
                 <label class="form-label">Tipo</label>
-                <select id="sg_tipo_item" class="form-control">
+                <select id="kg_tipo_item" class="form-control">
                     <option value="">Todos</option>
                     <option value="MATERIAL">Material</option>
                     <option value="PRODUCTO">Producto</option>
                 </select>
             </div>
+            <div class="campo campo-corta">
+                <label class="form-label">Movimiento</label>
+                <select id="kg_tipo_movimiento" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="COMPRA">Compra</option>
+                    <option value="PRODUCCION">Producción</option>
+                    <option value="EMPAQUETADO">Empaquetado</option>
+                    <option value="VENTA">Venta</option>
+                </select>
+            </div>
             <div class="campo" style="flex:0 1 auto;">
-                <button class="pc-btn pc-btn-primary" onclick="buscarStockGeneral()">
+                <button class="pc-btn pc-btn-primary" onclick="buscarKardexGeneral()">
                     <i class="fa-solid fa-magnifying-glass"></i> Filtrar
+                </button>
+            </div>
+            <div class="campo" style="flex:0 1 auto;">
+                <button class="pc-btn pc-btn-outline-secondary" onclick="exportarKardexGeneralCSV()">
+                    <i class="fa-solid fa-file-csv"></i> Exportar
                 </button>
             </div>
         </div>
 
         <div class="pc-table-wrap pc-table-responsive-cards">
-        <table class="pc-table" id="tablaStockGeneral">
+        <table class="pc-table" id="tablaKardexGeneral">
             <thead>
                 <tr>
-                    <th>Ítem</th>
-                    <th>Tipo</th>
-                    <th>Saldo actual</th>
-                    <th>Última actividad</th>
+                    <th>Fecha</th>
+                    <th>Movimiento</th>
+                    <th>Referencia</th>
+                    <th>Descripción</th>
+                    <th>Entrada</th>
+                    <th>Salida</th>
+                    <th>Saldo</th>
                 </tr>
             </thead>
-            <tbody id="tbodyStockGeneral">
-                <tr><td colspan="4" style="text-align:center;">Cargando stock general...</td></tr>
+            <tbody id="tbodyKardexGeneral">
+                <tr><td colspan="7" style="text-align:center;">Cargando movimientos del mes...</td></tr>
             </tbody>
         </table>
         </div>
-        <p class="text-muted small mb-0">Clic en una fila para ver su kardex detallado.</p>
+        <p class="text-muted small mb-0">Clic en una fila para ver el kardex detallado de ese ítem.</p>
+
+        <div id="generalPaginacion" class="d-flex justify-content-between align-items-center mt-2"></div>
     </div>
 
+    <div id="bloqueKardexItem">
     <div class="pc-filtros mb-3">
         <div class="campo campo-item">
             <label class="form-label">Ítem (material o producto)</label>
@@ -230,6 +256,7 @@ include("header.php");
     </div>
 
     <div id="kardexPaginacion" class="d-flex justify-content-between align-items-center mt-2"></div>
+    </div>
 </div>
 
 
@@ -273,6 +300,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     });
+
+    initFiltrosKardexGeneral();
 });
 
 // ── Llamada genérica al controlador ──────────────────────────────────────────
@@ -292,7 +321,7 @@ async function llamarKardex(accion, params = {}) {
     }
 }
 
-// ── Buscar kardex ─────────────────────────────────────────────────────────────
+// ── Buscar kardex (de un ítem específico) ────────────────────────────────────
 async function buscarKardex() {
     const valor = tomSelectItem.getValue();
     const tbody = document.getElementById('tbodyKardex');
@@ -325,7 +354,26 @@ async function buscarKardex() {
     renderResumen(json.resumen || {});
 }
 
-// ── Exportar CSV ──────────────────────────────────────────────────────────────
+function seleccionarItemEnKardex(tipo_item, item_id, nombre) {
+    const valor = `${tipo_item}:${item_id}`;
+
+    if (!tomSelectItem.options[valor]) {
+        tomSelectItem.addOption({
+            valor,
+            texto: `${nombre} (${tipo_item === 'MATERIAL' ? 'Material' : 'Producto'})`
+        });
+    }
+    tomSelectItem.setValue(valor);
+
+    document.getElementById('bloqueKardexGeneral').style.display = 'none';
+    document.getElementById('bloqueKardexItem').style.display = 'block';
+    document.getElementById('btnToggleGeneral').innerHTML = '<i class="fa-solid fa-list-check"></i> Ver kardex general';
+
+    buscarKardex();
+    document.querySelector('.pc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Exportar CSV (kardex de un ítem) ─────────────────────────────────────────
 function exportarKardexCSV() {
     if (!ultimoKardex.length) {
         Swal.fire('Atención', 'No hay datos para exportar.', 'warning');
@@ -442,87 +490,157 @@ function cambiarPagina(delta) {
     renderKardexPaginado();
 }
 
-// ── Stock general ──────────────────────────────────────────────────────────
-let stockGeneralCargado = false;
+// ── Kardex general: todos los ítems, movimientos del mes/año seleccionado ────
+let kardexGeneralCargado = false;
+let ultimoKardexGeneral  = [];
+let paginaActualKG       = 1;
 
-function toggleStockGeneral() {
-    const bloque = document.getElementById('bloqueStockGeneral');
-    const btn    = document.getElementById('btnToggleStock');
-    const mostrar = bloque.style.display === 'none';
+function initFiltrosKardexGeneral() {
+    const selMes  = document.getElementById('kg_mes');
+    const selAnio = document.getElementById('kg_anio');
+    const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const hoy = new Date();
 
-    bloque.style.display = mostrar ? 'block' : 'none';
+    // Mes y año actuales seleccionados por defecto
+    selMes.innerHTML = meses.map((nombre, i) =>
+        `<option value="${i + 1}" ${i + 1 === hoy.getMonth() + 1 ? 'selected' : ''}>${nombre}</option>`
+    ).join('');
+
+    let opcionesAnio = '';
+    for (let a = hoy.getFullYear(); a >= hoy.getFullYear() - 3; a--) {
+        opcionesAnio += `<option value="${a}" ${a === hoy.getFullYear() ? 'selected' : ''}>${a}</option>`;
+    }
+    selAnio.innerHTML = opcionesAnio;
+}
+
+function toggleKardexGeneral() {
+    const bloque     = document.getElementById('bloqueKardexGeneral');
+    const bloqueItem = document.getElementById('bloqueKardexItem');
+    const btn        = document.getElementById('btnToggleGeneral');
+    const mostrar    = bloque.style.display === 'none';
+
+    bloque.style.display     = mostrar ? 'block' : 'none';
+    bloqueItem.style.display = mostrar ? 'none'  : 'block';
     btn.innerHTML = mostrar
-        ? '<i class="fa-solid fa-xmark"></i> Ocultar stock general'
-        : '<i class="fa-solid fa-boxes-stacked"></i> Ver stock general';
+        ? '<i class="fa-solid fa-xmark"></i> Ocultar kardex general'
+        : '<i class="fa-solid fa-list-check"></i> Ver kardex general';
 
-    if (mostrar && !stockGeneralCargado) {
-        buscarStockGeneral();
+    if (mostrar && !kardexGeneralCargado) {
+        buscarKardexGeneral();
     }
 }
 
-async function buscarStockGeneral() {
-    const tbody = document.getElementById('tbodyStockGeneral');
-    const texto     = document.getElementById('sg_texto').value.trim();
-    const tipo_item = document.getElementById('sg_tipo_item').value;
+async function buscarKardexGeneral() {
+    const tbody = document.getElementById('tbodyKardexGeneral');
+    document.getElementById('generalPaginacion').innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>';
 
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>';
+    const params = {
+        mes:             document.getElementById('kg_mes').value,
+        anio:            document.getElementById('kg_anio').value,
+        texto:           document.getElementById('kg_texto').value.trim(),
+        tipo_item:       document.getElementById('kg_tipo_item').value,
+        tipo_movimiento: document.getElementById('kg_tipo_movimiento').value,
+    };
 
-    const json = await llamarKardex('LISTARSTOCKGENERAL', { texto, tipo_item });
+    const json = await llamarKardex('LISTARKARDEXGENERAL', params);
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
+        ultimoKardexGeneral = [];
         return;
     }
 
-    stockGeneralCargado = true;
-    renderStockGeneral(json.stock || []);
+    kardexGeneralCargado = true;
+    ultimoKardexGeneral  = json.movimientos || [];
+    paginaActualKG = 1;
+    renderKardexGeneralPaginado();
 }
 
-function renderStockGeneral(stock) {
-    const tbody = document.getElementById('tbodyStockGeneral');
+function renderKardexGeneral(movimientos) {
+    const tbody = document.getElementById('tbodyKardexGeneral');
 
-    if (stock.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Sin ítems con movimientos registrados.</td></tr>';
+    if (movimientos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Sin movimientos en el periodo seleccionado.</td></tr>';
         return;
     }
 
-    tbody.innerHTML = stock.map(s => {
-        const saldoNum   = parseFloat(s.saldo) || 0;
+    tbody.innerHTML = movimientos.map(m => {
+        const fecha = new Date(m.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' });
+        const badge = BADGE_MOVIMIENTO[m.tipo_movimiento] || 'bg-secondary';
+        const saldoNum   = parseFloat(m.saldo) || 0;
         const claseSaldo = saldoNum <= 0 ? 'text-saldo-cero' : 'fw-bold';
-        const unidad     = s.unidad_medida_nombre ? ` ${s.unidad_medida_nombre}` : '';
-        const fecha      = s.fecha ? new Date(s.fecha).toLocaleDateString('es-PE') : '-';
-        const tipoLabel  = s.tipo_item === 'MATERIAL' ? 'Material' : 'Producto';
+        const tipoLabel  = m.tipo_item === 'MATERIAL' ? 'Material' : 'Producto';
+        const nombreEsc  = String(m.item_nombre).replace(/'/g, "\\'");
 
         return `
-    <tr onclick="abrirKardexDesdeStock('${s.tipo_item}', ${s.item_id})">
-        <td data-label="Ítem">${s.item_nombre}</td>
-        <td data-label="Tipo"><span class="badge bg-secondary">${tipoLabel}</span></td>
-        <td data-label="Saldo actual" class="${claseSaldo}">${saldoNum.toFixed(2)}${unidad}</td>
-        <td data-label="Última actividad">${fecha}</td>
+    <tr onclick="seleccionarItemEnKardex('${m.tipo_item}', ${m.item_id}, '${nombreEsc}')">
+        <td data-label="Fecha">${fecha}</td>
+        <td data-label="Movimiento"><span class="badge ${badge}">${m.tipo_movimiento}</span></td>
+        <td data-label="Referencia">${referenciaDe(m)}</td>
+        <td data-label="Descripción">${m.item_nombre} <span class="badge bg-secondary">${tipoLabel}</span></td>
+        <td data-label="Entrada" class="text-success">${formatoEntradaSalida(m, m.entrada)}</td>
+        <td data-label="Salida" class="text-danger">${formatoEntradaSalida(m, m.salida)}</td>
+        <td data-label="Saldo" class="${claseSaldo}">${formatoSaldo(m)}</td>
     </tr>`;
     }).join('');
 }
 
-function abrirKardexDesdeStock(tipo_item, item_id) {
-    const valor = `${tipo_item}:${item_id}`;
+function renderKardexGeneralPaginado() {
+    const total = ultimoKardexGeneral.length;
+    const totalPaginas = Math.max(1, Math.ceil(total / FILAS_POR_PAGINA));
+    if (paginaActualKG > totalPaginas) paginaActualKG = totalPaginas;
 
-    // Si la opción no está cargada aún en el TomSelect (búsqueda no coincide), la agregamos al vuelo
-    if (!tomSelectItem.options[valor]) {
-        const fila = Array.from(document.querySelectorAll('#tbodyStockGeneral tr'))
-            .find(tr => tr.getAttribute('onclick') === `abrirKardexDesdeStock('${tipo_item}', ${item_id})`);
-        const nombre = fila ? fila.children[0].textContent : valor;
-        tomSelectItem.addOption({
-            valor,
-            texto: `${nombre} (${tipo_item === 'MATERIAL' ? 'Material' : 'Producto'})`
-        });
+    const inicio = (paginaActualKG - 1) * FILAS_POR_PAGINA;
+    const pagina = ultimoKardexGeneral.slice(inicio, inicio + FILAS_POR_PAGINA);
+
+    renderKardexGeneral(pagina);
+    renderControlesPaginacionKG(totalPaginas);
+}
+
+function renderControlesPaginacionKG(totalPaginas) {
+    const cont = document.getElementById('generalPaginacion');
+    if (totalPaginas <= 1) { cont.innerHTML = ''; return; }
+    cont.innerHTML = `
+        <button class="pc-btn pc-btn-sm" ${paginaActualKG === 1 ? 'disabled' : ''} onclick="cambiarPaginaKG(-1)">← Anterior</button>
+        <span>Página ${paginaActualKG} de ${totalPaginas}</span>
+        <button class="pc-btn pc-btn-sm" ${paginaActualKG === totalPaginas ? 'disabled' : ''} onclick="cambiarPaginaKG(1)">Siguiente →</button>
+    `;
+}
+
+function cambiarPaginaKG(delta) {
+    paginaActualKG += delta;
+    renderKardexGeneralPaginado();
+}
+
+function exportarKardexGeneralCSV() {
+    if (!ultimoKardexGeneral.length) {
+        Swal.fire('Atención', 'No hay datos para exportar.', 'warning');
+        return;
     }
+    const mes  = document.getElementById('kg_mes').value;
+    const anio = document.getElementById('kg_anio').value;
 
-    tomSelectItem.setValue(valor);
-    document.getElementById('bloqueStockGeneral').style.display = 'none';
-    document.getElementById('btnToggleStock').innerHTML = '<i class="fa-solid fa-boxes-stacked"></i> Ver stock general';
-
-    buscarKardex();
-    document.querySelector('.pc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const filas = [['Fecha', 'Movimiento', 'Referencia', 'Descripción', 'Tipo ítem', 'Entrada', 'Salida', 'Saldo']];
+    ultimoKardexGeneral.forEach(m => {
+        filas.push([
+            new Date(m.fecha).toLocaleString('es-PE'),
+            m.tipo_movimiento,
+            referenciaDe(m),
+            m.item_nombre,
+            m.tipo_item,
+            m.entrada || 0,
+            m.salida || 0,
+            m.saldo || 0
+        ]);
+    });
+    const csv = filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `kardex_general_${anio}_${mes}_${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
 </script>
 

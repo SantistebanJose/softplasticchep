@@ -32,6 +32,9 @@ function controladorKardex($accion)
         case 'OBTENERKARDEX':
             obtenerKardex();
             break;
+        case 'LISTARKARDEXGENERAL':
+            listarKardexGeneral();
+            break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
@@ -247,6 +250,112 @@ function obtenerKardex()
             'total_entradas' => $totalEntradas,
             'total_salidas'  => $totalSalidas,
         ],
+    ]);
+}
+
+// =============================================================================
+// KARDEX GENERAL (todos los movimientos de todos los ítems, filtrado por
+// mes/año — por defecto el mes y año en curso)
+// =============================================================================
+
+function listarKardexGeneral()
+{
+    $conectar = conectar_oll_BD();
+
+    $mes  = intval($_POST['mes'] ?? date('n'));   // mes actual por defecto
+    $anio = intval($_POST['anio'] ?? date('Y'));  // año actual por defecto
+    $tipoItem       = trim($_POST['tipo_item'] ?? '');       // opcional: MATERIAL, PRODUCTO
+    $tipoMovimiento = trim($_POST['tipo_movimiento'] ?? ''); // opcional: COMPRA, PRODUCCION, EMPAQUETADO, VENTA
+    $texto          = trim($_POST['texto'] ?? '');           // opcional: nombre de material/producto
+
+    if ($mes < 1 || $mes > 12) {
+        responder(false, 'Mes inválido.');
+    }
+
+    $where  = [
+        "EXTRACT(MONTH FROM fecha) = :mes",
+        "EXTRACT(YEAR FROM fecha) = :anio",
+    ];
+    $params = ['mes' => $mes, 'anio' => $anio];
+
+    if (in_array($tipoItem, ['MATERIAL', 'PRODUCTO'], true)) {
+        $where[] = "tipo_item = :tipo_item";
+        $params['tipo_item'] = $tipoItem;
+    }
+    if (in_array($tipoMovimiento, ['COMPRA', 'PRODUCCION', 'EMPAQUETADO', 'VENTA'], true)) {
+        $where[] = "tipo_movimiento = :tipo_movimiento";
+        $params['tipo_movimiento'] = $tipoMovimiento;
+    }
+    if ($texto !== '') {
+        $where[] = "LOWER(item_nombre) LIKE LOWER(:texto)";
+        $params['texto'] = "%$texto%";
+    }
+
+    $whereSql = 'WHERE ' . implode(' AND ', $where);
+
+    $sql = "
+        SELECT *
+        FROM movimientos
+        $whereSql
+        ORDER BY fecha, movimiento_id
+    ";
+
+    $movimientos = executeQuery($conectar, $sql, $params);
+
+    // ── Rellenar unidad_medida_id faltante, arrastrando la última unidad ────
+    // conocida POR ÍTEM (aquí hay muchos ítems mezclados, a diferencia de
+    // obtenerKardex donde todo el resultado es de un solo ítem).
+    $ultimaUnidadPorItem = [];
+    $unidadIds           = [];
+    foreach ($movimientos as &$m) {
+        $clave = $m['tipo_item'] . ':' . $m['item_id'];
+        if (!empty($m['unidad_medida_id'])) {
+            $ultimaUnidadPorItem[$clave] = $m['unidad_medida_id'];
+        } else {
+            $m['unidad_medida_id'] = $ultimaUnidadPorItem[$clave] ?? null;
+        }
+        if (!empty($m['unidad_medida_id'])) {
+            $unidadIds[$m['unidad_medida_id']] = true;
+        }
+    }
+    unset($m);
+
+    $nombresUnidad = [];
+    if (!empty($unidadIds)) {
+        $ids          = array_keys($unidadIds);
+        $placeholders = [];
+        $paramsUnidad = [];
+        foreach ($ids as $i => $uid) {
+            $key = "u$i";
+            $placeholders[] = ":$key";
+            $paramsUnidad[$key] = $uid;
+        }
+        $resultUnidad = executeQuery(
+            $conectar,
+            "SELECT id, nombre FROM unidad_medida WHERE id IN (" . implode(',', $placeholders) . ")",
+            $paramsUnidad
+        );
+        foreach ($resultUnidad as $u) {
+            $nombresUnidad[$u['id']] = $u['nombre'];
+        }
+    }
+
+    foreach ($movimientos as &$m) {
+        $uid = $m['unidad_medida_id'];
+        $m['unidad_medida_nombre'] = ($uid !== null && isset($nombresUnidad[$uid]))
+            ? $nombresUnidad[$uid]
+            : null;
+    }
+    unset($m);
+
+    // Más reciente primero, para revisar el mes de arriba hacia abajo
+    usort($movimientos, function ($a, $b) {
+        return strcmp($b['fecha'], $a['fecha']) ?: ($b['movimiento_id'] <=> $a['movimiento_id']);
+    });
+
+    responder(true, 'OK', [
+        'movimientos' => $movimientos,
+        'periodo'     => ['mes' => $mes, 'anio' => $anio],
     ]);
 }
 

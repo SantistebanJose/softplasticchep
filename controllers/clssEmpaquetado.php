@@ -160,6 +160,7 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             WHERE e.producto_id = :producto_id
               AND e.deleted_at IS NULL AND e.fin IS NOT NULL
               AND e.ensamblaje_id_referido IS NULL
+                AND e.js_producto_emsamblado IS NULL   
 
             UNION ALL
 
@@ -247,6 +248,7 @@ function listarEnsamblajesParaEmpaquetado()
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
+        "e.js_producto_emsamblado IS NULL", 
         "(e.cantidad_peso_kg - COALESCE((
             SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
             WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
