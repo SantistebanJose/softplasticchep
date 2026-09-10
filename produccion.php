@@ -380,20 +380,20 @@ include("header.php");
                 <div class="form-text">El primero que agregues queda como responsable principal.</div>
             </div>
             <div class="col-md-3 mb-2">
-                <label class="form-label">Máquina</label>
-                <select class="form-select" id="prod_maquina_id">
+                <label class="form-label">Máquina *</label>
+                <select class="form-select" id="prod_maquina_id" required>
                     <option value="">Selecciona...</option>
                 </select>
             </div>
             <div class="col-md-3 mb-2">
-                <label class="form-label">Categoría de material</label>
-                <select class="form-select" id="prod_categoria_material_id">
+                <label class="form-label">Categoría de material *</label>
+                <select class="form-select" id="prod_categoria_material_id" required>
                     <option value="">Selecciona...</option>
                 </select>
             </div>
             <div class="col-md-3 mb-2">
-                <label class="form-label">Sucursal</label>
-                <select class="form-select" id="prod_sucursal_id">
+                <label class="form-label">Sucursal *</label>
+                <select class="form-select" id="prod_sucursal_id" required>
                     <option value="">Selecciona...</option>
                 </select>
             </div>
@@ -437,9 +437,9 @@ include("header.php");
                material como límite. Ya no se elige lote/proveedor: eso lo
                reparte el sistema automáticamente al guardar. -->
           <div class="mb-1 d-flex justify-content-between align-items-center">
-            <label class="form-label mb-0">Materiales consumidos (opcional)</label>
-            <span class="form-text mb-0">Si este avance no consume material nuevo (ej. reproceso), deja el ticket vacío.</span>
-          </div>
+                <label class="form-label mb-0">Materiales / tintes consumidos *</label>
+                <span class="form-text mb-0">Selecciona al menos un material o tinte de la izquierda.</span>
+            </div>
 
           <div class="pc-mat-layout">
             <div class="pc-mat-panel">
@@ -556,11 +556,12 @@ let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let tsOperario = null;
 let materialesProdCache = null; // cache de materiales para las cards
+let materialesProdCachePorProducto = {}; // productoId -> materiales[]
 let productosMoldeProdCache = null; // cache de productos (para el 1er select en cascada)
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
 let contadorLineaTicket = 0;
 let tipoMaterialActivo = 'material'; // 'material' | 'tinte' — pestaña activa del menú
-
+let pollMaterialesTimer = null;
 let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, color, icono,
                         //   disponible, cantidad, comentario}]
 
@@ -581,11 +582,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // ese producto (segundo paso de la cascada).
     document.getElementById('prod_producto_id').addEventListener('change', (e) => {
         cargarMoldesDeProducto(e.target.value, null);
+        renderGridMateriales();
     });
 
     document.getElementById('prodVerInactivos').addEventListener('change', () => cargarProducciones());
 
     iniciarAutoRefresh();
+    document.getElementById('modalProduccion').addEventListener('shown.bs.modal', () => {
+        iniciarAutoRefreshMaterialesModal();
+    });
+    document.getElementById('modalProduccion').addEventListener('hidden.bs.modal', () => {
+        detenerAutoRefreshMaterialesModal();
+    });
 });
 
 
@@ -652,7 +660,42 @@ function iniciarAutoRefresh() {
         cargarProducciones(true);
     });
 }
+function iniciarAutoRefreshMaterialesModal() {
+    if (pollMaterialesTimer) clearInterval(pollMaterialesTimer);
+    pollMaterialesTimer = setInterval(() => {
+        if (document.hidden) return;
+        refrescarMaterialesEnVivo();
+    }, POLL_INTERVAL_MS);
+}
 
+function detenerAutoRefreshMaterialesModal() {
+    if (pollMaterialesTimer) clearInterval(pollMaterialesTimer);
+    pollMaterialesTimer = null;
+}
+
+// Vuelve a traer el stock real de los materiales del producto actual y
+// refresca tanto el menú de cards como el ticket ya armado, por si otro
+// operario consumió stock mientras este formulario seguía abierto.
+async function refrescarMaterialesEnVivo() {
+    const productoId = document.getElementById('prod_producto_id').value;
+    if (!productoId) return;
+
+    delete materialesProdCachePorProducto[productoId]; // invalida el cache de este producto
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+
+    ticketLineas.forEach(l => {
+        const actualizado = materiales.find(m => m.id == l.material_id);
+        if (!actualizado) return;
+        // cantidadOriginalDb: lo que esta línea ya tenía consumido en BD
+        // (solo aplica en modo edición); se suma de vuelta para no penalizar
+        // al propio avance que se está editando.
+        l.disponible = parseFloat(actualizado.stock_actual) + (l.cantidadOriginalDb || 0);
+        if (l.cantidad > l.disponible) l.cantidad = l.disponible;
+    });
+
+    renderGridMateriales();
+    renderTicket();
+}
 function actualizarTextoUltimaActualizacion() {
     const el = document.getElementById('lastUpdateTxt');
     if (!el || !ultimaActualizacion) return;
@@ -1018,11 +1061,13 @@ async function cargarSelectsModal(seleccion = {}) {
         document.getElementById('prod_molde_id').disabled = true;
     }
 }
-async function obtenerOpcionesMaterialesProd() {
-    if (materialesProdCache) return materialesProdCache;
-    const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {});
-    materialesProdCache = json.success ? json.materiales : [];
-    return materialesProdCache;
+async function obtenerOpcionesMaterialesProd(productoId) {
+    const key = productoId || 'sin_producto';
+    if (materialesProdCachePorProducto[key]) return materialesProdCachePorProducto[key];
+    const params = productoId ? { producto_id: productoId } : {};
+    const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', params);
+    materialesProdCachePorProducto[key] = json.success ? json.materiales : [];
+    return materialesProdCachePorProducto[key];
 }
 
 // ── Agrupación por producto ("escalera") ──────────────────────────────────
@@ -1248,19 +1293,26 @@ async function cargarProducciones(silencioso = false) {
 
 async function renderGridMateriales() {
     const grid = document.getElementById('prod_materiales_grid');
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const productoId = document.getElementById('prod_producto_id').value;
+
+    if (!productoId) {
+        grid.innerHTML = '<div class="pc-mat-empty">Selecciona primero un producto para ver sus materiales.</div>';
+        return;
+    }
+
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
     let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
     if (filtro) visibles = visibles.filter(m => m.nombre.toLowerCase().includes(filtro));
 
     if (visibles.length === 0) {
-        grid.innerHTML = `<div class="pc-mat-empty">No se encontró ningún ${tipoMaterialActivo === 'tinte' ? 'tinte' : 'material'} con ese nombre.</div>`;
+        grid.innerHTML = `<div class="pc-mat-empty">Este producto no tiene ${tipoMaterialActivo === 'tinte' ? 'tintes' : 'materiales'} configurados.</div>`;
         return;
     }
 
     grid.innerHTML = visibles.map(m => {
-        const est = estiloMaterial(m); // <-- antes: estiloMaterial(m.nombre)
+        const est = estiloMaterial(m);
         const enTicket = ticketLineas.filter(l => l.material_id == m.id)
             .reduce((s, l) => s + Number(l.cantidad || 0), 0);
         return `
@@ -1278,7 +1330,8 @@ async function renderGridMateriales() {
 // estaba en el ticket, le suma 1). No se pregunta por lote/proveedor: el
 // backend decide automáticamente de dónde sale el material al guardar.
 async function seleccionarMaterial(materialId) {
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const productoId = document.getElementById('prod_producto_id').value;
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
     const material = materiales.find(m => m.id == materialId);
     if (!material) return;
 
@@ -1298,6 +1351,7 @@ async function seleccionarMaterial(materialId) {
         bg: est.bg,
         icono: est.icono,
         disponible: parseFloat(material.stock_actual),
+        cantidadOriginalDb: 0, // NUEVO: no viene de un avance ya guardado
         cantidad: 1,
         comentario: '',
     });
@@ -1488,10 +1542,10 @@ async function abrirModalEditarProduccion(id) {
         agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
     });
 
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const materiales = await obtenerOpcionesMaterialesProd(productoIdDesdeUnico);
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const materialActual = materiales.find(m => m.id == d.material_id);
-        const est = estiloMaterial(materialActual || { nombre: d.material_nombre }); // <-- cambio
+        const est = estiloMaterial(materialActual || { nombre: d.material_nombre });
         const disponibleParaEditar = (materialActual ? parseFloat(materialActual.stock_actual) : 0) + d.cantidad;
         return {
             tempId: ++contadorLineaTicket,
@@ -1502,6 +1556,7 @@ async function abrirModalEditarProduccion(id) {
             bg: est.bg,
             icono: est.icono,
             disponible: disponibleParaEditar,
+            cantidadOriginalDb: d.cantidad, // NUEVO
             cantidad: d.cantidad,
             comentario: d.comentario,
         };
@@ -1515,6 +1570,22 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (!document.getElementById('prod_maquina_id').value) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la máquina.', 'warning');
+        return;
+    }
+    if (!document.getElementById('prod_categoria_material_id').value) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la categoría de material.', 'warning');
+        return;
+    }
+    if (!document.getElementById('prod_sucursal_id').value) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la sucursal.', 'warning');
+        return;
+    }
+    if (ticketLineas.length === 0) {
+        Swal.fire('Falta un dato', 'Debes agregar al menos un material o tinte consumido.', 'warning');
+        return;
+    }
     const moldeSelect = document.getElementById('prod_molde_id');
     const opcionMolde  = moldeSelect.selectedOptions[0];
     const moldeIdReal  = opcionMolde?.dataset.moldeId || '';
@@ -1551,6 +1622,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
 
     if (json.success) {
         modalProduccion.hide();
+        materialesProdCachePorProducto = {}; // 👉 NUEVO, aquí
         Swal.fire('Listo', json.message, 'success');
         cargarProducciones();
     } else {

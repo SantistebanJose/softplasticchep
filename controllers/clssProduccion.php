@@ -265,7 +265,8 @@ function buscarMoldesPorProducto(int $productoId)
 function buscarMaterialesProduccion()
 {
     $conectar = conectar_oll_BD();
-    $texto = trim($_POST['texto'] ?? '');
+    $texto      = trim($_POST['texto'] ?? '');
+    $productoId = intval($_POST['producto_id'] ?? 0);
 
     $where  = ["m.deleted_at IS NULL"];
     $params = [];
@@ -273,16 +274,19 @@ function buscarMaterialesProduccion()
         $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
     }
+    // NUEVO: si viene producto_id, solo trae materiales configurados
+    // (via material.js_producto) para ese producto específico.
+    if ($productoId > 0) {
+        $where[] = "EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) AS jp
+            WHERE (jp->>'producto_id')::int = :producto_id
+        )";
+        $params['producto_id'] = $productoId;
+    }
 
-    // Fallback de color para tintes: si material.rgb viene vacío (caso
-    // frecuente: el rgb real vive en la tabla `color`, no en `material`),
-    // se busca por coincidencia de nombre. Los tintes suelen llamarse
-    // "TINTE <COLOR>" (ej. "TINTE AZUL"), así que se compara el nombre del
-    // material (sin el prefijo "TINTE ") contra color.nombre. Si tu
-    // convención de nombres es distinta, ajusta el ON de este LEFT JOIN.
     $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color,
                COALESCE(NULLIF(TRIM(m.rgb), ''), co.rgb) AS rgb,
-               co.id AS color_id,                                   -- NUEVO
+               co.id AS color_id,
                u.nombre_corto AS unidad_corto
         FROM material m
         LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
@@ -1032,24 +1036,24 @@ function guardarProduccion()
     $esEmergencia = false;
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
-    if ($categoria_material_id !== null) {
-        $cat = executeQuery($conectar, "SELECT id FROM categoria_material WHERE id = :id AND deleted_at IS NULL", ['id' => $categoria_material_id]);
-        if (empty($cat)) responder(false, 'La categoría de material seleccionada no existe o está inactiva.');
-    }
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
     if ($molde_id <= 0) responder(false, 'Debes seleccionar el molde usado en este avance.');
     if (empty($unico_molde) || empty($molde_producto)) {
         responder(false, 'Debes seleccionar un producto y su molde asociado.');
     }
-    if ($sucursal_id !== null) {
-        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
-        if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
-    }
-    if (empty($fecha)) $fecha = date('Y-m-d H:i:s');
 
-    $molde = executeQuery($conectar, "SELECT id FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
-    if (empty($molde)) responder(false, 'El molde seleccionado no existe o está inactivo.');
+    if (!$maquina_id) responder(false, 'Debes seleccionar la máquina utilizada.');
+    $maq = executeQuery($conectar, "SELECT id FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquina_id]);
+    if (empty($maq)) responder(false, 'La máquina seleccionada no existe o está inactiva.');
 
+    if (!$categoria_material_id) responder(false, 'Debes seleccionar la categoría de material.');
+    $cat = executeQuery($conectar, "SELECT id FROM categoria_material WHERE id = :id AND deleted_at IS NULL", ['id' => $categoria_material_id]);
+    if (empty($cat)) responder(false, 'La categoría de material seleccionada no existe o está inactiva.');
+
+    if (!$sucursal_id) responder(false, 'Debes seleccionar la sucursal.');
+    $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
+    if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
+    
     // Validar que los operarios participantes existan y estén activos.  <-- NUEVO
     if (!empty($operariosParticipantesIds)) {
         $placeholders = [];
@@ -1087,6 +1091,12 @@ function guardarProduccion()
             'comentario'  => $comentario ?: null,
         ];
     }
+
+    // NUEVO: ya no se permite un avance sin materiales/tintes consumidos.
+    if (empty($detalle)) {
+        responder(false, 'Debes agregar al menos un material o tinte consumido en este avance.');
+    }
+
     $color_id = determinarColorDesdeDetalle($conectar, $detalle);
 
     $conectar->beginTransaction();

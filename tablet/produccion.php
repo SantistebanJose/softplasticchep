@@ -728,7 +728,7 @@ const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduc
 
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
-let materialesProdCache = null;
+let materialesProdCachePorProducto = {}; // productoId -> materiales[]
 let productosMoldeProdCache = null;
 let categoriasMaterialProdCache = null;
 let contadorLineaTicket = 0;
@@ -756,16 +756,19 @@ let selEstado = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    cargarProducciones().catch(err => {
-        console.error('Error cargando datos iniciales:', err);
-        document.getElementById('gridProducciones').innerHTML =
-            `<div class="pc-prod-empty" style="color:red;">Error de conexión con el servidor.</div>`;
-    });
-
+    cargarProducciones().catch(err => { ... });
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
     document.getElementById('cantidad_producida_ensamblaje').addEventListener('input', actualizarResumenEnsamblaje);
-    document.getElementById('prod_operarios_buscar').addEventListener('input', buscarOperariosExtra);   // <-- NUEVO
+    document.getElementById('prod_operarios_buscar').addEventListener('input', buscarOperariosExtra);
     iniciarAutoRefresh();
+
+    // 👉 AQUÍ:
+    document.getElementById('modalProduccion').addEventListener('shown.bs.modal', () => {
+        iniciarAutoRefreshMaterialesModal();
+    });
+    document.getElementById('modalProduccion').addEventListener('hidden.bs.modal', () => {
+        detenerAutoRefreshMaterialesModal();
+    });
 });
 
 function esTinte(m) { return m.color === true || m.color === 't' || m.color === 'true'; }
@@ -1223,6 +1226,7 @@ async function seleccionarProducto(id) {
     selEstado.molde_id = ''; selEstado.unico_molde = ''; selEstado.molde_etiqueta = ''; selEstado.molde_nombre = '';
     pintarBloqueProducto(productosMoldeProdCache);
     await cargarMoldesDeProducto(id, null);
+    await renderGridMateriales();
 }
 
 // ---- Molde (depende de producto) ----
@@ -1418,11 +1422,47 @@ async function cargarSelectoresModal(seleccion = {}) {
         document.getElementById('chips_molde').innerHTML = '';
     }
 }
-async function obtenerOpcionesMaterialesProd() {
-    if (materialesProdCache) return materialesProdCache;
-    const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {});
-    materialesProdCache = json.success ? json.materiales : [];
-    return materialesProdCache;
+async function obtenerOpcionesMaterialesProd(productoId) {
+    const key = productoId || 'sin_producto';
+    if (materialesProdCachePorProducto[key]) return materialesProdCachePorProducto[key];
+    const params = productoId ? { producto_id: productoId } : {};
+    const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', params);
+    materialesProdCachePorProducto[key] = json.success ? json.materiales : [];
+    return materialesProdCachePorProducto[key];
+}
+
+// 👉 AQUÍ, nuevas funciones:
+let pollMaterialesTimer = null;
+
+function iniciarAutoRefreshMaterialesModal() {
+    if (pollMaterialesTimer) clearInterval(pollMaterialesTimer);
+    pollMaterialesTimer = setInterval(() => {
+        if (document.hidden) return;
+        refrescarMaterialesEnVivo();
+    }, POLL_INTERVAL_MS);
+}
+
+function detenerAutoRefreshMaterialesModal() {
+    if (pollMaterialesTimer) clearInterval(pollMaterialesTimer);
+    pollMaterialesTimer = null;
+}
+
+async function refrescarMaterialesEnVivo() {
+    const productoId = selEstado.producto_id;
+    if (!productoId) return;
+
+    delete materialesProdCachePorProducto[productoId]; // invalida solo este producto
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+
+    ticketLineas.forEach(l => {
+        const actualizado = materiales.find(m => m.id == l.material_id);
+        if (!actualizado) return;
+        l.disponible = parseFloat(actualizado.stock_actual) + (l.cantidadOriginalDb || 0);
+        if (l.cantidad > l.disponible) l.cantidad = l.disponible;
+    });
+
+    renderGridMateriales();
+    renderTicket();
 }
 
 function agruparProduccionesPorProducto(producciones) {
@@ -1580,14 +1620,21 @@ async function cargarProducciones(silencioso = false) {
 
 async function renderGridMateriales() {
     const grid = document.getElementById('prod_materiales_grid');
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const productoId = selEstado.producto_id;
+
+    if (!productoId) {
+        grid.innerHTML = '<div class="pc-mat-empty">Selecciona primero un producto para ver sus materiales.</div>';
+        return;
+    }
+
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
     let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
     if (filtro) visibles = visibles.filter(m => m.nombre.toLowerCase().includes(filtro));
 
     if (visibles.length === 0) {
-        grid.innerHTML = `<div class="pc-mat-empty">No se encontró ningún ${tipoMaterialActivo === 'tinte' ? 'tinte' : 'material'} con ese nombre.</div>`;
+        grid.innerHTML = `<div class="pc-mat-empty">Este producto no tiene ${tipoMaterialActivo === 'tinte' ? 'tintes' : 'materiales'} configurados.</div>`;
         return;
     }
 
@@ -1605,7 +1652,7 @@ async function renderGridMateriales() {
 }
 
 async function seleccionarMaterial(materialId) {
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const materiales = await obtenerOpcionesMaterialesProd(selEstado.producto_id);
     const material = materiales.find(m => m.id == materialId);
     if (!material) return;
 
@@ -1616,7 +1663,7 @@ async function seleccionarMaterial(materialId) {
     ticketLineas.push({
         tempId: ++contadorLineaTicket, material_id: material.id, material_nombre: material.nombre,
         unidad_corto: material.unidad_corto, color: est.color, bg: est.bg, icono: est.icono,
-        disponible: parseFloat(material.stock_actual), cantidad: 1, comentario: '',
+        disponible: parseFloat(material.stock_actual), cantidadOriginalDb: 0, cantidad: 1, comentario: '',
     });
     renderTicket();
     renderGridMateriales();
@@ -1776,7 +1823,7 @@ async function abrirModalEditarProduccion(id) {
         agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
     });
 
-    const materiales = await obtenerOpcionesMaterialesProd();
+    const materiales = await obtenerOpcionesMaterialesProd(productoIdDesdeUnico);
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const materialActual = materiales.find(m => m.id == d.material_id);
         const est = estiloMaterial(materialActual || { nombre: d.material_nombre });
@@ -1794,6 +1841,22 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
 
     if (!selEstado.producto_id || !selEstado.unico_molde) {
         Swal.fire('Faltan datos', 'Selecciona producto y molde antes de guardar.', 'warning');
+        return;
+    }
+    if (!selEstado.maquina_id) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la máquina.', 'warning');
+        return;
+    }
+    if (!selEstado.categoria_material_id) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la categoría de material.', 'warning');
+        return;
+    }
+    if (!selEstado.sucursal_id) {
+        Swal.fire('Falta un dato', 'Debes seleccionar la sucursal.', 'warning');
+        return;
+    }
+    if (ticketLineas.length === 0) {
+        Swal.fire('Falta un dato', 'Debes agregar al menos un material o tinte consumido.', 'warning');
         return;
     }
 
@@ -1817,6 +1880,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
 
     if (json.success) {
         modalProduccion.hide();
+        materialesProdCache = null; 
         Swal.fire('Listo', json.message, 'success');
         cargarProducciones();
     } else {
