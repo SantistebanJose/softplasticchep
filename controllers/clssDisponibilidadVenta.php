@@ -132,17 +132,15 @@ function listarDisponibilidadVenta()
                 emp.pasado_venta,
                 emp.deleted_at,
                 CASE
-                    WHEN cs.colores_distintos IS NULL THEN NULL   -- legado
+                    WHEN cs.colores_distintos IS NULL THEN NULL
                     WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
-                    ELSE -1                                        -- surtido
+                    ELSE -1
                 END AS color_id_efectivo,
-                -- CAMBIO: el disponible real para venta es cantidad_disponible_tmp,
-                -- no cantidad_tota (que ahora es el histórico inmutable de lo
-                -- armado). COALESCE por si algún registro aún no tiene backfill.
                 COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) AS cantidad_disp,
                 COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) * COALESCE(um.equivalencia, 1) AS cantidad_base,
                 COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) AS cantidad_bolsas,
-                um.nombre_corto AS unidad_bolsa_corto
+                um.nombre_corto AS unidad_bolsa_corto,
+                COALESCE(um.equivalencia, 1) AS unidad_bolsa_equivalencia   -- NUEVO
             FROM empaquetado emp
             LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
@@ -169,14 +167,14 @@ function listarDisponibilidadVenta()
             dc.producto_id,
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
-            p.img_ruta AS producto_imagen,          -- NUEVO
+            p.img_ruta AS producto_imagen,
             dc.color_id_efectivo AS color_id,
             CASE
                 WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
                 WHEN dc.color_id_efectivo = -1 THEN 'Surtido'
                 ELSE co.nombre
             END AS color,
-            co.rgb AS color_hex,                    -- NUEVO
+            co.rgb AS color_hex,                    
             COUNT(*) AS registros_count,
             CASE
                 WHEN pv.capacidad_paquete_venta_base > 0
@@ -184,11 +182,14 @@ function listarDisponibilidadVenta()
                 ELSE NULL
             END AS paquetes_disponibles,
             pv.unidad_venta_corto,
+            pv.capacidad_paquete_venta_base,                          -- ★ FIX: faltaba esta línea
             (pv.capacidad_paquete_venta_base IS NULL) AS paquetes_venta_sin_configurar,
             pv.config_venta_inconsistente,
-            SUM(dc.cantidad_bolsas) AS bolsas_disponibles,
-            MIN(dc.unidad_bolsa_corto) AS unidad_bolsa_corto,
-            (COUNT(DISTINCT dc.unidad_bolsa_corto) > 1) AS unidades_bolsa_distintas
+        SUM(dc.cantidad_bolsas) AS bolsas_disponibles,
+        MIN(dc.unidad_bolsa_corto) AS unidad_bolsa_corto,
+        (COUNT(DISTINCT dc.unidad_bolsa_corto) > 1) AS unidades_bolsa_distintas,
+        SUM(dc.cantidad_base) AS cantidad_base_total,                     
+        MIN(dc.unidad_bolsa_equivalencia) AS unidad_bolsa_equivalencia    
         FROM detalle dc
         JOIN producto p ON p.id = dc.producto_id
         LEFT JOIN producto_venta pv ON pv.producto_id = dc.producto_id
@@ -203,10 +204,89 @@ function listarDisponibilidadVenta()
     ";
 
     $result = executeQuery($conectar, $sql, $params);
+    $result = decorarConDesglosePaquetesDV($result);   // NUEVO
     responderDV(true, 'OK', ['disponibilidad' => $result]);
 }
  
+// Igual espíritu que descomponerCantidadUnidad()/decorarConDesgloseEmp() de
+// clssEmpaquetado.php, pero operando sobre el TOTAL YA AGREGADO de un grupo
+// producto+color (varios registros de empaquetado), no sobre un registro
+// individual. Evita mostrar cifras como "9.83 GRU".
+function decorarConDesglosePaquetesDV(array $filas): array
+{
+    foreach ($filas as &$f) {
+        $sinConfig = ($f['paquetes_venta_sin_configurar'] === true || $f['paquetes_venta_sin_configurar'] === 't');
+        $mixBolsas = ($f['unidades_bolsa_distintas'] === true || $f['unidades_bolsa_distintas'] === 't');
 
+        $partes = $sinConfig ? [] : calcularDesglosePaquetesDV(
+            (float)($f['cantidad_base_total'] ?? 0),
+            isset($f['capacidad_paquete_venta_base']) ? (float)$f['capacidad_paquete_venta_base'] : null,
+            $f['unidad_venta_corto'] ?? null,
+            isset($f['unidad_bolsa_equivalencia']) ? (float)$f['unidad_bolsa_equivalencia'] : null,
+            $f['unidad_bolsa_corto'] ?? null,
+            $mixBolsas
+        );
+
+        $f['desglose_paquetes']       = $partes;
+        $f['desglose_paquetes_texto'] = formatearDesglosePaquetesDV($partes);
+    }
+    unset($f);
+    return $filas;
+}
+
+function calcularDesglosePaquetesDV(
+    float $cantidadBaseTotal,
+    ?float $capacidadPaqueteVentaBase,
+    ?string $unidadVentaCorto,
+    ?float $unidadBolsaEquivalencia,
+    ?string $unidadBolsaCorto,
+    bool $unidadesBolsaDistintas
+): array {
+    $partes   = [];
+    $restante = $cantidadBaseTotal;
+
+    // 1) Paquetes de venta completos (GRUESA, DOCENA, etc.)
+    if ($capacidadPaqueteVentaBase && $capacidadPaqueteVentaBase > 0) {
+        $paquetes = floor(($restante + 0.0001) / $capacidadPaqueteVentaBase);
+        if ($paquetes > 0) {
+            $partes[] = ['cantidad' => (int)$paquetes, 'unidad' => $unidadVentaCorto];
+            $restante = round($restante - ($paquetes * $capacidadPaqueteVentaBase), 4);
+        }
+    }
+
+    // 2) El resto (menos de un paquete completo) se expresa en la unidad de
+    // empaquetado (bolsa/docena/bulto) — solo si el grupo no mezcla
+    // distintas unidades de empaquetado.
+    if ($restante > 0.0001 && $unidadBolsaEquivalencia && $unidadBolsaEquivalencia > 0 && !$unidadesBolsaDistintas) {
+        $bolsas = round(($restante + 0.0001) / $unidadBolsaEquivalencia, 2);
+        if ($bolsas > 0) {
+            $partes[] = ['cantidad' => $bolsas, 'unidad' => $unidadBolsaCorto];
+            $restante = round($restante - ($bolsas * $unidadBolsaEquivalencia), 4);
+        }
+    }
+
+    // 3) Si no se pudo expresar en ninguna unidad (sin config o sin bolsa
+    // representativa), no se pierde el dato: se deja en base.
+    if (empty($partes) && $cantidadBaseTotal > 0.0001) {
+        $partes[] = ['cantidad' => round($cantidadBaseTotal, 2), 'unidad' => null];
+    }
+
+    return $partes;
+}
+
+function formatearDesglosePaquetesDV(array $partes): string
+{
+    if (empty($partes)) return '';
+    $textos = array_map(function ($p) {
+        $cant = ($p['cantidad'] == floor($p['cantidad']))
+            ? (string)(int)$p['cantidad']
+            : rtrim(rtrim(number_format($p['cantidad'], 2, '.', ''), '0'), '.');
+        return trim($cant . ' ' . ($p['unidad'] ?? ''));
+    }, $partes);
+    if (count($textos) === 1) return $textos[0];
+    $ultimo = array_pop($textos);
+    return implode(', ', $textos) . ' y ' . $ultimo;
+}
 function responderDV(bool $ok, string $msg, array $extra = []): void
 {
     if (ob_get_level() > 0) {

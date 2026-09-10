@@ -245,10 +245,41 @@ function seleccionarTabDV(productoId) {
     renderTabsDV();
     renderPanelProductoDV();
 }
+function calcularDesgloseTotalDV(filas) {
+    const validas = filas.filter(f => !f.paquetes_venta_sin_configurar);
+    if (validas.length === 0) return null;
 
+    const capacidades  = [...new Set(validas.map(f => Number(f.capacidad_paquete_venta_base)))];
+    const bolsaEquivs   = [...new Set(validas.map(f => Number(f.unidad_bolsa_equivalencia || 0)))];
+    const unidadesBolsa = [...new Set(validas.map(f => f.unidad_bolsa_corto).filter(Boolean))];
+    const unidadVenta   = validas[0].unidad_venta_corto ?? '';
+
+    if (capacidades.length !== 1 || !capacidades[0]) return null;
+
+    const totalBase = validas.reduce((acc, f) => acc + Number(f.cantidad_base_total || 0), 0);
+    const capacidad = capacidades[0];
+    const paquetes  = Math.floor((totalBase + 0.0001) / capacidad);
+    const restante  = totalBase - paquetes * capacidad;
+
+    const partes = [];
+    if (paquetes > 0) partes.push(`${paquetes} ${unidadVenta}`.trim());
+
+    if (restante > 0.0001 && bolsaEquivs.length === 1 && bolsaEquivs[0] > 0 && unidadesBolsa.length === 1) {
+        const bolsas = Math.round((restante / bolsaEquivs[0]) * 100) / 100;
+        if (bolsas > 0) partes.push(`${bolsas} ${unidadesBolsa[0]}`.trim());
+    }
+
+    if (partes.length === 0) return null;
+    if (partes.length === 1) return partes[0];
+    const ultimo = partes.pop();
+    return partes.join(', ') + ' y ' + ultimo;
+}
 function celdaPaquetesTextoDV(f) {
     if (f.paquetes_venta_sin_configurar) {
         return `<span class="sin-config" title="Este producto no tiene configurada su unidad de venta (cant_equivale / unidad_equivale_id). Configúrala en Productos.">Sin config. de venta</span>`;
+    }
+    if (f.desglose_paquetes_texto) {
+        return `<span class="paquetes">${f.desglose_paquetes_texto}</span>`;
     }
     return `<span class="paquetes">${formatearNumeroDV(f.paquetes_disponibles)} <small>${f.unidad_venta_corto ?? ''}</small></span>`;
 }
@@ -313,10 +344,12 @@ function renderPanelProductoDV() {
         ? `<img src="${imagen}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=&quot;sin-foto&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>'">`
         : `<div class="sin-foto"><i class="fa-regular fa-image"></i></div>`;
 
+    const desgloseTotal = calcularDesgloseTotalDV(grupo.filas);
     const statPaquetesHtml = tieneSinConfig
         ? `<div class="stat sin-config"><div class="valor">Sin config.</div><div class="label">Paquetes disponibles</div></div>`
-        : `<div class="stat"><div class="valor">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</div><div class="label">Paquetes disponibles</div></div>`;
-
+        : desgloseTotal
+            ? `<div class="stat"><div class="valor">${desgloseTotal}</div><div class="label">Paquetes disponibles</div></div>`
+            : `<div class="stat"><div class="valor">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</div><div class="label">Paquetes disponibles</div></div>`;
     header.style.display = 'flex';
     header.innerHTML = `
         <div class="foto">${fotoHtml}</div>
