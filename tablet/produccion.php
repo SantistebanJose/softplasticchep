@@ -756,13 +756,16 @@ let selEstado = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    cargarProducciones().catch(err => { ... });
+    cargarProducciones().catch(err => {
+        console.error('Error cargando datos iniciales:', err);
+        document.getElementById('gridProducciones').innerHTML =
+            `<div class="pc-prod-empty" style="color:red;">Error de conexión con el servidor. Revisa la consola (F12).</div>`;
+    });
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
     document.getElementById('cantidad_producida_ensamblaje').addEventListener('input', actualizarResumenEnsamblaje);
     document.getElementById('prod_operarios_buscar').addEventListener('input', buscarOperariosExtra);
     iniciarAutoRefresh();
 
-    // 👉 AQUÍ:
     document.getElementById('modalProduccion').addEventListener('shown.bs.modal', () => {
         iniciarAutoRefreshMaterialesModal();
     });
