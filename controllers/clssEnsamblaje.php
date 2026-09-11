@@ -900,7 +900,7 @@ function guardarEnsamblaje()
     $conectar = conectar_oll_BD();
 
     $id                  = intval($_POST['id'] ?? 0);
-    $sucursal_id = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
+    $sucursal_id = intval($_POST['sucursal_id'] ?? 0);
     $producto_id         = intval($_POST['producto_id'] ?? 0);
     $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
     if (!is_array($operariosInput)) $operariosInput = [];
@@ -916,10 +916,11 @@ function guardarEnsamblaje()
         responder(false, 'Debes indicar al menos un operario que participó en este armado.');
     }
 
-    if ($sucursal_id !== null) {
-        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
-        if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
+    if ($sucursal_id <= 0) {
+        responder(false, 'Debes seleccionar la sucursal donde se realizó este armado.');
     }
+    $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursal_id]);
+    if (empty($suc)) responder(false, 'La sucursal seleccionada no existe o está inactiva.');
 
     $detalleEntrada = json_decode($detalleJson, true);
     if (!is_array($detalleEntrada)) $detalleEntrada = [];

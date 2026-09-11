@@ -395,7 +395,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div id="est_operarios_chips" class="pc-chip-wrap"></div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Sucursal</label>
+                        <label class="form-label">Sucursal *</label>
                         <div id="est_sucursal_chips" class="pc-chip-wrap"></div>
                     </div>
 
@@ -518,9 +518,16 @@ function iniciarAutoRefreshEmp() {
     pollTimerEmp = setInterval(() => {
         if (document.hidden) return;
         cargarMisRegistros();
+        cargarPendientesEmpaquetado();
+        // Solo refresca los sacos/colores disponibles si el operario no
+        // está con el dedo puesto en un input del formulario en ese instante
+        // (para no perderle el cursor mientras escribe una cantidad).
+        if (estacionProductoIdActual && !document.activeElement?.closest('#formEstacionArmado')) {
+            refrescarOrigenesSilencioso();
+        }
     }, POLL_INTERVAL_MS_EMP);
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) cargarMisRegistros();
+        if (!document.hidden) { cargarMisRegistros(); cargarPendientesEmpaquetado(); }
     });
 }
 
@@ -980,6 +987,16 @@ async function cargarOrigenesDisponibles(productoId) {
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
     capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null; // NUEVO
+}
+async function refrescarOrigenesSilencioso() {
+    if (!estacionProductoIdActual) return;
+    const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: estacionProductoIdActual });
+    if (!json.success) return;
+    origenesDisponiblesCache = json.origenes || [];
+    unidadEmpaquetadoProductoActual = json.unidad_empaquetado || null;
+    reglasEmpaquetadoActuales = json.reglas_empaquetado || null;
+    capacidadEnUnidadOrigenActual = json.capacidad_en_unidad_origen ?? null;
+    if (esModoMezcla()) renderMezcla(); else renderBultos();
 }
 
 function aplicarUnidadEmpaquetadoFija() {
@@ -1452,6 +1469,10 @@ function obtenerBultosJsonEmp() {
 document.getElementById('formEstacionArmado').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (!estSucursalSeleccionada) {
+        Swal.fire('Falta la sucursal', 'Selecciona la sucursal donde se armó este paquete.', 'warning');
+        return;
+    }
     if (estOperariosSeleccionados.length === 0) {
         Swal.fire('Falta información', 'Selecciona al menos un operario.', 'warning');
         return;

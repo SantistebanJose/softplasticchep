@@ -725,10 +725,10 @@ function crearEmpaquetado()
 {
     $conectar = conectar_oll_BD();
     $productoId   = intval($_POST['producto_id'] ?? 0);
-    $sucursalId   = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
+    $sucursalId   = intval($_POST['sucursal_id'] ?? 0);
 
     if (!$productoId) responder(false, 'Debes indicar el producto.');
-
+    if (!$sucursalId) responder(false, 'Debes indicar la sucursal.');
     // Varios operarios pueden participar en un mismo registro de empaquetado.
     // Llega como JSON: "[3,7,12]" (ids seleccionados en la estación de armado).
     $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
@@ -787,10 +787,8 @@ function crearEmpaquetado()
     ", ['pid' => $productoId, 'pid2' => $productoId, 'pid3' => $productoId]);
     $unidadOrigenCodigo = $origenesRef[0]['unidad_salida_codigo'] ?? null;
     $equivalenciaCapacidad = obtenerCapacidadPaqueteEnUnidadOrigen($conectar, $unidadEmpaquetado, $unidadOrigenCodigo) ?? 0;
-    if ($sucursalId !== null) {
-        $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
-        if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
-    }
+    $suc = executeQuery($conectar, "SELECT id FROM sucursal WHERE id = :id AND delete_at IS NULL", ['id' => $sucursalId]);
+    if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
 
     $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
     if ($reglas['conversion_peso_a_unidad'] && empty($reglas['peso_unitario_g'])) {

@@ -302,7 +302,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <!-- Barra superior: sucursal (chips) + operarios (chips + botón que abre el modal de selección) -->
             <div class="pc-ens-topbar">
                 <div class="pc-ens-topbar-group">
-                    <label><i class="fa-solid fa-store"></i> Sucursal</label>
+                    <label><i class="fa-solid fa-store"></i> Sucursal *</label>
                     <div class="pc-chip-toggle-row" id="ens_sucursal_chips">
                         <span class="pc-ens-requisito" style="padding:6px 10px;">Cargando sucursales...</span>
                     </div>
@@ -1432,6 +1432,10 @@ function aplicarModoSoloLecturaEns() {
 document.getElementById('formEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (!sucursalSeleccionadaEns) {
+        Swal.fire('Falta la sucursal', 'Toca la sucursal donde se realizó este armado.', 'warning');
+        return;
+    }
     if (!obtenerProductoIdSeleccionadoEns()) {
         Swal.fire('Falta el producto', 'Toca una card de producto para seleccionarlo.', 'warning');
         return;
