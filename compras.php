@@ -152,6 +152,8 @@ include("header.php");
     </div>
   </div>
 </div>
+
+<!-- Modal Cámara: tomar foto del comprobante -->
 <div class="modal fade" id="modalCamaraComprobante" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -179,6 +181,7 @@ include("header.php");
     </div>
   </div>
 </div>
+
 <!-- Modal Ver Comprobante -->
 <div class="modal fade" id="modalVerComprobante" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -313,6 +316,82 @@ const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
 const modalProveedorRapido = new bootstrap.Modal(document.getElementById('modalProveedorRapido'));
 const modalVerComprobante = new bootstrap.Modal(document.getElementById('modalVerComprobante'));
 
+// ── Cámara del comprobante (tomar foto en vez de/además de subir archivo) ───
+const modalCamaraComprobante = new bootstrap.Modal(document.getElementById('modalCamaraComprobante'));
+let streamCamaraComprobante = null;
+let capturaComprobanteBlob = null; // si existe, tiene prioridad sobre el <input type="file"> al guardar
+
+async function abrirModalCamaraComprobante() {
+    const video = document.getElementById('videoCamaraComprobante');
+    const errorEl = document.getElementById('camaraComprobanteError');
+
+    video.style.display = '';
+    document.getElementById('previewCamaraComprobante').style.display = 'none';
+    errorEl.style.display = 'none';
+    document.getElementById('btnCapturarFotoComprobante').style.display = '';
+    document.getElementById('btnCapturarFotoComprobante').disabled = false;
+    document.getElementById('btnRepetirFotoComprobante').style.display = 'none';
+    document.getElementById('btnUsarFotoComprobante').style.display = 'none';
+
+    modalCamaraComprobante.show();
+
+    try {
+        // 'environment' pide la cámara trasera en celular; en PC sin esa
+        // cámara el navegador cae de vuelta a la única disponible (webcam).
+        streamCamaraComprobante = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false
+        });
+        video.srcObject = streamCamaraComprobante;
+    } catch (err) {
+        console.error('No se pudo acceder a la cámara:', err);
+        errorEl.textContent = 'No se pudo acceder a la cámara. Revisa los permisos del navegador o usa "Subir archivo".';
+        errorEl.style.display = 'block';
+        document.getElementById('btnCapturarFotoComprobante').disabled = true;
+    }
+}
+
+function detenerStreamCamara() {
+    if (streamCamaraComprobante) {
+        streamCamaraComprobante.getTracks().forEach(t => t.stop());
+        streamCamaraComprobante = null;
+    }
+}
+
+function capturarFotoComprobante() {
+    const video = document.getElementById('videoCamaraComprobante');
+    const canvas = document.getElementById('canvasCamaraComprobante');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+        capturaComprobanteBlob = blob;
+        document.getElementById('imgPreviewCamaraComprobante').src = URL.createObjectURL(blob);
+        video.style.display = 'none';
+        document.getElementById('previewCamaraComprobante').style.display = '';
+        document.getElementById('btnCapturarFotoComprobante').style.display = 'none';
+        document.getElementById('btnRepetirFotoComprobante').style.display = '';
+        document.getElementById('btnUsarFotoComprobante').style.display = '';
+        detenerStreamCamara(); // no hace falta la cámara prendida mientras revisa la foto
+    }, 'image/jpeg', 0.9);
+}
+
+function repetirFotoComprobante() {
+    capturaComprobanteBlob = null;
+    abrirModalCamaraComprobante();
+}
+
+function usarFotoComprobante() {
+    modalCamaraComprobante.hide();
+    document.getElementById('compra_comprobante').value = ''; // que no compita con el input de archivo
+    document.getElementById('compra_comprobante_preview').innerHTML =
+        '<span class="text-success"><i class="fa-solid fa-check"></i> Foto capturada, lista para subir</span>';
+}
+
+// Por si cierran el modal con el backdrop o Esc en vez del botón Cancelar
+document.getElementById('modalCamaraComprobante').addEventListener('hidden.bs.modal', detenerStreamCamara);
+
 let modoEdicionCompra = false;
 let compraIdActual = 0;
 let comprobanteActualRuta = null;
@@ -322,6 +401,7 @@ let materialesCache = null; // cache de la lista de materiales (BUSCARMATERIALES
 let unidadesPorFamiliaCache = {}; // cache: raizId -> [unidades compatibles]
 let tomSelectFiltroProveedor = null;
 let tomSelectModalProveedor = null;
+let pollingComprasInterval = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedoresFiltro();
@@ -331,6 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tbodyCompras').innerHTML =
             `<tr><td colspan="10" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
+    iniciarPollingCompras();
     ['mat_rapido_nombre', 'prov_rapido_razon', 'prov_rapido_comercial'].forEach(id => {
         aplicarMayusculasEnVivo(document.getElementById(id));
     });
@@ -344,6 +425,39 @@ document.addEventListener('DOMContentLoaded', () => {
     ['fcompra_estado', 'fcompra_desde', 'fcompra_hasta'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarCompras);
     });
+});
+
+// ── Refresco en tiempo real (sin recargar página) ───────────────────────────
+const INTERVALO_POLLING_COMPRAS = 8000; // mismo intervalo que producción
+
+function iniciarPollingCompras() {
+    detenerPollingCompras();
+    pollingComprasInterval = setInterval(() => {
+        // No refrescar mientras el modal de crear/editar compra está abierto,
+        // se perdería lo que el usuario está escribiendo en el detalle.
+        const modalAbierto = document.getElementById('modalCompra').classList.contains('show');
+        if (modalAbierto) return;
+
+        cargarCompras();
+        materialesCache = null; // fuerza traer stock actualizado la próxima vez que se abra el selector de materiales
+    }, INTERVALO_POLLING_COMPRAS);
+}
+
+function detenerPollingCompras() {
+    if (pollingComprasInterval) {
+        clearInterval(pollingComprasInterval);
+        pollingComprasInterval = null;
+    }
+}
+
+// Pausa el polling si el usuario cambia de pestaña/minimiza, para no gastar
+// llamadas de más; lo retoma al volver.
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        detenerPollingCompras();
+    } else {
+        iniciarPollingCompras();
+    }
 });
 
 // Render compartido: nombre + comercial arriba, RUC/DNI chico abajo. Sirve
@@ -546,7 +660,7 @@ document.getElementById('formMaterialRapido').addEventListener('submit', async f
         stock_actual: 0,
         color: '1', // siempre tinte desde este alta rápida
         rgb: document.getElementById('mat_rapido_rgb').value.trim(),
-        color_nombre: document.getElementById('mat_rapido_color_nombre').value.trim(), // ← AGREGAR ESTA LÍNEA
+        color_nombre: document.getElementById('mat_rapido_color_nombre').value.trim(),
         productos_ids: '[]',
     });
 
@@ -567,6 +681,7 @@ document.getElementById('formMaterialRapido').addEventListener('submit', async f
         tomSelectMaterialActivo.setValue(String(json.id), true); // dispara onChange -> carga unidad y conversión
     }
 });
+
 // Usa la misma acción con la que tu material.php llena el select de unidad
 // de medida (unidad RAÍZ). Si el nombre de la acción es distinto, ajústalo aquí.
 async function cargarUnidadesRaizModalMaterial() {
@@ -583,10 +698,6 @@ async function cargarUnidadesRaizModalMaterial() {
         Swal.fire('Error', json.message || 'No se pudieron cargar las unidades de medida.', 'error');
     }
 }
-
-document.getElementById('mat_rapido_picker').addEventListener('input', (e) => {
-    document.getElementById('mat_rapido_rgb').value = e.target.value;
-});
 
 function abrirModalProveedorRapido(documentoPrellenado = '') {
     document.getElementById('formProveedorRapido').reset();
@@ -646,8 +757,6 @@ document.getElementById('formProveedorRapido').addEventListener('submit', async 
     // Recarga el Tom Select del modal de compra y deja seleccionado el nuevo proveedor
     await cargarProveedoresModal(ruc);
 });
-
-
 
 async function obtenerOpcionesMateriales() {
     if (materialesCache) return materialesCache;
@@ -727,7 +836,6 @@ async function cargarCompras() {
 // datos (modo edición) puede traer: material_id, unidad_medida_id, cantidad,
 // sub_total (P.U guardado, aunque la BD siga llamándolo sub_total), total,
 // comentario (tal cual vienen de OBTENERCOMPRA).
-// ── Detalle de materiales (dinámico) ─────────────────────────────────────────
 async function agregarFilaMaterial(datos = null) {
     const materiales = await obtenerOpcionesMateriales();
     const filaId = 'fila-mat-' + (++contadorFilaMaterial);
@@ -793,80 +901,6 @@ async function agregarFilaMaterial(datos = null) {
                 </div>`;
     }
 
-    const modalCamaraComprobante = new bootstrap.Modal(document.getElementById('modalCamaraComprobante'));
-let streamCamaraComprobante = null;
-let capturaComprobanteBlob = null; // si existe, tiene prioridad sobre el <input type="file"> al guardar
-
-async function abrirModalCamaraComprobante() {
-    const video = document.getElementById('videoCamaraComprobante');
-    const errorEl = document.getElementById('camaraComprobanteError');
-
-    video.style.display = '';
-    document.getElementById('previewCamaraComprobante').style.display = 'none';
-    errorEl.style.display = 'none';
-    document.getElementById('btnCapturarFotoComprobante').style.display = '';
-    document.getElementById('btnCapturarFotoComprobante').disabled = false;
-    document.getElementById('btnRepetirFotoComprobante').style.display = 'none';
-    document.getElementById('btnUsarFotoComprobante').style.display = 'none';
-
-    modalCamaraComprobante.show();
-
-    try {
-        // 'environment' pide la cámara trasera en celular; en PC sin esa
-        // cámara el navegador cae de vuelta a la única disponible (webcam).
-        streamCamaraComprobante = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' } },
-            audio: false
-        });
-        video.srcObject = streamCamaraComprobante;
-    } catch (err) {
-        console.error('No se pudo acceder a la cámara:', err);
-        errorEl.textContent = 'No se pudo acceder a la cámara. Revisa los permisos del navegador o usa "Subir archivo".';
-        errorEl.style.display = 'block';
-        document.getElementById('btnCapturarFotoComprobante').disabled = true;
-    }
-}
-
-function detenerStreamCamara() {
-    if (streamCamaraComprobante) {
-        streamCamaraComprobante.getTracks().forEach(t => t.stop());
-        streamCamaraComprobante = null;
-    }
-}
-
-function capturarFotoComprobante() {
-    const video = document.getElementById('videoCamaraComprobante');
-    const canvas = document.getElementById('canvasCamaraComprobante');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-
-    canvas.toBlob((blob) => {
-        capturaComprobanteBlob = blob;
-        document.getElementById('imgPreviewCamaraComprobante').src = URL.createObjectURL(blob);
-        video.style.display = 'none';
-        document.getElementById('previewCamaraComprobante').style.display = '';
-        document.getElementById('btnCapturarFotoComprobante').style.display = 'none';
-        document.getElementById('btnRepetirFotoComprobante').style.display = '';
-        document.getElementById('btnUsarFotoComprobante').style.display = '';
-        detenerStreamCamara(); // no hace falta la cámara prendida mientras revisa la foto
-    }, 'image/jpeg', 0.9);
-}
-
-function repetirFotoComprobante() {
-    capturaComprobanteBlob = null;
-    abrirModalCamaraComprobante();
-}
-
-function usarFotoComprobante() {
-    modalCamaraComprobante.hide();
-    document.getElementById('compra_comprobante').value = ''; // que no compita con el input de archivo
-    document.getElementById('compra_comprobante_preview').innerHTML =
-        '<span class="text-success"><i class="fa-solid fa-check"></i> Foto capturada, lista para subir</span>';
-}
-
-// Por si cierran el modal con el backdrop o Esc en vez del botón Cancelar
-document.getElementById('modalCamaraComprobante').addEventListener('hidden.bs.modal', detenerStreamCamara);
     const tomSelectMaterial = new TomSelect(matSelectEl, {
         valueField: 'id',
         labelField: 'nombre',
@@ -1025,6 +1059,7 @@ function obtenerDetalleJson() {
     return JSON.stringify(detalle);
 }
 
+// ── Crear / Editar ───────────────────────────────────────────────────────────
 function limpiarFormularioCompra() {
     document.getElementById('formCompra').reset();
     document.getElementById('compra_detalle_wrap').innerHTML = '';
@@ -1119,8 +1154,13 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
     formData.append('total_img_cargado', document.getElementById('compra_total_img_cargado').value);
 
-    const archivo = document.getElementById('compra_comprobante').files[0];
-    if (archivo) formData.append('img_comprobante', archivo);
+    // La foto tomada con la cámara tiene prioridad sobre el <input type="file">
+    if (capturaComprobanteBlob) {
+        formData.append('img_comprobante', capturaComprobanteBlob, 'comprobante_camara.jpg');
+    } else {
+        const archivo = document.getElementById('compra_comprobante').files[0];
+        if (archivo) formData.append('img_comprobante', archivo);
+    }
 
     let json;
     try {
