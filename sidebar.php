@@ -47,7 +47,7 @@ $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
 $administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion'];
-$reportesPages       = ['stock', 'produccion_operario'];
+$reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
 $ventasOpen         = in_array($activePage, $ventasPages);
@@ -181,7 +181,7 @@ $reportesOpen       = in_array($activePage, $reportesPages);
         </div>
     </details>
 
-    <!-- Reportes -->
+        <!-- Reportes -->
     <details class="pc-nav-group" <?= $reportesOpen ? 'open' : '' ?>>
         <summary class="<?= pc_group_summary_class($reportesOpen) ?>">
             <span class="pc-nav-icon"><i class="fa-solid fa-chart-column"></i></span>
@@ -193,6 +193,12 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             </a>
             <a href="produccion_operario.php" class="<?= pc_sub_class('produccion_operario', $activePage) ?>">
                 <span class="dot"></span> Producción por Operario
+            </a>
+            <a href="kardex.php" class="<?= pc_sub_class('kardex', $activePage) ?>">
+                <span class="dot"></span> Kardex
+            </a>
+            <a href="reporte_pase_ensamblaje.php" class="<?= pc_sub_class('reporte_pase_ensamblaje', $activePage) ?>">
+                <span class="dot"></span> Pase a Ensamblaje
             </a>
         </div>
     </details>

@@ -147,6 +147,12 @@ window.addEventListener('load', function () {
             <a href="produccion_operario.php" class="pc-quick-btn q-dark">
                 <i class="fa-solid fa-chart-column"></i> Producción por Operario
             </a>
+            <a href="kardex.php" class="pc-quick-btn q-navy">
+                <i class="fa-solid fa-boxes-packing"></i> Kardex
+            </a>
+            <a href="reporte_pase_ensamblaje.php" class="pc-quick-btn q-warning">
+                <i class="fa-solid fa-right-left"></i> Pase a Ensamblaje
+            </a>
         </div>
 
     </div>
