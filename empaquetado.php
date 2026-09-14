@@ -358,10 +358,15 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
 <script>
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
+const CONTROLADOR_SUCURSAL    = 'controllers/clssSucursal.php';
 const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
 
+const llamarEmpaquetado = (accion, params = {}) => llamar(CONTROLADOR_EMPAQUETADO, accion, params);
+const llamarSucursal    = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 // ── Estado de la ESTACIÓN DE ARMADO (creación de registros, inline en la página principal) ──
 let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
@@ -413,21 +418,6 @@ function limpiarFiltrosListado() {
     cargarListadoGeneralEmp();
 }
 
-async function llamarEmpaquetado(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_EMPAQUETADO, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
 
 function textoDesgloseEmp(r) {
     const desglose = parseJsonColumnaEmp(r.js_desglose ?? r.desglose); // según cómo llegue
@@ -705,11 +695,10 @@ async function cargarEstacionParaProducto(productoId) {
     inicializarBloqueFormulario();
     actualizarResumenBarraAccion();
 }
-
-async function cargarOrigenesDisponibles(productoId, miToken) {
+async function cargarOrigenesDisponibles(productoId, miToken = null) {
     const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
 
-    if (miToken !== tokenCargaEstacion) return;   // <-- respuesta vieja, se ignora
+    if (miToken !== null && miToken !== tokenCargaEstacion) return; // respuesta vieja, se ignora
 
     if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
     origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
@@ -717,6 +706,7 @@ async function cargarOrigenesDisponibles(productoId, miToken) {
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
     capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null;
 }
+
 // =============================================================================
 // LISTADO GENERAL
 // =============================================================================
@@ -826,14 +816,7 @@ async function cargarSelectsModalEdicion() {
     renderOperariosChips('emp_operarios_chips', empOperariosSeleccionados, 'toggleOperarioModalEdicion');
 }
 
-async function cargarOrigenesDisponibles(productoId) {
-    const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
-    if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
-    origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
-    unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
-    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
-    capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null; // <-- NUEVO
-}
+
 
 function aplicarUnidadEmpaquetadoFija() {
     const sUnidad = document.getElementById('est_unidad_medida');
@@ -1421,17 +1404,6 @@ function obtenerBultosJsonEmp() {
     return JSON.stringify(bultos);
 }
 
-const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
-
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
 
 let empSucursalesCache = null;
 async function obtenerSucursalesEmp() {
@@ -1469,7 +1441,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: estSucursalSeleccionada || '',
+            sucursal_id: document.getElementById('est_sucursal_id').value || '',
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1502,7 +1474,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         params = {
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
-            sucursal_id: estSucursalSeleccionada || '',
+            sucursal_id: document.getElementById('est_sucursal_id').value || '',
             bultos: bultosJson,
         };
     }

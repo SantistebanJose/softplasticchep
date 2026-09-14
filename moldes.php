@@ -176,12 +176,16 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
 <script>
-const CONTROLADOR_MOLDES    = 'controllers/clssMoldes.php';    // clssMoldes.php vive en su propia carpeta
-const CONTROLADOR_PRODUCTOS = 'controllers/clssProductos.php'; // para llenar el <select> de productos
+const CONTROLADOR_MOLDES    = 'controllers/clssMoldes.php';
+const CONTROLADOR_PRODUCTOS = 'controllers/clssProductos.php';
 const modalMolde        = new bootstrap.Modal(document.getElementById('modalMolde'));
 const modalVerFotoMolde = new bootstrap.Modal(document.getElementById('modalVerFotoMolde'));
 
+const llamarMoldes    = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
+const llamarProductos = (accion, params = {}) => llamar(CONTROLADOR_PRODUCTOS, accion, params);
 document.addEventListener('DOMContentLoaded', () => {
     Promise.all([
         cargarProductosSelect(),
@@ -308,38 +312,6 @@ function verFotoMolde(url) {
     modalVerFotoMolde.show();
 }
 
-// ── Llamadas genéricas a los controladores ──────────────────────────────────
-async function llamarMoldes(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_MOLDES, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
-
-async function llamarProductos(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_PRODUCTOS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
 
 async function cargarProductosSelect() {
     const json = await llamarProductos('LISTARPRODUCTOS', { texto: '', estado: 'activo' });
@@ -481,7 +453,7 @@ document.getElementById('formMolde').addEventListener('submit', async function (
     }
 
     const formData = new FormData(this); // incluye el archivo de "imagen" automáticamente
-    formData.append('accion', 'GUARDARMOLDE');
+    await prepararFormDataConDevice(formData, 'GUARDARMOLDE'); // agrega accion + device_id + device_nombre + device_modelo
     productoIds.forEach(pid => formData.append('producto_ids[]', pid));
 
     const resp = await fetch(CONTROLADOR_MOLDES, { method: 'POST', body: formData });
@@ -495,7 +467,6 @@ document.getElementById('formMolde').addEventListener('submit', async function (
         Swal.fire('Error', json.message, 'error');
     }
 });
-
 // ── Eliminar / Reactivar ─────────────────────────────────────────────────────
 function eliminarMolde(id) {
     Swal.fire({

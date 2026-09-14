@@ -142,10 +142,13 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
 <script>
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
 const modalProveedor = new bootstrap.Modal(document.getElementById('modalProveedor'));
 
+const llamarProveedores = (accion, params = {}) => llamar(CONTROLADOR_PROVEEDORES, accion, params);
 let modoEdicion = false; // true = editando (RUC ya no se puede cambiar)
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -173,24 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ── Llamadas genéricas ───────────────────────────────────────────────────────
-async function llamar(url, accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
-
-const llamarProveedores = (accion, params = {}) => llamar(CONTROLADOR_PROVEEDORES, accion, params);
 
 function badgeRegistro(deletedAt) {
     return !deletedAt
@@ -406,7 +391,6 @@ document.getElementById('formProveedor').addEventListener('submit', async functi
     }
 
     const params = {
-        accion: 'GUARDARPROVEEDOR',
         ruc: document.getElementById('prov_ruc').value.trim(),
         js_tipo: obtenerTiposSeleccionados(),
         razon_social: document.getElementById('prov_razon_social').value.trim(),

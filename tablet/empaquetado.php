@@ -931,7 +931,7 @@ function eliminarMiRegistro(id) {
             const productoAfectado = estacionProductoIdActual;
             await Promise.all([cargarPendientesEmpaquetado(), cargarMisRegistros()]);
             if (productoAfectado) {
-                await cargarOrigenesDisponibles(productoAfectado);
+                await cargarOrigenesDisponibles(productoAfectado, ++tokenCargaEstacion);
                 aplicarUnidadEmpaquetadoFija();
                 if (esModoMezcla()) renderMezcla(); else renderBultos();
             }
@@ -980,14 +980,7 @@ async function cargarSelectsEstacion() {
     renderSucursalChips('est_sucursal_chips', estSucursalSeleccionada, 'seleccionarSucursalEstacion');
 }
 
-async function cargarOrigenesDisponibles(productoId) {
-    const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
-    if (!json.success) console.error('Error BUSCARORIGENESDISPONIBLES:', json.message);
-    origenesDisponiblesCache = json.success ? (json.origenes || []) : [];
-    unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
-    reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
-    capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null; // NUEVO
-}
+
 async function refrescarOrigenesSilencioso() {
     if (!estacionProductoIdActual) return;
     const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: estacionProductoIdActual });

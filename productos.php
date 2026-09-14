@@ -418,10 +418,14 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <!-- SheetJS: librería para generar archivos Excel (.xlsx) 100% en el navegador -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
 <script>
-const CONTROLADOR        = 'controllers/clssProductos.php'; // clssProductos.php vive en su propia carpeta
-const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php';     // se reutiliza para saber qué moldes tiene el producto
+const CONTROLADOR        = 'controllers/clssProductos.php';
+const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php';
 
+const llamarProductos = (accion, params = {}) => llamar(CONTROLADOR, accion, params);
+const llamarMoldes    = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
 const modalProducto        = new bootstrap.Modal(document.getElementById('modalProducto'));
 const modalConfigProducto  = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
 const modalVerFotoProducto = new bootstrap.Modal(document.getElementById('modalVerFotoProducto'));
@@ -557,26 +561,9 @@ function verFotoProducto(url) {
     modalVerFotoProducto.show();
 }
 
-// ── Llamada genérica a un controlador (por defecto, el de Productos) ────────
-async function llamar(accion, params = {}, controlador = CONTROLADOR) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(controlador, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
-
 // ── Catálogo de unidades ────────────────────────────────────────────────────
 async function cargarUnidades() {
-    const json = await llamar('LISTARUNIDADES');
+    const json = await llamarProductos('LISTARUNIDADES');
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
     unidadesCache = json.unidades || [];
 
@@ -597,7 +584,7 @@ async function cargarProductos() {
     const texto  = document.getElementById('f_texto').value.trim();
     const estado = document.getElementById('f_estado').value;
 
-    const json = await llamar('LISTARPRODUCTOS', { texto, estado });
+    const json = await llamarProductos('LISTARPRODUCTOS', { texto, estado });
     const tbody = document.getElementById('tbodyProductos');
 
     if (!json.success) {
@@ -700,7 +687,7 @@ function abrirModalCrear() {
 }
 
 async function abrirModalEditar(id) {
-    const json = await llamar('OBTENERPRODUCTO', { id });
+    const json = await llamarProductos('OBTENERPRODUCTO', { id });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
     const p = json.producto;
@@ -723,7 +710,7 @@ async function abrirModalEditar(id) {
 document.getElementById('formProducto').addEventListener('submit', async function (e) {
     e.preventDefault();
     const formData = new FormData(this); // incluye el archivo de "imagen" automáticamente
-    formData.append('accion', 'GUARDARPRODUCTO');
+    await prepararFormDataConDevice(formData, 'GUARDARPRODUCTO'); // agrega accion + device_id + device_nombre + device_modelo
 
     const resp = await fetch(CONTROLADOR, { method: 'POST', body: formData });
     const json = await resp.json();
@@ -736,7 +723,6 @@ document.getElementById('formProducto').addEventListener('submit', async functio
         Swal.fire('Error', json.message, 'error');
     }
 });
-
 // ── Eliminar / Reactivar ─────────────────────────────────────────────────────
 function eliminarProducto(id) {
     Swal.fire({
@@ -748,7 +734,7 @@ function eliminarProducto(id) {
         cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const json = await llamar('ELIMINARPRODUCTO', { id });
+        const json = await llamarProductos('ELIMINARPRODUCTO', { id });
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
             cargarProductos();
@@ -759,7 +745,7 @@ function eliminarProducto(id) {
 }
 
 function reactivarProducto(id) {
-    llamar('REACTIVARPRODUCTO', { id }).then(json => {
+    llamarProductos('REACTIVARPRODUCTO', { id }).then(json => {
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
             cargarProductos();
@@ -785,8 +771,8 @@ function reactivarProducto(id) {
  */
 async function abrirModalConfiguracion(productoId, productoDescripcion) {
     const [jsonMoldes, jsonProd] = await Promise.all([
-        llamar('LISTARMOLDESPRODUCTO', {}, CONTROLADOR_MOLDES),
-        llamar('OBTENERPRODUCTO', { id: productoId })
+        llamarMoldes('LISTARMOLDESPRODUCTO'),
+        llamarProductos('OBTENERPRODUCTO', { id: productoId })
     ]);
 
     if (!jsonMoldes.success) { Swal.fire('Error', jsonMoldes.message, 'error'); return; }
@@ -993,7 +979,7 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
         configuracionVenta.salida_ensamblaje = ensOpt.textContent.split(' - ')[0].trim().toLowerCase();
     }
 
-    const json = await llamar('GUARDARCONFIGPRODUCTO', {
+    const json = await llamarProductos('GUARDARCONFIGPRODUCTO', {
         producto_id: productoId,
         configuraciones: JSON.stringify(configuraciones),
         configuracion_venta: JSON.stringify(configuracionVenta),

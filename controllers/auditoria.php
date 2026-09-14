@@ -97,18 +97,20 @@ function obtenerMovimientoSesion(string $accion, array $cambios = []): array
 {
     $ip = obtenerIpCliente();
 
+    $esOperario = !empty($_SESSION['operario_id']);
+
     return [
-        'usuario'        => $_SESSION['usuario_id'] ?? 'Sistema',
-        'nombre'         => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
-        'user'           => $_SESSION['user_usuario'] ?? 'N/A',
+        'usuario'        => $esOperario ? $_SESSION['operario_id'] : ($_SESSION['usuario_id'] ?? 'Sistema'),
+        'nombre'         => $esOperario ? ($_SESSION['operario_nombre'] ?? 'Operario') : ($_SESSION['nombre_usuario'] ?? 'Usuario Desconocido'),
+        'user'           => $esOperario ? 'operario' : ($_SESSION['user_usuario'] ?? 'N/A'),
         'perfiles'       => $_SESSION['perfiles'] ?? 'N/A',
-        'rol'            => $_SESSION['rol_usuario'] ?? 'N/A',
+        'rol'            => $esOperario ? 'operario' : ($_SESSION['rol_usuario'] ?? 'N/A'),
         'accion'         => $accion,
         'ip'             => $ip,
         'ubicacion'      => obtenerUbicacionPorIp($ip),
         'device_id'      => trim($_POST['device_id'] ?? '') ?: 'N/A',
         'device_nombre'  => trim($_POST['device_nombre'] ?? '') ?: 'N/A',
-        'device_modelo'  => trim($_POST['device_modelo'] ?? '') ?: 'N/A', // NUEVO
+        'device_modelo'  => trim($_POST['device_modelo'] ?? '') ?: 'N/A',
         'cambios'        => $cambios,
         'timestamp'      => date('Y-m-d H:i:s'),
     ];

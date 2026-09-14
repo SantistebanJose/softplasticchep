@@ -98,11 +98,12 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
 
 <script>
 const CONTROLADOR_MAQUINAS = 'controllers/clssMaquina.php';
 const modalMaquina = new bootstrap.Modal(document.getElementById('modalMaquina'));
-
+const llamarMaquinas = (accion, params = {}) => llamar(CONTROLADOR_MAQUINAS, accion, params);
 document.addEventListener('DOMContentLoaded', () => {
     cargarSucursalesCombo();
 
@@ -128,24 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ── Llamadas genéricas ───────────────────────────────────────────────────────
-async function llamar(url, accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
 
-const llamarMaquinas = (accion, params = {}) => llamar(CONTROLADOR_MAQUINAS, accion, params);
 
 function textoEstado(estado) {
     if (estado === 'A') return '<span class="badge bg-success">Activa</span>';
@@ -241,7 +225,7 @@ async function abrirModalEditarMaquina(id) {
 document.getElementById('formMaquina').addEventListener('submit', async function (e) {
     e.preventDefault();
     const formData = new FormData(this);
-    formData.append('accion', 'GUARDARMAQUINA');
+    await prepararFormDataConDevice(formData, 'GUARDARMAQUINA'); // agrega accion + device_id + device_nombre + device_modelo
 
     const resp = await fetch(CONTROLADOR_MAQUINAS, { method: 'POST', body: formData });
     const json = await resp.json();
