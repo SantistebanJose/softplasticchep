@@ -543,6 +543,7 @@ include("header.php");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+   <script src="../assets/js/device-tracking.js"></script>
 <script>
 
 
@@ -710,7 +711,12 @@ function actualizarTextoUltimaActualizacion() {
 const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
 
 async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(CONTROLADOR_SUCURSAL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -726,7 +732,6 @@ async function obtenerSucursalesProd() {
     sucursalesProdCache = json.success ? json.sucursales : [];
     return sucursalesProdCache;
 }
-
 function estadoCorto(p) {
     if (p.enviado_ensamblaje) return 'ensamblaje';
     if (!p.fecha_hora_inicio) return 'sin';
@@ -763,9 +768,13 @@ function renderStatRow(producciones) {
     `;
 }
 
-// ── Llamadas genéricas ────────────────────────────────────────────────────
 async function llamarProduccion(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(CONTROLADOR_PRODUCCION, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -781,7 +790,12 @@ async function llamarProduccion(accion, params = {}) {
 }
 
 async function llamarMoldes(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(CONTROLADOR_MOLDES, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -791,7 +805,12 @@ async function llamarMoldes(accion, params = {}) {
 }
 
 async function llamarColor(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(CONTROLADOR_COLOR, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -799,7 +818,6 @@ async function llamarColor(accion, params = {}) {
     });
     return resp.json();
 }
-
 function renderListaMermas(p) {
     const cont = document.getElementById('merma_lista_registrada');
     const mermas = p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];

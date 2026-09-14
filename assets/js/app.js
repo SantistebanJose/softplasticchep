@@ -7,3 +7,8 @@ document.addEventListener('click', function (e) {
         sidebar.classList.remove('open');
     }
 });
+
+// ── Identificación de dispositivo (auditoría) ──────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    DeviceTracking.pedirNombreSiFalta();
+});

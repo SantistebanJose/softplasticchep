@@ -302,6 +302,7 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+<script src="js/device-tracking.js"></script>
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
@@ -472,7 +473,12 @@ function renderOpcionProveedor(data, escape) {
 }
 // ── Llamadas genéricas ────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1151,7 +1157,9 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     formData.append('fecha_compra', document.getElementById('compra_fecha').value);
     formData.append('descripcion', document.getElementById('compra_descripcion').value.trim());
     formData.append('detalle', detalleJson);
-    formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
+formData.append('device_id', DeviceTracking.getDeviceId());
+formData.append('device_nombre', DeviceTracking.getDeviceNombre());
+formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
     formData.append('total_img_cargado', document.getElementById('compra_total_img_cargado').value);
 
     // La foto tomada con la cámara tiene prioridad sobre el <input type="file">

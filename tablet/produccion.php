@@ -716,6 +716,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="../assets/js/device-tracking.js"></script>
 <script>
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
@@ -958,8 +959,17 @@ function iniciarAutoRefresh() {
 }
 
 async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
+    const resp = await fetch(CONTROLADOR_SUCURSAL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
     return resp.json();
 }
 
@@ -993,9 +1003,13 @@ function renderStatRow(producciones) {
         <div class="pc-stat-chip s-warning"><div class="ico"><i class="fa-solid fa-weight-hanging"></i></div><div class="txt"><div class="n">${formatearCantidadProd(kgHoy)}</div><div class="l">Kg hoy</div></div></div>
     `;
 }
-
 async function llamarProduccion(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(CONTROLADOR_PRODUCCION, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
     const texto = await resp.text();
     try { return JSON.parse(texto); }
