@@ -1,16 +1,9 @@
-/**
- * device-tracking.js
- * Genera un UUID persistente por dispositivo/navegador (localStorage) y
- * permite asignarle un nombre legible. Se usa para llenar device_id y
- * device_nombre en cada request hacia los controladores clss*.php.
- */
 const DeviceTracking = (() => {
     const KEY_ID     = 'app_device_id';
     const KEY_NOMBRE = 'app_device_nombre';
+    const KEY_MODELO = 'app_device_modelo';
 
     function generarUUID() {
-        // crypto.randomUUID() existe en navegadores modernos (Chrome 92+,
-        // Safari 15.4+). Fallback simple por si acaso.
         if (crypto?.randomUUID) return crypto.randomUUID();
         return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
             const r = Math.random() * 16 | 0;
@@ -36,8 +29,6 @@ const DeviceTracking = (() => {
         localStorage.setItem(KEY_NOMBRE, nombre.trim());
     }
 
-    // Pide el nombre una sola vez (ej. al cargar la tablet por primera vez).
-    // Llamar esto al iniciar la app si getDeviceNombre() devuelve 'N/A'.
     function pedirNombreSiFalta() {
         if (getDeviceNombre() === 'N/A') {
             const nombre = prompt('Nombre de este dispositivo (ej. "Tablet Producción 1"):');
@@ -45,5 +36,30 @@ const DeviceTracking = (() => {
         }
     }
 
-    return { getDeviceId, getDeviceNombre, setDeviceNombre, pedirNombreSiFalta };
+    // NUEVO: intenta el modelo real vía Client Hints de alta entropía
+    // (solo Chrome/Edge en Android da modelo real, ej. "Pixel 7 (Android)");
+    // en el resto de navegadores (iOS Safari, Firefox, desktop) cae al
+    // user-agent crudo, que al menos da SO/navegador.
+    async function detectarModeloDispositivo() {
+        if (navigator.userAgentData?.getHighEntropyValues) {
+            try {
+                const ua = await navigator.userAgentData.getHighEntropyValues(['model', 'platform', 'platformVersion']);
+                if (ua.model) return `${ua.model} (${ua.platform})`;
+            } catch (e) { /* sigue al fallback */ }
+        }
+        return navigator.userAgent;
+    }
+
+    // Se cachea en localStorage igual que device_id: el modelo de un
+    // dispositivo no cambia entre sesiones, así que se detecta una sola vez.
+    async function getDeviceModelo() {
+        let modelo = localStorage.getItem(KEY_MODELO);
+        if (!modelo) {
+            modelo = await detectarModeloDispositivo();
+            localStorage.setItem(KEY_MODELO, modelo);
+        }
+        return modelo;
+    }
+
+    return { getDeviceId, getDeviceNombre, setDeviceNombre, pedirNombreSiFalta, getDeviceModelo };
 })();

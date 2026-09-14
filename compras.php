@@ -1139,7 +1139,7 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     formData.append('detalle', detalleJson);
     formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
     formData.append('total_img_cargado', document.getElementById('compra_total_img_cargado').value);
-    prepararFormDataConDevice(formData, 'GUARDARCOMPRA'); // agrega accion + device_id + device_nombre
+    await prepararFormDataConDevice(formData, 'GUARDARCOMPRA'); // agrega accion + device_id + device_nombre
     // La foto tomada con la cámara tiene prioridad sobre el <input type="file">
     if (capturaComprobanteBlob) {
         formData.append('img_comprobante', capturaComprobanteBlob, 'comprobante_camara.jpg');
