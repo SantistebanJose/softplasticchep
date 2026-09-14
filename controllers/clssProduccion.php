@@ -684,21 +684,6 @@ function obtenerProduccion($id)
     responder(true, 'OK', ['produccion' => $produccion[0], 'detalle' => $detalle]);
 }
 
-/**
- * Auditoría (idéntico patrón al resto de controladores).
- */
-function obtenerIpCliente(): string
-{
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-        return trim($ips[0]);
-    }
-    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-        return trim($_SERVER['HTTP_X_REAL_IP']);
-    }
-    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
-}
-
 
 function verificarPropietarioOperario($conectar, int $produccionId): void
 {
@@ -736,20 +721,6 @@ function verificarNoEnviadoParaOperario($conectar, int $produccionId): void
     }
 }
 
-function obtenerMovimientoSesion(string $accion, array $cambios = []): array
-{
-    return [
-        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
-        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
-        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
-        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
-        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
-        'accion'    => $accion,
-        'ip'        => obtenerIpCliente(),
-        'cambios'   => $cambios,
-        'timestamp' => date('Y-m-d H:i:s'),
-    ];
-}
 
 function mergeItemConConfigVigente(?array $itemFoto, ?array $itemVigente, bool $forzarVigente = false): ?array
 {

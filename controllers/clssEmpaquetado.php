@@ -885,7 +885,7 @@ function crearEmpaquetado()
         }
 
         $operariosTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
-        $movimiento   = obtenerMovimientoSesionEmp('crear', [[
+        $movimiento   = obtenerMovimientoSesion('crear', [[
             'campo' => 'Empaquetado', 'valor_antes' => '(nuevo)',
             'valor_despues' => count($bultosLimpios) . " bulto(s), total $cantidadTotal, " . count($consumoPorOrigen) . " origen(es), operarios: $operariosTexto",
         ]]);
@@ -1013,7 +1013,7 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
         $diferenciaPct    = $bolsasTeoricas > 0 ? abs($bolsasProducidas - $bolsasTeoricas) / $bolsasTeoricas * 100 : null;
 
         $operariosTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
-        $movimiento = obtenerMovimientoSesionEmp('crear_mezcla', [[
+        $movimiento = obtenerMovimientoSesion('crear_mezcla', [[
             'campo' => 'Empaquetado (mezcla)', 'valor_antes' => '(nuevo)',
             'valor_despues' => "$bolsasProducidas bolsas producidas, {$kgTotal} kg mezclados de " . count($consumoPorOrigen) . " origen(es), operarios: $operariosTexto"
                 . ($diferenciaPct !== null ? " — teórico: " . round($bolsasTeoricas, 1) . " bolsas, diferencia: " . round($diferenciaPct, 1) . "%" : ""),
@@ -1281,7 +1281,7 @@ function editarEmpaquetado()
         'valor_antes' => "unidad #{$actual[0]['unidad_medida']}, operarios: $operariosAntesTexto, sucursal #{$actual[0]['sucursal']}",
         'valor_despues' => "unidad #$unidadMedida, operarios: $operariosDespuesTexto, sucursal #$sucursalId",
     ]];
-    $movimiento   = obtenerMovimientoSesionEmp('editar', $cambios);
+    $movimiento   = obtenerMovimientoSesion('editar', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -1332,7 +1332,7 @@ function eliminarEmpaquetado(int $id)
         );
 
         $cambios = [['campo' => 'Estado', 'valor_antes' => 'Activo', 'valor_despues' => 'Inactivo']];
-        $movimiento   = obtenerMovimientoSesionEmp('desactivar', $cambios);
+        $movimiento   = obtenerMovimientoSesion('desactivar', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -1407,7 +1407,7 @@ function reactivarEmpaquetado(int $id)
         );
 
         $cambios = [['campo' => 'Estado', 'valor_antes' => 'Inactivo', 'valor_despues' => 'Activo']];
-        $movimiento   = obtenerMovimientoSesionEmp('reactivar', $cambios);
+        $movimiento   = obtenerMovimientoSesion('reactivar', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -1429,36 +1429,8 @@ function reactivarEmpaquetado(int $id)
     }
 }
 
-// =============================================================================
-// AUDITORÍA
-// =============================================================================
 
-function obtenerIpClienteEmp(): string
-{
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-        return trim($ips[0]);
-    }
-    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-        return trim($_SERVER['HTTP_X_REAL_IP']);
-    }
-    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
-}
 
-function obtenerMovimientoSesionEmp(string $accion, array $cambios = []): array
-{
-    return [
-        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
-        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
-        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
-        'perfiles'  => $_SESSION['perfiles'] ?? 'N/A',
-        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
-        'accion'    => $accion,
-        'ip'        => obtenerIpClienteEmp(),
-        'cambios'   => $cambios,
-        'timestamp' => date('Y-m-d H:i:s'),
-    ];
-}
 
 // =============================================================================
 // HELPER

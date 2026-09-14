@@ -92,35 +92,6 @@ function controladorVenta($accion)
     }
 }
 
-// =============================================================================
-// HELPERS DE AUDITORÍA (mismo patrón que clssProveedor.php)
-// =============================================================================
-
-function obtenerIpClienteVenta(): string
-{
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-        return trim($ips[0]);
-    }
-    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-        return trim($_SERVER['HTTP_X_REAL_IP']);
-    }
-    return $_SERVER['REMOTE_ADDR'] ?? 'N/A';
-}
-
-function obtenerMovimientoSesionVenta(string $accion, array $cambios = []): array
-{
-    return [
-        'usuario'   => $_SESSION['usuario_id'] ?? 'Sistema',
-        'nombre'    => $_SESSION['nombre_usuario'] ?? 'Usuario Desconocido',
-        'user'      => $_SESSION['user_usuario'] ?? 'N/A',
-        'rol'       => $_SESSION['rol_usuario'] ?? 'N/A',
-        'accion'    => $accion,
-        'ip'        => obtenerIpClienteVenta(),
-        'cambios'   => $cambios,
-        'timestamp' => date('Y-m-d H:i:s'),
-    ];
-}
 
 // =============================================================================
 // TRAZABILIDAD VENTA <-> EMPAQUETADO (empaquetado.js_venta)
@@ -645,7 +616,7 @@ function guardarVenta()
             ];
         }
 
-        $movimiento = obtenerMovimientoSesionVenta('crear');
+        $movimiento = obtenerMovimientoSesion('crear');
 
         $stmtInsert = $conectar->prepare("
             INSERT INTO venta (codigo, cliente_ruc, fecha_venta, js_items, monto_total, estado, created_at, js_session, js_historial)
@@ -722,7 +693,7 @@ function anularVenta(int $id)
             }
         }
 
-        $movimiento = obtenerMovimientoSesionVenta('anular', [[
+        $movimiento = obtenerMovimientoSesion('anular', [[
             'campo' => 'Estado', 'valor_antes' => 'completada', 'valor_despues' => 'anulada',
         ]]);
 
