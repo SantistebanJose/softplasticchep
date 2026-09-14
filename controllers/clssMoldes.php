@@ -13,6 +13,7 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/auditoria.php';   
 require_once __DIR__ . '/cloudinaryHelper.php';
 
 session_start();

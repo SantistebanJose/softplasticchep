@@ -41,6 +41,8 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/auditoria.php';   
+
 session_start();
 
 // PHP 8.5 imprime avisos "Deprecated" como HTML antes del cuerpo de la

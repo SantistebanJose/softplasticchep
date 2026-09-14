@@ -101,6 +101,7 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/auditoria.php';   
 session_start();
 
 if (isset($_POST["accion"])) {
