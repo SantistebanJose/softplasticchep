@@ -309,6 +309,7 @@ include("header.php");
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
 const CONTROLADOR_MATERIAL = 'controllers/clssMaterial.php';
+const llamarCompras = (accion, params = {}) => llamar(CONTROLADOR_COMPRAS, accion, params);
 const llamarMaterial = (accion, params = {}) => llamar(CONTROLADOR_MATERIAL, accion, params);
 const modalMaterialRapido = new bootstrap.Modal(document.getElementById('modalMaterialRapido'));
 let tomSelectMaterialActivo = null; // fila cuyo Tom Select se actualizará al guardar
