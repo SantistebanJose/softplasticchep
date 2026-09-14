@@ -210,7 +210,12 @@ async function cargarChecklistProductosMaterial(seleccionados = []) {
 
 // ── Llamadas genéricas ───────────────────────────────────────────────────────
 async function llamar(url, accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
+    const body = new URLSearchParams({
+        accion,
+        device_id: DeviceTracking.getDeviceId(),
+        device_nombre: DeviceTracking.getDeviceNombre(),
+        ...params
+    });
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -340,6 +345,8 @@ document.getElementById('formMaterial').addEventListener('submit', async functio
     formData.append('accion', 'GUARDARMATERIAL'); 
     formData.append('productos_ids', JSON.stringify(Array.from(productosSeleccionadosMaterial)));
     formData.set('derivado', document.getElementById('material_derivado').checked ? '1' : '0');
+    formData.append('device_id', DeviceTracking.getDeviceId());
+    formData.append('device_nombre', DeviceTracking.getDeviceNombre());
 
     const resp = await fetch(CONTROLADOR_MATERIALES, { method: 'POST', body: formData });
     const json = await resp.json();

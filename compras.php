@@ -303,6 +303,8 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script src="assets/js/device-tracking.js"></script>
+<script src="assets/js/app-common.js"></script>
+
 <script>
 const CONTROLADOR_COMPRAS  = 'controllers/clssCompra.php';
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
@@ -471,29 +473,6 @@ function renderOpcionProveedor(data, escape) {
                 ${rucLinea}
             </div>`;
 }
-// ── Llamadas genéricas ────────────────────────────────────────────────────
-async function llamar(url, accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
-const llamarCompras  = (accion, params = {}) => llamar(CONTROLADOR_COMPRAS, accion, params);
-const llamarUnidades = (accion, params = {}) => llamar(CONTROLADOR_UNIDADES, accion, params);
 
 function badgeRegistro(deletedAt) {
     return !deletedAt
@@ -1151,17 +1130,14 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     }
 
     const formData = new FormData();
-    formData.append('accion', 'GUARDARCOMPRA');
     formData.append('id', compraIdActual);
     formData.append('proveedor_id', document.getElementById('compra_proveedor_id').value);
     formData.append('fecha_compra', document.getElementById('compra_fecha').value);
     formData.append('descripcion', document.getElementById('compra_descripcion').value.trim());
     formData.append('detalle', detalleJson);
-formData.append('device_id', DeviceTracking.getDeviceId());
-formData.append('device_nombre', DeviceTracking.getDeviceNombre());
-formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
+    formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
     formData.append('total_img_cargado', document.getElementById('compra_total_img_cargado').value);
-
+    prepararFormDataConDevice(formData, 'GUARDARCOMPRA'); // agrega accion + device_id + device_nombre
     // La foto tomada con la cámara tiene prioridad sobre el <input type="file">
     if (capturaComprobanteBlob) {
         formData.append('img_comprobante', capturaComprobanteBlob, 'comprobante_camara.jpg');
