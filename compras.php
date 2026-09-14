@@ -315,6 +315,7 @@ const modalMaterialRapido = new bootstrap.Modal(document.getElementById('modalMa
 let tomSelectMaterialActivo = null; // fila cuyo Tom Select se actualizará al guardar
 const llamarProveedores = (accion, params = {}) => llamar(CONTROLADOR_PROVEEDORES, accion, params);
 const CONTROLADOR_UNIDADES = 'controllers/clssUnidadMedida.php';
+const llamarUnidades = (accion, params = {}) =>llamar(CONTROLADOR_UNIDADES, accion, params);
 const RUTA_VER_COMPROBANTE = 'controllers/ver_comprobante.php'; // sirve el archivo validando sesión
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
 const modalProveedorRapido = new bootstrap.Modal(document.getElementById('modalProveedorRapido'));
