@@ -10,6 +10,8 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/auditoria.php';   
+
 session_start();
 ob_start(); // <-- por si algo imprime antes de tiempo
 

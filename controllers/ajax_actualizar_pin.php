@@ -8,8 +8,10 @@
 session_start();
 header('Content-Type: application/json');
 
+
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/auditoria.php';   // <-- agregar
 
 if (empty($_SESSION['usuario_id'])) {
     echo json_encode(['success' => false, 'message' => 'Sesión no válida. Vuelve a iniciar sesión.']);

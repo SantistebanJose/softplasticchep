@@ -19,6 +19,8 @@
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/clssArea.php'; // trae sincronizarJsCargosArea() (guard evita doble dispatch)
+require_once __DIR__ . '/auditoria.php';   
+
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
