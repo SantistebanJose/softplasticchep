@@ -717,6 +717,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
+<script src="../assets/js/app-common.js"></script>
+
 <script>
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
@@ -727,6 +729,10 @@ const CONTROLADOR_COLOR      = '../controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduccion'));
 
+const llamarProduccion = (accion, params = {}) => llamar(CONTROLADOR_PRODUCCION, accion, params);
+const llamarMoldes     = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
+const llamarColor      = (accion, params = {}) => llamar(CONTROLADOR_COLOR, accion, params);
+const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
 let materialesProdCachePorProducto = {}; // productoId -> materiales[]
@@ -958,20 +964,6 @@ function iniciarAutoRefresh() {
     });
 }
 
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
 
 async function obtenerSucursalesProd() {
     if (sucursalesProdCache) return sucursalesProdCache;
@@ -1002,33 +994,6 @@ function renderStatRow(producciones) {
         <div class="pc-stat-chip s-success"><div class="ico"><i class="fa-solid fa-flag-checkered"></i></div><div class="txt"><div class="n">${finalizadas}</div><div class="l">Finalizadas</div></div></div>
         <div class="pc-stat-chip s-warning"><div class="ico"><i class="fa-solid fa-weight-hanging"></i></div><div class="txt"><div class="n">${formatearCantidadProd(kgHoy)}</div><div class="l">Kg hoy</div></div></div>
     `;
-}
-async function llamarProduccion(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_PRODUCCION, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    const texto = await resp.text();
-    try { return JSON.parse(texto); }
-    catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}).`);
-    }
-}
-
-async function llamarMoldes(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_MOLDES, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    return resp.json();
-}
-
-async function llamarColor(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_COLOR, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    return resp.json();
 }
 
 function renderListaMermas(p) {

@@ -115,8 +115,9 @@ include("header.php");
 <script>
 const CONTROLADOR_OPERARIO  = 'controllers/clssOperario.php';
 const CONTROLADOR_SUCURSAL  = 'controllers/clssSucursal.php';
+const llamarOperario = (accion, params = {}) => llamar(CONTROLADOR_OPERARIO, accion, params);
+const llamarSucursal = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 const modalOperario = new bootstrap.Modal(document.getElementById('modalOperario'));
-
 let modoEdicionOperario = false;
 let operarioIdActual = 0;
 let tomSelectSucursales = null;
@@ -175,37 +176,8 @@ function inicializarTomSelectEtapas() {
     });
 }
 
-async function llamarOperario(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_OPERARIO, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
 
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
+
 
 async function cargarCargosActivos() {
     const json = await llamarOperario('LISTARCARGOS');

@@ -549,9 +549,6 @@ include("header.php");
 
 
 var total = 0;
-const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
-const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php'; // para el filtro de moldes y el <select> de color
-const CONTROLADOR_COLOR      = 'controllers/clssColor.php';  // para el <select> de color
 const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduccion'));
 
 let modoEdicionProduccion = false;
@@ -709,23 +706,15 @@ function actualizarTextoUltimaActualizacion() {
     el.innerHTML = texto;
 }
 
-const CONTROLADOR_SUCURSAL = 'controllers/clssSucursal.php';
+const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
+const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php';
+const CONTROLADOR_COLOR      = 'controllers/clssColor.php';
+const CONTROLADOR_SUCURSAL   = 'controllers/clssSucursal.php';
 
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
-
+const llamarProduccion = (accion, params = {}) => llamar(CONTROLADOR_PRODUCCION, accion, params);
+const llamarMoldes     = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
+const llamarColor      = (accion, params = {}) => llamar(CONTROLADOR_COLOR, accion, params);
+const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 let sucursalesProdCache = null;
 async function obtenerSucursalesProd() {
     if (sucursalesProdCache) return sucursalesProdCache;
@@ -769,56 +758,6 @@ function renderStatRow(producciones) {
     `;
 }
 
-async function llamarProduccion(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_PRODUCCION, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
-    }
-}
-
-async function llamarMoldes(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_MOLDES, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
-
-async function llamarColor(accion, params = {}) {
-    const body = new URLSearchParams({
-        accion,
-        device_id: DeviceTracking.getDeviceId(),
-        device_nombre: DeviceTracking.getDeviceNombre(),
-        ...params
-    });
-    const resp = await fetch(CONTROLADOR_COLOR, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
 function renderListaMermas(p) {
     const cont = document.getElementById('merma_lista_registrada');
     const mermas = p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
