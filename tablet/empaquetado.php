@@ -510,7 +510,7 @@ let registrosGlobalCache = [];
 let vistaListaActual = 'pendientes';
 
 document.addEventListener('DOMContentLoaded', () => {
-    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
+    // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
 
     cargarPendientesEmpaquetado();
     cargarMisRegistros();

@@ -392,7 +392,7 @@ let cacheFilasEmpaquetado = [];
 let tabActivoEmp = '__todos__';
 
 document.addEventListener('DOMContentLoaded', () => {
-    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
+   // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
 
     cargarPendientesEmpaquetado();
     cargarListadoGeneralEmp();

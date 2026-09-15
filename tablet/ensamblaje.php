@@ -459,7 +459,7 @@ let operariosCatalogoEns = [];    // catálogo completo de operarios
 let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
 
 document.addEventListener('DOMContentLoaded', () => {
-    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
+   // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
 
     cargarEnsamblajes().catch(err => {
         console.error('Error cargando datos iniciales:', err);

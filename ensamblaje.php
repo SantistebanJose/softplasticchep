@@ -420,7 +420,7 @@ let ensamblajesCache = [];       // último listado recibido del backend
 let productoTabActivoEns = null; // clave del producto activo; null = aún sin definir
 
 document.addEventListener('DOMContentLoaded', () => {
-    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
+    // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
     inicializarPagina();
 });
 async function inicializarPagina() {
