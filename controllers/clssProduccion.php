@@ -102,6 +102,7 @@ ob_start();
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/clssVerificarSession.php';
 session_start();
 
 if (isset($_POST["accion"])) {
@@ -116,7 +117,113 @@ if (isset($_POST["accion"])) {
     }
 }
 
-function controladorProduccion($accion)
+function controladorProduccion(string $accion): void
+{
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARPRODUCCIONES',
+        'OBTENERPRODUCCION',
+        'BUSCAROPERARIOS',
+        'BUSCARMAQUINAS',
+        'BUSCARMATERIALESPRODUCCION',
+        'BUSCARCATEGORIASMATERIAL',
+        'BUSCARLOTESMATERIAL',
+        'BUSCARPRODUCTOSMOLDE',
+        'BUSCARMOLDESPORPRODUCTO',
+    ];
+
+    $accionesOperacion = [
+        'GUARDARPRODUCCION',
+        'REGISTRARMERMA',
+        'INICIARCORRIDA',
+        'FINALIZARCORRIDA',
+        'ENVIARAENSAMBLAJE',
+    ];
+
+    $accionesSoloAdmin = [
+        'ELIMINARPRODUCCION',
+        'REACTIVARPRODUCCION',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['ADMIN', 'PRODUCCION', 'CONSULTA']);
+    } elseif (in_array($accion, $accionesOperacion, true)) {
+        exigirRol($usuario, ['ADMIN', 'PRODUCCION']);
+    } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+        exigirRol($usuario, ['ADMIN']);
+    } else {
+        responder(false, 'Acción no reconocida.');
+    }
+
+    switch ($accion) {
+        case 'LISTARPRODUCCIONES':
+            listarProducciones();
+            break;
+
+        case 'OBTENERPRODUCCION':
+            obtenerProduccion((int) ($_POST['id'] ?? 0));
+            break;
+
+        case 'GUARDARPRODUCCION':
+            guardarProduccion();
+            break;
+
+        case 'ELIMINARPRODUCCION':
+            eliminarProduccion();
+            break;
+
+        case 'REACTIVARPRODUCCION':
+            reactivarProduccion();
+            break;
+
+        case 'REGISTRARMERMA':
+            registrarMerma();
+            break;
+
+        case 'BUSCAROPERARIOS':
+            buscarOperarios();
+            break;
+
+        case 'BUSCARMAQUINAS':
+            buscarMaquinas();
+            break;
+
+        case 'BUSCARMATERIALESPRODUCCION':
+            buscarMaterialesProduccion();
+            break;
+
+        case 'BUSCARCATEGORIASMATERIAL':
+            buscarCategoriasMaterial();
+            break;
+
+        case 'ENVIARAENSAMBLAJE':
+            enviarAEnsamblaje();
+            break;
+
+        case 'INICIARCORRIDA':
+            iniciarCorrida((int) ($_POST['id'] ?? 0));
+            break;
+
+        case 'FINALIZARCORRIDA':
+            finalizarCorrida((int) ($_POST['id'] ?? 0));
+            break;
+
+        case 'BUSCARLOTESMATERIAL':
+            buscarLotesMaterial();
+            break;
+
+        case 'BUSCARPRODUCTOSMOLDE':
+            buscarProductosMolde();
+            break;
+
+        case 'BUSCARMOLDESPORPRODUCTO':
+            buscarMoldesPorProducto((int) ($_POST['producto_id'] ?? 0));
+            break;
+    }
+}
+
+function controladorProduccionAntiguo($accion)
 {
     switch ($accion) {
         case 'LISTARPRODUCCIONES':
