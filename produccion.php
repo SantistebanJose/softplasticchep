@@ -569,7 +569,7 @@ let produccionesCache = [];      // último listado recibido del backend
 let productoTabActivo = null;    // nombre del producto seleccionado; null = aún sin definir
 
 document.addEventListener('DOMContentLoaded', () => {
-    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
+    //DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
 
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
