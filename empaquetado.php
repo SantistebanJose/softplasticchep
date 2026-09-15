@@ -392,6 +392,8 @@ let cacheFilasEmpaquetado = [];
 let tabActivoEmp = '__todos__';
 
 document.addEventListener('DOMContentLoaded', () => {
+    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
+
     cargarPendientesEmpaquetado();
     cargarListadoGeneralEmp();
 
@@ -411,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(id).addEventListener('change', cargarListadoGeneralEmp);
     });
 });
+
 function limpiarFiltrosListado() {
     document.getElementById('flist_estado').value = '';
     document.getElementById('flist_fecha_desde').value = '';

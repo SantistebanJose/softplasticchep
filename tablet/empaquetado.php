@@ -473,12 +473,17 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="../assets/js/device-tracking.js"></script>
+<script src="../assets/js/app-common.js"></script>
 <script>
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_EMPAQUETADO = '../controllers/clssEmpaquetado.php';
 const CONTROLADOR_SUCURSAL    = '../controllers/clssSucursal.php';
+
+const llamarEmpaquetado = (accion, params = {}) => llamar(CONTROLADOR_EMPAQUETADO, accion, params);
+const llamarSucursal    = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 
 let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
@@ -505,6 +510,8 @@ let registrosGlobalCache = [];
 let vistaListaActual = 'pendientes';
 
 document.addEventListener('DOMContentLoaded', () => {
+    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
+
     cargarPendientesEmpaquetado();
     cargarMisRegistros();
     iniciarAutoRefreshEmp();
@@ -531,31 +538,6 @@ function iniciarAutoRefreshEmp() {
     });
 }
 
-async function llamarEmpaquetado(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_EMPAQUETADO, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}).`);
-    }
-}
-
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    return resp.json();
-}
 
 function formatearCantidadEmp(n) {
     if (n === null || n === undefined || n === '') return '-';

@@ -569,6 +569,8 @@ let produccionesCache = [];      // último listado recibido del backend
 let productoTabActivo = null;    // nombre del producto seleccionado; null = aún sin definir
 
 document.addEventListener('DOMContentLoaded', () => {
+    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
+
     cargarProducciones().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('gridProducciones').innerHTML =
@@ -577,8 +579,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
 
-    // Al cambiar el producto, se recarga el select de moldes filtrado por
-    // ese producto (segundo paso de la cascada).
     document.getElementById('prod_producto_id').addEventListener('change', (e) => {
         cargarMoldesDeProducto(e.target.value, null);
         renderGridMateriales();
@@ -594,7 +594,6 @@ document.addEventListener('DOMContentLoaded', () => {
         detenerAutoRefreshMaterialesModal();
     });
 });
-
 
 function esTinte(m) {
     return m.color === true || m.color === 't' || m.color === 'true';

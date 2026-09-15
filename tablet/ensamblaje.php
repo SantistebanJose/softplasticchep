@@ -425,6 +425,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="../assets/js/device-tracking.js"></script>
+<script src="../assets/js/app-common.js"></script>
 <script>
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
@@ -433,6 +435,9 @@ const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'));
 const modalOperariosEns = new bootstrap.Modal(document.getElementById('modalOperariosEns'));
+
+const llamarEnsamblaje = (accion, params = {}) => llamar(CONTROLADOR_ENSAMBLAJE, accion, params);
+const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 
 let modoEdicionEnsamblaje = false;
 let ensamblajeIdActual = 0;
@@ -454,6 +459,8 @@ let operariosCatalogoEns = [];    // catálogo completo de operarios
 let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
 
 document.addEventListener('DOMContentLoaded', () => {
+    DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
+
     cargarEnsamblajes().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('gridEnsamblajes').innerHTML =
@@ -484,7 +491,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     iniciarAutoRefreshEns();
 });
-
 // ── Auto-refresh silencioso, igual patrón que Producción ───────────────────
 const POLL_INTERVAL_MS_ENS = 8000;
 let pollTimerEns = null;
@@ -507,27 +513,6 @@ function iniciarAutoRefreshEns() {
     });
 }
 
-// ── Llamadas genéricas ───────────────────────────────────────────────────
-async function llamarEnsamblaje(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_ENSAMBLAJE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-    const texto = await resp.text();
-    try { return JSON.parse(texto); }
-    catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}).`);
-    }
-}
-
-async function llamarSucursal(accion, params = {}) {
-    const body = new URLSearchParams({ accion, ...params });
-    const resp = await fetch(CONTROLADOR_SUCURSAL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    return resp.json();
-}
 async function obtenerSucursalesEns() {
     if (sucursalesEnsCache) return sucursalesEnsCache;
     const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
