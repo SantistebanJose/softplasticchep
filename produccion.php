@@ -337,6 +337,7 @@ include("header.php");
 <div class="pc-card">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2>Producción</h2>
+        <?php //echo json_encode($_SESSION)?>
         <button class="pc-btn pc-btn-primary" onclick="abrirModalCrearProduccion()">
             <i class="fa-solid fa-plus"></i> Registrar producción
         </button>

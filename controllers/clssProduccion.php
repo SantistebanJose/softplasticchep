@@ -119,6 +119,7 @@ if (isset($_POST["accion"])) {
 
 function controladorProduccion(string $accion): void
 {
+    // Todo acceso a Producción exige una sesión válida.
     $usuario = exigirSesion();
 
     $accionesLectura = [
@@ -147,13 +148,13 @@ function controladorProduccion(string $accion): void
     ];
 
     if (in_array($accion, $accionesLectura, true)) {
-        exigirRol($usuario, ['ADMIN', 'PRODUCCION', 'CONSULTA']);
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
     } elseif (in_array($accion, $accionesOperacion, true)) {
-        exigirRol($usuario, ['ADMIN', 'PRODUCCION']);
+        exigirRol($usuario, ['administrador', 'produccion']);
     } elseif (in_array($accion, $accionesSoloAdmin, true)) {
-        exigirRol($usuario, ['ADMIN']);
+        exigirRol($usuario, ['administrador']);
     } else {
-        responder(false, 'Acción no reconocida.');
+        responderAcceso(400, 'Acción no reconocida.');
     }
 
     switch ($accion) {
@@ -222,7 +223,6 @@ function controladorProduccion(string $accion): void
             break;
     }
 }
-
 function controladorProduccionAntiguo($accion)
 {
     switch ($accion) {

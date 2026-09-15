@@ -51,7 +51,14 @@ function exigirSesion(): array
 
 function exigirRol(array $usuario, array $rolesPermitidos): void
 {
-    if (!in_array($usuario['rol'], $rolesPermitidos, true)) {
+    $rolUsuario = strtoupper(trim((string) $usuario['rol']));
+
+    $rolesPermitidos = array_map(
+        fn($rol) => strtoupper(trim((string) $rol)),
+        $rolesPermitidos
+    );
+
+    if (!in_array($rolUsuario, $rolesPermitidos, true)) {
         responderAcceso(403, 'No tienes permiso para realizar esta acción.');
     }
 }
