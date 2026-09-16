@@ -161,8 +161,9 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             ) col ON true
             WHERE e.producto_id = :producto_id
               AND e.deleted_at IS NULL AND e.fin IS NOT NULL
+              AND e.enviado_empaquetado IS TRUE
               AND e.ensamblaje_id_referido IS NULL
-                AND e.js_producto_emsamblado IS NULL   
+              AND e.js_producto_emsamblado IS NULL
 
             UNION ALL
 
@@ -249,6 +250,7 @@ function listarEnsamblajesParaEmpaquetado()
     $where  = [
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
+        "e.enviado_empaquetado IS TRUE",
         "e.ensamblaje_id_referido IS NULL",
         "e.js_producto_emsamblado IS NULL", 
         "(e.cantidad_peso_kg - COALESCE((

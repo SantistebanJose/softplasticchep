@@ -470,11 +470,12 @@ function listarVentas()
     }
     // 'todas' (o cualquier otro valor no reconocido) no agrega filtro de fecha.
 
-    $sql = "SELECT v.id, v.codigo, v.cliente_ruc, p.razon_social AS cliente_nombre,
+    $sql = "SELECT v.id, v.codigo, v.cliente_ruc,
+                   COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
                    v.fecha_venta, v.monto_total, v.estado,
                    jsonb_array_length(v.js_items) AS items_count
             FROM venta v
-            JOIN proveedor p ON p.ruc = v.cliente_ruc
+            LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
             WHERE " . implode(' AND ', $where) . "
             ORDER BY v.fecha_venta DESC";
 
@@ -488,10 +489,10 @@ function obtenerVenta(int $id)
     if ($id <= 0) responderVenta(false, 'Venta inválida.');
 
     $result = executeQuery($conectar, "
-        SELECT v.*, p.razon_social AS cliente_nombre, p.nombre_comercial AS cliente_comercial,
+        SELECT v.*, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre, p.nombre_comercial AS cliente_comercial,
                p.ubicacion AS cliente_ubicacion, p.correo AS cliente_correo
         FROM venta v
-        JOIN proveedor p ON p.ruc = v.cliente_ruc
+        LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
         WHERE v.id = :id
     ", ['id' => $id]);
 
@@ -543,22 +544,25 @@ function guardarVenta()
 {
     $conectar = conectar_oll_BD();
 
+    // Una venta sin cliente identificado se registra como venta de mostrador
+    // usando el RUC/DNI reservado de "Clientes Varios".
     $cliente_ruc = trim($_POST['cliente_ruc'] ?? '');
+    if ($cliente_ruc === '') $cliente_ruc = '99999999';
     $itemsJson   = trim($_POST['items'] ?? '[]');
 
-    if (empty($cliente_ruc)) responderVenta(false, 'Debes seleccionar un cliente.');
+    if ($cliente_ruc !== '99999999') {
+        $cliente = executeQuery($conectar,
+            "SELECT ruc, js_tipo, deleted_at FROM proveedor WHERE ruc = :ruc",
+            ['ruc' => $cliente_ruc]
+        );
+        if (empty($cliente)) responderVenta(false, 'Cliente no encontrado.');
 
-    $cliente = executeQuery($conectar,
-        "SELECT ruc, js_tipo, deleted_at FROM proveedor WHERE ruc = :ruc",
-        ['ruc' => $cliente_ruc]
-    );
-    if (empty($cliente)) responderVenta(false, 'Cliente no encontrado.');
-
-    $tiposCliente = json_decode($cliente[0]['js_tipo'] ?? '[]', true) ?: [];
-    if (!in_array('cliente', $tiposCliente, true)) {
-        responderVenta(false, 'El RUC/DNI seleccionado no corresponde a un cliente.');
+        $tiposCliente = json_decode($cliente[0]['js_tipo'] ?? '[]', true) ?: [];
+        if (!in_array('cliente', $tiposCliente, true)) {
+            responderVenta(false, 'El RUC/DNI seleccionado no corresponde a un cliente.');
+        }
+        if (!empty($cliente[0]['deleted_at'])) responderVenta(false, 'El cliente seleccionado está inactivo.');
     }
-    if (!empty($cliente[0]['deleted_at'])) responderVenta(false, 'El cliente seleccionado está inactivo.');
 
     $itemsInput = json_decode($itemsJson, true);
     if (!is_array($itemsInput) || count($itemsInput) === 0) {
@@ -567,6 +571,31 @@ function guardarVenta()
 
     try {
         $conectar->beginTransaction();
+
+        // venta.cliente_ruc tiene una llave foránea a proveedor. Creamos una
+        // sola vez el cliente reservado dentro de la misma transacción para
+        // que las ventas de mostrador siempre cumplan dicha restricción.
+        if ($cliente_ruc === '99999999') {
+            $movimientoClienteVarios = obtenerMovimientoSesion('crear');
+            $stmtClienteVarios = $conectar->prepare("
+                INSERT INTO proveedor (
+                    ruc, js_tipo, razon_social, nombre_comercial, telefonos_contacto,
+                    correo, ubigeo, ubicacion, js_consulta_api,
+                    created_at, js_session, js_historial
+                ) VALUES (
+                    '99999999', :js_tipo::jsonb, 'Clientes Varios', NULL, :telefonos_contacto::jsonb,
+                    NULL, NULL, NULL, NULL,
+                    NOW(), :js_session, :js_historial::jsonb
+                )
+                ON CONFLICT (ruc) DO NOTHING
+            ");
+            $stmtClienteVarios->execute([
+                'js_tipo'            => '["cliente"]',
+                'telefonos_contacto' => '[]',
+                'js_session'         => json_encode($movimientoClienteVarios, JSON_UNESCAPED_UNICODE),
+                'js_historial'       => json_encode([$movimientoClienteVarios], JSON_UNESCAPED_UNICODE),
+            ]);
+        }
 
         $itemsFinal = [];
         $montoTotal = 0.0;

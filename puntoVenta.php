@@ -39,12 +39,54 @@ include("header.php");
         <h2>Venta Rápida</h2>
     </div>
     <div class="p-3 pc-venta-cliente-buscador" style="max-width:460px;">
-        <label class="form-label">Cliente *</label>
+        <label class="form-label">Cliente <span class="text-muted fw-normal">(opcional)</span></label>
         <input type="text" class="form-control" id="pv_cliente_texto" placeholder="Buscar cliente por nombre o RUC/DNI..." autocomplete="off">
         <div class="pc-venta-item-resultados" id="pv_cliente_resultados"></div>
         <input type="hidden" id="pv_cliente_ruc">
-        <div class="form-text" id="pv_cliente_seleccionado"></div>
+        <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+            <div class="form-text m-0" id="pv_cliente_seleccionado">Cliente: Clientes Varios · RUC/DNI: 99999999</div>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="abrirRegistroClientePV()">
+                <i class="fa-solid fa-user-plus"></i> Registrar cliente
+            </button>
+        </div>
     </div>
+</div>
+
+<!-- Modal de alta rápida de cliente -->
+<div class="modal fade" id="modalClientePV" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formClientePV">
+        <div class="modal-header">
+          <h5 class="modal-title">Registrar cliente</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">RUC / DNI *</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="pv_nuevo_cliente_ruc" maxlength="11" inputmode="numeric" required>
+              <button type="button" class="btn btn-outline-primary" onclick="consultarClientePV()"><i class="fa-solid fa-magnifying-glass"></i> Consultar</button>
+            </div>
+            <div class="form-text" id="pv_nuevo_cliente_info">8 dígitos (DNI) u 11 dígitos (RUC).</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Razón social / Nombre completo *</label>
+            <input type="text" class="form-control" id="pv_nuevo_cliente_nombre" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Nombre comercial</label>
+            <input type="text" class="form-control" id="pv_nuevo_cliente_comercial">
+          </div>
+          <input type="hidden" id="pv_nuevo_cliente_api">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cliente</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="row g-3">
@@ -90,7 +132,10 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const CONTROLADOR_VENTA = 'controllers/clssVenta.php';
+const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
 const TICKET_PDF_URL = 'controllers/ticketPdf.php';
+const CLIENTE_VARIOS_RUC = '99999999';
+const modalClientePV = new bootstrap.Modal(document.getElementById('modalClientePV'));
 
 async function llamarVenta(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -106,6 +151,16 @@ async function llamarVenta(accion, params = {}) {
         console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
         throw new Error(`El servidor no devolvió JSON válido (accion=${accion}).`);
     }
+}
+
+async function llamarProveedoresPV(accion, params = {}) {
+    const body = new URLSearchParams({ accion, ...params });
+    const resp = await fetch(CONTROLADOR_PROVEEDORES, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+    });
+    const texto = await resp.text();
+    try { return JSON.parse(texto); }
+    catch (e) { console.error(`Respuesta no válida para accion=${accion}:`, texto); throw new Error('El servidor no devolvió JSON válido.'); }
 }
 
 function formatearMoneda(n) {
@@ -138,6 +193,7 @@ function resolverImagenVenta(ruta) {
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarGridProductos('');
+    seleccionarClienteVariosPV();
 
     let debounceProducto = null;
     document.getElementById('pv_producto_texto').addEventListener('input', function () {
@@ -151,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
 let debounceClienteTimer = null;
 document.getElementById('pv_cliente_texto').addEventListener('input', function () {
     document.getElementById('pv_cliente_ruc').value = '';
-    document.getElementById('pv_cliente_seleccionado').textContent = '';
+    document.getElementById('pv_cliente_seleccionado').textContent = `Cliente: Clientes Varios · RUC/DNI: ${CLIENTE_VARIOS_RUC}`;
     clearTimeout(debounceClienteTimer);
     const valor = this.value.trim();
     const cont = document.getElementById('pv_cliente_resultados');
@@ -175,6 +231,74 @@ function seleccionarClientePV(ruc, nombre) {
     document.getElementById('pv_cliente_seleccionado').textContent = `Seleccionado: ${nombre} (${ruc})`;
     document.getElementById('pv_cliente_resultados').style.display = 'none';
 }
+
+function seleccionarClienteVariosPV() {
+    document.getElementById('pv_cliente_ruc').value = CLIENTE_VARIOS_RUC;
+    document.getElementById('pv_cliente_texto').value = '';
+    document.getElementById('pv_cliente_seleccionado').textContent = `Cliente: Clientes Varios · RUC/DNI: ${CLIENTE_VARIOS_RUC}`;
+}
+
+function abrirRegistroClientePV() {
+    document.getElementById('formClientePV').reset();
+    document.getElementById('pv_nuevo_cliente_api').value = '';
+    document.getElementById('pv_nuevo_cliente_info').textContent = '8 dígitos (DNI) u 11 dígitos (RUC).';
+    modalClientePV.show();
+}
+
+async function consultarClientePV() {
+    const numero = document.getElementById('pv_nuevo_cliente_ruc').value.trim();
+    if (!/^\d{8}$|^\d{11}$/.test(numero)) {
+        Swal.fire('Atención', 'Ingresa un RUC (11 dígitos) o DNI (8 dígitos) válido.', 'warning');
+        return;
+    }
+    const info = document.getElementById('pv_nuevo_cliente_info');
+    info.textContent = 'Consultando...';
+    const json = await llamarProveedoresPV('CONSULTARDOCUMENTO', { numero });
+    if (!json.success) { info.textContent = ''; Swal.fire('Error', json.message, 'error'); return; }
+    document.getElementById('pv_nuevo_cliente_nombre').value = json.data.name || '';
+    document.getElementById('pv_nuevo_cliente_api').value = json.raw || '';
+    info.textContent = json.data.tipo === 'RUC' ? `Empresa · Estado: ${json.data.state || '-'}` : 'Persona natural (DNI)';
+}
+
+document.getElementById('pv_nuevo_cliente_ruc').addEventListener('input', function () {
+    this.value = this.value.replace(/\D/g, '');
+});
+
+document.getElementById('formClientePV').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const ruc = document.getElementById('pv_nuevo_cliente_ruc').value.trim();
+    const razon = document.getElementById('pv_nuevo_cliente_nombre').value.trim();
+    if (!/^\d{8}$|^\d{11}$/.test(ruc) || !razon) {
+        Swal.fire('Atención', 'Completa un RUC/DNI válido y el nombre del cliente.', 'warning');
+        return;
+    }
+
+    // Un cliente registrado desde esta pantalla debe ser nuevo. No se debe
+    // sobrescribir ni convertir un proveedor o cliente que ya existe.
+    const existente = await llamarProveedoresPV('OBTENERPROVEEDOR', { ruc });
+    if (existente.success) {
+        let descripcion = 'proveedor y/o cliente';
+        try {
+            const tiposExistentes = JSON.parse(existente.proveedor.js_tipo || '[]');
+            if (tiposExistentes.includes('cliente') && tiposExistentes.includes('proveedor')) descripcion = 'proveedor y cliente';
+            else if (tiposExistentes.includes('cliente')) descripcion = 'cliente';
+            else if (tiposExistentes.includes('proveedor')) descripcion = 'proveedor';
+        } catch (_) { /* mantenemos el mensaje general */ }
+        Swal.fire('Cliente ya registrado', `El RUC/DNI ${ruc} ya está registrado como ${descripcion}. Búscalo y selecciónalo en el campo Cliente.`, 'warning');
+        return;
+    }
+    const json = await llamarProveedoresPV('GUARDARPROVEEDOR', {
+        ruc, razon_social: razon,
+        nombre_comercial: document.getElementById('pv_nuevo_cliente_comercial').value.trim(),
+        js_tipo: JSON.stringify(['cliente']), telefonos_contacto: '[]',
+        solo_nuevo_cliente: '1',
+        js_consulta_api: document.getElementById('pv_nuevo_cliente_api').value,
+    });
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+    modalClientePV.hide();
+    seleccionarClientePV(ruc, razon);
+    Swal.fire('Listo', 'Cliente registrado y seleccionado para esta venta.', 'success');
+});
 
 document.addEventListener('click', (e) => {
     if (!e.target.closest('.pc-venta-cliente-buscador')) {
@@ -340,16 +464,63 @@ function renderCarrito() {
 }
 
 // ── Registrar venta ──────────────────────────────────────────────────────────
+function escaparHtmlPV(valor) {
+    return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+async function confirmarVentaRapida(clienteRuc) {
+    const esClienteVarios = clienteRuc === CLIENTE_VARIOS_RUC;
+    const clienteNombre = esClienteVarios
+        ? 'Clientes Varios'
+        : (document.getElementById('pv_cliente_texto').value.trim() || 'Cliente seleccionado');
+    const total = carritoVenta.reduce((acumulado, item) => acumulado + (item.cantidad * item.precio), 0);
+    const filas = carritoVenta.map(item => `
+        <tr>
+            <td class="text-start">
+                <div class="fw-semibold">${escaparHtmlPV(item.producto_codigo)} - ${escaparHtmlPV(item.producto)}</div>
+                <small class="text-muted">${escaparHtmlPV(item.color)}</small>
+            </td>
+            <td class="text-end">${formatearCantidadVenta(item.cantidad)} ${escaparHtmlPV(item.unidad)}</td>
+            <td class="text-end">${formatearMoneda(item.precio)}</td>
+            <td class="text-end">${formatearMoneda(item.cantidad * item.precio)}</td>
+        </tr>
+    `).join('');
+
+    const resultado = await Swal.fire({
+        title: '¿Confirmar venta?',
+        icon: 'question',
+        html: `
+            <div class="text-start mb-2"><b>Cliente:</b> ${escaparHtmlPV(clienteNombre)}<br><b>RUC/DNI:</b> ${escaparHtmlPV(clienteRuc)}</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-2" style="font-size:.8rem;">
+                    <thead><tr><th>Artículo</th><th class="text-end">Cant.</th><th class="text-end">P. Unit.</th><th class="text-end">Subtotal</th></tr></thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>
+            <div class="text-end fs-5"><b>Total: ${formatearMoneda(total)}</b></div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fa-solid fa-check"></i> Sí, registrar venta',
+        cancelButtonText: 'Revisar venta',
+        focusCancel: true,
+        width: 760,
+    });
+    return resultado.isConfirmed;
+}
+
 async function registrarVentaRapida() {
-    const clienteRuc = document.getElementById('pv_cliente_ruc').value;
-    if (!clienteRuc) {
-        Swal.fire('Atención', 'Selecciona un cliente de la lista antes de guardar.', 'warning');
-        return;
-    }
+    const clienteRuc = document.getElementById('pv_cliente_ruc').value || CLIENTE_VARIOS_RUC;
     if (carritoVenta.length === 0) {
         Swal.fire('Atención', 'Agrega al menos un producto al carrito.', 'warning');
         return;
     }
+
+    if (!await confirmarVentaRapida(clienteRuc)) return;
 
     const items = carritoVenta.map(item => ({
         producto_id: item.producto_id,
@@ -372,9 +543,7 @@ async function registrarVentaRapida() {
         Swal.fire('Listo', `Venta ${json.codigo} registrada correctamente.`, 'success');
         carritoVenta = [];
         renderCarrito();
-        document.getElementById('pv_cliente_ruc').value = '';
-        document.getElementById('pv_cliente_texto').value = '';
-        document.getElementById('pv_cliente_seleccionado').textContent = '';
+        seleccionarClienteVariosPV();
         cargarGridProductos(document.getElementById('pv_producto_texto').value.trim());
         imprimirTicketVenta(json.venta_id);
     } else {

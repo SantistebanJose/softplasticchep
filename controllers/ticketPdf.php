@@ -2,7 +2,7 @@
 
 /**
  * controllers/ticketPdf.php
- * Genera el comprobante de una venta como PDF de página completa (A4),
+ * Genera el comprobante de una venta como ticket térmico de 80 mm,
  * con logo y datos de la empresa (sin SUNAT, es un ticket simple interno).
  *
  * Uso: controllers/ticketPdf.php?id=123
@@ -18,6 +18,9 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
 session_start();
+
+// Evita que notices/warnings accidentales se mezclen con los bytes del PDF.
+ob_start();
 
 // =============================================================================
 // DATOS DE LA EMPRESA (fijos — no vienen de la base de datos)
@@ -38,9 +41,9 @@ $conectar = conectar_oll_BD();
 
 $result = executeQuery($conectar, "
     SELECT v.codigo, v.fecha_venta, v.monto_total, v.estado, v.js_items,
-           v.cliente_ruc, p.razon_social AS cliente_nombre
+           v.cliente_ruc, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre
     FROM venta v
-    JOIN proveedor p ON p.ruc = v.cliente_ruc
+    LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
     WHERE v.id = :id
 ", ['id' => $id]);
 
@@ -61,10 +64,14 @@ function pdfEscaparTexto(string $s): string
     return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $s);
 }
 
-// UTF-8 -> Latin-1/CP1252, que es lo que espera WinAnsiEncoding.
+// UTF-8 -> Windows-1252, que es lo que espera WinAnsiEncoding. utf8_decode()
+// fue obsoleta en PHP 8.2 y sus avisos terminaban corrompiendo el PDF.
 function pdfTexto(string $s): string
 {
-    return pdfEscaparTexto(utf8_decode($s));
+    $convertido = function_exists('iconv')
+        ? iconv('UTF-8', 'Windows-1252//TRANSLIT', $s)
+        : mb_convert_encoding($s, 'Windows-1252', 'UTF-8');
+    return pdfEscaparTexto($convertido === false ? $s : $convertido);
 }
 
 // str_pad() cuenta BYTES, no caracteres visibles: con tildes/ñ (2 bytes en
@@ -213,13 +220,40 @@ function generarPdfComprobante(array $lineas, float $anchoPt, float $altoPt, ?ar
 }
 
 // =============================================================================
-// ARMAR EL CONTENIDO DEL COMPROBANTE (A4)
+// ARMAR EL CONTENIDO DEL COMPROBANTE (TICKET TÉRMICO DE 80 mm)
 // =============================================================================
 
-$anchoPt = 595.28; // A4
-$altoPt  = 841.89;
-$margen  = 40.0;
-$anchoUtil = $anchoPt - 2 * $margen;
+// 80 mm equivalen a 226.77 puntos PDF. La altura se calcula según el
+// contenido, para no dejar espacio de A4 ni cortar tickets con varios ítems.
+$anchoPt = 226.77;
+$margen  = 12.0;
+$columnasTicket = 48;
+
+function envolverTicket(string $texto, int $columnas): array
+{
+    $texto = trim($texto);
+    if ($texto === '') return [];
+    return explode("\n", wordwrap($texto, $columnas, "\n", true));
+}
+
+function centrarTicket(string $texto, int $columnas): string
+{
+    $espacios = max(0, intdiv($columnas - mb_strlen($texto, 'UTF-8'), 2));
+    return str_repeat(' ', $espacios) . $texto;
+}
+
+// Primero contamos las líneas variables para calcular una altura exacta.
+$lineasVariables = 0;
+foreach ($items as $it) {
+    $nombre = trim(($it['producto_codigo'] ?? '') . ' - ' . ($it['producto'] ?? ''));
+    $color  = $it['color'] ?? '';
+    if ($color === 'Sin color (registro legado)') $color = '';
+    $lineasVariables += max(1, count(envolverTicket($nombre, $columnasTicket)));
+    $lineasVariables += count(envolverTicket($color, $columnasTicket - 2));
+    $lineasVariables += 1; // cantidad × precio = subtotal
+}
+$lineasVariables += count(envolverTicket($venta['cliente_nombre'], $columnasTicket - 9));
+$altoPt = max(285.0, 265.0 + ($lineasVariables * 10.5));
 
 $lineas = [];
 $y = $altoPt - $margen; // cursor vertical, baja a medida que se agregan líneas
@@ -232,64 +266,57 @@ function agregarLinea(array &$lineas, float &$y, string $texto, int $size, bool 
 
 // ── Logo + datos de la empresa ──────────────────────────────────────────────
 $logo = cargarLogoComoRGB(EMPRESA_LOGO_PATH);
-$xTextoEmpresa = $margen;
 
 if ($logo !== null) {
-    $maxAncho = 110.0;
-    $maxAlto  = 50.0;
+    $maxAncho = 60.0;
+    $maxAlto  = 35.0;
     $escala   = min($maxAncho / $logo['ancho'], $maxAlto / $logo['alto']);
     $logo['dispAncho'] = $logo['ancho'] * $escala;
     $logo['dispAlto']  = $logo['alto'] * $escala;
-    $logo['x'] = $margen;
+    $logo['x'] = ($anchoPt - $logo['dispAncho']) / 2;
     $logo['y'] = $y - $logo['dispAlto'];
-
-    $xTextoEmpresa = $margen + $logo['dispAncho'] + 15;
+    $y -= $logo['dispAlto'] + 5;
 }
 
-$yEmpresa = $y;
-$lineas[] = ['texto' => EMPRESA_NOMBRE_COMERCIAL, 'size' => 14, 'bold' => true, 'x' => $xTextoEmpresa, 'y' => $yEmpresa];
-$yEmpresa -= 16;
-$lineas[] = ['texto' => EMPRESA_RAZON_SOCIAL, 'size' => 9, 'bold' => false, 'x' => $xTextoEmpresa, 'y' => $yEmpresa];
-$yEmpresa -= 12;
-$lineas[] = ['texto' => 'RUC: ' . EMPRESA_RUC, 'size' => 9, 'bold' => false, 'x' => $xTextoEmpresa, 'y' => $yEmpresa];
-$yEmpresa -= 12;
-
-// El cursor baja lo que ocupe más alto: el bloque de texto de la empresa
-// o el logo (si el logo es más alto que el texto, el punto de partida
-// del resto del documento respeta esa altura).
-$y = min($yEmpresa, $logo !== null ? ($y - $logo['dispAlto']) : $yEmpresa) - 10;
-
-agregarLinea($lineas, $y, str_repeat('-', 95), 8, false, $margen, 14);
+agregarLinea($lineas, $y, centrarTicket(EMPRESA_NOMBRE_COMERCIAL, $columnasTicket), 11, true, $margen, 13);
+agregarLinea($lineas, $y, centrarTicket(EMPRESA_RAZON_SOCIAL, $columnasTicket), 7, false, $margen, 10);
+agregarLinea($lineas, $y, centrarTicket('RUC: ' . EMPRESA_RUC, $columnasTicket), 7, false, $margen, 12);
+agregarLinea($lineas, $y, str_repeat('-', $columnasTicket), 7, false, $margen, 10);
 
 // ── Datos de la venta ────────────────────────────────────────────────────────
-agregarLinea($lineas, $y, $venta['codigo'], 14, true, $margen, 18);
+agregarLinea($lineas, $y, centrarTicket($venta['codigo'], $columnasTicket), 11, true, $margen, 14);
 
 if ($venta['estado'] === 'anulada') {
-    agregarLinea($lineas, $y, '*** VENTA ANULADA ***', 11, true, $margen, 15);
+    agregarLinea($lineas, $y, centrarTicket('*** VENTA ANULADA ***', $columnasTicket), 9, true, $margen, 12);
 }
 
-agregarLinea($lineas, $y, 'Fecha: ' . date('d/m/Y H:i', strtotime($venta['fecha_venta'])), 9, false, $margen, 13);
-agregarLinea($lineas, $y, 'Cliente: ' . $venta['cliente_nombre'], 9, false, $margen, 13);
-agregarLinea($lineas, $y, 'RUC/DNI: ' . $venta['cliente_ruc'], 9, false, $margen, 16);
+agregarLinea($lineas, $y, 'Fecha: ' . date('d/m/Y H:i', strtotime($venta['fecha_venta'])), 7, false, $margen, 10);
+foreach (envolverTicket($venta['cliente_nombre'], $columnasTicket - 9) as $i => $linea) {
+    agregarLinea($lineas, $y, ($i === 0 ? 'Cliente: ' : '         ') . $linea, 7, false, $margen, 10);
+}
+agregarLinea($lineas, $y, 'RUC/DNI: ' . $venta['cliente_ruc'], 7, false, $margen, 12);
 
-agregarLinea($lineas, $y, str_repeat('-', 95), 8, false, $margen, 14);
+agregarLinea($lineas, $y, str_repeat('-', $columnasTicket), 7, false, $margen, 10);
 
 // ── Tabla de ítems ───────────────────────────────────────────────────────────
-// Columnas (en caracteres, fuente Courier 9pt): Producto 45 | Color 15 |
-// Cant 8 (der.) | P.Unit 12 (der.) | Subtotal 14 (der.) ≈ 94 caracteres,
-// entra cómodo en el ancho útil de A4.
-$colProducto = 45;
-$colColor    = 15;
-$colCant     = 8;
-$colPUnit    = 12;
-$colSubtotal = 14;
+agregarLinea($lineas, $y, centrarTicket('DETALLE DE VENTA', $columnasTicket), 8, true, $margen, 11);
 
-$encabezado = mbPad('Producto', $colProducto)
-            . mbPad('Color', $colColor)
-            . mbPad('Cant', $colCant, STR_PAD_LEFT)
-            . mbPad('P.Unit', $colPUnit, STR_PAD_LEFT)
-            . mbPad('Subtotal', $colSubtotal, STR_PAD_LEFT);
-agregarLinea($lineas, $y, $encabezado, 9, true, $margen, 13);
+// El nombre del producto se imprime arriba para darle espacio. Los importes se
+// muestran abajo en una tabla con bordes visibles, pensada para ticket de 80 mm.
+$colCant     = 9;
+$colPUnit    = 13;
+$colSubtotal = 14;
+$bordeTabla = '+' . str_repeat('-', $colCant) . '+' . str_repeat('-', $colPUnit) . '+' . str_repeat('-', $colSubtotal) . '+';
+$encabezadoTabla = '|'
+    . mbPad('CANT.', $colCant)
+    . '|'
+    . mbPad('P. UNIT.', $colPUnit)
+    . '|'
+    . mbPad('SUBTOTAL', $colSubtotal)
+    . '|';
+agregarLinea($lineas, $y, $bordeTabla, 7, false, $margen, 8);
+agregarLinea($lineas, $y, $encabezadoTabla, 7, true, $margen, 9);
+agregarLinea($lineas, $y, $bordeTabla, 7, false, $margen, 9);
 
 foreach ($items as $it) {
     $nombre = $it['producto_codigo'] . ' - ' . $it['producto'];
@@ -300,29 +327,28 @@ foreach ($items as $it) {
     $precioTxt   = number_format((float)$it['precio_unitario'], 2);
     $subtotalTxt = number_format((float)$it['subtotal'], 2);
 
-    $wrapNombre = explode("\n", wordwrap($nombre, $colProducto, "\n", true));
-    $wrapColor  = explode("\n", wordwrap($color, $colColor, "\n", true));
-    $filasTexto = max(count($wrapNombre), count($wrapColor));
-
-    for ($i = 0; $i < $filasTexto; $i++) {
-        $nombreLinea = mbPad($wrapNombre[$i] ?? '', $colProducto);
-        $colorLinea  = mbPad($wrapColor[$i] ?? '', $colColor);
-        if ($i === 0) {
-            $linea = $nombreLinea . $colorLinea
-                   . mbPad($cantidadTxt, $colCant, STR_PAD_LEFT)
-                   . mbPad($precioTxt, $colPUnit, STR_PAD_LEFT)
-                   . mbPad($subtotalTxt, $colSubtotal, STR_PAD_LEFT);
-        } else {
-            $linea = $nombreLinea . $colorLinea;
-        }
-        agregarLinea($lineas, $y, $linea, 9, false, $margen, 12);
+    foreach (envolverTicket($nombre, $columnasTicket) as $linea) {
+        agregarLinea($lineas, $y, $linea, 8, true, $margen, 10);
     }
+    foreach (envolverTicket($color, $columnasTicket - 2) as $linea) {
+        agregarLinea($lineas, $y, '  ' . $linea, 7, false, $margen, 9);
+    }
+    $filaImportes = '|'
+        . mbPad($cantidadTxt, $colCant)
+        . '|'
+        . mbPad('S/ ' . $precioTxt, $colPUnit, STR_PAD_LEFT)
+        . '|'
+        . mbPad('S/ ' . $subtotalTxt, $colSubtotal, STR_PAD_LEFT)
+        . '|';
+    agregarLinea($lineas, $y, $filaImportes, 7, false, $margen, 9);
+    agregarLinea($lineas, $y, $bordeTabla, 7, false, $margen, 9);
 }
 
-agregarLinea($lineas, $y, str_repeat('-', 95), 8, false, $margen, 18);
+agregarLinea($lineas, $y, str_repeat('-', $columnasTicket), 7, false, $margen, 13);
 
-$totalTxt = mbPad('TOTAL: S/ ' . number_format((float)$venta['monto_total'], 2), 95, STR_PAD_LEFT);
-agregarLinea($lineas, $y, $totalTxt, 12, true, $margen, 16);
+$totalTxt = 'TOTAL: S/ ' . number_format((float)$venta['monto_total'], 2);
+agregarLinea($lineas, $y, centrarTicket($totalTxt, $columnasTicket), 11, true, $margen, 14);
+agregarLinea($lineas, $y, centrarTicket('¡Gracias por su compra!', $columnasTicket), 7, false, $margen, 8);
 
 $pdf = generarPdfComprobante($lineas, $anchoPt, $altoPt, $logo);
 

@@ -186,6 +186,9 @@ function guardarProveedor()
     $ubicacion        = trim($_POST['ubicacion'] ?? '');
     $telefonosJson    = trim($_POST['telefonos_contacto'] ?? '[]');
     $consultaApiJson  = trim($_POST['js_consulta_api'] ?? '');
+    // El alta rápida desde Punto de Venta solo admite clientes nuevos: no debe
+    // convertir ni sobrescribir un proveedor o cliente ya registrado.
+    $soloNuevoCliente = ($_POST['solo_nuevo_cliente'] ?? '') === '1';
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (!esDocumentoProveedorValido($ruc)) {
@@ -234,6 +237,10 @@ function guardarProveedor()
     ];
 
     $existente = executeQuery($conectar, "SELECT * FROM proveedor WHERE ruc = :ruc", ['ruc' => $ruc]);
+
+    if ($soloNuevoCliente && !empty($existente)) {
+        responder(false, 'El RUC/DNI ya está registrado como proveedor y/o cliente. Selecciónalo desde el buscador de clientes.');
+    }
 
     if (empty($existente)) {
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
