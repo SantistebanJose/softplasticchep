@@ -20,32 +20,66 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
-session_start();
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-function controladorSucursal($accion)
+if (isset($_POST['accion'])) {
+    try {
+        controladorSucursal((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssSucursal.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssSucursal.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
+}
+
+function controladorSucursal(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARSUCURSALES',
+        'OBTENERSUCURSAL',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARSUCURSAL',
+        'ELIMINARSUCURSAL',
+        'REACTIVARSUCURSAL',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARSUCURSALES':
             listarSucursales();
             break;
+
         case 'OBTENERSUCURSAL':
-            obtenerSucursal(intval($_POST['id'] ?? 0));
+            obtenerSucursal((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARSUCURSAL':
             guardarSucursal();
             break;
+
         case 'ELIMINARSUCURSAL':
             eliminarSucursal();
             break;
+
         case 'REACTIVARSUCURSAL':
             reactivarSucursal();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // SUCURSALES
 // =============================================================================
