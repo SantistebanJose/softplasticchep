@@ -5,9 +5,10 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
+iniciarSesionSegura();
 
 if (isset($_POST["accion"])) {
     try {
@@ -21,8 +22,50 @@ if (isset($_POST["accion"])) {
     }
 }
 
-function controladorEmpaquetado($accion)
+function controladorEmpaquetado(string $accion): void
 {
+    $accionesLectura = [
+        'LISTARENSAMBLAJESPARAEMPAQUETADO',
+        'LISTARPRODUCCIONESPARAEMPAQUETADO',
+        'BUSCARORIGENESDISPONIBLES',
+        'LISTAREMPAQUETADOSPORPRODUCTO',
+        'LISTAREMPAQUETADOS',
+        'LISTARTODOSEMPAQUETADOS',
+        'OBTENEREMPAQUETADO',
+        'BUSCARUNIDADESMEDIDA',
+        'BUSCAROPERARIOS',
+    ];
+
+    $accionesOperacion = [
+        'CREAREMPAQUETADO',
+    ];
+
+    $accionesSoloAdmin = [
+        'EDITAREMPAQUETADO',
+        'ELIMINAREMPAQUETADO',
+        'REACTIVAREMPAQUETADO',
+    ];
+
+    // La tablet identifica al operario mediante operario_id, no usuario_id.
+    // Puede consultar y registrar empaquetados, pero no modificarlos ni revertirlos.
+    if (!empty($_SESSION['operario_id'])) {
+        if (!in_array($accion, array_merge($accionesLectura, $accionesOperacion), true)) {
+            responderAcceso(403, 'No tienes permiso para realizar esta acción.');
+        }
+    } else {
+        $usuario = exigirSesion();
+
+        if (in_array($accion, $accionesLectura, true)) {
+            exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+        } elseif (in_array($accion, $accionesOperacion, true)) {
+            exigirRol($usuario, ['administrador', 'produccion']);
+        } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+            exigirRol($usuario, ['administrador']);
+        } else {
+            responderAcceso(400, 'Acción no reconocida.');
+        }
+    }
+
     switch ($accion) {
         case 'LISTARENSAMBLAJESPARAEMPAQUETADO':
             listarEnsamblajesParaEmpaquetado();
