@@ -149,9 +149,10 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
+iniciarSesionSegura();
 
 if (isset($_POST["accion"])) {
     try {
@@ -165,8 +166,54 @@ if (isset($_POST["accion"])) {
     }
 }
 
-function controladorEnsamblaje($accion)
+function controladorEnsamblaje(string $accion): void
 {
+    $accionesLectura = [
+        'LISTARENSAMBLAJES',
+        'OBTENERENSAMBLAJE',
+        'BUSCARPRODUCTOS',
+        'BUSCAROPERARIOS',
+        'BUSCARDERIVADOS',
+        'BUSCARCOMPLEMENTOS',
+        'BUSCARPRODUCTOSPARACOMPLEMENTAR',
+        'BUSCARPRODUCCIONESDISPONIBLES',
+        'BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE',
+        'OBTENERDATOSPRODUCCIONPARAENSAMBLAJE',
+    ];
+
+    $accionesOperacion = [
+        'GUARDARENSAMBLAJE',
+        'INICIARENSAMBLAJE',
+        'FINALIZARENSAMBLAJE',
+        'PASARAEMPAQUETADO',
+        'COMPLEMENTAR',
+    ];
+
+    $accionesSoloAdmin = [
+        'ELIMINARENSAMBLAJE',
+        'REACTIVARENSAMBLAJE',
+    ];
+
+    // La tablet autentica operarios con operario_id, no con usuario_id.
+    // Conserva ese flujo, pero no les permite desactivar ni reactivar registros.
+    if (esOperarioSesion()) {
+        if (!in_array($accion, array_merge($accionesLectura, $accionesOperacion), true)) {
+            responderAcceso(403, 'No tienes permiso para realizar esta acción.');
+        }
+    } else {
+        $usuario = exigirSesion();
+
+        if (in_array($accion, $accionesLectura, true)) {
+            exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+        } elseif (in_array($accion, $accionesOperacion, true)) {
+            exigirRol($usuario, ['administrador', 'produccion']);
+        } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+            exigirRol($usuario, ['administrador']);
+        } else {
+            responderAcceso(400, 'Acción no reconocida.');
+        }
+    }
+
     switch ($accion) {
         case 'LISTARENSAMBLAJES':
             listarEnsamblajes();
