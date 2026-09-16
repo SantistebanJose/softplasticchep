@@ -38,54 +38,90 @@
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
-
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-// PHP 8.5 imprime avisos "Deprecated" como HTML antes del cuerpo de la
-// respuesta si display_errors está activo. Como este controlador SIEMPRE
-// responde JSON puro (ver responder()), cualquier warning/notice impreso
-// aquí rompe el JSON.parse() del frontend. Se silencia solo la salida en
-// pantalla de deprecated/notice (los errores reales igual se registran
-// en el log si error_log/log_errors está configurado en php.ini).
+// Evita que avisos deprecated/notice dañen la respuesta JSON.
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 ini_set('display_errors', '0');
 
-function controladorOperario($accion)
+if (isset($_POST['accion'])) {
+    try {
+        controladorOperario((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssOperario.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssOperario.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
+}
+
+function controladorOperario(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTAROPERARIOS',
+        'OBTENEROPERARIO',
+        'LISTARCARGOS',
+        'LISTARETAPASACTIVAS',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDAROPERARIO',
+        'ELIMINAROPERARIO',
+        'REACTIVAROPERARIO',
+        'CREARUSUARIODESDEOPERARIO',
+        'BUSCARDNI',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTAROPERARIOS':
             listarOperarios();
             break;
+
         case 'OBTENEROPERARIO':
-            obtenerOperario(intval($_POST['id'] ?? 0));
+            obtenerOperario((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDAROPERARIO':
             guardarOperario();
             break;
+
         case 'ELIMINAROPERARIO':
             eliminarOperario();
             break;
+
         case 'REACTIVAROPERARIO':
             reactivarOperario();
             break;
+
         case 'CREARUSUARIODESDEOPERARIO':
             crearUsuarioManualDesdeOperario();
             break;
+
         case 'LISTARCARGOS':
             listarCargos();
             break;
+
         case 'BUSCARDNI':
             buscarDNI();
             break;
+
         case 'LISTARETAPASACTIVAS':
             listarEtapasActivas();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
 
@@ -729,10 +765,3 @@ function responder(bool $ok, string $msg, array $extra = []): void
     exit;
 }
 
-// =============================================================================
-// DISPATCH
-// =============================================================================
-
-if (isset($_POST["accion"])) {
-    controladorOperario($_POST["accion"]);
-}
