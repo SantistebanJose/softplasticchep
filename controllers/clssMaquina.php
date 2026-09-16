@@ -20,40 +20,73 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-if (isset($_POST["accion"])) {
-    controladorMaquina($_POST["accion"]);
+if (isset($_POST['accion'])) {
+    try {
+        controladorMaquina((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssMaquina.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssMaquina.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-function controladorMaquina($accion)
+function controladorMaquina(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARMAQUINAS',
+        'OBTENERMAQUINA',
+        'LISTARSUCURSALES',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARMAQUINA',
+        'ELIMINARMAQUINA',
+        'REACTIVARMAQUINA',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARMAQUINAS':
             listarMaquinas();
             break;
+
         case 'OBTENERMAQUINA':
-            obtenerMaquina(intval($_POST['id'] ?? 0));
+            obtenerMaquina((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARMAQUINA':
             guardarMaquina();
             break;
+
         case 'ELIMINARMAQUINA':
             eliminarMaquina();
             break;
+
         case 'REACTIVARMAQUINA':
             reactivarMaquina();
             break;
+
         case 'LISTARSUCURSALES':
             listarSucursalesCombo();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // MAQUINA
 // =============================================================================

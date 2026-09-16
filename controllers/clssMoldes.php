@@ -13,45 +13,78 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/cloudinaryHelper.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-// Carpeta donde se guardan las fotos de molde (sube 1 nivel desde controllers/)
+// Carpeta donde se guardan las fotos de molde.
 define('CARPETA_IMAGENES_MOLDE', __DIR__ . '/../uploads/moldes/');
 define('RUTA_WEB_IMAGENES_MOLDE', 'uploads/moldes/');
 
-if (isset($_POST["accion"])) {
-    controladorMoldes($_POST["accion"]);
+if (isset($_POST['accion'])) {
+    try {
+        controladorMoldes((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssMoldes.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssMoldes.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-function controladorMoldes($accion)
+function controladorMoldes(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARMOLDES',
+        'LISTARMOLDESPRODUCTO',
+        'OBTENERMOLDE',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARMOLDE',
+        'ELIMINARMOLDE',
+        'REACTIVARMOLDE',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'ventas', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARMOLDES':
             listarMoldes();
             break;
+
         case 'LISTARMOLDESPRODUCTO':
             listarMoldesProducto();
             break;
+
         case 'OBTENERMOLDE':
-            obtenerMolde(intval($_POST['id'] ?? 0));
+            obtenerMolde((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARMOLDE':
             guardarMolde();
             break;
+
         case 'ELIMINARMOLDE':
             eliminarMolde();
             break;
+
         case 'REACTIVARMOLDE':
             reactivarMolde();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // MOLDES
 // =============================================================================

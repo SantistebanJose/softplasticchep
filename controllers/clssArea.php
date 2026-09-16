@@ -22,34 +22,56 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-function controladorArea($accion)
+function controladorArea(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARAREAS',
+        'OBTENERAREA',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARAREA',
+        'ELIMINARAREA',
+        'REACTIVARAREA',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARAREAS':
             listarAreas();
             break;
+
         case 'OBTENERAREA':
-            obtenerArea(intval($_POST['id'] ?? 0));
+            obtenerArea((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARAREA':
             guardarArea();
             break;
+
         case 'ELIMINARAREA':
             eliminarArea();
             break;
+
         case 'REACTIVARAREA':
             reactivarArea();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // AREA
 // =============================================================================
@@ -268,11 +290,17 @@ if (!function_exists('responder')) {
     }
 }
 
-// =============================================================================
-// DISPATCH — solo se ejecuta si ESTE archivo fue llamado directamente
-// (no cuando clssCargo.php lo incluye vía require_once para reutilizar
-// sincronizarJsCargosArea)
-// =============================================================================
-if (basename($_SERVER['SCRIPT_FILENAME']) === basename(__FILE__)) {
-    controladorArea($_POST['accion'] ?? '');
+if (
+    basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)
+    && isset($_POST['accion'])
+) {
+    try {
+        controladorArea((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssArea.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssArea.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }

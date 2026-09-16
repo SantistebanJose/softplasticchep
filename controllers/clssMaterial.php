@@ -31,40 +31,74 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-if (isset($_POST["accion"])) {
-    controladorMaterial($_POST["accion"]);
+if (isset($_POST['accion'])) {
+    try {
+        controladorMaterial((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssMaterial.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssMaterial.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-function controladorMaterial($accion)
+function controladorMaterial(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARMATERIALES',
+        'BUSCARPRODUCTOS',
+        'OBTENERMATERIAL',
+    ];
+
+    // Guarda también stock_actual, unidad y tinte; es administración de inventario.
+    $accionesAdministracion = [
+        'GUARDARMATERIAL',
+        'ELIMINARMATERIAL',
+        'REACTIVARMATERIAL',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'compras', 'produccion', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARMATERIALES':
             listarMateriales();
             break;
+
         case 'BUSCARPRODUCTOS':
             buscarProductosMaterial();
             break;
+
         case 'OBTENERMATERIAL':
-            obtenerMaterial(intval($_POST['id'] ?? 0));
+            obtenerMaterial((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARMATERIAL':
             guardarMaterial();
             break;
+
         case 'ELIMINARMATERIAL':
             eliminarMaterial();
             break;
+
         case 'REACTIVARMATERIAL':
             reactivarMaterial();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // MATERIAL
 // =============================================================================

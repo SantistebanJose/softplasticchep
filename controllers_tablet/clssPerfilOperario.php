@@ -13,7 +13,7 @@
 
 require_once __DIR__ . '/../controllers/bd.php';
 require_once __DIR__ . '/../controllers/executeQuery.php';
-session_start();
+require_once __DIR__ . '/../controllers/clssVerificarSession.php';
 
 function controladorPerfilOperario($accion)
 {
@@ -31,9 +31,13 @@ function controladorPerfilOperario($accion)
 
 function requerirSesionOperario(): int
 {
+    // Inicia la sesión con cookie segura, strict mode y SameSite=Lax.
+    iniciarSesionSegura();
+
     if (empty($_SESSION['operario_id'])) {
-        responder(false, 'Sesión no válida. Vuelve a iniciar sesión.');
+        responderAcceso(401, 'Sesión de operario no válida. Vuelve a iniciar sesión.');
     }
+
     return (int) $_SESSION['operario_id'];
 }
 

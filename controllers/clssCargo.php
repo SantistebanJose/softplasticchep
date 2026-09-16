@@ -20,39 +20,67 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/clssArea.php'; // trae sincronizarJsCargosArea() (guard evita doble dispatch)
 require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/clssVerificarSession.php';
 
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+if (isset($_POST['accion'])) {
+    try {
+        controladorCargo((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssCargo.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssCargo.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-if (isset($_POST["accion"])) {
-    controladorCargo($_POST["accion"]);
-}
-
-function controladorCargo($accion)
+function controladorCargo(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARCARGOS',
+        'OBTENERCARGO',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARCARGO',
+        'ELIMINARCARGO',
+        'REACTIVARCARGO',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARCARGOS':
             listarCargos();
             break;
+
         case 'OBTENERCARGO':
-            obtenerCargo(intval($_POST['id'] ?? 0));
+            obtenerCargo((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARCARGO':
             guardarCargo();
             break;
+
         case 'ELIMINARCARGO':
             eliminarCargo();
             break;
+
         case 'REACTIVARCARGO':
             reactivarCargo();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // CARGO
 // =============================================================================

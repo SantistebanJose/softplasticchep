@@ -11,34 +11,66 @@
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-if (isset($_POST["accion"])) {
-    controladorColor($_POST["accion"]);
+if (isset($_POST['accion'])) {
+    try {
+        controladorColor((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssColor.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssColor.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-function controladorColor($accion)
+function controladorColor(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARCOLORES',
+        'OBTENERCOLOR',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARCOLOR',
+        'ELIMINARCOLOR',
+        'REACTIVARCOLOR',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARCOLORES':
             listarColores();
             break;
+
         case 'OBTENERCOLOR':
-            obtenerColor(intval($_POST['id'] ?? 0));
+            obtenerColor((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARCOLOR':
             guardarColor();
             break;
+
         case 'ELIMINARCOLOR':
             eliminarColor();
             break;
+
         case 'REACTIVARCOLOR':
             reactivarColor();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
 

@@ -51,47 +51,80 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
-session_start();
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-if (isset($_POST["accion"])) {
+if (isset($_POST['accion'])) {
     try {
-        controladorVenta($_POST["accion"]);
+        controladorVenta((string) $_POST['accion']);
     } catch (PDOException $e) {
-        error_log("Error de base de datos en clssVenta.php: " . $e->getMessage());
-        responderVenta(false, 'Error de base de datos: ' . $e->getMessage());
+        error_log('Error de base de datos en clssVenta.php: ' . $e->getMessage());
+        responderVenta(false, 'Error de base de datos.');
     } catch (Throwable $e) {
-        error_log("Error inesperado en clssVenta.php: " . $e->getMessage());
-        responderVenta(false, 'Error inesperado en el servidor: ' . $e->getMessage());
+        error_log('Error inesperado en clssVenta.php: ' . $e->getMessage());
+        responderVenta(false, 'Error inesperado en el servidor.');
     }
 }
 
-function controladorVenta($accion)
+function controladorVenta(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARVENTAS',
+        'OBTENERVENTA',
+        'BUSCARCLIENTES',
+        'BUSCARDISPONIBLESVENTA',
+    ];
+
+    $accionesVentas = [
+        'GUARDARVENTA',
+    ];
+
+    // Anular repone stock de empaquetado y altera una operación ya registrada.
+    $accionesSoloAdmin = [
+        'ANULARVENTA',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'ventas', 'consulta']);
+
+    } elseif (in_array($accion, $accionesVentas, true)) {
+        exigirRol($usuario, ['administrador', 'ventas']);
+
+    } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARVENTAS':
             listarVentas();
             break;
+
         case 'OBTENERVENTA':
-            obtenerVenta((int)($_POST['id'] ?? 0));
+            obtenerVenta((int) ($_POST['id'] ?? 0));
             break;
+
         case 'BUSCARCLIENTES':
             buscarClientes();
             break;
+
         case 'BUSCARDISPONIBLESVENTA':
             buscarDisponiblesVenta();
             break;
+
         case 'GUARDARVENTA':
             guardarVenta();
             break;
+
         case 'ANULARVENTA':
-            anularVenta((int)($_POST['id'] ?? 0));
+            anularVenta((int) ($_POST['id'] ?? 0));
             break;
-        default:
-            responderVenta(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 
 // =============================================================================
 // TRAZABILIDAD VENTA <-> EMPAQUETADO (empaquetado.js_venta)

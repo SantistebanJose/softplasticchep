@@ -8,48 +8,83 @@ ini_set('log_errors', '1');
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/cloudinaryHelper.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-// Carpeta donde se guardan las fotos de producto (sube 1 nivel desde controllers/)
+// Carpeta donde se guardan las fotos de producto.
 define('CARPETA_IMAGENES_PRODUCTO', __DIR__ . '/../uploads/productos/');
 define('RUTA_WEB_IMAGENES_PRODUCTO', 'uploads/productos/');
 
-if (isset($_POST["accion"])) {
-    controladorProductos($_POST["accion"]);
+if (isset($_POST['accion'])) {
+    try {
+        controladorProductos((string) $_POST['accion']);
+    } catch (PDOException $e) {
+        error_log('Error de base de datos en clssProducto.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
+    } catch (Throwable $e) {
+        error_log('Error inesperado en clssProducto.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
+    }
 }
 
-function controladorProductos($accion)
+function controladorProductos(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARUNIDADES',
+        'LISTARPRODUCTOS',
+        'OBTENERPRODUCTO',
+    ];
+
+    $accionesAdministracion = [
+        'GUARDARPRODUCTO',
+        'ELIMINARPRODUCTO',
+        'REACTIVARPRODUCTO',
+        'GUARDARCONFIGPRODUCTO',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'produccion', 'ventas', 'consulta']);
+
+    } elseif (in_array($accion, $accionesAdministracion, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARUNIDADES':
             listarUnidades();
             break;
+
         case 'LISTARPRODUCTOS':
             listarProductos();
             break;
+
         case 'OBTENERPRODUCTO':
-            obtenerProducto(intval($_POST['id'] ?? 0));
+            obtenerProducto((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARPRODUCTO':
             guardarProducto();
             break;
+
         case 'ELIMINARPRODUCTO':
             eliminarProducto();
             break;
+
         case 'REACTIVARPRODUCTO':
             reactivarProducto();
             break;
+
         case 'GUARDARCONFIGPRODUCTO':
             guardarConfigProducto();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // CATÁLOGOS
 // =============================================================================
