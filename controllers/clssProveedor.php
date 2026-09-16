@@ -25,52 +25,89 @@
  * para que ningún error de base de datos quede oculto: si algo falla, el
  * frontend recibe success:false con el motivo real, en vez de un falso éxito.
  */
-
 ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
-session_start();
+require_once __DIR__ . '/auditoria.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-if (isset($_POST["accion"])) {
+if (isset($_POST['accion'])) {
     try {
-        controladorProveedor($_POST["accion"]);
+        controladorProveedor((string) $_POST['accion']);
     } catch (PDOException $e) {
-        error_log("Error de base de datos en clssProveedor.php: " . $e->getMessage());
-        responder(false, 'Error de base de datos: ' . $e->getMessage());
+        error_log('Error de base de datos en clssProveedor.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
     } catch (Throwable $e) {
-        error_log("Error inesperado en clssProveedor.php: " . $e->getMessage());
-        responder(false, 'Error inesperado en el servidor: ' . $e->getMessage());
+        error_log('Error inesperado en clssProveedor.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
     }
 }
 
-function controladorProveedor($accion)
+function controladorProveedor(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARPROVEEDORES',
+        'OBTENERPROVEEDOR',
+    ];
+
+    $accionesConsultaDocumento = [
+        'CONSULTARDOCUMENTO',
+    ];
+
+    $accionesCompras = [
+        'GUARDARPROVEEDOR',
+    ];
+
+    $accionesSoloAdmin = [
+        'ELIMINARPROVEEDOR',
+        'REACTIVARPROVEEDOR',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'compras', 'ventas', 'consulta']);
+
+    } elseif (in_array($accion, $accionesConsultaDocumento, true)) {
+        exigirRol($usuario, ['administrador', 'compras', 'ventas']);
+
+    } elseif (in_array($accion, $accionesCompras, true)) {
+        exigirRol($usuario, ['administrador', 'compras']);
+
+    } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARPROVEEDORES':
             listarProveedores();
             break;
+
         case 'OBTENERPROVEEDOR':
             obtenerProveedor(trim($_POST['ruc'] ?? ''));
             break;
+
         case 'GUARDARPROVEEDOR':
             guardarProveedor();
             break;
+
         case 'ELIMINARPROVEEDOR':
             eliminarProveedor();
             break;
+
         case 'REACTIVARPROVEEDOR':
             reactivarProveedor();
             break;
+
         case 'CONSULTARDOCUMENTO':
             consultarDocumento(trim($_POST['numero'] ?? ''));
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
-
 // =============================================================================
 // HELPERS DE VALIDACIÓN
 // =============================================================================
