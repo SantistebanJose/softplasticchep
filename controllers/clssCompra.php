@@ -95,57 +95,93 @@ ob_start();
 
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
-require_once __DIR__ . '/auditoria.php';   
-
+require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/cloudinaryHelper.php';
+require_once __DIR__ . '/clssVerificarSession.php';
 
-session_start();
-
-// Carpeta donde se guardan los comprobantes subidos (sube 1 nivel desde controllers/)
+// Carpeta donde se guardan los comprobantes subidos.
 define('CARPETA_COMPROBANTES', __DIR__ . '/../uploads/comprobantes/');
 define('RUTA_WEB_COMPROBANTES', 'uploads/comprobantes/');
 
-if (isset($_POST["accion"])) {
+if (isset($_POST['accion'])) {
     try {
-        controladorCompra($_POST["accion"]);
+        controladorCompra((string) $_POST['accion']);
     } catch (PDOException $e) {
-        error_log("Error de base de datos en clssCompra.php: " . $e->getMessage());
-        responder(false, 'Error de base de datos: ' . $e->getMessage());
+        error_log('Error de base de datos en clssCompra.php: ' . $e->getMessage());
+        responder(false, 'Error de base de datos.');
     } catch (Throwable $e) {
-        error_log("Error inesperado en clssCompra.php: " . $e->getMessage());
-        responder(false, 'Error inesperado en el servidor: ' . $e->getMessage());
+        error_log('Error inesperado en clssCompra.php: ' . $e->getMessage());
+        responder(false, 'Error inesperado en el servidor.');
     }
 }
 
-function controladorCompra($accion)
+function controladorCompra(string $accion): void
 {
+    $usuario = exigirSesion();
+
+    $accionesLectura = [
+        'LISTARCOMPRAS',
+        'OBTENERCOMPRA',
+        'BUSCARPROVEEDORES',
+        'BUSCARMATERIALES',
+        'BUSCARUNIDADES',
+    ];
+
+    $accionesCompras = [
+        'GUARDARCOMPRA',
+    ];
+
+    // Estas acciones revierten o restauran stock; se reservan a administración.
+    $accionesSoloAdmin = [
+        'ELIMINARCOMPRA',
+        'REACTIVARCOMPRA',
+    ];
+
+    if (in_array($accion, $accionesLectura, true)) {
+        exigirRol($usuario, ['administrador', 'compras', 'consulta']);
+
+    } elseif (in_array($accion, $accionesCompras, true)) {
+        exigirRol($usuario, ['administrador', 'compras']);
+
+    } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+        exigirRol($usuario, ['administrador']);
+
+    } else {
+        responderAcceso(400, 'Acción no reconocida.');
+    }
+
     switch ($accion) {
         case 'LISTARCOMPRAS':
             listarCompras();
             break;
+
         case 'OBTENERCOMPRA':
-            obtenerCompra(intval($_POST['id'] ?? 0));
+            obtenerCompra((int) ($_POST['id'] ?? 0));
             break;
+
         case 'GUARDARCOMPRA':
             guardarCompra();
             break;
+
         case 'ELIMINARCOMPRA':
             eliminarCompra();
             break;
+
         case 'REACTIVARCOMPRA':
             reactivarCompra();
             break;
+
         case 'BUSCARPROVEEDORES':
             buscarProveedores();
             break;
+
         case 'BUSCARMATERIALES':
             buscarMateriales();
             break;
+
         case 'BUSCARUNIDADES':
             buscarUnidades();
             break;
-        default:
-            responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
 }
 
