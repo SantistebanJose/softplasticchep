@@ -48,6 +48,7 @@ if (isset($_POST['accion'])) {
 
 function controladorCompraTablet(string $accion): void
 {
+    error_log('DEBUG accion recibida: [' . $accion . '] len=' . strlen($accion));
     $operarioId = exigirSesionConductorApi();
 
     $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES'];
