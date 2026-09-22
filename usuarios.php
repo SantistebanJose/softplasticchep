@@ -267,6 +267,7 @@ require __DIR__ . '/header.php';
 
                             <select class="form-select" name="rol" id="usu_rol" required>
                                 <option value="operario">Operario</option>
+                                <option value="conductor">Conductor</option>
                                 <option value="administrador">Administrador</option>
                             </select>
                         </div>
