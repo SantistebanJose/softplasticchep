@@ -384,7 +384,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_COMPRA = '../controllers_tablet/clssCompra.php';
+const CONTROLADOR_COMPRA = '../controllers_tablet/clssCompraTablet.php';
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
 
 // llamar() es el helper compartido (ver app-common.js) que hace un POST

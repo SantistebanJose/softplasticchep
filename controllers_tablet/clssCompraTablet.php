@@ -38,10 +38,10 @@ if (isset($_POST['accion'])) {
     try {
         controladorCompraTablet((string) $_POST['accion']);
     } catch (PDOException $e) {
-        error_log('Error de base de datos en clssCompra.php: ' . $e->getMessage());
+        error_log('Error de base de datos en clssCompraTablet.php: ' . $e->getMessage());
         responder(false, 'Error de base de datos.');
     } catch (Throwable $e) {
-        error_log('Error inesperado en clssCompra.php: ' . $e->getMessage());
+        error_log('Error inesperado en clssCompraTablet.php: ' . $e->getMessage());
         responder(false, 'Error inesperado en el servidor.');
     }
 }
