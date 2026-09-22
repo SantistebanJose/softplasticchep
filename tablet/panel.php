@@ -13,7 +13,8 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
 $puedeProduccion  = operarioTieneEtapa('PRODUC');
 $puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
 $puedeEmpaquetado = operarioTieneEtapa('EMPAQUET');
-$tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado;
+$esConductor      = ($_SESSION['operario_rol'] ?? '') === 'conductor';
+$tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado || $esConductor;
 
 // Saludo dinámico según la hora
 $hora = (int) date('H');
@@ -100,6 +101,15 @@ else                 $saludo = 'Buenas noches';
             <div class="pc-op-panel-icon"><i class="fa-solid fa-chart-column"></i></div>
             <span class="pc-op-panel-label">Mis ensamblajes</span>
             <span class="pc-op-panel-sub">Revisa tu reporte de armados</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+        <?php endif; ?>
+
+        <?php if ($esConductor): ?>
+        <a href="compras_tablet.php" class="pc-op-panel-btn q-amber">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-truck-ramp-box"></i></div>
+            <span class="pc-op-panel-label">Compras</span>
+            <span class="pc-op-panel-sub">Registra el material que recibes</span>
             <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>
