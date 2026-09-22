@@ -224,7 +224,33 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
         <div class="pc-cmp-empty">Cargando...</div>
     </div>
 </div>
-
+<div class="modal fade" id="modalCamaraComprobanteTablet" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Tomar foto del comprobante</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body text-center">
+        <video id="videoCamaraComprobanteTablet" autoplay playsinline
+               style="width:100%; max-height:60vh; background:#000; border-radius:8px;"></video>
+        <canvas id="canvasCamaraComprobanteTablet" style="display:none;"></canvas>
+        <div id="previewCamaraComprobanteTablet" style="display:none;">
+            <img id="imgPreviewCamaraComprobanteTablet" style="width:100%; max-height:60vh; object-fit:contain; border-radius:8px;">
+        </div>
+        <div class="form-text mt-2" id="camaraComprobanteTabletError" style="color:#dc3545; display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-outline-primary" id="btnRepetirFotoComprobanteTablet" style="display:none;" onclick="repetirFotoComprobanteTablet()">Repetir</button>
+        <button type="button" class="btn btn-primary" id="btnCapturarFotoComprobanteTablet" onclick="capturarFotoComprobanteTablet()">
+            <i class="fa-solid fa-camera"></i> Capturar
+        </button>
+        <button type="button" class="btn btn-success" id="btnUsarFotoComprobanteTablet" style="display:none;" onclick="usarFotoComprobanteTablet()">Usar esta foto</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- Modal Crear/Editar -->
 <div class="modal fade pc-modal-tablet" id="modalCompra" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
@@ -303,7 +329,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                 <div class="info" id="cmp_comprobante_info">Sin comprobante cargado.</div>
                                 <button type="button" class="btn btn-sm btn-outline-danger" id="cmp_btn_quitar_comprobante" style="display:none;" onclick="quitarComprobanteCompra()">Quitar</button>
                             </div>
-                            <input type="file" id="cmp_img_comprobante" class="form-control" accept=".jpg,.jpeg,.png,.webp,.pdf">
+                            <div class="d-flex gap-2">
+                                <input type="file" id="cmp_img_comprobante" class="form-control" accept=".jpg,.jpeg,.png,.webp,.pdf">
+                                <button type="button" class="btn btn-outline-secondary flex-shrink-0" onclick="abrirModalCamaraComprobanteTablet()" title="Tomar foto">
+                                    <i class="fa-solid fa-camera"></i>
+                                </button>
+                            </div>
                             <div>
                                 <label style="font-size:.78em; font-weight:700; color:#5c5947;">Monto del comprobante (S/)</label>
                                 <input type="number" id="cmp_total_img_cargado" class="form-control form-control-lg" min="0" step="0.01" placeholder="Opcional">
@@ -437,7 +468,8 @@ async function cargarCompras() {
     });
 
     if (!json.success) {
-        grid.innerHTML = `<div class="pc-cmp-empty">${json.message}</div>`;
+        console.error('LISTARMISCOMPRAS falló:', json);
+        grid.innerHTML = `<div class="pc-cmp-empty">${json.message || 'No se pudo cargar el listado de compras.'}</div>`;
         return;
     }
 
@@ -503,13 +535,18 @@ async function buscarYRenderProveedores() {
     grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
 
     const json = await llamarCompra('BUSCARPROVEEDORES', { texto });
-    const proveedores = json.success ? (json.proveedores || []) : [];
 
+    if (!json.success) {
+        console.error('BUSCARPROVEEDORES falló:', json);
+        grid.innerHTML = `<div class="pc-mat-empty" style="color:#c94a4a;">${json.message || 'Error al buscar proveedores.'}</div>`;
+        return;
+    }
+
+    const proveedores = json.proveedores || [];
     if (proveedores.length === 0) {
         grid.innerHTML = '<div class="pc-mat-empty">No se encontraron proveedores.</div>';
         return;
     }
-
     grid.innerHTML = proveedores.map(p => `
         <button type="button" class="pc-prov-card" onclick='seleccionarProveedorCompra(${JSON.stringify(p)})'>
             <span class="pellet"><i class="fa-solid fa-truck-field"></i></span>
@@ -553,8 +590,14 @@ async function buscarYRenderMateriales() {
     grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
 
     const json = await llamarCompra('BUSCARMATERIALES', { texto });
-    const materiales = json.success ? (json.materiales || []) : [];
 
+    if (!json.success) {
+        console.error('BUSCARMATERIALES falló:', json);
+        grid.innerHTML = `<div class="pc-mat-empty" style="color:#c94a4a;">${json.message || 'Error al buscar materiales.'}</div>`;
+        return;
+    }
+
+    const materiales = json.materiales || [];
     if (materiales.length === 0) {
         grid.innerHTML = '<div class="pc-mat-empty">No se encontraron materiales.</div>';
         return;
@@ -878,6 +921,80 @@ document.getElementById('formCompra').addEventListener('submit', async function 
         btnGuardar.innerHTML = 'Guardar';
     }
 });
+
+const modalCamaraComprobanteTablet = new bootstrap.Modal(document.getElementById('modalCamaraComprobanteTablet'));
+let streamCamaraComprobanteTablet = null;
+let capturaComprobanteTabletBlob = null;
+
+async function abrirModalCamaraComprobanteTablet() {
+    const video = document.getElementById('videoCamaraComprobanteTablet');
+    const errorEl = document.getElementById('camaraComprobanteTabletError');
+
+    video.style.display = '';
+    document.getElementById('previewCamaraComprobanteTablet').style.display = 'none';
+    errorEl.style.display = 'none';
+    document.getElementById('btnCapturarFotoComprobanteTablet').style.display = '';
+    document.getElementById('btnCapturarFotoComprobanteTablet').disabled = false;
+    document.getElementById('btnRepetirFotoComprobanteTablet').style.display = 'none';
+    document.getElementById('btnUsarFotoComprobanteTablet').style.display = 'none';
+
+    modalCamaraComprobanteTablet.show();
+
+    try {
+        streamCamaraComprobanteTablet = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false
+        });
+        video.srcObject = streamCamaraComprobanteTablet;
+    } catch (err) {
+        console.error('No se pudo acceder a la cámara:', err);
+        errorEl.textContent = 'No se pudo acceder a la cámara. Revisa los permisos o usa "Subir archivo".';
+        errorEl.style.display = 'block';
+        document.getElementById('btnCapturarFotoComprobanteTablet').disabled = true;
+    }
+}
+
+function detenerStreamCamaraTablet() {
+    if (streamCamaraComprobanteTablet) {
+        streamCamaraComprobanteTablet.getTracks().forEach(t => t.stop());
+        streamCamaraComprobanteTablet = null;
+    }
+}
+
+function capturarFotoComprobanteTablet() {
+    const video = document.getElementById('videoCamaraComprobanteTablet');
+    const canvas = document.getElementById('canvasCamaraComprobanteTablet');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+        capturaComprobanteTabletBlob = blob;
+        document.getElementById('imgPreviewCamaraComprobanteTablet').src = URL.createObjectURL(blob);
+        video.style.display = 'none';
+        document.getElementById('previewCamaraComprobanteTablet').style.display = '';
+        document.getElementById('btnCapturarFotoComprobanteTablet').style.display = 'none';
+        document.getElementById('btnRepetirFotoComprobanteTablet').style.display = '';
+        document.getElementById('btnUsarFotoComprobanteTablet').style.display = '';
+        detenerStreamCamaraTablet();
+    }, 'image/jpeg', 0.9);
+}
+
+function repetirFotoComprobanteTablet() {
+    capturaComprobanteTabletBlob = null;
+    abrirModalCamaraComprobanteTablet();
+}
+
+function usarFotoComprobanteTablet() {
+    modalCamaraComprobanteTablet.hide();
+    document.getElementById('cmp_img_comprobante').value = '';
+    comprobanteArchivo = new File([capturaComprobanteTabletBlob], 'comprobante_camara.jpg', { type: 'image/jpeg' });
+    eliminarComprobanteFlag = false;
+    renderComprobantePreview();
+}
+
+document.getElementById('modalCamaraComprobanteTablet').addEventListener('hidden.bs.modal', detenerStreamCamaraTablet);
+
 </script>
 </body>
 </html>

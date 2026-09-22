@@ -1,6 +1,6 @@
 <?php
 /**
- * controllers_tablet/clssCompraTablet.php
+ * controllers_tablet/clssCompra.php
  * Versión tablet (conductor) del módulo de Compras. Sesión propia
  * ($_SESSION['operario_id'] + operario_rol === 'conductor'), NO la sesión
  * de administrador (usuario_id) que usa controllers/clssCompra.php.
