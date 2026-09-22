@@ -51,7 +51,7 @@ function controladorCompraTablet(string $accion): void
     $operarioId = exigirSesionConductorApi();
 
     $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES'];
-    $accionesEscritura = ['GUARDARCOMPRA'];
+    $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
         responder(false, 'Acción no reconocida.');
@@ -66,6 +66,12 @@ function controladorCompraTablet(string $accion): void
             break;
         case 'GUARDARCOMPRA':
             guardarCompraTablet($operarioId);
+            break;
+        case 'GUARDARPROVEEDORTABLET':
+            guardarProveedorTablet();
+            break;
+        case 'GUARDARMATERIALTABLET':
+            guardarMaterialTablet();
             break;
         case 'BUSCARPROVEEDORES':
             buscarProveedores();
@@ -143,7 +149,7 @@ function buscarMateriales()
 function buscarUnidades()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre, nombre_corto, equivalencia FROM unidad_medida ORDER BY nombre";
+    $sql = "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id FROM unidad_medida ORDER BY nombre";
     $result = executeQuery($conectar, $sql, []);
     responder(true, 'OK', ['unidades' => $result]);
 }
@@ -587,6 +593,68 @@ function guardarCompraTablet(int $operarioId)
         error_log("Error guardando compra (tablet): " . $e->getMessage());
         responder(false, 'No se pudo guardar la compra: ' . $e->getMessage());
     }
+}
+
+function guardarProveedorTablet()
+{
+    $conectar = conectar_oll_BD();
+    $ruc  = trim($_POST['ruc'] ?? '');
+    $razon = trim($_POST['razon_social'] ?? '');
+    $comercial = trim($_POST['nombre_comercial'] ?? '');
+
+    if (!preg_match('/^\d{8}$|^\d{11}$/', $ruc)) {
+        responder(false, 'El RUC/DNI debe tener 8 u 11 dígitos.');
+    }
+    if ($razon === '') {
+        responder(false, 'La razón social / nombre es obligatorio.');
+    }
+
+    $existe = executeQuery($conectar,
+        "SELECT ruc FROM proveedor WHERE ruc = :ruc AND deleted_at IS NULL",
+        ['ruc' => $ruc]
+    );
+    if (!empty($existe)) {
+        responder(false, 'Ya existe un proveedor con ese RUC/DNI.');
+    }
+
+    executeNonQuery($conectar, "
+        INSERT INTO proveedor (ruc, razon_social, nombre_comercial, js_tipo, telefonos_contacto, created_at)
+        VALUES (:ruc, :razon_social, :nombre_comercial, :js_tipo, '[]', NOW())
+    ", [
+        'ruc'              => $ruc,
+        'razon_social'     => $razon,
+        'nombre_comercial' => $comercial ?: null,
+        'js_tipo'          => json_encode(['proveedor']),
+    ]);
+
+    responder(true, 'Proveedor registrado correctamente.', [
+        'proveedor' => ['ruc' => $ruc, 'razon_social' => $razon, 'nombre_comercial' => $comercial],
+    ]);
+}
+
+function guardarMaterialTablet()
+{
+    $conectar = conectar_oll_BD();
+    $nombre = trim($_POST['nombre'] ?? '');
+    $unidadMedidaId = intval($_POST['unidad_medida_id'] ?? 0);
+
+    if ($nombre === '') responder(false, 'El nombre del material es obligatorio.');
+    if ($unidadMedidaId <= 0) responder(false, 'Selecciona la unidad de medida base.');
+
+    $nuevo = executeQuery($conectar, "
+        INSERT INTO material (nombre, unidad_medida_id, stock_actual, stock_minimo, color, created_at)
+        VALUES (:nombre, :unidad_medida_id, 0, 0, false, NOW())
+        RETURNING id
+    ", [
+        'nombre'           => $nombre,
+        'unidad_medida_id' => $unidadMedidaId,
+    ]);
+    $id = $nuevo[0]['id'] ?? null;
+    if (!$id) responder(false, 'No se pudo registrar el material.');
+
+    responder(true, 'Material registrado correctamente.', [
+        'material' => ['id' => $id, 'nombre' => $nombre, 'stock_actual' => 0, 'unidad_medida_id' => $unidadMedidaId],
+    ]);
 }
 
 function insertarLineasYSumarStockTablet($conectar, int $compraId, array $detalle): void

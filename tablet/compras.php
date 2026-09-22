@@ -544,7 +544,13 @@ async function buscarYRenderProveedores() {
 
     const proveedores = json.proveedores || [];
     if (proveedores.length === 0) {
-        grid.innerHTML = '<div class="pc-mat-empty">No se encontraron proveedores.</div>';
+        grid.innerHTML = `
+            <div class="pc-mat-empty">
+                No se encontraron proveedores.<br>
+                <button type="button" class="btn btn-primary btn-sm mt-2" onclick="abrirFormularioProveedorRapidoTablet()">
+                    <i class="fa-solid fa-plus"></i> Registrar proveedor nuevo
+                </button>
+            </div>`;
         return;
     }
     grid.innerHTML = proveedores.map(p => `
@@ -599,7 +605,13 @@ async function buscarYRenderMateriales() {
 
     const materiales = json.materiales || [];
     if (materiales.length === 0) {
-        grid.innerHTML = '<div class="pc-mat-empty">No se encontraron materiales.</div>';
+        grid.innerHTML = `
+            <div class="pc-mat-empty">
+                No se encontraron materiales.<br>
+                <button type="button" class="btn btn-primary btn-sm mt-2" onclick="abrirFormularioMaterialRapidoTablet()">
+                    <i class="fa-solid fa-plus"></i> Registrar material nuevo
+                </button>
+            </div>`;
         return;
     }
 
@@ -609,6 +621,59 @@ async function buscarYRenderMateriales() {
             <span class="nombre">${m.nombre}</span>
             <span class="meta">Stock: <b>${formatearCantidadCompra(m.stock_actual)} ${m.unidad_corto ?? ''}</b></span>
         </button>`).join('');
+}
+async function abrirFormularioProveedorRapidoTablet() {
+    const texto = document.getElementById('cmp_buscar_proveedor').value.trim();
+    const { value } = await Swal.fire({
+        title: 'Registrar proveedor',
+        html: `
+            <input id="pr_ruc" class="swal2-input" placeholder="RUC / DNI">
+            <input id="pr_razon" class="swal2-input" placeholder="Razón social / nombre" value="${texto.replace(/"/g,'')}">
+            <input id="pr_comercial" class="swal2-input" placeholder="Nombre comercial (opcional)">
+        `,
+        confirmButtonText: 'Guardar',
+        showCancelButton: true,
+        preConfirm: () => ({
+            ruc: document.getElementById('pr_ruc').value.trim(),
+            razon_social: document.getElementById('pr_razon').value.trim(),
+            nombre_comercial: document.getElementById('pr_comercial').value.trim(),
+        })
+    });
+    if (!value) return;
+
+    const json = await llamarCompra('GUARDARPROVEEDORTABLET', value);
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+
+    Swal.fire('Listo', json.message, 'success');
+    seleccionarProveedorCompra(json.proveedor);
+}
+
+async function abrirFormularioMaterialRapidoTablet() {
+    const texto = document.getElementById('cmp_buscar_material').value.trim();
+    const unidades = await obtenerUnidadesCompra();
+    const raiz = unidades.filter(u => !u.unidad_base_id);
+    const opciones = raiz.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
+
+    const { value } = await Swal.fire({
+        title: 'Registrar material',
+        html: `
+            <input id="mr_nombre" class="swal2-input" placeholder="Nombre del material" value="${texto.replace(/"/g,'')}">
+            <select id="mr_unidad" class="swal2-select">${opciones}</select>
+        `,
+        confirmButtonText: 'Guardar',
+        showCancelButton: true,
+        preConfirm: () => ({
+            nombre: document.getElementById('mr_nombre').value.trim(),
+            unidad_medida_id: document.getElementById('mr_unidad').value,
+        })
+    });
+    if (!value) return;
+
+    const json = await llamarCompra('GUARDARMATERIALTABLET', value);
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+
+    Swal.fire('Listo', json.message, 'success');
+    abrirFormularioLineaCompra(json.material); // lo deja listo para agregar cantidad
 }
 
 async function abrirFormularioLineaCompra(material) {
