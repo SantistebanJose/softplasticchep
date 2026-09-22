@@ -106,7 +106,7 @@ else                 $saludo = 'Buenas noches';
         <?php endif; ?>
 
         <?php if ($esConductor): ?>
-        <a href="compras_tablet.php" class="pc-op-panel-btn q-amber">
+        <a href="compras.php" class="pc-op-panel-btn q-amber">
             <div class="pc-op-panel-icon"><i class="fa-solid fa-truck-ramp-box"></i></div>
             <span class="pc-op-panel-label">Compras</span>
             <span class="pc-op-panel-sub">Registra el material que recibes</span>
