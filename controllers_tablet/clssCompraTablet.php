@@ -55,7 +55,11 @@ function controladorCompraTablet(string $accion): void
     $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
-        responder(false, 'Acción no reconocida.');
+        responder(false, 'Acción no reconocida.', [
+            'debug_accion_recibida' => $accion,
+            'debug_len'             => strlen($accion),
+            'debug_acciones_validas'=> array_merge($accionesLectura, $accionesEscritura),
+        ]);
     }
 
     switch ($accion) {
