@@ -385,6 +385,7 @@ const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_COMPRA = '../controllers_tablet/clssCompraConductor.php';
+
 const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
 
 // llamar() es el helper compartido (ver app-common.js) que hace un POST
@@ -537,6 +538,7 @@ async function buscarYRenderProveedores() {
     const json = await llamarCompra('BUSCARPROVEEDORES', { texto });
 
     if (!json.success) {
+
         console.error('BUSCARPROVEEDORES falló:', json);
         grid.innerHTML = `<div class="pc-mat-empty" style="color:#c94a4a;">${json.message || 'Error al buscar proveedores.'}</div>`;
         return;

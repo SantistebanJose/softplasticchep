@@ -24,11 +24,10 @@
  *   ALTER TABLE compra ADD COLUMN operario_id bigint REFERENCES operario(id);
  */
 
-ob_start();
 
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
-require_once __DIR__ . '/clssAuthOperario.php';
+//require_once __DIR__ . '/clssAuthOperario.php';
 require_once __DIR__ . '/../controllers/bd.php';
 require_once __DIR__ . '/../controllers/executeQuery.php';
 require_once __DIR__ . '/../controllers/auditoria.php';
@@ -55,7 +54,7 @@ function controladorCompraTablet(string $accion): void
     $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
-        responder(false, 'Acción no reconocida.', [
+        responder(true, 'Acción no reconocida.Ubillus cachudo', [
             'debug_accion_recibida' => $accion,
             'debug_len'             => strlen($accion),
             'debug_acciones_validas'=> array_merge($accionesLectura, $accionesEscritura),

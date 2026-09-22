@@ -156,7 +156,7 @@ function controladorAuthOperario($accion)
             echo json_encode(verificarPinOperario($_POST['dni'] ?? '', $_POST['pin'] ?? ''));
             break;
         default:
-            echo json_encode(['success' => false, 'error' => 'Acción no reconocida.']);
+            echo json_encode(['success' => false, 'error' => 'Acción no reconocida. Ubillus KCHUDO']);
     }
 }
 
