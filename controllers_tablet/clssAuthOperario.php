@@ -1,8 +1,8 @@
 <?php
 /**
  * controllers_tablet/clssAuthOperario.php
- * Login rápido de operarios en tablet: identificación solo por DNI (sin password).
- * Reutiliza la tabla `usuario` (user_ = DNI del operario), solo permite rol = 'operario'.
+ * Login rápido de operarios/conductores en tablet: identificación solo por DNI (sin password).
+ * Reutiliza la tabla `usuario` (user_ = DNI de la persona), permite rol = 'operario' o 'conductor'.
  *
  * NUEVO: al loguear también se resuelven y guardan en sesión las etapas del
  * operario (operario.js_etapas_relacionadas), para poder controlar el acceso
@@ -26,9 +26,14 @@
  *
  * FIX 3: usuario.operario_id puede ser NULL (cuentas creadas manualmente
  * desde el panel admin, ver UserController::saveUser()). Si una de esas
- * cuentas tiene rol 'operario' y un user_ de 8 dígitos, podía loguearse
- * en la tablet y quedar con $_SESSION['operario_id'] = NULL. Se bloquea
- * ahora explícitamente en verificarPinOperario().
+ * cuentas tiene rol 'operario'/'conductor' y un user_ de 8 dígitos, podía
+ * loguearse en la tablet y quedar con $_SESSION['operario_id'] = NULL. Se
+ * bloquea ahora explícitamente en verificarPinOperario().
+ *
+ * FIX 4: verificarDniOperario() solo aceptaba rol = 'operario'. Con la
+ * incorporación del rol 'conductor' (mismo login DNI+PIN, pero con acceso
+ * a pantallas distintas, ej. registrar compras en vez de producción), se
+ * amplió a una whitelist de roles permitidos en tablet.
  */
 
 require_once __DIR__ . '/../controllers/bd.php';
@@ -36,13 +41,12 @@ require_once __DIR__ . '/../controllers/executeQuery.php';
 
 
 /**
- * Login de operario en dos pasos: DNI -> PIN.
- * Reemplaza a la antigua intentarLoginOperario() por estas dos funciones.
+ * Login en dos pasos: DNI -> PIN. Válido tanto para operario como conductor.
  * No hacen echo ni exit: cada ajax_*.php es quien decide el JSON de salida.
  */
 
 /**
- * PASO 1: valida el DNI (existe, activo, rol = operario).
+ * PASO 1: valida el DNI (existe, activo, rol permitido en tablet).
  * NO crea sesión todavía — solo confirma identidad y devuelve el nombre
  * para saludarlo en el modal del PIN.
  */
@@ -77,8 +81,12 @@ function verificarDniOperario(string $dni): array
     $rolPerfiles = decodificarRolPerfiles($usuario['rol_y_perfiles']);
     $rol = strtolower(trim((string) ($rolPerfiles['rol'] ?? '')));
 
-    if ($rol !== 'operario') {
-        return ['success' => false, 'error' => 'Este DNI no corresponde a un operario.'];
+    // La tablet acepta operario Y conductor -> mismo login DNI+PIN, solo
+    // cambia a qué pantallas tienen acceso después (ver exigirAccesoEtapa()
+    // para operario y exigirRolConductor() para conductor).
+    $rolesPermitidosTablet = ['operario', 'conductor'];
+    if (!in_array($rol, $rolesPermitidosTablet, true)) {
+        return ['success' => false, 'error' => 'Este DNI no tiene acceso a la tablet.'];
     }
 
     return ['success' => true, 'error' => null, 'nombre' => $usuario['nombre_completo']];
@@ -88,7 +96,7 @@ function verificarDniOperario(string $dni): array
  * PASO 2: recibe DNI + PIN juntos. Vuelve a validar el DNI completo
  * (no confía en lo ya mostrado en el modal) y compara el PIN contra
  * usuario.pin. Si todo coincide, recién ahí resuelve etapas y crea
- * la sesión real (mismo comportamiento que la vieja intentarLoginOperario()).
+ * la sesión real.
  */
 function verificarPinOperario(string $dni, string $pin): array
 {
@@ -122,7 +130,7 @@ function verificarPinOperario(string $dni, string $pin): array
 
     // FIX 3: cuenta sin operario vinculado (creada manualmente desde el
     // panel admin) -> no puede loguearse en la tablet, aunque tenga rol
-    // 'operario' y un user_ de 8 dígitos.
+    // operario/conductor y un user_ de 8 dígitos.
     if (empty($usuario['operario_id'])) {
         return ['success' => false, 'error' => 'Esta cuenta no está vinculada a un registro de operario. Contacta a un administrador.'];
     }
@@ -269,6 +277,53 @@ function exigirAccesoEtapa(string $fragmentoEtapa, string $nombreModulo): void
     $mensajeJs  = json_encode(
         htmlspecialchars($nombreOperario) . ', tu usuario no tiene asignada la etapa de <b>' .
         htmlspecialchars($nombreModulo) . '</b>.<br>Pide a un administrador que te agregue esta etapa si deberías tener acceso.',
+        JSON_UNESCAPED_UNICODE
+    );
+    ?>
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+        <title>Acceso restringido · Plásticos Chepito</title>
+    </head>
+    <body style="margin:0;background:#f6f4ee;">
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <script>
+            Swal.fire({
+                icon: 'warning',
+                title: <?= $tituloJs ?>,
+                html: <?= $mensajeJs ?>,
+                confirmButtonText: 'Volver al panel',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+            }).then(() => {
+                window.location.href = 'panel.php';
+            });
+        </script>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+/**
+ * Guard de página: exige que el usuario logueado en tablet tenga rol
+ * 'conductor'. Pensado para gatear pantallas como compras_tablet.php,
+ * paralelo a exigirAccesoEtapa() pero por rol en vez de por etapa
+ * (un conductor no tiene etapas de producción asignadas).
+ * Debe llamarse DESPUÉS de confirmar que $_SESSION['operario_id'] existe.
+ */
+function exigirRolConductor(): void
+{
+    if (($_SESSION['operario_rol'] ?? '') === 'conductor') {
+        return;
+    }
+
+    $nombreOperario = $_SESSION['operario_nombre'] ?? 'Usuario';
+    $tituloJs  = json_encode('Sin acceso', JSON_UNESCAPED_UNICODE);
+    $mensajeJs = json_encode(
+        htmlspecialchars($nombreOperario) . ', esta pantalla es solo para conductores.<br>Pide a un administrador que revise tu rol si deberías tener acceso.',
         JSON_UNESCAPED_UNICODE
     );
     ?>
