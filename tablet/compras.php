@@ -1060,8 +1060,13 @@ function usarFotoComprobanteTablet() {
     renderComprobantePreview();
 }
 
-document.getElementById('modalCamaraComprobanteTablet').addEventListener('hidden.bs.modal', detenerStreamCamaraTablet);
-
+document.getElementById('modalCamaraComprobanteTablet')
+    .addEventListener('shown.bs.modal', function () {
+        const backdrops = document.querySelectorAll('.modal-backdrop');
+        const ultimo = backdrops[backdrops.length - 1];
+        if (ultimo) ultimo.style.zIndex = 1060;
+        this.style.zIndex = 1065;
+    });
 </script>
 </body>
 </html>
