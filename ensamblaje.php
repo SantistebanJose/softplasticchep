@@ -296,6 +296,7 @@ include("header.php");
          estado. "Ver inactivos" es el único toggle de estado que queda. -->
     <div class="pc-tabs-toolbar">
         <div class="pc-tabs-row" id="ensProductoTabs"></div>
+        <div class="pc-tabs-row" id="ensColorTabs" style="display:none"></div>
         <label class="pc-toggle-inactivos" title="Incluir también los ensamblajes desactivados">
             <input type="checkbox" id="ensVerInactivos">
             Ver inactivos
@@ -319,13 +320,25 @@ include("header.php");
         <div class="modal-body">
 
         <div class="row">
-            <div class="col-md-5 mb-2">
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Producto a ensamblar *</label>
                 <select class="form-select" id="ens_producto_id" required onchange="cambioProductoEnsamblaje()">
                     <option value="">Selecciona un producto...</option>
                 </select>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-2 mb-2">
+                <label class="form-label">Color final *</label>
+                <select class="form-select" id="ens_color_id" required onchange="cambioProductoEnsamblaje()">
+                    <option value="">Selecciona un color...</option>
+                </select>
+            </div>
+            <div class="col-md-3 mb-2" id="ens_maquina_wrap" style="display:none;">
+                <label class="form-label">Máquina *</label>
+                <select class="form-select" id="ens_maquina_id">
+                    <option value="">Selecciona una máquina...</option>
+                </select>
+            </div>
+            <div class="col-md-3 mb-2">
                 <label class="form-label">Operarios que participaron *</label>
                 <select class="form-select" id="ens_operarios_ids" multiple></select>
             </div>
@@ -416,8 +429,10 @@ let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, ensamblaje_complemento_id, nombre, meta, color, bg, icono}]
 let productosDisponiblesEnsCache = null; // cache para el select del modal (producto+color pendientes)
+let maquinasEnsamblajeCache = [];
 let ensamblajesCache = [];       // último listado recibido del backend
 let productoTabActivoEns = null; // clave del producto activo; null = aún sin definir
+let colorTabActivoEns = 'TODOS';
 
 document.addEventListener('DOMContentLoaded', () => {
     // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
@@ -530,8 +545,32 @@ async function obtenerSucursalesEns() {
 
 function seleccionarTabProductoEns(nombre) {
     productoTabActivoEns = nombre;
+    colorTabActivoEns = 'TODOS';
     const grupos = agruparEnsamblajesPorProducto(ensamblajesCache);
     renderTabsProductoEns(grupos);
+    renderTabsColorEns(grupos.get(nombre));
+    renderGridEnsamblajes(ensamblajesCache);
+}
+
+function renderTabsColorEns(items) {
+    const contenedor = document.getElementById('ensColorTabs');
+    if (!items || productoTabActivoEns === 'TODOS') { contenedor.style.display = 'none'; contenedor.innerHTML = ''; return; }
+    const colores = [...new Set(items.map(e => e.color_nombre_actual || 'Sin color'))];
+    if (colores.length <= 1) { colorTabActivoEns = 'TODOS'; contenedor.style.display = 'none'; contenedor.innerHTML = ''; return; }
+    if (colorTabActivoEns !== 'TODOS' && !colores.includes(colorTabActivoEns)) colorTabActivoEns = 'TODOS';
+    contenedor.style.display = 'flex';
+    let html = `<button type="button" class="pc-tab-item ${colorTabActivoEns === 'TODOS' ? 'activo' : ''}" onclick="seleccionarTabColorEns('TODOS')"><i class="fa-solid fa-palette"></i> Todos los colores <span class="cnt">${items.length}</span></button>`;
+    colores.forEach(color => {
+        const n = items.filter(e => (e.color_nombre_actual || 'Sin color') === color).length;
+        const safe = color.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += `<button type="button" class="pc-tab-item ${colorTabActivoEns === color ? 'activo' : ''}" onclick="seleccionarTabColorEns('${safe}')"><i class="fa-solid fa-droplet"></i> ${color} <span class="cnt">${n}</span></button>`;
+    });
+    contenedor.innerHTML = html;
+}
+function seleccionarTabColorEns(color) {
+    colorTabActivoEns = color;
+    const grupos = agruparEnsamblajesPorProducto(ensamblajesCache);
+    renderTabsColorEns(grupos.get(productoTabActivoEns));
     renderGridEnsamblajes(ensamblajesCache);
 }
 
@@ -614,32 +653,35 @@ async function cargarSelectsFiltroEns() {
     }
 }
 async function obtenerProductosDisponiblesEns(incluirEnsamblajeId = 0) {
-    if (!incluirEnsamblajeId) {
-        if (productosDisponiblesEnsCache && productosDisponiblesEnsCache.length > 0) return productosDisponiblesEnsCache;
-        const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '' });
-        productosDisponiblesEnsCache = json.success ? json.productos : [];
-        return productosDisponiblesEnsCache;
-    }
-    const json = await llamarEnsamblaje('BUSCARPRODUCTOSDISPONIBLESENSAMBLAJE', { texto: '', incluir_ensamblaje_id: incluirEnsamblajeId });
-    return json.success ? json.productos : [];
+    if (productosDisponiblesEnsCache?.length) return productosDisponiblesEnsCache;
+    const json = await llamarEnsamblaje('BUSCARPRODUCTOSCONFIGURADOSENSAMBLAJE');
+    productosDisponiblesEnsCache = json.success ? json.productos : [];
+    return productosDisponiblesEnsCache;
 }
 async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
-    const [productos, operario, sucursales] = await Promise.all([
+    const [productos, colores, maquinasResp, operario, sucursales] = await Promise.all([
         obtenerProductosDisponiblesEns(incluirEnsamblajeId),
+        llamarEnsamblaje('BUSCARCOLORESENSAMBLAJE'),
+        llamarEnsamblaje('BUSCARMAQUINASENSAMBLAJE'),
         llamarEnsamblaje('BUSCAROPERARIOS'),
         obtenerSucursalesEns(),
     ]);
 
     const sProd = document.getElementById('ens_producto_id');
     sProd.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.producto_id}_${p.color_id}"
-                data-producto-id="${p.producto_id}"
-                data-color-id="${p.color_id}">${p.productoformato} — ${p.disponibles} disponible(s)</option>`).join('');
+        productos.map(p => `<option value="${p.producto_id}" data-requiere-maquina="${p.requiere_maquina_ensamblaje === true || p.requiere_maquina_ensamblaje === 1 || p.requiere_maquina_ensamblaje === '1' ? '1' : '0'}">${p.codigo} - ${p.descripcion}</option>`).join('');
+    const sColor = document.getElementById('ens_color_id');
+    const colorList = colores.success ? colores.colores : [];
+    sColor.innerHTML = '<option value="">Selecciona un color...</option>' + colorList.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    maquinasEnsamblajeCache = maquinasResp.success ? maquinasResp.maquinas : [];
+    const sMaquina = document.getElementById('ens_maquina_id');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
     if (seleccion.producto_id) {
-        const valorBuscado = `${seleccion.producto_id}_${seleccion.color_id ?? ''}`;
-        const coincide = Array.from(sProd.options).find(o => o.value === valorBuscado);
-        if (coincide) sProd.value = valorBuscado;
+        sProd.value = String(seleccion.producto_id);
+        if (seleccion.color_id) sColor.value = String(seleccion.color_id);
     }
+    sMaquina.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
+    actualizarCampoMaquinaEnsamblaje();
     const sSuc = document.getElementById('ens_sucursal_id');
         sSuc.innerHTML = '<option value="">Selecciona...</option>' +
             (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
@@ -659,8 +701,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
 
 
 function obtenerProductoIdSeleccionadoEns() {
-    const valorSelect = document.getElementById('ens_producto_id').value;
-    return valorSelect ? valorSelect.split('_')[0] : '';
+    return document.getElementById('ens_producto_id').value || '';
 }
 
 // ── Card individual de ensamblaje ──────────────────────────────────────────
@@ -673,15 +714,15 @@ function tarjetaEnsamblajeHtml(e) {
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
     const esDePrimera = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de primera';
-    const puedeDecidirDestino = !e.deleted_at && e.fin && !productoEmsamblado && !e.enviado_empaquetado;
-    const puedeComplementar = puedeDecidirDestino && esDePrimera;
+    const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
+    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const complementoUsado = !!e.ensamblaje_id_referido;
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
         <div class="pc-ens-card-head">
             <div class="titulo">
                 <span class="id">#${e.ensamblaje_id}</span>
-                <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}</span>
+                <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'} (${e.color_nombre_actual ?? 'Sin color'})</span>
             </div>
             <div class="badges">
                 ${badgeRegistroEns(e.deleted_at)}
@@ -712,6 +753,11 @@ function tarjetaEnsamblajeHtml(e) {
                 <span class="lbl">Categoría material</span>
                 <span class="val">${e.categoria_material_nombre ?? '-'}</span>
             </div>
+            ${puedeDecidirDestino && esDePrimera ? `
+            <div class="pc-ens-field">
+                <span class="lbl">Complemento</span>
+                <span class="val"><span class="badge-complemento-estado disponible"><i class="fa-solid fa-puzzle-piece"></i> Disponible al armar un colgador</span></span>
+            </div>` : ''}
             <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
                 <span class="val">
@@ -760,6 +806,11 @@ function tarjetaEnsamblajeHtml(e) {
                     </span>
                 </span>
             </div>` : ''}
+            ${complementoUsado && !productoEmsamblado ? `
+            <div class="pc-ens-field">
+                <span class="lbl">Usado como complemento</span>
+                <span class="val"><span class="badge-complemento-estado usado"><i class="fa-solid fa-lock"></i> En armado #${e.ensamblaje_id_referido}</span></span>
+            </div>` : ''}
             ${e.enviado_empaquetado ? `
             <div class="pc-ens-field">
                 <span class="lbl">Empaquetado</span>
@@ -789,10 +840,6 @@ function tarjetaEnsamblajeHtml(e) {
                 : ''
             }
             ${puedeDecidirDestino ? `
-                ${puedeComplementar ? `
-                    <button type="button" class="pc-btn-complementar" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Marcar como complemento de otro producto">
-                        <i class="fa-solid fa-puzzle-piece"></i> Complementar</button>
-                ` : ''}
                 <button type="button" class="pc-btn-empaquetado" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})" title="Enviar directo a empaquetado">
                     <i class="fa-solid fa-box"></i> A Empaquetado</button>
             ` : ''}
@@ -837,7 +884,9 @@ function renderGridEnsamblajes(ensamblajes) {
         }
     } else {
         grid.className = 'pc-ens-grid';
-        const items = grupos.get(productoTabActivoEns) || [];
+        const itemsProducto = grupos.get(productoTabActivoEns) || [];
+        renderTabsColorEns(itemsProducto);
+        const items = colorTabActivoEns === 'TODOS' ? itemsProducto : itemsProducto.filter(e => (e.color_nombre_actual || 'Sin color') === colorTabActivoEns);
         html = items.length
             ? items.map(tarjetaEnsamblajeHtml).join('')
             : '<div class="pc-ens-empty">No hay armados registrados para este producto.</div>';
@@ -874,9 +923,11 @@ async function cargarEnsamblajes() {
     if (productoTabActivoEns === null || (productoTabActivoEns !== 'TODOS' && !grupos.has(productoTabActivoEns))) {
         const primerProducto = grupos.keys().next().value;
         productoTabActivoEns = primerProducto ?? 'TODOS';
+        colorTabActivoEns = 'TODOS';
     }
 
     renderTabsProductoEns(grupos);
+    renderTabsColorEns(grupos.get(productoTabActivoEns));
     renderGridEnsamblajes(ensamblajesCache);
 }
 
@@ -1046,15 +1097,18 @@ async function renderGridDetalle() {
     const grid = document.getElementById('ens_detalle_grid');
     const texto = document.getElementById('ens_buscar_detalle').value.trim();
     const sel = document.getElementById('ens_producto_id');
-    const [productoId, colorId] = (sel.value || '').split('_');
+    const productoId = sel.value;
+    const colorId = document.getElementById('ens_color_id').value;
+
+    if (!productoId || !colorId) {
+        grid.innerHTML = '<div class="pc-mat-empty">Selecciona el producto y su color final para ver componentes.</div>';
+        return;
+    }
 
     if (tabDetalleActiva === 'produccion') {
-        if (!productoId) {
-            grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver sus producciones disponibles.</div>';
-            return;
-        }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId, texto });
+        const categoriaFiltro = categoriaMaterialTicketActual();
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId, categoria_material_id: categoriaFiltro || '', texto });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
@@ -1074,14 +1128,16 @@ async function renderGridDetalle() {
                         molde_nombre: p.molde_nombre,
                         color_nombre: colorNombre,
                         cantidad_kg: p.cantidad_kg ?? p.cantidad,
-                        fecha_hora_fin: p.fecha_hora_fin,
-                        categoria_material_id: p.categoria_material_id,
-                        unidad_codigo: p.unidad_produccion_codigo || 'KG',
+                fecha_hora_fin: p.fecha_hora_fin,
+                categoria_material_id: p.categoria_material_id,
+                categoria_material_nombre: p.categoria_material_nombre_verif,
+                unidad_codigo: p.unidad_produccion_codigo || 'KG',
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
                 <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <b>${colorNombre || '-'}</b></span>
+                <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
         }).join('');
@@ -1124,17 +1180,12 @@ async function renderGridDetalle() {
             grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver complementos disponibles.</div>';
             return;
         }
-        const categoriaActual = categoriaMaterialTicketActual();
-        if (!categoriaActual) {
-            grid.innerHTML = '<div class="pc-mat-empty">Agrega al menos una producción con categoría de material definida para ver complementos compatibles.</div>';
-            return;
-        }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId, texto, categoria_material_id: categoriaActual });
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId, excluir_id: ensamblajeIdActual, texto });
         const complementos = json.success ? (json.complementos || []) : [];
 
         if (complementos.length === 0) {
-            grid.innerHTML = '<div class="pc-mat-empty">No hay armados finalizados de la misma categoría de material marcados como complemento de este producto.</div>';
+            grid.innerHTML = '<div class="pc-mat-empty">No hay armados libres de Primera Categoría y del mismo color para usar como complemento.</div>';
             return;
         }
 
@@ -1158,6 +1209,7 @@ async function renderGridDetalle() {
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
                 <span class="nombre">${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
+                <span class="meta">De Primera · Color: <b>${c.complemento_color_nombre || '-'}</b></span>
                 <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
                 <span class="meta">${formatearFechaHoraLegibleEns(c.fin)}</span>
             </button>`;
@@ -1172,6 +1224,11 @@ function agregarLineaDetalle(tipo, datos) {
     const est = estiloPorNombre(nombreParaEstilo);
 
     if (tipo === 'produccion') {
+        const categoriaActual = categoriaMaterialTicketActual();
+        if (categoriaActual && datos.categoria_material_id && String(categoriaActual) !== String(datos.categoria_material_id)) {
+            alert('No se pueden mezclar producciones de Primera y Segunda Categoría en el mismo armado.');
+            return;
+        }
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'produccion',
@@ -1185,6 +1242,7 @@ function agregarLineaDetalle(tipo, datos) {
             cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
             unidad_codigo: datos.unidad_codigo || 'KG',
             categoria_material_id: datos.categoria_material_id,
+            categoria_material_nombre: datos.categoria_material_nombre,
         });
     } else if (tipo === 'derivado') {
         ticketDetalleEns.push({
@@ -1311,12 +1369,25 @@ function obtenerDetalleJsonEns() {
 }
 
 function cambioProductoEnsamblaje() {
+    actualizarCampoMaquinaEnsamblaje();
     renderGridDetalle();
+}
+
+function actualizarCampoMaquinaEnsamblaje() {
+    const productoSel = document.getElementById('ens_producto_id');
+    const requiere = productoSel.selectedOptions[0]?.dataset.requiereMaquina === '1';
+    const wrap = document.getElementById('ens_maquina_wrap');
+    const maquinaSel = document.getElementById('ens_maquina_id');
+    wrap.style.display = requiere ? '' : 'none';
+    maquinaSel.required = requiere;
+    if (!requiere) maquinaSel.value = '';
 }
 
 // ── Crear / Editar ────────────────────────────────────────────────────────
 function limpiarFormularioEnsamblaje() {
     document.getElementById('formEnsamblaje').reset();
+    document.getElementById('ens_maquina_id').value = '';
+    document.getElementById('ens_maquina_wrap').style.display = 'none';
     document.getElementById('ens_buscar_detalle').value = '';
     ensamblajeIdActual = 0;
     ticketDetalleEns = [];
@@ -1379,6 +1450,7 @@ async function abrirModalEditarEnsamblaje(id) {
         color_id: e.color_id_actual,
         operario_ids: operariosVinculados,
         sucursal_id: e.sucursal,
+        maquina_id: e.maquina_id,
     }, id);
 
     const moldes = parseJsonColumna(e.js_moldes_utilizados);
@@ -1452,10 +1524,17 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     const params = {
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
+        color_id: document.getElementById('ens_color_id').value,
+        maquina_id: document.getElementById('ens_maquina_id').value,
         operarios: JSON.stringify(tsOperariosEns ? tsOperariosEns.getValue() : []),
         sucursal_id: document.getElementById('ens_sucursal_id').value,
         detalle: obtenerDetalleJsonEns(),
     };
+
+    if (!params.producto_id || !params.color_id) {
+        Swal.fire('Falta seleccionar', 'Selecciona el producto y el color final que van a armar.', 'warning');
+        return;
+    }
 
     const json = await llamarEnsamblaje('GUARDARENSAMBLAJE', params);
 

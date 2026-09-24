@@ -894,7 +894,7 @@ async function abrirModalCrearCompra() {
     modoEdicionCompra = false;
     document.getElementById('modalCompraTitulo').textContent = 'Registrar compra';
     // Fecha de hoy por defecto
-    document.getElementById('cmp_fecha_compra').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('cmp_fecha_compra').value = fechaLocalISO();
     await obtenerUnidadesCompra();
     modalCompra.show();
 }

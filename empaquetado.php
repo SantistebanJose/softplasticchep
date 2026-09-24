@@ -164,18 +164,24 @@ include("header.php");
     <form id="formEstacionArmado">
         <input type="hidden" id="est_producto_id" value="0">
         <div class="row">
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <label class="form-label">Unidad de medida *</label>
                 <select class="form-select" id="est_unidad_medida" required></select>
                 <small class="text-muted" id="avisoUnidadEstacion" style="display:none;">
                     Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí y configúrala en Productos para la próxima vez.
                 </small>
             </div>
-            <div class="col-md-5 mb-2">
+            <div class="col-md-3 mb-2" id="est_maquina_wrap" style="display:none;">
+                <label class="form-label" for="est_maquina_id">Máquina *</label>
+                <select class="form-select" id="est_maquina_id">
+                    <option value="">Selecciona una máquina...</option>
+                </select>
+            </div>
+            <div class="col-md-4 mb-2">
                 <label class="form-label">Operarios *</label>
                 <div id="est_operarios_chips" class="pc-operario-chips-wrap"></div>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-2 mb-2">
                 <label class="form-label">Sucursal</label>
                 <select class="form-select" id="est_sucursal_id"></select>
             </div>
@@ -371,6 +377,7 @@ const llamarSucursal    = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, 
 let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
+let empMaquinasCache = null;
 let origenesDisponiblesCache = []; // BUSCARORIGENESDISPONIBLES del producto de la estación activa
 let unidadEmpaquetadoProductoActual = null;
 let reglasEmpaquetadoActuales = null;
@@ -422,7 +429,34 @@ function limpiarFiltrosListado() {
 }
 
 
+function desgloseVentaEmp(r) {
+    const conversorValido = Number(r.cant_equivale) > 0
+        && r.unidad_venta_corto
+        && String(r.unidad_equivale_id ?? '') === String(r.unidad_medida ?? '');
+    const marcadoPorServidor = r.desglose_conversion_venta === true
+        || r.desglose_conversion_venta === 1
+        || r.desglose_conversion_venta === '1'
+        || r.desglose_conversion_venta === 't';
+    if (!conversorValido && !marcadoPorServidor) return null;
+
+    const cantidad = Number(r.cantidad_tota) || 0;
+    const porPaquete = Number(r.cant_equivale) || 0;
+    const paquetes = porPaquete > 0 ? Math.floor((cantidad + 0.000001) / porPaquete) : 0;
+    const resto = Math.max(0, Math.round((cantidad - paquetes * porPaquete) * 10000) / 10000);
+    const partes = [];
+    if (paquetes > 0) partes.push(`${formatearCantidadEmp(paquetes)} ${r.unidad_venta_corto}`);
+    if (resto > 0.0001 || partes.length === 0) {
+        partes.push(`${formatearCantidadEmp(resto > 0.0001 ? resto : cantidad)} ${r.unidad_corto ?? ''}`.trim());
+    }
+    return partes.join(' + ');
+}
+
 function textoDesgloseEmp(r) {
+    const desgloseVenta = desgloseVentaEmp(r);
+    if (desgloseVenta) {
+        const total = `${formatearCantidadEmp(r.cantidad_tota)} ${r.unidad_corto ?? ''}`.trim();
+        return `${total} <span class="text-muted" style="font-size:.85em;">(${desgloseVenta})</span>`;
+    }
     const desglose = parseJsonColumnaEmp(r.js_desglose ?? r.desglose); // según cómo llegue
     if (!desglose || desglose.length === 0) {
         return `${formatearCantidadEmp(r.cantidad_tota)} ${r.unidad_corto ?? ''}`;
@@ -454,6 +488,9 @@ function parseJsonColumnaEmp(v) {
 }
 
 function textoEquivalenteEmp(r) {
+    // Si se muestra la conversión comercial del producto, no mezclarla con
+    // la equivalencia global de unidad (que puede dar un total confuso).
+    if (desgloseVentaEmp(r)) return '';
     if (r.unidad_base_id && r.cantidad_tota_en_base != null) {
         return ` <span class="text-muted" style="font-size:.85em;">(= ${formatearCantidadEmp(r.cantidad_tota_en_base)} ${r.unidad_base_corto ?? ''})</span>`;
     }
@@ -696,7 +733,6 @@ async function cargarEstacionParaProducto(productoId) {
 
     aplicarUnidadEmpaquetadoFija();
     inicializarBloqueFormulario();
-    actualizarResumenBarraAccion();
 }
 async function cargarOrigenesDisponibles(productoId, miToken = null) {
     const json = await llamarEmpaquetado('BUSCARORIGENESDISPONIBLES', { producto_id: productoId });
@@ -708,6 +744,19 @@ async function cargarOrigenesDisponibles(productoId, miToken = null) {
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
     capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null;
+    aplicarMaquinaEmpaquetado();
+}
+
+function aplicarMaquinaEmpaquetado() {
+    const requerida = reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === true
+        || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === 1
+        || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === '1';
+    const contenedor = document.getElementById('est_maquina_wrap');
+    const select = document.getElementById('est_maquina_id');
+    if (!contenedor || !select) return;
+    contenedor.style.display = requerida ? '' : 'none';
+    select.required = requerida;
+    if (!requerida) select.value = '';
 }
 
 // =============================================================================
@@ -784,11 +833,18 @@ async function obtenerOperariosEmp() {
     empOperariosCache = json.success ? json.operario : [];
     return empOperariosCache;
 }
+async function obtenerMaquinasEmp() {
+    if (empMaquinasCache) return empMaquinasCache;
+    const json = await llamarEmpaquetado('BUSCARMAQUINAS');
+    if (!json.success) console.error('Error BUSCARMAQUINAS:', json.message);
+    empMaquinasCache = json.success ? (json.maquinas || []) : [];
+    return empMaquinasCache;
+}
 
 // Selects/chips de la ESTACIÓN DE ARMADO (creación de registros nuevos)
 async function cargarSelectsEstacion() {
-    const [unidades, operarios, sucursales] = await Promise.all([
-        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
+    const [unidades, operarios, sucursales, maquinas] = await Promise.all([
+        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp(), obtenerMaquinasEmp()
     ]);
     const sUnidad = document.getElementById('est_unidad_medida');
     sUnidad.innerHTML = unidades.length
@@ -797,6 +853,9 @@ async function cargarSelectsEstacion() {
 
     const sSuc = document.getElementById('est_sucursal_id');
     sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+
+    const sMaquina = document.getElementById('est_maquina_id');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
 
     estOperariosSeleccionados = [];
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
@@ -1445,6 +1504,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
             sucursal_id: document.getElementById('est_sucursal_id').value || '',
+            maquina_id: document.getElementById('est_maquina_id').value || '',
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1478,6 +1538,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
             sucursal_id: document.getElementById('est_sucursal_id').value || '',
+            maquina_id: document.getElementById('est_maquina_id').value || '',
             bultos: bultosJson,
         };
     }
@@ -1490,7 +1551,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         const productoRecienUsado = estacionProductoIdActual;
         await Promise.all([
             cargarPendientesEmpaquetado(),
-            cargarMisRegistros(),
+            cargarListadoGeneralEmp(),
         ]);
         estacionProductoIdActual = 0;
         await cargarEstacionParaProducto(productoRecienUsado);

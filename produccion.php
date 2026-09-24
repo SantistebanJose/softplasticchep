@@ -276,8 +276,6 @@ include("header.php");
 @media (max-width:900px){ .pc-stat-row{ grid-template-columns:repeat(2,1fr); } }
 
 /* ---------- Estado visual en las cards de producción ---------- */
-.pc-prod-card.estado-ensamblaje{ opacity:.7; }
-
 .pc-prod-card.pc-flash{ animation:pc-flash-bg 1.8s ease; }
 @keyframes pc-flash-bg{
     0%{ background:#FFF6DC; box-shadow:0 0 0 2px #F5D98A inset; }
@@ -400,22 +398,23 @@ include("header.php");
             </div>
         </div>
 
-          <!-- Selección en cascada: primero el PRODUCTO, luego (filtrado por
-               ese producto) el MOLDE. Antes era un solo select con todas
-               las combinaciones "MOLDE — PRODUCTO" mezcladas, difícil de
-               ubicar. -->
+          <!-- Se registra el molde usado. El producto final se determina
+               posteriormente en Ensamblaje, según la combinación armada. -->
           <div class="row">
-            <div class="col-md-4 mb-2">
-                <label class="form-label">Producto *</label>
-                <select class="form-select" id="prod_producto_id" required>
-                    <option value="">Selecciona un producto...</option>
-                </select>
-            </div>
-            <div class="col-md-4 mb-2">
+            <input type="hidden" id="prod_producto_id" value="">
+            <div class="col-md-6 mb-2">
                 <label class="form-label">Molde *</label>
                 <select class="form-select" id="prod_molde_id" required disabled>
-                    <option value="">Primero selecciona un producto...</option>
+                    <option value="">Cargando moldes...</option>
                 </select>
+                <div class="form-text">El producto terminado se asigna en Ensamblaje.</div>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Color final producido *</label>
+                <select class="form-select" id="prod_color_id" required>
+                    <option value="">Selecciona un color...</option>
+                </select>
+                <div class="form-text">Independiente de los tintes consumidos.</div>
             </div>
           </div>
 
@@ -558,6 +557,7 @@ let tsOperario = null;
 let materialesProdCache = null; // cache de materiales para las cards
 let materialesProdCachePorProducto = {}; // productoId -> materiales[]
 let productosMoldeProdCache = null; // cache de productos (para el 1er select en cascada)
+let coloresProduccionCache = null;
 let categoriasMaterialProdCache = null; // cache de categorías de material para el select
 let contadorLineaTicket = 0;
 let tipoMaterialActivo = 'material'; // 'material' | 'tinte' — pestaña activa del menú
@@ -567,7 +567,7 @@ let ticketLineas = []; // [{tempId, material_id, material_nombre, unidad_corto, 
 
 // ── Pestañas de producto (reemplazan los filtros de arriba) ─────────────────
 let produccionesCache = [];      // último listado recibido del backend
-let productoTabActivo = null;    // nombre del producto seleccionado; null = aún sin definir
+let productoTabActivo = 'TODOS'; // mostrar todas las producciones desde que se abre el listado
 
 document.addEventListener('DOMContentLoaded', () => {
     //DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
@@ -580,10 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prod_mat_buscar').addEventListener('input', renderGridMateriales);
 
-    document.getElementById('prod_producto_id').addEventListener('change', (e) => {
-        cargarMoldesDeProducto(e.target.value, null);
-        renderGridMateriales();
-    });
+    cargarColoresProduccion();
 
     document.getElementById('prodVerInactivos').addEventListener('change', () => cargarProducciones());
 
@@ -595,6 +592,17 @@ document.addEventListener('DOMContentLoaded', () => {
         detenerAutoRefreshMaterialesModal();
     });
 });
+
+async function cargarColoresProduccion(seleccion = '') {
+    if (!coloresProduccionCache) {
+        const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
+        coloresProduccionCache = json.success ? json.colores : [];
+    }
+    const select = document.getElementById('prod_color_id');
+    select.innerHTML = '<option value="">Selecciona un color...</option>' +
+        coloresProduccionCache.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    select.value = seleccion || '';
+}
 
 function esTinte(m) {
     return m.color === true || m.color === 't' || m.color === 'true';
@@ -638,6 +646,7 @@ function inicializarTomSelectOperario() {
 // =============================================================================
 const POLL_INTERVAL_MS = 8000; // cada 8s, sin avisar nada al usuario
 let pollTimer = null;
+let cargandoListadoProducciones = false;
 let snapshotEstados = {}; // { produccion_id: 'sin' | 'curso' | 'fin' }
 
 function iniciarAutoRefresh() {
@@ -676,11 +685,7 @@ function detenerAutoRefreshMaterialesModal() {
 // refresca tanto el menú de cards como el ticket ya armado, por si otro
 // operario consumió stock mientras este formulario seguía abierto.
 async function refrescarMaterialesEnVivo() {
-    const productoId = document.getElementById('prod_producto_id').value;
-    if (!productoId) return;
-
-    delete materialesProdCachePorProducto[productoId]; // invalida el cache de este producto
-    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const materiales = await obtenerOpcionesMaterialesProd('');
 
     ticketLineas.forEach(l => {
         const actualizado = materiales.find(m => m.id == l.material_id);
@@ -735,7 +740,7 @@ function renderStatRow(producciones) {
     const enCurso = activas.filter(p => estadoCorto(p) === 'curso').length;
     const finalizadas = activas.filter(p => estadoCorto(p) === 'fin').length;
     const kgHoy = activas
-        .filter(p => p.fecha && p.fecha.substring(0, 10) === new Date().toISOString().substring(0, 10))
+        .filter(p => p.fecha && p.fecha.substring(0, 10) === fechaLocalISO())
         .reduce((s, p) => s + Number(p.cantidad || 0), 0);
 
     document.getElementById('statRowProduccion').innerHTML = `
@@ -933,17 +938,9 @@ async function obtenerProductosMoldeProd() {
 // "unico_molde" tipo "7-2" o directamente un molde_id numérico).
 async function cargarMoldesDeProducto(productoId, seleccion) {
     const moldeSelect = document.getElementById('prod_molde_id');
-
-    if (!productoId) {
-        moldeSelect.innerHTML = '<option value="">Primero selecciona un producto...</option>';
-        moldeSelect.disabled = true;
-        return;
-    }
-
     moldeSelect.disabled = false;
     moldeSelect.innerHTML = '<option value="">Cargando moldes...</option>';
-
-    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: productoId });
+    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: 0 });
     const moldes = json.success ? json.moldes : [];
 
     if (moldes.length === 0) {
@@ -952,11 +949,12 @@ async function cargarMoldesDeProducto(productoId, seleccion) {
     }
 
     moldeSelect.innerHTML = '<option value="">Selecciona un molde...</option>' +
-        moldes.map(m => `<option value="${m.unico_molde}" data-molde-id="${m.molde_id}" data-etiqueta="${m.etiqueta}">${m.molde_nombre}</option>`).join('');
+        moldes.map(m => `<option value="${m.unico_molde}" data-molde-id="${m.molde_id}" data-etiqueta="${m.etiqueta}" data-cantidad-productos="${m.cantidad_productos}">${m.molde_nombre}</option>`).join('');
 
     if (seleccion) {
         const porUnico   = [...moldeSelect.options].find(o => o.value == seleccion);
-        const porMoldeId = [...moldeSelect.options].find(o => o.dataset.moldeId == seleccion);
+        const moldeIdSeleccionado = String(seleccion).split('-')[0];
+        const porMoldeId = [...moldeSelect.options].find(o => o.dataset.moldeId == moldeIdSeleccionado);
         moldeSelect.value = (porUnico || porMoldeId)?.value ?? '';
     }
 }
@@ -1007,17 +1005,8 @@ async function cargarSelectsModal(seleccion = {}) {
         (categorias || []).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     if (seleccion.categoria_material_id) categoriaSelect.value = seleccion.categoria_material_id;
 
-    const productoSelect = document.getElementById('prod_producto_id');
-    productoSelect.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        (productos || []).map(p => `<option value="${p.producto_id}">${p.descripcion}</option>`).join('');
-
-    if (seleccion.producto_id) {
-        productoSelect.value = seleccion.producto_id;
-        await cargarMoldesDeProducto(seleccion.producto_id, seleccion.unico_molde || seleccion.molde_id);
-    } else {
-        document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
-        document.getElementById('prod_molde_id').disabled = true;
-    }
+    document.getElementById('prod_producto_id').value = '';
+    await cargarMoldesDeProducto('', seleccion.unico_molde || seleccion.molde_id || null);
 }
 async function obtenerOpcionesMaterialesProd(productoId) {
     const key = productoId || 'sin_producto';
@@ -1028,26 +1017,22 @@ async function obtenerOpcionesMaterialesProd(productoId) {
     return materialesProdCachePorProducto[key];
 }
 
-// ── Agrupación por producto ("escalera") ──────────────────────────────────
-// Agrupa las producciones por el nombre del producto, extraído del campo
-// molde_producto que ya guarda cada avance con el formato "MOLDE — PRODUCTO".
-// El orden de los grupos respeta el orden en que aparece cada producto en
-// la lista ya ordenada por el backend (enviado_ensamblaje asc, id desc).
+// Agrupa avances por molde para que los moldes compartidos no queden bajo
+// "Sin producto asociado".
 function agruparProduccionesPorProducto(producciones) {
     const grupos = new Map();
     producciones.forEach(p => {
-        const nombreProducto = p.producto_descripcion || 'Sin producto asociado';
-        if (!grupos.has(nombreProducto)) grupos.set(nombreProducto, []);
-        grupos.get(nombreProducto).push(p);
+        const nombreMolde = p.molde_nombre || 'Sin molde';
+        if (!grupos.has(nombreMolde)) grupos.set(nombreMolde, []);
+        grupos.get(nombreMolde).push(p);
     });
     return grupos;
 }
 
-// ── Pestañas de producto (reemplazan la fila de filtros anterior) ────────
-// Dibuja una pestaña por cada producto que tenga al menos un avance en el
+// ── Pestañas de molde ────────────────────────────────────────────────────
+// Dibuja una pestaña por cada molde que tenga al menos un avance en el
 // listado actual, con su conteo, más una pestaña "Todos" para ver el
-// tablero completo agrupado (como antes). Al tocar una pestaña, solo se
-// muestran las cards de ese producto.
+// tablero completo agrupado. Al tocar una pestaña, solo se ven sus avances.
 function renderTabsProducto(grupos) {
     const contenedor = document.getElementById('prodProductoTabs');
     const totalGeneral = [...grupos.values()].reduce((s, items) => s + items.length, 0);
@@ -1057,11 +1042,11 @@ function renderTabsProducto(grupos) {
             <i class="fa-solid fa-grip"></i> Todos <span class="cnt">${totalGeneral}</span>
         </button>`;
 
-    for (const [nombreProducto, items] of grupos) {
-        const nombreEscapado = nombreProducto.replace(/'/g, "\\'");
+    for (const [nombreMolde, items] of grupos) {
+        const nombreEscapado = nombreMolde.replace(/'/g, "\\'");
         html += `
-            <button type="button" class="pc-tab-item ${productoTabActivo === nombreProducto ? 'activo' : ''}" onclick="seleccionarTabProducto('${nombreEscapado}')">
-                <i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="cnt">${items.length}</span>
+            <button type="button" class="pc-tab-item ${productoTabActivo === nombreMolde ? 'activo' : ''}" onclick="seleccionarTabProducto('${nombreEscapado}')">
+                <i class="fa-solid fa-shapes"></i> ${nombreMolde} <span class="cnt">${items.length}</span>
             </button>`;
     }
 
@@ -1080,9 +1065,10 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     nuevosEstados[p.id] = estado;
     const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
 
-    const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
-    const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
+    const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
+    const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
+    const puedeFinalizar = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
     // Ahora SIEMPRE que la corrida terminó se muestra el botón de avanzar:
     // el texto (y el destino real) depende de si el molde/producto
@@ -1123,9 +1109,9 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            <button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+            ${puedeGestionar ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
-            </button>
+            </button>` : ''}
         </div>
 
         <div class="pc-prod-title">${p.molde_nombre ?? '-'}</div>
@@ -1144,8 +1130,10 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         </div>
 
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
+        ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
 
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
+        ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
 
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
 
@@ -1160,11 +1148,12 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                     <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
                 : ''
             }
-            ${!p.deleted_at
+            ${puedeGestionar && !p.deleted_at
                 ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
-                : `<button type="button" class="pc-prod-ghost-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
+                : (puedeGestionar ? `<button type="button" class="pc-prod-ghost-btn" onclick="reactivarProduccion(${p.id})" title="Reactivar">
                        <i class="fa-solid fa-rotate-left"></i></button>`
+                  : '')
             }
             ${mostrarBotonAvanzar
                 ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})" title="Enviar este avance a ${etapaTexto}">
@@ -1174,7 +1163,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         </div>
     </div>`;
 }
-// Dibuja el tablero de cards según la pestaña de producto activa. Si es
+// Dibuja el tablero de cards según la pestaña de molde activa. Si es
 // "TODOS", se ve como antes (secciones agrupadas por producto); si es un
 // producto puntual, se ve solo su cuadrícula de avances.
 function renderGridProducciones(producciones, silencioso) {
@@ -1192,12 +1181,12 @@ function renderGridProducciones(producciones, silencioso) {
 
     let html = '';
     if (productoTabActivo === 'TODOS') {
-        for (const [nombreProducto, items] of grupos) {
+        for (const [nombreMolde, items] of grupos) {
             html += `
                 <div class="pc-prod-group">
                     <div class="pc-prod-group-header">
                         <span class="linea"></span>
-                        <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-prod-group-count">· ${items.length}</span></span>
+                        <span class="texto"><i class="fa-solid fa-shapes"></i> ${nombreMolde} <span class="pc-prod-group-count">· ${items.length}</span></span>
                         <span class="linea"></span>
                     </div>
                     <div class="pc-prod-grid">
@@ -1209,7 +1198,7 @@ function renderGridProducciones(producciones, silencioso) {
         const items = grupos.get(productoTabActivo) || [];
         html = items.length
             ? `<div class="pc-prod-grid">${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}</div>`
-            : '<div class="pc-prod-empty">No hay avances registrados para este producto.</div>';
+            : '<div class="pc-prod-empty">No hay avances registrados para este molde.</div>';
         // Igual calculamos el estado de todos para que el snapshot no pierda
         // de vista lo que pasa en las pestañas que no se están mostrando.
         producciones.forEach(p => { if (!(p.id in nuevosEstados)) nuevosEstados[p.id] = estadoCorto(p); });
@@ -1221,29 +1210,35 @@ function renderGridProducciones(producciones, silencioso) {
 
 async function cargarProducciones(silencioso = false) {
     const grid = document.getElementById('gridProducciones');
+    if (cargandoListadoProducciones) return;
+    cargandoListadoProducciones = true;
     if (!silencioso) grid.innerHTML = '<div class="pc-prod-empty">Cargando...</div>';
 
-    const verInactivos = document.getElementById('prodVerInactivos').checked;
-    const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: verInactivos ? '' : 'activa' });
-    if (!json.success) {
-        grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
-        return;
+    try {
+        const verInactivos = document.getElementById('prodVerInactivos').checked;
+        const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: verInactivos ? '' : 'activa' });
+        if (!json.success) {
+            grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
+            return;
+        }
+
+        produccionesCache = json.producciones || [];
+        const grupos = agruparProduccionesPorProducto(produccionesCache);
+
+    // El listado abre en "Todos" para que los avances de otros moldes no
+    // queden ocultos dentro de la primera pestaña.
+        if (productoTabActivo === null || (productoTabActivo !== 'TODOS' && !grupos.has(productoTabActivo))) {
+            productoTabActivo = 'TODOS';
+        }
+
+        renderTabsProducto(grupos);
+        renderGridProducciones(produccionesCache, silencioso);
+    } catch (error) {
+        console.error('No se pudo cargar el listado de Producción:', error);
+        grid.innerHTML = '<div class="pc-prod-empty">No se pudo cargar el listado. Intenta actualizar en unos segundos.</div>';
+    } finally {
+        cargandoListadoProducciones = false;
     }
-
-    produccionesCache = json.producciones || [];
-    const grupos = agruparProduccionesPorProducto(produccionesCache);
-
-    // La pestaña activa por defecto es el PRIMER producto del listado (no
-    // "Todos"). Si la pestaña que estaba activa ya no existe en el nuevo
-    // listado (se desactivó el único avance de ese producto, por ejemplo),
-    // se cae de vuelta al primer producto disponible.
-    if (productoTabActivo === null || (productoTabActivo !== 'TODOS' && !grupos.has(productoTabActivo))) {
-        const primerProducto = grupos.keys().next().value;
-        productoTabActivo = primerProducto ?? 'TODOS';
-    }
-
-    renderTabsProducto(grupos);
-    renderGridProducciones(produccionesCache, silencioso);
 }
 // =============================================================================
 // MENÚ DE MATERIALES + TICKET (sin selección de lote)
@@ -1251,14 +1246,7 @@ async function cargarProducciones(silencioso = false) {
 
 async function renderGridMateriales() {
     const grid = document.getElementById('prod_materiales_grid');
-    const productoId = document.getElementById('prod_producto_id').value;
-
-    if (!productoId) {
-        grid.innerHTML = '<div class="pc-mat-empty">Selecciona primero un producto para ver sus materiales.</div>';
-        return;
-    }
-
-    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
     let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
@@ -1288,8 +1276,7 @@ async function renderGridMateriales() {
 // estaba en el ticket, le suma 1). No se pregunta por lote/proveedor: el
 // backend decide automáticamente de dónde sale el material al guardar.
 async function seleccionarMaterial(materialId) {
-    const productoId = document.getElementById('prod_producto_id').value;
-    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     const material = materiales.find(m => m.id == materialId);
     if (!material) return;
 
@@ -1421,8 +1408,8 @@ function obtenerDetalleJsonProd() {
 function limpiarFormularioProduccion() {
     document.getElementById('formProduccion').reset();
     document.getElementById('prod_mat_buscar').value = '';
-    document.getElementById('prod_molde_id').innerHTML = '<option value="">Primero selecciona un producto...</option>';
-    document.getElementById('prod_molde_id').disabled = true;
+    document.getElementById('prod_molde_id').innerHTML = '<option value="">Selecciona un molde...</option>';
+    document.getElementById('prod_molde_id').disabled = false;
     if (tsOperario) tsOperario.clear();
     produccionIdActual = 0;
     ticketLineas = [];
@@ -1436,10 +1423,9 @@ async function abrirModalCrearProduccion() {
     modoEdicionProduccion = false;
     document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
     await cargarSelectsModal();
+    await cargarColoresProduccion();
     // Fecha/hora actual por defecto
-    const ahora = new Date();
-    ahora.setMinutes(ahora.getMinutes() - ahora.getTimezoneOffset());
-    document.getElementById('prod_fecha').value = ahora.toISOString().substring(0, 16);
+    document.getElementById('prod_fecha').value = fechaHoraLocalInput();
     await renderGridMateriales();
     modalProduccion.show();
 }
@@ -1457,6 +1443,7 @@ async function abrirModalEditarProduccion(id) {
     document.getElementById('prod_cantidad').value = p.cantidad;
     document.getElementById('prod_fecha').value = formatearFechaHoraLocal(p.fecha);
     document.getElementById('prod_observaciones').value = p.observaciones ?? '';
+    await cargarColoresProduccion(p.color_id);
 
     // "unico_molde_producto" tiene el formato "{molde_id}-{producto_id}":
     // de ahí se saca qué producto tenía seleccionado este avance, para
@@ -1500,7 +1487,7 @@ async function abrirModalEditarProduccion(id) {
         agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
     });
 
-    const materiales = await obtenerOpcionesMaterialesProd(productoIdDesdeUnico);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const materialActual = materiales.find(m => m.id == d.material_id);
         const est = estiloMaterial(materialActual || { nombre: d.material_nombre });
@@ -1534,6 +1521,10 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     }
     if (!document.getElementById('prod_categoria_material_id').value) {
         Swal.fire('Falta un dato', 'Debes seleccionar la categoría de material.', 'warning');
+        return;
+    }
+    if (!document.getElementById('prod_color_id').value) {
+        Swal.fire('Falta un dato', 'Debes seleccionar el color final producido.', 'warning');
         return;
     }
     if (!document.getElementById('prod_sucursal_id').value) {
@@ -1570,6 +1561,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         molde_id: moldeIdReal,
         unico_molde: uniqueMolde,
         molde_producto: moldeProducto,
+        color_id: document.getElementById('prod_color_id').value,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
@@ -1579,10 +1571,20 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     const json = await llamarProduccion('GUARDARPRODUCCION', params);
 
     if (json.success) {
+        const esNuevo = !produccionIdActual;
         modalProduccion.hide();
         materialesProdCachePorProducto = {}; // 👉 NUEVO, aquí
-        Swal.fire('Listo', json.message, 'success');
-        cargarProducciones();
+        if (esNuevo) productoTabActivo = 'TODOS';
+        await cargarProducciones();
+        if (esNuevo && json.id) {
+            const tarjeta = document.getElementById(`fila-produccion-${json.id}`);
+            tarjeta?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            tarjeta?.classList.add('pc-flash');
+            tarjeta?.querySelector('.pc-prod-ghost-btn.success')?.focus({ preventScroll: true });
+            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Producción guardada. Pulsa Iniciar en la tarjeta.', showConfirmButton: false, timer: 2200 });
+        } else {
+            Swal.fire('Listo', json.message, 'success');
+        }
     } else {
         Swal.fire('Error', json.message, 'error');
     }
@@ -1622,22 +1624,15 @@ function reactivarProduccion(id) {
 
 // ── Iniciar / Finalizar corrida (acciones directas desde la card) ───────────
 function iniciarProduccion(id) {
-    Swal.fire({
-        title: '¿Iniciar la corrida ahora?',
-        text: 'Se registrará la hora actual del servidor como inicio.',
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, iniciar',
-        cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-        if (!result.isConfirmed) return;
-        const json = await llamarProduccion('INICIARCORRIDA', { id });
-        if (json.success) {
-            Swal.fire('Listo', json.message, 'success');
-            cargarProducciones();
-        } else {
-            Swal.fire('Error', json.message, 'error');
-        }
+    const boton = document.querySelector(`#fila-produccion-${id} .pc-prod-ghost-btn.success`);
+    if (boton?.disabled) return;
+    if (boton) { boton.disabled = true; boton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Iniciando…'; }
+    llamarProduccion('INICIARCORRIDA', { id }).then(json => {
+        if (json.success) { Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 }); cargarProducciones(); }
+        else { Swal.fire('Error', json.message, 'error'); if (boton) { boton.disabled = false; boton.innerHTML = '<i class="fa-solid fa-play"></i> Iniciar'; } }
+    }).catch(() => {
+        if (boton) { boton.disabled = false; boton.innerHTML = '<i class="fa-solid fa-play"></i> Iniciar'; }
+        Swal.fire('Error', 'No se pudo iniciar la corrida.', 'error');
     });
 }
 

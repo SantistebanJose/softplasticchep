@@ -37,7 +37,7 @@ if (isset($_POST['accion'])) {
 
 function controladorSucursal(string $accion): void
 {
-    $usuario = exigirSesion();
+    iniciarSesionSegura();
 
     $accionesLectura = [
         'LISTARSUCURSALES',
@@ -50,12 +50,19 @@ function controladorSucursal(string $accion): void
         'REACTIVARSUCURSAL',
     ];
 
-    if (in_array($accion, $accionesLectura, true)) {
-        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
-    } elseif (in_array($accion, $accionesAdministracion, true)) {
-        exigirRol($usuario, ['administrador']);
+    if (!empty($_SESSION['operario_id'])) {
+        if ($accion !== 'LISTARSUCURSALES') {
+            responderAcceso(403, 'No tienes permiso para realizar esta acción.');
+        }
     } else {
-        responderAcceso(400, 'Acción no reconocida.');
+        $usuario = exigirSesion();
+        if (in_array($accion, $accionesLectura, true)) {
+            exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+        } elseif (in_array($accion, $accionesAdministracion, true)) {
+            exigirRol($usuario, ['administrador']);
+        } else {
+            responderAcceso(400, 'Acción no reconocida.');
+        }
     }
 
     switch ($accion) {

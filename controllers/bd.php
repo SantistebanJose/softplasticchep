@@ -1,5 +1,6 @@
 <?php
 //bd.php
+date_default_timezone_set('America/Lima');
 function conectar_oll_BD() {
     $host = "bi.back-mrsoft.com";
     $user = "usrwebapp";
@@ -11,6 +12,7 @@ function conectar_oll_BD() {
         $dsn = "pgsql:host=$host;port=$port;dbname=$nombreBD";
         $conexion = new PDO($dsn, $user, $password);
         $conexion->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $conexion->exec("SET TIME ZONE 'America/Lima'");
         //echo "conectadoo :)";
         return $conexion;
     } catch (PDOException $e) {

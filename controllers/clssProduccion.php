@@ -103,7 +103,8 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
 require_once __DIR__ . '/clssVerificarSession.php'; //esto agregar en todos los controladores que requieran sesión
-session_start();
+require_once __DIR__ . '/cloudinaryHelper.php';
+iniciarSesionSegura();
 
 if (isset($_POST["accion"])) {
     try {
@@ -119,9 +120,6 @@ if (isset($_POST["accion"])) {
 
 function controladorProduccion(string $accion): void
 {
-    // Todo acceso a Producción exige una sesión válida.
-    $usuario = exigirSesion();
-
     $accionesLectura = [
         'LISTARPRODUCCIONES',
         'OBTENERPRODUCCION',
@@ -147,14 +145,23 @@ function controladorProduccion(string $accion): void
         'REACTIVARPRODUCCION',
     ];
 
-    if (in_array($accion, $accionesLectura, true)) {
-        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
-    } elseif (in_array($accion, $accionesOperacion, true)) {
-        exigirRol($usuario, ['administrador', 'produccion']);
-    } elseif (in_array($accion, $accionesSoloAdmin, true)) {
-        exigirRol($usuario, ['administrador']);
+    if (!empty($_SESSION['operario_id'])) {
+        // La tablet autentica por operario_id, no por usuario_id. El alcance
+        // de edición/avance se valida además dentro de cada acción.
+        if (!in_array($accion, array_merge($accionesLectura, $accionesOperacion), true)) {
+            responderAcceso(403, 'No tienes permiso para realizar esta acción.');
+        }
     } else {
-        responderAcceso(400, 'Acción no reconocida.');
+        $usuario = exigirSesion();
+        if (in_array($accion, $accionesLectura, true)) {
+            exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+        } elseif (in_array($accion, $accionesOperacion, true)) {
+            exigirRol($usuario, ['administrador', 'produccion']);
+        } elseif (in_array($accion, $accionesSoloAdmin, true)) {
+            exigirRol($usuario, ['administrador']);
+        } else {
+            responderAcceso(400, 'Acción no reconocida.');
+        }
     }
 
     switch ($accion) {
@@ -347,23 +354,27 @@ function buscarProductosMolde()
 // guardarla tal cual en produccion.molde_producto.
 function buscarMoldesPorProducto(int $productoId)
 {
-    if (!$productoId) responder(false, 'Debes indicar un producto.');
     $conectar = conectar_oll_BD();
+    $filtro = $productoId > 0 ? "AND (elem->>'producto_id')::int = :producto_id" : '';
     $sql = "
         SELECT
             m.id AS molde_id,
             m.nombre AS molde_nombre,
-            (elem->>'producto_id')::int AS producto_id,
-            elem->>'descripcion' AS producto_descripcion,
-            (m.id::text || '-' || (elem->>'producto_id')) AS unico_molde,
-            (m.nombre || ' — ' || (elem->>'descripcion')) AS etiqueta
+            COUNT(*)::int AS cantidad_productos,
+            CASE WHEN COUNT(*) = 1 THEN MIN((elem->>'producto_id')::int)::int ELSE 0 END AS producto_id,
+            jsonb_agg(jsonb_build_object('producto_id', (elem->>'producto_id')::int, 'descripcion', elem->>'descripcion')) AS productos,
+            (m.id::text || '-' || CASE WHEN COUNT(*) = 1 THEN MIN(elem->>'producto_id') ELSE '0' END) AS unico_molde,
+            m.nombre AS etiqueta
         FROM molde m, jsonb_array_elements(m.js_producto) elem
         WHERE m.deleted_at IS NULL
           AND m.js_producto IS NOT NULL
-          AND (elem->>'producto_id')::int = :producto_id
+          $filtro
+        GROUP BY m.id, m.nombre
         ORDER BY m.nombre
     ";
-    $result = executeQuery($conectar, $sql, ['producto_id' => $productoId]);
+    $result = executeQuery($conectar, $sql, $productoId > 0 ? ['producto_id' => $productoId] : []);
+    foreach ($result as &$molde) $molde['productos'] = json_decode($molde['productos'] ?? '[]', true) ?: [];
+    unset($molde);
     responder(true, 'OK', ['moldes' => $result]);
 }
 
@@ -597,6 +608,7 @@ function listarProducciones()
 {
     $conectar = conectar_oll_BD();
     $texto        = trim($_POST['texto'] ?? '');
+    // En tablet cada operario consulta únicamente sus propios avances.
     if (!empty($_SESSION['operario_id'])) {
         $operario_id = (string) intval($_SESSION['operario_id']);
     } else {
@@ -620,10 +632,7 @@ function listarProducciones()
         if ($operario_id !== '') {
         // Coincide si es el responsable principal (operario_id) O si aparece
         // como participante en js_operarios (avances con varios operarios).
-        $where[] = "(pd.operario_id = :operario_id OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS op
-            WHERE (op->>'operario_id')::bigint = :operario_id_js
-        ))";
+        $where[] = "(pd.operario_id = :operario_id OR COALESCE(pd.js_operarios, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('operario_id', CAST(:operario_id_js AS integer))))";
         $params['operario_id']    = $operario_id;
         $params['operario_id_js'] = $operario_id;
     }
@@ -655,7 +664,12 @@ function listarProducciones()
 
     $sql = "
         SELECT
-            pd.*,
+            pd.id, pd.operario_id, pd.js_operarios, pd.maquina_id, pd.molde_id,
+            pd.color_id, pd.categoria_material_id, pd.sucursal, pd.cantidad,
+            pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
+            pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
+            pd.js_cantidades_merma, pd.js_configuracion_moment, pd.js_images,
+            pd.unico_molde_producto, pd.molde_producto,
             op.nombre_completo AS operario_nombre,
             ma.nombre AS maquina_nombre,
             mo.nombre AS molde_nombre,
@@ -665,10 +679,7 @@ function listarProducciones()
             su.nombre AS sucursal_nombre,
             pr.descripcion AS producto_descripcion,
             pr.js_configuracion_empaquetado,
-            COALESCE((
-                SELECT COUNT(*) FROM rel_produccion_material rpm
-                WHERE rpm.produccion_id = pd.id AND rpm.deleted_at IS NULL
-            ), 0) AS items_count,
+            COALESCE(rpm_count.items_count, 0) AS items_count,
             cfg.item,
             cfg.item->>'salida_produccion' AS unidad_salida_produccion,
             cfg.item->>'salida_merma'      AS unidad_salida_merma,
@@ -684,12 +695,44 @@ function listarProducciones()
         LEFT JOIN producto pr ON NULLIF(split_part(pd.unico_molde_producto,'-', 2), '')::bigint = pr.id
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
+        LEFT JOIN (
+            SELECT produccion_id, COUNT(*) AS items_count
+            FROM rel_produccion_material
+            WHERE deleted_at IS NULL
+            GROUP BY produccion_id
+        ) rpm_count ON rpm_count.produccion_id = pd.id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
     ";
         $result = executeQuery($conectar, $sql, $params);
 
+        $moldesCompartidosIds = [];
+        foreach ($result as $fila) {
+            if (empty($fila['item_vivo']) && empty($fila['producto_descripcion']) && !empty($fila['molde_id'])) {
+                $moldesCompartidosIds[] = (int)$fila['molde_id'];
+            }
+        }
+        $itemsCompartidosPorMolde = obtenerItemsConfigMoldesCompartidos($conectar, $moldesCompartidosIds);
+
         foreach ($result as &$fila) {
+            $imagenes = !empty($fila['js_images']) ? json_decode($fila['js_images'], true) : [];
+            $fila['fotos_pesaje'] = [];
+            if (is_array($imagenes)) {
+                foreach ($imagenes as $imagen) {
+                    if (is_array($imagen) && ($imagen['tipo'] ?? '') === 'pesaje_produccion' && !empty($imagen['url'])) {
+                        $fila['fotos_pesaje'][] = [
+                            'url' => $imagen['url'],
+                            'nombre' => $imagen['nombre'] ?? 'Foto del pesaje',
+                        ];
+                    }
+                }
+            }
+            $fila['puede_gestionar'] = empty($_SESSION['operario_id'])
+                || (int)($fila['operario_id'] ?? 0) === (int)$_SESSION['operario_id']
+                || in_array((int)$_SESSION['operario_id'], array_map(
+                    static fn($op) => (int)($op['operario_id'] ?? 0),
+                    is_array(json_decode($fila['js_operarios'] ?? '[]', true)) ? json_decode($fila['js_operarios'] ?? '[]', true) : []
+                ), true);
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
@@ -700,6 +743,9 @@ function listarProducciones()
 
             $itemFoto = !empty($fila['js_configuracion_moment']) ? json_decode($fila['js_configuracion_moment'], true) : null;
             $itemVivo = !empty($fila['item_vivo']) ? json_decode($fila['item_vivo'], true) : null;
+            if (!$itemVivo && empty($fila['producto_descripcion'])) {
+                $itemVivo = $itemsCompartidosPorMolde[(int)$fila['molde_id']] ?? null;
+            }
             $forzarVigente = empty($fila['enviado_ensamblaje']);
             $fila['item'] = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
             unset($fila['item_vivo']);
@@ -755,9 +801,10 @@ function obtenerProduccion($id)
     // Esto hacía fallar OBTENERPRODUCCION (usado al editar un avance) el
     // 100% de las veces. Ahora sí corta la ejecución únicamente cuando el
     // registro no existe.
-        if (empty($produccion)) {
+    if (empty($produccion)) {
         responder(false, 'Registro de producción no encontrado.');
     }
+    verificarPropietarioOperario($conectar, (int) $id);
 
     $produccion[0]['js_operarios'] = !empty($produccion[0]['js_operarios'])   // <-- AGREGAR ESTO
         ? json_decode($produccion[0]['js_operarios'], true)
@@ -765,6 +812,10 @@ function obtenerProduccion($id)
 
     $itemFoto = !empty($produccion[0]['js_configuracion_moment']) ? json_decode($produccion[0]['js_configuracion_moment'], true) : null;
     $itemVivo = !empty($produccion[0]['item_vivo']) ? json_decode($produccion[0]['item_vivo'], true) : null;
+    $partesUnico = explode('-', (string) ($produccion[0]['unico_molde_producto'] ?? ''));
+    if (!$itemVivo && (empty($partesUnico[1]) || (int) $partesUnico[1] <= 0)) {
+        $itemVivo = obtenerItemConfigMoldeCompartido($conectar, (int) $produccion[0]['molde_id']);
+    }
     $forzarVigente = empty($produccion[0]['enviado_ensamblaje']);
     $produccion[0]['item'] = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
     unset($produccion[0]['item_vivo']);
@@ -773,15 +824,11 @@ function obtenerProduccion($id)
     // por línea: el frontend agrupa estas filas por material_id).
         $detalle = executeQuery(
         $conectar,
-        "SELECT rpm.*, m.nombre AS material_nombre,
-                rcm.compra_id, c.fecha_compra, p.razon_social AS proveedor,
-                rcm.cantidad_base AS lote_cantidad_base,
+        "SELECT rpm.id, rpm.produccion_id, rpm.material_id, rpm.cantidad, rpm.comentario,
+                m.nombre AS material_nombre,
                 ub.nombre_corto AS unidad_base_corto
         FROM rel_produccion_material rpm
         JOIN material m ON m.id = rpm.material_id
-        LEFT JOIN rel_compra_material rcm ON rcm.id = rpm.rel_compra_material_id
-        LEFT JOIN compra c ON c.id = rcm.compra_id
-        LEFT JOIN proveedor p ON p.ruc = c.proveedor_id
         LEFT JOIN unidad_medida ub ON ub.id = m.unidad_medida_id
         WHERE rpm.produccion_id = :id AND rpm.deleted_at IS NULL
         ORDER BY rpm.id",
@@ -798,33 +845,34 @@ function verificarPropietarioOperario($conectar, int $produccionId): void
 
     $fila = executeQuery(
         $conectar,
-        "SELECT operario_id FROM produccion WHERE id = :id",
+        "SELECT operario_id, js_operarios FROM produccion WHERE id = :id",
         ['id' => $produccionId]
     );
     if (empty($fila)) return; // el propio flujo de cada acción ya valida "no encontrado"
 
-    if ((int)($fila[0]['operario_id'] ?? 0) !== (int)$_SESSION['operario_id']) {
+    $participantes = json_decode($fila[0]['js_operarios'] ?? '[]', true) ?: [];
+    $idsParticipantes = array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $participantes);
+    if ((int)($fila[0]['operario_id'] ?? 0) !== (int)$_SESSION['operario_id']
+        && !in_array((int)$_SESSION['operario_id'], $idsParticipantes, true)) {
         responder(false, 'No puedes modificar un avance de producción que no es tuyo.');
     }
 }
 
 // Un operario (sesión operario_id) solo puede editar/eliminar un avance
-// MIENTRAS esté corriendo (aún no enviado a ensamblaje/empaquetado). Una
-// vez enviado, solo el administrador (sin operario_id en sesión) puede
-// modificarlo o desactivarlo.
+// mientras no haya finalizado ni se haya enviado a la etapa siguiente.
 function verificarNoEnviadoParaOperario($conectar, int $produccionId): void
 {
     if (empty($_SESSION['operario_id'])) return; // admin, sin restricción
 
     $fila = executeQuery(
         $conectar,
-        "SELECT enviado_ensamblaje FROM produccion WHERE id = :id",
+        "SELECT fecha_hora_fin, enviado_ensamblaje FROM produccion WHERE id = :id",
         ['id' => $produccionId]
     );
     if (empty($fila)) return; // el flujo normal ya valida "no encontrado"
 
-    if (!empty($fila[0]['enviado_ensamblaje'])) {
-        responder(false, 'Este avance ya fue enviado a ensamblaje/empaquetado. Solo un administrador puede editarlo o eliminarlo.');
+    if (!empty($fila[0]['fecha_hora_fin']) || !empty($fila[0]['enviado_ensamblaje'])) {
+        responder(false, 'Esta producción ya finalizó. Solo un administrador puede editarla o eliminarla.');
     }
 }
 
@@ -1010,6 +1058,7 @@ function obtenerItemConfigProduccion($conectar, int $produccionId): ?array
     $partes     = explode('-', $rows[0]['unico_molde_producto'] ?? '');
     $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
     $itemVivo   = obtenerItemConfigProductoMolde($conectar, $productoId, (int) $rows[0]['molde_id']);
+    if (!$itemVivo && $productoId <= 0) $itemVivo = obtenerItemConfigMoldeCompartido($conectar, (int) $rows[0]['molde_id']);
 
     $forzarVigente = empty($rows[0]['enviado_ensamblaje']);
     $item = mergeItemConConfigVigente($itemFoto, $itemVivo, $forzarVigente);
@@ -1063,7 +1112,7 @@ function guardarProduccion()
 
     // Operarios adicionales enviados desde el panel de admin (opcional).
     // <-- NUEVO (bloque completo)
-    $operariosExtraRaw = json_decode($_POST['operarios'] ?? '[]', true);
+    $operariosExtraRaw = empty($_SESSION['operario_id']) ? json_decode($_POST['operarios'] ?? '[]', true) : [];
     if (is_array($operariosExtraRaw)) {
         foreach ($operariosExtraRaw as $oid) {
             $oid = intval($oid);
@@ -1080,12 +1129,28 @@ function guardarProduccion()
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
 
+    if ($molde_id > 0) {
+        $moldeFila = executeQuery($conectar, "SELECT nombre, js_producto FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
+        if (empty($moldeFila)) responder(false, 'El molde seleccionado no existe o está inactivo.');
+        $relacionesProducto = json_decode($moldeFila[0]['js_producto'] ?? '[]', true) ?: [];
+        if (empty($relacionesProducto)) responder(false, 'El molde seleccionado no está asociado a ningún producto. Configúralo primero en Moldes.');
+        $molde_producto = $moldeFila[0]['nombre'];
+        if (count($relacionesProducto) > 1) {
+            // Un molde compartido se produce sin asignarle todavía un producto.
+            $unico_molde = $molde_id . '-0';
+        } else {
+            $unico_molde = $molde_id . '-' . (int) ($relacionesProducto[0]['producto_id'] ?? 0);
+        }
+    }
+
     $partesUnico = explode('-', $unico_molde);
     $productoIdParaConfig = isset($partesUnico[1]) ? intval($partesUnico[1]) : 0;
 
     $jsConfigMoment = null;
     if ($id === 0) {
-        $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
+        $itemConfigMoment = $productoIdParaConfig > 0
+            ? obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id)
+            : obtenerItemConfigMoldeCompartido($conectar, $molde_id);
         $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
     } else {
         $registroActualParaFoto = executeQuery(
@@ -1100,7 +1165,9 @@ function guardarProduccion()
         );
 
         if ($sinFotoPrevia || $moldeCambio) {
-            $itemConfigMoment = obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id);
+            $itemConfigMoment = $productoIdParaConfig > 0
+                ? obtenerItemConfigProductoMolde($conectar, $productoIdParaConfig, $molde_id)
+                : obtenerItemConfigMoldeCompartido($conectar, $molde_id);
             $jsConfigMoment = $itemConfigMoment ? json_encode($itemConfigMoment, JSON_UNESCAPED_UNICODE) : null;
         } else {
             $jsConfigMoment = $registroActualParaFoto[0]['js_configuracion_moment'];
@@ -1176,7 +1243,16 @@ function guardarProduccion()
         responder(false, 'Debes agregar al menos un material o tinte consumido en este avance.');
     }
 
-    $color_id = determinarColorDesdeDetalle($conectar, $detalle);
+    // El color final puede obtenerse mezclando varios tintes, por lo que se
+    // registra por separado del detalle de materiales consumidos.
+    $color_id = intval($_POST['color_id'] ?? 0);
+    if ($color_id > 0) {
+        $colorActivo = executeQuery($conectar, "SELECT id FROM color WHERE id = :id AND deleted_at IS NULL", ['id' => $color_id]);
+        if (empty($colorActivo)) responder(false, 'El color final seleccionado no existe o está inactivo.');
+    } else {
+        // Compatibilidad con clientes anteriores que todavía no envían color_id.
+        $color_id = determinarColorDesdeDetalle($conectar, $detalle);
+    }
 
     $conectar->beginTransaction();
     try {
@@ -1234,11 +1310,11 @@ function guardarProduccion()
             // ── EDICIÓN ──────────────────────────────────────────────────────
             $actual = executeQuery($conectar, "SELECT * FROM produccion WHERE id = :id", ['id' => $id]);
             if (empty($actual)) throw new Exception('Registro de producción no encontrado.');
-            if (!empty($_SESSION['operario_id']) && (int)$actual[0]['operario_id'] !== (int)$_SESSION['operario_id']) {
-                throw new Exception('No puedes editar un avance de producción que no es tuyo.');
-            }
-            if (!empty($_SESSION['operario_id']) && !empty($actual[0]['enviado_ensamblaje'])) {
-                throw new Exception('Este avance ya fue enviado a ensamblaje/empaquetado. Solo un administrador puede editarlo.');
+            if (!empty($_SESSION['operario_id'])) {
+                verificarPropietarioOperario($conectar, $id);
+                if (!empty($actual[0]['fecha_hora_fin']) || !empty($actual[0]['enviado_ensamblaje'])) {
+                    throw new Exception('Esta producción ya finalizó. Solo un administrador puede editarla.');
+                }
             }
             if (!empty($actual[0]['deleted_at'])) {
                 throw new Exception('No puedes editar un registro inactivo. Reactívalo primero.');
@@ -1493,6 +1569,7 @@ function eliminarProduccion()
 // a restar su cantidad del stock.
 function reactivarProduccion()
 {
+    if (!empty($_SESSION['operario_id'])) responder(false, 'Solo un administrador puede reactivar producciones.');
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     if (!$id) responder(false, 'ID inválido.');
@@ -1572,6 +1649,45 @@ function enviarAEnsamblaje()
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
+    // La evidencia solo se acepta como archivo JPEG capturado desde el flujo
+    // de cámara en vivo de la tablet; nunca se ofrece un selector de galería.
+    $requiereFotoPesaje = !empty($_SESSION['operario_id']);
+    $fotosPesaje = [];
+    $totalBytesFotos = 0;
+    $archivosSubidos = $_FILES['fotos_pesaje'] ?? null;
+    if (is_array($archivosSubidos) && isset($archivosSubidos['name']) && is_array($archivosSubidos['name'])) {
+        foreach ($archivosSubidos['name'] as $i => $nombreOriginal) {
+            $errorArchivo = (int) ($archivosSubidos['error'][$i] ?? UPLOAD_ERR_NO_FILE);
+            if ($errorArchivo === UPLOAD_ERR_NO_FILE) continue;
+            if ($errorArchivo !== UPLOAD_ERR_OK) {
+                responder(false, 'No se pudo recibir una de las fotos. Revisa el tamaño y vuelve a intentarlo.');
+            }
+            $fotosPesaje[] = [
+                'name' => $nombreOriginal,
+                'tmp_name' => $archivosSubidos['tmp_name'][$i] ?? '',
+                'size' => (int) ($archivosSubidos['size'][$i] ?? 0),
+            ];
+        }
+    }
+    if (count($fotosPesaje) > 3) responder(false, 'Puedes adjuntar como máximo 3 fotos del pesaje.');
+    if ($requiereFotoPesaje && count($fotosPesaje) === 0) {
+        responder(false, 'Debes tomar al menos una foto de la balanza con la cámara antes de enviar la producción.');
+    }
+    foreach ($fotosPesaje as $foto) {
+        if ($foto['size'] <= 0 || $foto['size'] > 4 * 1024 * 1024) {
+            responder(false, 'Cada foto del pesaje debe pesar como máximo 4 MB.');
+        }
+        $totalBytesFotos += $foto['size'];
+        // getimagesize identifica el formato real sin depender de Fileinfo.
+        $infoImagen = @getimagesize($foto['tmp_name']);
+        if ($infoImagen === false || ($infoImagen[2] ?? null) !== IMAGETYPE_JPEG) {
+            responder(false, 'Todas las evidencias deben ser fotos JPEG válidas tomadas con la cámara.');
+        }
+    }
+    if ($totalBytesFotos > 7 * 1024 * 1024) {
+        responder(false, 'El conjunto de fotos del pesaje supera el límite de 7 MB.');
+    }
+
     verificarPropietarioOperario($conectar, $id);
 
     $existe = executeQuery(
@@ -1584,6 +1700,10 @@ function enviarAEnsamblaje()
 
     $item = obtenerItemConfigProduccion($conectar, $id);
     $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
+    $parteProductoProduccion = explode('-', (string) ($existe[0]['unico_molde_producto'] ?? ''));
+    if ((int) ($parteProductoProduccion[1] ?? 0) <= 0 && !$necesitaEnsamblaje) {
+        responder(false, 'Un molde compartido debe pasar por Ensamblaje para que allí se asigne el producto final.');
+    }
     $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
 
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
@@ -1630,11 +1750,31 @@ function enviarAEnsamblaje()
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
+    $fotosCloudinary = [];
+    foreach ($fotosPesaje as $i => $foto) {
+        $subida = subirImagenACloudinary($foto['tmp_name'], 'pesaje_produccion_' . $id . '_' . ($i + 1) . '.jpg', 'produccion/pesajes');
+        $fotosCloudinary[] = [
+            'tipo' => 'pesaje_produccion',
+            'url' => $subida['url'],
+            'nombre' => 'Foto del pesaje ' . ($i + 1),
+            'public_id' => $subida['public_id'] ?? null,
+        ];
+    }
+    $jsonFotoPesaje = !empty($fotosCloudinary)
+        ? json_encode($fotosCloudinary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        : null;
+
     $conectar->beginTransaction();
     try {
         executeNonQuery($conectar, "
             UPDATE produccion SET
                 cantidad_producida_kg   = :cantidad_producida,
+                js_images               = CASE
+                    WHEN :guardar_fotos_pesaje = FALSE THEN js_images
+                    WHEN js_images IS NULL THEN CAST(:foto_pesaje_array_empty AS jsonb)
+                    WHEN jsonb_typeof(js_images) = 'array' THEN js_images || CAST(:foto_pesaje_array_append AS jsonb)
+                    ELSE jsonb_build_array(js_images) || CAST(:foto_pesaje_array_wrap AS jsonb)
+                END,
                 fecha_envio_ensamblaje  = NOW(),
                 enviado_ensamblaje      = true,
                 js_configuracion_moment = :js_config_final,
@@ -1646,6 +1786,10 @@ function enviarAEnsamblaje()
         ", [
             'id'                 => $id,
             'cantidad_producida' => $cantidadProducida,
+            'guardar_fotos_pesaje'     => !empty($fotosCloudinary),
+            'foto_pesaje_array_empty'  => $jsonFotoPesaje,
+            'foto_pesaje_array_append' => $jsonFotoPesaje,
+            'foto_pesaje_array_wrap'   => $jsonFotoPesaje,
             'js_config_final'    => json_encode($item, JSON_UNESCAPED_UNICODE),
             'js_operarios'       => $jsOperariosActualizado,
             'js_session'         => $js_session,
@@ -1670,9 +1814,13 @@ function enviarAEnsamblaje()
         responder(true, "Avance enviado a $destino correctamente.", [
             'id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino,
             'ensamblaje_id_automatico' => $ensamblajeAutoId,
+            'fotos_pesaje_guardadas' => count($fotosCloudinary),
         ]);
     } catch (Throwable $e) {
         $conectar->rollBack();
+        foreach ($fotosCloudinary as $fotoCloudinary) {
+            if (!empty($fotoCloudinary['url'])) borrarImagenCloudinary($fotoCloudinary['url']);
+        }
         error_log("Error enviando a $destino: " . $e->getMessage());
         responder(false, "No se pudo enviar a $destino: " . $e->getMessage());
     }
@@ -1705,9 +1853,12 @@ function registrarMerma()
         responder(false, 'Selecciona al menos un color o describe la merma (ej. "combinación de ambos colores", "purga").');
     }
 
-    $actual = executeQuery($conectar, "SELECT id, deleted_at FROM produccion WHERE id = :id", ['id' => $id]);
+    $actual = executeQuery($conectar, "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($actual)) responder(false, 'Registro de producción no encontrado.');
     if (!empty($actual[0]['deleted_at'])) responder(false, 'No puedes registrar merma en un avance inactivo.');
+    if (!empty($_SESSION['operario_id']) && !empty($actual[0]['enviado_ensamblaje'])) {
+        responder(false, 'Esta producción ya pasó a la siguiente etapa. Solo un administrador puede corregir su merma.');
+    }
 
     $colores = [];
     if (!empty($coloresIds)) {
@@ -1879,4 +2030,60 @@ function obtenerItemConfigProductoMolde($conectar, int $productoId, int $moldeId
     if (empty($rows) || empty($rows[0]['item'])) return null;
     $item = json_decode($rows[0]['item'], true);
     return is_array($item) ? $item : null;
+}
+
+/**
+ * Usa una configuración asociada al molde como referencia para la salida
+ * común registrada en Producción. Ensamblaje resuelve después la configuración
+ * específica del producto elegido para armar.
+ */
+function obtenerItemConfigMoldeCompartido($conectar, int $moldeId): ?array
+{
+    if (!$moldeId) return null;
+    $rows = executeQuery($conectar, "
+        SELECT x.item
+        FROM molde m
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
+        JOIN producto pr ON pr.id = (rel->>'producto_id')::bigint
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) x(item)
+        WHERE m.id = :molde_id
+          AND (x.item->>'molde_id')::bigint = m.id
+        ORDER BY pr.id
+        LIMIT 1
+    ", ['molde_id' => $moldeId]);
+    if (empty($rows) || empty($rows[0]['item'])) return null;
+    $item = json_decode($rows[0]['item'], true);
+    return is_array($item) ? $item : null;
+}
+
+/** Resuelve en una sola consulta las configuraciones de salida de moldes compartidos. */
+function obtenerItemsConfigMoldesCompartidos($conectar, array $moldeIds): array
+{
+    $moldeIds = array_values(array_unique(array_filter(array_map('intval', $moldeIds))));
+    if (empty($moldeIds)) return [];
+
+    $params = [];
+    $placeholders = [];
+    foreach ($moldeIds as $i => $moldeId) {
+        $key = "molde{$i}";
+        $placeholders[] = ":{$key}";
+        $params[$key] = $moldeId;
+    }
+    $rows = executeQuery($conectar, "
+        SELECT DISTINCT ON (m.id) m.id AS molde_id, x.item
+        FROM molde m
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
+        JOIN producto pr ON pr.id = NULLIF(rel->>'producto_id', '')::bigint
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) x(item)
+        WHERE m.id IN (" . implode(',', $placeholders) . ")
+          AND NULLIF(x.item->>'molde_id', '')::bigint = m.id
+        ORDER BY m.id, pr.id
+    ", $params);
+
+    $porMolde = [];
+    foreach ($rows as $row) {
+        $item = json_decode($row['item'] ?? '', true);
+        if (is_array($item)) $porMolde[(int)$row['molde_id']] = $item;
+    }
+    return $porMolde;
 }

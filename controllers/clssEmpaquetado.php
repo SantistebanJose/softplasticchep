@@ -34,6 +34,7 @@ function controladorEmpaquetado(string $accion): void
         'OBTENEREMPAQUETADO',
         'BUSCARUNIDADESMEDIDA',
         'BUSCAROPERARIOS',
+        'BUSCARMAQUINAS',
     ];
 
     $accionesOperacion = [
@@ -64,6 +65,14 @@ function controladorEmpaquetado(string $accion): void
         } else {
             responderAcceso(400, 'Acción no reconocida.');
         }
+    }
+
+    // Libera el bloqueo exclusivo de la sesión antes de ejecutar consultas.
+    // La tablet hace varias llamadas AJAX concurrentes con la misma sesión;
+    // si la primera tarda, las demás quedan esperando session_start() hasta
+    // alcanzar el límite de ejecución de PHP.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
     }
 
     switch ($accion) {
@@ -105,6 +114,9 @@ function controladorEmpaquetado(string $accion): void
             break;
         case 'BUSCAROPERARIOS':
             buscarOperarios();
+            break;
+        case 'BUSCARMAQUINAS':
+            buscarMaquinasEmpaquetado();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
@@ -195,12 +207,16 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             FROM ensamblaje e
             LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
             LEFT JOIN LATERAL (
-                SELECT pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex
-                FROM rel_ensamblaje_producto rep
-                JOIN produccion pd ON pd.id = rep.molde_produccion_id
-                LEFT JOIN color co ON co.id = pd.color_id
-                WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
-                LIMIT 1
+                SELECT COALESCE(e.color_id, own.color_id) AS color_id, co.nombre AS color_nombre, co.rgb AS color_hex
+                FROM (SELECT 1) seed
+                LEFT JOIN LATERAL (
+                    SELECT pd.color_id
+                    FROM rel_ensamblaje_producto rep
+                    JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                    WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL
+                    LIMIT 1
+                ) own ON true
+                LEFT JOIN color co ON co.id = COALESCE(e.color_id, own.color_id)
             ) col ON true
             WHERE e.producto_id = :producto_id
               AND e.deleted_at IS NULL AND e.fin IS NOT NULL
@@ -471,6 +487,9 @@ function resolverOperariosEmpaquetado($conectar, array $idsOperario): array
     if (count($result) !== count($idsOperario)) {
         throw new Exception('Uno o más operarios seleccionados no existen, están inactivos o no están asignados a la etapa de empaquetado.');
     }
+    if (!empty($_SESSION['operario_id']) && !in_array((int)$_SESSION['operario_id'], array_map('intval', array_column($result, 'id')), true)) {
+        throw new Exception('El empaquetado debe quedar asociado al operario que inició sesión.');
+    }
 
     return array_map(fn($o) => [
         'operario_id'     => (int)$o['id'],
@@ -557,6 +576,9 @@ function listarEmpaquetadosPorProducto(int $productoId)
     $result = executeQuery($conectar, "
         SELECT
             emp.id, emp.producto_id, emp.unidad_medida,
+            p.unidad_venta_id, p.cant_equivale, p.unidad_equivale_id,
+            uv.nombre_corto AS unidad_venta_corto,
+            (p.unidad_equivale_id = emp.unidad_medida AND COALESCE(p.cant_equivale, 0) > 0) AS desglose_conversion_venta,
             emp.cantidad_tota, emp.js_cantidades,
             emp.operario_id, emp.js_operarios, emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
@@ -579,6 +601,8 @@ function listarEmpaquetadosPorProducto(int $productoId)
                 WHERE reo.empaquetado_id = emp.id AND reo.deleted_at IS NULL
             ) AS js_origenes
         FROM empaquetado emp
+        LEFT JOIN producto p ON p.id = emp.producto_id
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
         LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
         LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         LEFT JOIN operario op ON op.id = emp.operario_id
@@ -605,6 +629,17 @@ function listarTodosEmpaquetados()
     $where  = ["emp.deleted_at IS NULL"];
     $params = [];
 
+    // La tablet consulta solo los empaquetados en los que participa el
+    // operario autenticado. El panel administrativo conserva el listado global.
+    if (!empty($_SESSION['operario_id'])) {
+        $where[] = "(emp.operario_id = :operario_id OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(emp.js_operarios, '[]'::jsonb)) AS op
+            WHERE (op->>'operario_id')::bigint = :operario_id_js
+        ))";
+        $params['operario_id'] = (int)$_SESSION['operario_id'];
+        $params['operario_id_js'] = (int)$_SESSION['operario_id'];
+    }
+
     if ($texto !== '') {
         $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
@@ -625,7 +660,11 @@ function listarTodosEmpaquetados()
 
     $sql = "SELECT
             emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
+            emp.unidad_medida,
             p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
+            p.unidad_venta_id, p.cant_equivale, p.unidad_equivale_id,
+            uv.nombre_corto AS unidad_venta_corto,
+            (p.unidad_equivale_id = emp.unidad_medida AND COALESCE(p.cant_equivale, 0) > 0) AS desglose_conversion_venta,
             emp.cantidad_tota, emp.js_cantidades,
             emp.operario_id, emp.js_operarios, op.nombre_completo AS operario_nombre,
             su.nombre AS sucursal_nombre,
@@ -668,6 +707,7 @@ function listarTodosEmpaquetados()
         LEFT JOIN operario op ON op.id = emp.operario_id
         LEFT JOIN sucursal su ON su.id = emp.sucursal
         LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
         LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY emp.created_at DESC
@@ -706,6 +746,14 @@ function obtenerEmpaquetado(int $id)
     ", ['id' => $id]);
 
     if (empty($result)) responder(false, 'Registro de empaquetado no encontrado o inactivo.');
+    if (!empty($_SESSION['operario_id'])) {
+        $participantes = json_decode($result[0]['js_operarios'] ?? '[]', true) ?: [];
+        $ids = array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $participantes);
+        if ((int)($result[0]['operario_id'] ?? 0) !== (int)$_SESSION['operario_id']
+            && !in_array((int)$_SESSION['operario_id'], $ids, true)) {
+            responder(false, 'No puedes consultar un empaquetado en el que no participaste.');
+        }
+    }
     $filas = decorarConDesgloseEmp(decodificarJsOperarios($result));
     responder(true, 'OK', ['empaquetado' => $filas[0]]);
 }
@@ -838,6 +886,14 @@ function crearEmpaquetado()
     if (empty($suc)) responder(false, 'La sucursal indicada no existe o está inactiva.');
 
     $reglas = obtenerReglasEmpaquetadoProducto($conectar, $productoId);
+    $maquinaId = intval($_POST['maquina_id'] ?? 0) ?: null;
+    if ($reglas['requiere_maquina_empaquetado'] && !$maquinaId) {
+        responder(false, 'Este producto requiere seleccionar la máquina utilizada en Empaquetado.');
+    }
+    if ($maquinaId) {
+        $maquina = executeQuery($conectar, "SELECT id FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
+        if (empty($maquina)) responder(false, 'La máquina seleccionada no existe o está inactiva.');
+    }
     if ($reglas['conversion_peso_a_unidad'] && empty($reglas['peso_unitario_g'])) {
         responder(false, 'Este producto requiere conversión de kg a unidades para empaquetar, pero no tiene configurado el "Peso unitario (g)". Complétalo en el módulo de Productos antes de continuar.');
     }
@@ -846,7 +902,7 @@ function crearEmpaquetado()
     // ver crearEmpaquetadoMezcla(). No usan bultos con color manual porque
     // la máquina mezcla los colores sin que el operario pueda controlarlo.
     if ($reglas['conversion_peso_a_unidad']) {
-        crearEmpaquetadoMezcla($conectar, $productoId, $operarioIdPrimario, $operariosResueltos, $sucursalId, $unidadMedida, $unidadEmpaquetado, $reglas);
+        crearEmpaquetadoMezcla($conectar, $productoId, $operarioIdPrimario, $operariosResueltos, $sucursalId, $unidadMedida, $unidadEmpaquetado, $reglas, $maquinaId);
         return;
     }
 
@@ -938,13 +994,13 @@ function crearEmpaquetado()
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $nuevo = executeQuery($conectar, "
-            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
+            INSERT INTO empaquetado (producto_id, unidad_medida, maquina_id, operario_id, js_operarios, sucursal,
                 cantidad_tota, cantidad_disponible_tmp, js_cantidades, created_at, js_session, js_historial)
-            VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
+            VALUES (:producto_id, :unidad_medida, :maquina_id, :operario_id, :js_operarios, :sucursal_id,
                 :cantidad_tota, :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
-            'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
+            'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida, 'maquina_id' => $maquinaId,
             'operario_id'   => $operarioIdPrimario,
             'js_operarios'  => json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE),
             'sucursal_id'   => $sucursalId,
@@ -990,7 +1046,7 @@ function crearEmpaquetado()
  * $operarioIdPrimario y $operariosResueltos vienen ya resueltos desde
  * crearEmpaquetado() (múltiples operarios pueden participar).
  */
-function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrimario, array $operariosResueltos, ?int $sucursalId, int $unidadMedida, array $unidadEmpaquetado, array $reglas): void
+function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrimario, array $operariosResueltos, ?int $sucursalId, int $unidadMedida, array $unidadEmpaquetado, array $reglas, ?int $maquinaId = null): void
 {
     $origenesJson     = trim($_POST['mezcla_origenes'] ?? '[]');
     $bolsasProducidas = floatval($_POST['bolsas_producidas'] ?? 0);
@@ -1081,13 +1137,13 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
         ]];
 
         $nuevo = executeQuery($conectar, "
-            INSERT INTO empaquetado (producto_id, unidad_medida, operario_id, js_operarios, sucursal,
+            INSERT INTO empaquetado (producto_id, unidad_medida, maquina_id, operario_id, js_operarios, sucursal,
                 cantidad_tota, cantidad_disponible_tmp, js_cantidades, created_at, js_session, js_historial)
-            VALUES (:producto_id, :unidad_medida, :operario_id, :js_operarios, :sucursal_id,
+            VALUES (:producto_id, :unidad_medida, :maquina_id, :operario_id, :js_operarios, :sucursal_id,
                 :cantidad_tota, :cantidad_tota, :js_cantidades, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
-            'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida,
+            'producto_id'   => $productoId, 'unidad_medida' => $unidadMedida, 'maquina_id' => $maquinaId,
             'operario_id'   => $operarioIdPrimario,
             'js_operarios'  => json_encode($operariosResueltos, JSON_UNESCAPED_UNICODE),
             'sucursal_id'   => $sucursalId,
@@ -1136,7 +1192,7 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
  * (equivalencia 144 UND, misma base) en el catálogo
  * -> [ {nombre_corto:'PAQ', cantidad:9}, {nombre_corto:'BOL', cantidad:20}, {nombre_corto:'UND', cantidad:X} ]
  */
-function descomponerCantidadUnidad($conectar, float $cantidad, array $unidadPrincipal, ?float $equivalenciaMinima = null, ?array $conversionVenta = null): array
+function descomponerCantidadUnidad($conectar, float $cantidad, array $unidadPrincipal, ?float $equivalenciaMinima = null, ?array $conversionVenta = null, ?array $unidadesBaseCache = null): array
 {
     $desglose = [];
     $restante = $cantidad;
@@ -1181,23 +1237,31 @@ function descomponerCantidadUnidad($conectar, float $cantidad, array $unidadPrin
     $equivPrincipal = (float)$unidadPrincipal['equivalencia'];
     $totalBase      = round($restante * $equivPrincipal, 4);
 
-    $paramsCand = ['base_id' => $baseId, 'equiv_principal' => $equivPrincipal];
-    $condMinima = '';
-    if ($equivalenciaMinima !== null && $equivalenciaMinima > 0) {
-        $condMinima = " AND COALESCE(equivalencia, 1) >= :equiv_minima";
-        $paramsCand['equiv_minima'] = $equivalenciaMinima;
+    if ($unidadesBaseCache === null) {
+        $paramsCand = ['base_id' => $baseId, 'equiv_principal' => $equivPrincipal];
+        $condMinima = '';
+        if ($equivalenciaMinima !== null && $equivalenciaMinima > 0) {
+            $condMinima = " AND COALESCE(equivalencia, 1) >= :equiv_minima";
+            $paramsCand['equiv_minima'] = $equivalenciaMinima;
+        }
+
+        $candidatas = executeQuery($conectar, "
+            SELECT id, nombre_corto, COALESCE(equivalencia, 1) AS equivalencia
+            FROM unidad_medida
+            WHERE deleted_at IS NULL
+              AND (unidad_base_id = :base_id OR id = :base_id)
+              AND COALESCE(equivalencia, 1) <= :equiv_principal
+              $condMinima
+            ORDER BY COALESCE(equivalencia, 1) DESC
+        ", $paramsCand);
+    } else {
+        $candidatas = array_values(array_filter($unidadesBaseCache, function ($u) use ($equivPrincipal, $equivalenciaMinima) {
+            $equiv = (float)($u['equivalencia'] ?? 1);
+            return $equiv <= $equivPrincipal
+                && ($equivalenciaMinima === null || $equivalenciaMinima <= 0 || $equiv >= $equivalenciaMinima);
+        }));
+        usort($candidatas, fn($a, $b) => (float)$b['equivalencia'] <=> (float)$a['equivalencia']);
     }
-
-    $candidatas = executeQuery($conectar, "
-        SELECT id, nombre_corto, COALESCE(equivalencia, 1) AS equivalencia
-        FROM unidad_medida
-        WHERE deleted_at IS NULL
-          AND (unidad_base_id = :base_id OR id = :base_id)
-          AND COALESCE(equivalencia, 1) <= :equiv_principal
-          $condMinima
-        ORDER BY COALESCE(equivalencia, 1) DESC
-    ", $paramsCand);
-
     $restanteBase = $totalBase;
     foreach ($candidatas as $u) {
         $equiv = (float)$u['equivalencia'];
@@ -1230,6 +1294,7 @@ function decorarConDesgloseEmp(array $filas): array
     $conectar = conectar_oll_BD();
     $cacheReglas = [];
     $cacheConversion = [];
+    $cacheUnidadesBase = [];
     foreach ($filas as &$fila) {
         if (empty($fila['cantidad_tota'])) continue;
         $unidadPrincipal = [
@@ -1254,7 +1319,31 @@ function decorarConDesgloseEmp(array $filas): array
             $conversionVenta = $cacheConversion[$pid];
         }
 
-        $fila['js_desglose'] = descomponerCantidadUnidad($conectar, (float)$fila['cantidad_tota'], $unidadPrincipal, $equivalenciaMinima, $conversionVenta);
+        // La equivalencia global de unidad (p. ej. GRU -> UND) puede no
+        // representar la conversión comercial configurada para este producto
+        // (p. ej. 1 PK24 = 24 GRU). Marca los casos donde el desglose usa esa
+        // conversión para que el listado no presente ambas equivalencias como
+        // si fueran acumulables.
+        $fila['desglose_conversion_venta'] = !empty($fila['desglose_conversion_venta'])
+            || ($conversionVenta
+                && (int)($unidadPrincipal['id'] ?? 0) === (int)$conversionVenta['unidad_equivale_id']);
+
+        $baseId = (int)($unidadPrincipal['unidad_base_id'] ?? 0);
+        $unidadesBase = null;
+        if ($baseId > 0) {
+            if (!array_key_exists($baseId, $cacheUnidadesBase)) {
+                $cacheUnidadesBase[$baseId] = executeQuery($conectar, "
+                    SELECT id, nombre_corto, COALESCE(equivalencia, 1) AS equivalencia
+                    FROM unidad_medida
+                    WHERE deleted_at IS NULL
+                      AND (unidad_base_id = :base_id OR id = :base_id)
+                    ORDER BY COALESCE(equivalencia, 1) DESC
+                ", ['base_id' => $baseId]);
+            }
+            $unidadesBase = $cacheUnidadesBase[$baseId];
+        }
+
+        $fila['js_desglose'] = descomponerCantidadUnidad($conectar, (float)$fila['cantidad_tota'], $unidadPrincipal, $equivalenciaMinima, $conversionVenta, $unidadesBase);
     }
     unset($fila);
     return $filas;
@@ -1535,8 +1624,21 @@ function obtenerReglasEmpaquetadoProducto($conectar, int $productoId): array
         'modo_distribucion_color'             => $cfg['modo_distribucion_color'] ?? 'libre',
         'granularidad_color'                  => intval($cfg['granularidad_color'] ?? 1),
         'conversion_peso_a_unidad'             => !empty($cfg['conversion_peso_a_unidad']),
+        'requiere_maquina_empaquetado'          => !empty($cfg['requiere_maquina_empaquetado']),
         'peso_unitario_g'                     => !empty($rows[0]['peso_unitario_g']) ? floatval($rows[0]['peso_unitario_g']) : null,
         'unidad_minima_desglose_id'            => $unidadMinimaId,
         'unidad_minima_desglose_equivalencia'  => $equivalenciaMinima,
     ];
+}
+
+function buscarMaquinasEmpaquetado(): void
+{
+    $conectar = conectar_oll_BD();
+    $maquinas = executeQuery($conectar, "
+        SELECT id, nombre
+        FROM maquina
+        WHERE deleted_at IS NULL
+        ORDER BY nombre
+    ");
+    responder(true, 'OK', ['maquinas' => $maquinas]);
 }

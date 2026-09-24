@@ -337,7 +337,12 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
         const formData = new FormData();
         formData.append('accion', 'MISPRODUCCIONESOPERARIO');
         formData.append('modo', modoActual);
-        formData.append('fecha', new Date().toISOString().slice(0, 10));
+        // Usar la fecha local del dispositivo (Lima); toISOString() convierte
+        // a UTC y después de las 19:00 puede enviar el día siguiente.
+        const ahoraLocal = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const fechaLocal = `${ahoraLocal.getFullYear()}-${pad(ahoraLocal.getMonth() + 1)}-${pad(ahoraLocal.getDate())}`;
+        formData.append('fecha', fechaLocal);
 
         fetch(URL_CONTROLADOR, { method: 'POST', body: formData })
             .then(r => r.json())

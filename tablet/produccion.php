@@ -435,14 +435,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <!-- Columna izquierda: selectores tipo card (sin combos) -->
             <div class="pc-form-col-left">
 
-                <div class="pc-selector-block">
-                    <div class="pc-sel-label">Producto <span class="req">*</span></div>
-                    <div class="pc-chip-strip" id="chips_producto"></div>
-                </div>
-
                 <div class="pc-selector-block" id="bloque_molde" style="display:none;">
                     <div class="pc-sel-label">Molde <span class="req">*</span></div>
                     <div class="pc-chip-strip" id="chips_molde"></div>
+                    <div class="form-text">El producto terminado se asigna en Ensamblaje.</div>
                 </div>
                 <div class="pc-selector-block">
                     <div class="pc-sel-label">
@@ -457,6 +453,11 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
 
                 <div class="pc-selector-row-compact">
+                    <button type="button" class="pc-select-btn" id="btnSel_color" onclick="abrirSelectorGenerico('color')">
+                        <span class="ico"><i class="fa-solid fa-palette"></i></span>
+                        <span class="cuerpo"><span class="lbl">Color final producido *</span><span class="val vacio" id="valor_color">Ninguno</span></span>
+                        <i class="fa-solid fa-chevron-right chev"></i>
+                    </button>
                     <button type="button" class="pc-select-btn" id="btnSel_maquina" onclick="abrirSelectorGenerico('maquina')">
                         <span class="ico"><i class="fa-solid fa-gears"></i></span>
                         <span class="cuerpo">
@@ -498,8 +499,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <!-- Columna derecha: materiales + ticket (ya existía como panel doble) -->
             <div class="pc-form-col-right">
                 <div class="mb-2 d-flex justify-content-between align-items-center flex-wrap gap-1">
-                    <label class="form-label mb-0">Materiales consumidos (opcional)</label>
-                    <span class="form-text mb-0">Si este avance no consume material nuevo, deja el ticket vacío.</span>
+                    <label class="form-label mb-0">Materiales / tintes consumidos *</label>
+                    <span class="form-text mb-0">Agrega los materiales y los tintes usados para obtener el color final.</span>
                 </div>
 
                 <div class="pc-mat-layout">
@@ -656,10 +657,39 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
                 </div>
 
+                <!-- Evidencia obligatoria del pesaje: la imagen solo se obtiene desde la cámara en vivo. -->
+                <div class="pc-ens-card" id="tarjetaFotoPesaje">
+                    <div class="pc-ens-card-header">
+                        <span class="num">2</span>
+                        <div class="titulos">
+                            <div class="titulo">Fotos del pesaje *</div>
+                            <div class="sub">Toma al menos una y hasta tres fotos desde la cámara. No se permite elegir desde la galería.</div>
+                        </div>
+                    </div>
+                    <div style="padding:16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-outline-primary btn-lg" id="btnTomarFotoPesaje" onclick="abrirCamaraPesaje()">
+                            <i class="fa-solid fa-camera"></i> Tomar foto (0/3)
+                        </button>
+                        <span id="estadoFotoPesaje" class="text-danger">Toma al menos una foto. Puedes guardar hasta 3.</span>
+                    </div>
+                    <div id="fotosPesajePreview" style="display:none; padding:0 16px 16px; gap:10px; flex-wrap:wrap;"></div>
+                    <div id="panelCamaraPesaje" style="display:none; padding:0 16px 16px;">
+                        <video id="videoCamaraPesaje" autoplay playsinline style="display:none; width:100%; max-height:50vh; background:#111; border-radius:10px;"></video>
+                        <canvas id="canvasCamaraPesaje" style="display:none;"></canvas>
+                        <img id="capturaCamaraPesaje" alt="Foto capturada" style="display:none; width:100%; max-height:50vh; object-fit:contain;">
+                        <div id="errorCamaraPesaje" class="text-danger mt-2" style="display:none;"></div>
+                        <div class="d-flex gap-2 mt-2">
+                            <button type="button" class="btn btn-outline-primary" id="btnCapturarPesaje" style="display:none;" onclick="capturarFotoPesaje()"><i class="fa-solid fa-camera"></i> Capturar</button>
+                            <button type="button" class="btn btn-outline-secondary" id="btnNuevaCapturaPesaje" style="display:none;" onclick="reintentarFotoPesaje()">Repetir</button>
+                            <button type="button" class="btn btn-success" id="btnConfirmarPesaje" style="display:none;" onclick="confirmarFotoPesaje()">Usar esta foto</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Paso 2: merma -->
                 <div class="pc-ens-card">
                     <div class="pc-ens-card-header opcional">
-                        <span class="num">2</span>
+                        <span class="num">3</span>
                         <div class="titulos">
                             <div class="titulo">Merma</div>
                             <div class="sub">Registra material perdido o descartado, si aplica</div>
@@ -743,11 +773,12 @@ let tipoMaterialActivo = 'material';
 let ticketLineas = [];
 
 let produccionesCache = [];
-let productoTabActivo = null;
+let productoTabActivo = 'TODOS';
 
 // ---- Estado de los selectores tipo card (reemplaza a los <select>) ----
 let maquinasProdCache = null;
 let sucursalesProdCache = null;
+let coloresProdCache = null;
 let moldesProdCache = [];
 
 let operariosProdCache = null;   // <-- NUEVO
@@ -798,12 +829,14 @@ const modalSelectorGenerico = new bootstrap.Modal(document.getElementById('modal
 let selectorGenericoContexto = null; // 'maquina' | 'categoria' | 'sucursal'
 
 const SELECTOR_CONFIG = {
+    color:     { titulo: 'Color final producido', cache: () => coloresProdCache, icon: () => 'fa-palette', seleccionar: seleccionarColorFinal, estadoKey: 'color_id', estadoNombreKey: 'color_nombre' },
     maquina:   { titulo: 'Máquina',            cache: () => maquinasProdCache,           icon: () => 'fa-gears',  seleccionar: seleccionarMaquina,   estadoKey: 'maquina_id',              estadoNombreKey: 'maquina_nombre' },
     categoria: { titulo: 'Categoría material',  cache: () => categoriasMaterialProdCache, icon: () => 'fa-tags',   seleccionar: seleccionarCategoria, estadoKey: 'categoria_material_id',   estadoNombreKey: 'categoria_nombre' },
     sucursal:  { titulo: 'Sucursal',            cache: () => sucursalesProdCache,         icon: () => 'fa-store',  seleccionar: seleccionarSucursal,  estadoKey: 'sucursal_id',             estadoNombreKey: 'sucursal_nombre' },
 };
 
 const SELECTOR_COLOR = {
+    color:     { color: '#D97706', bg: '#FDF1E0' },
     maquina:   { color: '#2F6FED', bg: '#EAF0FE' },
     categoria: { color: '#7C3AED', bg: '#F1EAFD' },
     sucursal:  { color: '#16A34A', bg: '#E8F7EE' },
@@ -947,6 +980,7 @@ document.getElementById('btnAceptarTeclado').addEventListener('click', () => {
 
 const POLL_INTERVAL_MS = 8000;
 let pollTimer = null;
+let cargandoListadoProducciones = false;
 let snapshotEstados = {};
 
 function iniciarAutoRefresh() {
@@ -987,7 +1021,7 @@ function renderStatRow(producciones) {
     const enCurso = activas.filter(p => estadoCorto(p) === 'curso').length;
     const finalizadas = activas.filter(p => estadoCorto(p) === 'fin').length;
     const kgHoy = activas
-        .filter(p => p.fecha && p.fecha.substring(0, 10) === new Date().toISOString().substring(0, 10))
+        .filter(p => p.fecha && p.fecha.substring(0, 10) === fechaLocalISO())
         .reduce((s, p) => s + Number(p.cantidad || 0), 0);
 
     document.getElementById('statRowProduccion').innerHTML = `
@@ -1217,27 +1251,23 @@ async function seleccionarProducto(id) {
 async function cargarMoldesDeProducto(productoId, seleccion) {
     const bloque = document.getElementById('bloque_molde');
     const cont = document.getElementById('chips_molde');
-    if (!productoId) {
-        bloque.style.display = 'none';
-        cont.innerHTML = '';
-        moldesProdCache = [];
-        return;
-    }
     bloque.style.display = '';
     cont.innerHTML = '<div class="pc-sel-vacio">Cargando moldes...</div>';
-    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: productoId });
+    const json = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: 0 });
     moldesProdCache = json.success ? json.moldes : [];
 
     if (moldesProdCache.length === 0) {
-        cont.innerHTML = '<div class="pc-sel-vacio">Este producto no tiene moldes asociados.</div>';
+        cont.innerHTML = '<div class="pc-sel-vacio">No hay moldes activos asociados.</div>';
         return;
     }
 
     if (seleccion) {
-        const encontrado = moldesProdCache.find(m => String(m.unico_molde) === String(seleccion) || String(m.molde_id) === String(seleccion));
+        const idMoldeSeleccionado = String(seleccion).split('-')[0];
+        const encontrado = moldesProdCache.find(m => String(m.unico_molde) === String(seleccion) || String(m.molde_id) === idMoldeSeleccionado);
         if (encontrado) {
             selEstado.molde_id = encontrado.molde_id; selEstado.unico_molde = encontrado.unico_molde;
             selEstado.molde_etiqueta = encontrado.etiqueta; selEstado.molde_nombre = encontrado.molde_nombre;
+            selEstado.producto_id = Number(encontrado.producto_id) || '';
         }
     }
 
@@ -1251,6 +1281,7 @@ function seleccionarMolde(uniqueVal) {
     if (!m) return;
     selEstado.molde_id = m.molde_id; selEstado.unico_molde = m.unico_molde;
     selEstado.molde_etiqueta = m.etiqueta; selEstado.molde_nombre = m.molde_nombre;
+    selEstado.producto_id = Number(m.producto_id) || '';
     renderChipGrid('chips_molde', moldesProdCache, {
         getId: mm => mm.unico_molde, getLabel: mm => mm.molde_nombre, getIcon: () => 'fa-shapes',
         seleccionadoId: selEstado.unico_molde, onSeleccionar: 'seleccionarMolde',
@@ -1341,10 +1372,16 @@ function seleccionarSucursal(id) {
     const s = (sucursalesProdCache || []).find(x => String(x.id) === String(id));
     selEstado.sucursal_nombre = s ? s.nombre : '';
 }
+function seleccionarColorFinal(id) {
+    selEstado.color_id = id;
+    const c = (coloresProdCache || []).find(x => String(x.id) === String(id));
+    selEstado.color_nombre = c ? c.nombre : '';
+    selEstado.color_rgb = c ? c.rgb : '';
+}
 
 // Refresca los 3 botones "val" del formulario (Máquina / Categoría / Sucursal),
 // pintándolos de color cuando ya tienen una selección (estado "lleno").
-const SELECTOR_NOMBRE_KEY = { maquina: 'maquina_nombre', categoria: 'categoria_nombre', sucursal: 'sucursal_nombre' };
+const SELECTOR_NOMBRE_KEY = { color: 'color_nombre', maquina: 'maquina_nombre', categoria: 'categoria_nombre', sucursal: 'sucursal_nombre' };
 function refrescarValoresSelectorGenerico() {
     Object.keys(SELECTOR_NOMBRE_KEY).forEach(tipo => {
         const nombre = selEstado[SELECTOR_NOMBRE_KEY[tipo]];
@@ -1362,14 +1399,16 @@ function refrescarValoresSelectorGenerico() {
 
 // ---- Carga inicial de todos los selectores del modal ----
 async function cargarSelectoresModal(seleccion = {}) {
-    const [maquinasJson, categorias, productos, sucursales, operarios] = await Promise.all([
+    const [maquinasJson, categorias, productos, sucursales, operarios, coloresJson] = await Promise.all([
         llamarProduccion('BUSCARMAQUINAS'),
         obtenerCategoriasMaterialProd(),
         obtenerProductosMoldeProd(),
         obtenerSucursalesProd(),
         obtenerOperariosProd(''),
+        llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' }),
     ]);
     maquinasProdCache = maquinasJson.success ? maquinasJson.maquinas : [];
+    coloresProdCache = coloresJson.success ? coloresJson.colores : [];
     operariosProdCache = operarios;
 
     selEstado = {
@@ -1378,11 +1417,14 @@ async function cargarSelectoresModal(seleccion = {}) {
         sucursal_id: seleccion.sucursal_id ?? '', sucursal_nombre: '',
         producto_id: seleccion.producto_id ?? '', producto_nombre: '',
         molde_id: '', unico_molde: seleccion.unico_molde ?? '', molde_etiqueta: '', molde_nombre: '',
+        color_id: seleccion.color_id ?? '', color_nombre: '', color_rgb: '',
         operarios_extra_ids: seleccion.operarios_extra_ids ?? [],
     };
 
     const maq = maquinasProdCache.find(x => String(x.id) === String(selEstado.maquina_id));
     if (maq) selEstado.maquina_nombre = maq.nombre;
+    const color = coloresProdCache.find(x => String(x.id) === String(selEstado.color_id));
+    if (color) { selEstado.color_nombre = color.nombre; selEstado.color_rgb = color.rgb; }
     const cat = (categorias || []).find(x => String(x.id) === String(selEstado.categoria_material_id));
     if (cat) selEstado.categoria_nombre = cat.nombre;
     const suc = (sucursales || []).find(x => String(x.id) === String(selEstado.sucursal_id));
@@ -1393,18 +1435,12 @@ async function cargarSelectoresModal(seleccion = {}) {
     pintarBloqueMaquina(maquinasProdCache);
     pintarBloqueCategoria(categorias);
     pintarBloqueSucursal(sucursales);
-    pintarBloqueProducto(productos);
     document.getElementById('prod_operarios_buscar').value = '';
     pintarBloqueOperariosExtra(operariosProdCache);
     actualizarContadorOperariosExtra();
     refrescarValoresSelectorGenerico();
 
-    if (selEstado.producto_id) {
-        await cargarMoldesDeProducto(selEstado.producto_id, selEstado.unico_molde || null);
-    } else {
-        document.getElementById('bloque_molde').style.display = 'none';
-        document.getElementById('chips_molde').innerHTML = '';
-    }
+    await cargarMoldesDeProducto('', seleccion.unico_molde || seleccion.molde_id || null);
 }
 async function obtenerOpcionesMaterialesProd(productoId) {
     const key = productoId || 'sin_producto';
@@ -1432,11 +1468,7 @@ function detenerAutoRefreshMaterialesModal() {
 }
 
 async function refrescarMaterialesEnVivo() {
-    const productoId = selEstado.producto_id;
-    if (!productoId) return;
-
-    delete materialesProdCachePorProducto[productoId]; // invalida solo este producto
-    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const materiales = await obtenerOpcionesMaterialesProd('');
 
     ticketLineas.forEach(l => {
         const actualizado = materiales.find(m => m.id == l.material_id);
@@ -1452,9 +1484,9 @@ async function refrescarMaterialesEnVivo() {
 function agruparProduccionesPorProducto(producciones) {
     const grupos = new Map();
     producciones.forEach(p => {
-        const nombreProducto = p.producto_descripcion || 'Sin producto asociado';
-        if (!grupos.has(nombreProducto)) grupos.set(nombreProducto, []);
-        grupos.get(nombreProducto).push(p);
+        const nombreMolde = p.molde_nombre || 'Sin molde';
+        if (!grupos.has(nombreMolde)) grupos.set(nombreMolde, []);
+        grupos.get(nombreMolde).push(p);
     });
     return grupos;
 }
@@ -1463,9 +1495,9 @@ function renderTabsProducto(grupos) {
     const contenedor = document.getElementById('prodProductoTabs');
     const totalGeneral = [...grupos.values()].reduce((s, items) => s + items.length, 0);
     let html = `<button type="button" class="pc-tab-item ${productoTabActivo === 'TODOS' ? 'activo' : ''}" onclick="seleccionarTabProducto('TODOS')"><i class="fa-solid fa-grip"></i> Todos <span class="cnt">${totalGeneral}</span></button>`;
-    for (const [nombreProducto, items] of grupos) {
-        const nombreEscapado = nombreProducto.replace(/'/g, "\\'");
-        html += `<button type="button" class="pc-tab-item ${productoTabActivo === nombreProducto ? 'activo' : ''}" onclick="seleccionarTabProducto('${nombreEscapado}')"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="cnt">${items.length}</span></button>`;
+    for (const [nombreMolde, items] of grupos) {
+        const nombreEscapado = nombreMolde.replace(/'/g, "\\'");
+        html += `<button type="button" class="pc-tab-item ${productoTabActivo === nombreMolde ? 'activo' : ''}" onclick="seleccionarTabProducto('${nombreEscapado}')"><i class="fa-solid fa-shapes"></i> ${nombreMolde} <span class="cnt">${items.length}</span></button>`;
     }
     contenedor.innerHTML = html;
 }
@@ -1482,9 +1514,10 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     nuevosEstados[p.id] = estado;
     const cambioDeEstado = silencioso && snapshotEstados[p.id] && snapshotEstados[p.id] !== estado;
 
-    const puedeIniciar = !p.deleted_at && !p.fecha_hora_inicio;
-    const puedeFinalizar = !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
+    const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
+    const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
+    const puedeFinalizar = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
+    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
     const requiereEnsamblaje = necesitaEnsamblaje(p);
     const etapaTexto = requiereEnsamblaje ? 'ensamblaje' : 'empaquetado';
@@ -1513,7 +1546,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            ${!p.deleted_at && !p.enviado_ensamblaje
+            ${puedeGestionar && !p.deleted_at && !p.fecha_hora_fin && !p.enviado_ensamblaje
                 ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
                 </button>`
@@ -1527,7 +1560,9 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <div class="pc-prod-stat"><div class="num">${p.items_count}</div><div class="lbl">Material${p.items_count == 1 ? '' : 'es'}</div></div>
         </div>
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
+        ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
+        ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
         <div class="pc-prod-operarios">
             <i class="fa-solid fa-users"></i>
@@ -1557,12 +1592,12 @@ function renderGridProducciones(producciones, silencioso) {
 
     let html = '';
     if (productoTabActivo === 'TODOS') {
-        for (const [nombreProducto, items] of grupos) {
+        for (const [nombreMolde, items] of grupos) {
             html += `
                 <div class="pc-prod-group">
                     <div class="pc-prod-group-header">
                         <span class="linea"></span>
-                        <span class="texto"><i class="fa-solid fa-layer-group"></i> ${nombreProducto} <span class="pc-prod-group-count">· ${items.length}</span></span>
+                        <span class="texto"><i class="fa-solid fa-shapes"></i> ${nombreMolde} <span class="pc-prod-group-count">· ${items.length}</span></span>
                         <span class="linea"></span>
                     </div>
                     <div class="pc-prod-grid">${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}</div>
@@ -1572,7 +1607,7 @@ function renderGridProducciones(producciones, silencioso) {
         const items = grupos.get(productoTabActivo) || [];
         html = items.length
             ? `<div class="pc-prod-grid">${items.map(p => tarjetaProduccionHtml(p, nuevosEstados, silencioso)).join('')}</div>`
-            : '<div class="pc-prod-empty">No hay avances registrados para este producto.</div>';
+            : '<div class="pc-prod-empty">No hay avances registrados para este molde.</div>';
         producciones.forEach(p => { if (!(p.id in nuevosEstados)) nuevosEstados[p.id] = estadoCorto(p); });
     }
 
@@ -1582,36 +1617,37 @@ function renderGridProducciones(producciones, silencioso) {
 
 async function cargarProducciones(silencioso = false) {
     const grid = document.getElementById('gridProducciones');
+    if (cargandoListadoProducciones) return;
+    cargandoListadoProducciones = true;
     if (!silencioso) grid.innerHTML = '<div class="pc-prod-empty">Cargando...</div>';
 
-    const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: 'activa', operario_id: OPERARIO_ID });
-    if (!json.success) {
-        grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
-        return;
+    try {
+        const json = await llamarProduccion('LISTARPRODUCCIONES', { estado: 'activa', operario_id: OPERARIO_ID });
+        if (!json.success) {
+            grid.innerHTML = `<div class="pc-prod-empty">${json.message}</div>`;
+            return;
+        }
+
+        produccionesCache = json.producciones || [];
+        const grupos = agruparProduccionesPorProducto(produccionesCache);
+
+        if (productoTabActivo === null || (productoTabActivo !== 'TODOS' && !grupos.has(productoTabActivo))) {
+            productoTabActivo = 'TODOS';
+        }
+
+        renderTabsProducto(grupos);
+        renderGridProducciones(produccionesCache, silencioso);
+    } catch (error) {
+        console.error('No se pudo cargar el listado de Producción:', error);
+        grid.innerHTML = '<div class="pc-prod-empty">No se pudo cargar el listado. Intenta actualizar en unos segundos.</div>';
+    } finally {
+        cargandoListadoProducciones = false;
     }
-
-    produccionesCache = json.producciones || [];
-    const grupos = agruparProduccionesPorProducto(produccionesCache);
-
-    if (productoTabActivo === null || (productoTabActivo !== 'TODOS' && !grupos.has(productoTabActivo))) {
-        const primerProducto = grupos.keys().next().value;
-        productoTabActivo = primerProducto ?? 'TODOS';
-    }
-
-    renderTabsProducto(grupos);
-    renderGridProducciones(produccionesCache, silencioso);
 }
 
 async function renderGridMateriales() {
     const grid = document.getElementById('prod_materiales_grid');
-    const productoId = selEstado.producto_id;
-
-    if (!productoId) {
-        grid.innerHTML = '<div class="pc-mat-empty">Selecciona primero un producto para ver sus materiales.</div>';
-        return;
-    }
-
-    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
     let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
@@ -1636,7 +1672,7 @@ async function renderGridMateriales() {
 }
 
 async function seleccionarMaterial(materialId) {
-    const materiales = await obtenerOpcionesMaterialesProd(selEstado.producto_id);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     const material = materiales.find(m => m.id == materialId);
     if (!material) return;
 
@@ -1750,6 +1786,7 @@ function limpiarFormularioProduccion() {
         sucursal_id: '', sucursal_nombre: '',
         producto_id: '', producto_nombre: '',
         molde_id: '', unico_molde: '', molde_etiqueta: '', molde_nombre: '',
+        color_id: '', color_nombre: '', color_rgb: '',
         operarios_extra_ids: [],
     };
     document.getElementById('bloque_molde').style.display = 'none';
@@ -1762,9 +1799,7 @@ async function abrirModalCrearProduccion() {
     modoEdicionProduccion = false;
     document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
     await cargarSelectoresModal();
-    const ahora = new Date();
-    ahora.setMinutes(ahora.getMinutes() - ahora.getTimezoneOffset());
-    document.getElementById('prod_fecha').value = ahora.toISOString().substring(0, 16);
+    document.getElementById('prod_fecha').value = fechaHoraLocalInput();
     await renderGridMateriales();
     modalProduccion.show();
 }
@@ -1794,6 +1829,7 @@ async function abrirModalEditarProduccion(id) {
         maquina_id: p.maquina_id, producto_id: productoIdDesdeUnico,
         unico_molde: p.unico_molde_producto,
         categoria_material_id: p.categoria_material_id, sucursal_id: p.sucursal_id,
+        color_id: p.color_id,
         operarios_extra_ids: operariosExtraExistentes,   // <-- NUEVO
     });
     await renderGridMateriales();
@@ -1807,7 +1843,7 @@ async function abrirModalEditarProduccion(id) {
         agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
     });
 
-    const materiales = await obtenerOpcionesMaterialesProd(productoIdDesdeUnico);
+    const materiales = await obtenerOpcionesMaterialesProd('');
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const materialActual = materiales.find(m => m.id == d.material_id);
         const est = estiloMaterial(materialActual || { nombre: d.material_nombre });
@@ -1823,8 +1859,8 @@ async function abrirModalEditarProduccion(id) {
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    if (!selEstado.producto_id || !selEstado.unico_molde) {
-        Swal.fire('Faltan datos', 'Selecciona producto y molde antes de guardar.', 'warning');
+    if (!selEstado.unico_molde) {
+        Swal.fire('Falta un dato', 'Selecciona el molde usado en este avance.', 'warning');
         return;
     }
     if (!selEstado.maquina_id) {
@@ -1837,6 +1873,10 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     }
     if (!selEstado.sucursal_id) {
         Swal.fire('Falta un dato', 'Debes seleccionar la sucursal.', 'warning');
+        return;
+    }
+    if (!selEstado.color_id) {
+        Swal.fire('Falta un dato', 'Debes seleccionar el color final producido.', 'warning');
         return;
     }
     if (ticketLineas.length === 0) {
@@ -1854,6 +1894,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         molde_id: selEstado.molde_id,
         unico_molde: selEstado.unico_molde,
         molde_producto: selEstado.molde_etiqueta,
+        color_id: selEstado.color_id,
         cantidad: document.getElementById('prod_cantidad').value,
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
@@ -1863,24 +1904,35 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     const json = await llamarProduccion('GUARDARPRODUCCION', params);
 
     if (json.success) {
+        const esNuevo = !produccionIdActual;
         modalProduccion.hide();
         materialesProdCache = null; 
-        Swal.fire('Listo', json.message, 'success');
-        cargarProducciones();
+        if (esNuevo) productoTabActivo = 'TODOS';
+        await cargarProducciones();
+        if (esNuevo && json.id) {
+            const tarjeta = document.getElementById(`fila-produccion-${json.id}`);
+            tarjeta?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            tarjeta?.classList.add('pc-flash');
+            tarjeta?.querySelector('.pc-prod-ghost-btn.success')?.focus({ preventScroll: true });
+            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Producción guardada. Pulsa Iniciar en la tarjeta.', showConfirmButton: false, timer: 2200 });
+        } else {
+            Swal.fire('Listo', json.message, 'success');
+        }
     } else {
         Swal.fire('Error', json.message, 'error');
     }
 });
 
 function iniciarProduccion(id) {
-    Swal.fire({
-        title: '¿Iniciar la corrida ahora?', icon: 'question',
-        showCancelButton: true, confirmButtonText: 'Sí, iniciar', cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-        if (!result.isConfirmed) return;
-        const json = await llamarProduccion('INICIARCORRIDA', { id });
-        if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarProducciones(); }
-        else Swal.fire('Error', json.message, 'error');
+    const boton = document.querySelector(`#fila-produccion-${id} .pc-prod-ghost-btn.success`);
+    if (boton?.disabled) return;
+    if (boton) { boton.disabled = true; boton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Iniciando…'; }
+    llamarProduccion('INICIARCORRIDA', { id }).then(json => {
+        if (json.success) { Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1800 }); cargarProducciones(); }
+        else { Swal.fire('Error', json.message, 'error'); if (boton) { boton.disabled = false; boton.innerHTML = '<i class="fa-solid fa-play"></i> Iniciar'; } }
+    }).catch(() => {
+        if (boton) { boton.disabled = false; boton.innerHTML = '<i class="fa-solid fa-play"></i> Iniciar'; }
+        Swal.fire('Error', 'No se pudo iniciar la corrida.', 'error');
     });
 }
 
@@ -1900,12 +1952,24 @@ const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('mod
 let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;
 let mermaColoresSeleccionados = [];
+let archivosFotosPesaje = [];
+let capturaPendienteFotoPesaje = false;
+let streamCamaraPesaje = null;
 
 let cantidadesPorOperario = {}; // { operario_id: cantidad }
 
 function abrirModalCantidadParaEnsamblaje(produccionId) {
+    detenerCamaraPesaje();
     produccionIdParaEnsamblaje = produccionId;
     document.getElementById('formCantidadEnsamblaje').reset();
+    archivosFotosPesaje.forEach(foto => URL.revokeObjectURL(foto.previewUrl));
+    archivosFotosPesaje = [];
+    capturaPendienteFotoPesaje = false;
+    renderFotosPesajeCapturadas();
+    document.getElementById('btnTomarFotoPesaje').style.display = '';
+    document.getElementById('panelCamaraPesaje').style.display = 'none';
+    document.getElementById('errorCamaraPesaje').style.display = 'none';
+    actualizarEstadoFotosPesaje();
 
     const p = produccionesCache.find(x => x.id == produccionId);
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
@@ -1919,6 +1983,136 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
 
     modalCantidadEnsamblaje.show();
 }
+
+async function abrirCamaraPesaje() {
+    if (archivosFotosPesaje.length >= 3) {
+        actualizarEstadoFotosPesaje();
+        return;
+    }
+    const error = document.getElementById('errorCamaraPesaje');
+    error.style.display = 'none';
+    document.getElementById('panelCamaraPesaje').style.display = '';
+    document.getElementById('videoCamaraPesaje').style.display = 'none';
+    document.getElementById('capturaCamaraPesaje').style.display = 'none';
+    document.getElementById('btnCapturarPesaje').style.display = 'none';
+    document.getElementById('btnConfirmarPesaje').style.display = 'none';
+    document.getElementById('btnNuevaCapturaPesaje').style.display = 'none';
+    if (!window.isSecureContext) {
+        error.textContent = 'Chrome solo permite usar la cámara por HTTPS o desde localhost. Abre esta página con una conexión HTTPS.';
+        error.style.display = '';
+        return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+        error.textContent = 'Este navegador no ofrece acceso a la cámara. Actualiza Chrome o abre el sistema desde una tablet compatible.';
+        error.style.display = '';
+        return;
+    }
+    try {
+        streamCamaraPesaje = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        const video = document.getElementById('videoCamaraPesaje');
+        video.srcObject = streamCamaraPesaje;
+        await video.play();
+        video.style.display = '';
+        document.getElementById('btnCapturarPesaje').style.display = '';
+    } catch (e) {
+        detenerCamaraPesaje();
+        if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+            error.textContent = 'Chrome bloqueó el acceso a la cámara. Recarga la página si acabas de cambiar el permiso y luego permite Cámara en la configuración del sitio.';
+        } else if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
+            error.textContent = 'No se encontró una cámara disponible en este dispositivo.';
+        } else if (e?.name === 'NotReadableError' || e?.name === 'TrackStartError') {
+            error.textContent = 'La cámara está ocupada por otra aplicación. Ciérrala e inténtalo de nuevo.';
+        } else {
+            error.textContent = `No se pudo abrir la cámara (${e?.name || 'error'}). Verifica el permiso del navegador.`;
+        }
+        error.style.display = '';
+    }
+}
+
+async function capturarFotoPesaje() {
+    const video = document.getElementById('videoCamaraPesaje');
+    if (!streamCamaraPesaje || !video.videoWidth) return;
+    const canvas = document.getElementById('canvasCamaraPesaje');
+    const escala = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * escala);
+    canvas.height = Math.round(video.videoHeight * escala);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const img = document.getElementById('capturaCamaraPesaje');
+    img.src = canvas.toDataURL('image/jpeg', 0.78);
+    img.style.display = '';
+    capturaPendienteFotoPesaje = true;
+    video.style.display = 'none';
+    document.getElementById('btnCapturarPesaje').style.display = 'none';
+    document.getElementById('btnConfirmarPesaje').style.display = '';
+    document.getElementById('btnNuevaCapturaPesaje').style.display = '';
+}
+
+function reintentarFotoPesaje() {
+    document.getElementById('capturaCamaraPesaje').style.display = 'none';
+    document.getElementById('videoCamaraPesaje').style.display = '';
+    document.getElementById('btnCapturarPesaje').style.display = '';
+    document.getElementById('btnConfirmarPesaje').style.display = 'none';
+    document.getElementById('btnNuevaCapturaPesaje').style.display = 'none';
+}
+
+async function confirmarFotoPesaje() {
+    if (!capturaPendienteFotoPesaje || archivosFotosPesaje.length >= 3) return;
+    const canvas = document.getElementById('canvasCamaraPesaje');
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+    if (!blob) {
+        document.getElementById('errorCamaraPesaje').textContent = 'No se pudo preparar la foto. Intenta capturarla nuevamente.';
+        document.getElementById('errorCamaraPesaje').style.display = '';
+        return;
+    }
+    const numero = archivosFotosPesaje.length + 1;
+    archivosFotosPesaje.push({
+        file: new File([blob], `pesaje_${numero}.jpg`, { type: 'image/jpeg' }),
+        previewUrl: URL.createObjectURL(blob),
+    });
+    capturaPendienteFotoPesaje = false;
+    renderFotosPesajeCapturadas();
+    document.getElementById('panelCamaraPesaje').style.display = 'none';
+    detenerCamaraPesaje();
+}
+
+function renderFotosPesajeCapturadas() {
+    const contenedor = document.getElementById('fotosPesajePreview');
+    contenedor.innerHTML = archivosFotosPesaje.map((foto, indice) => `
+        <div style="position:relative; width:110px;">
+            <img src="${foto.previewUrl}" alt="Foto ${indice + 1} del pesaje" style="width:110px; height:90px; object-fit:cover; border-radius:8px; border:1px solid #dee2e6;">
+            <span style="display:block; text-align:center; font-size:.78rem;">Foto ${indice + 1}</span>
+            <button type="button" class="btn btn-sm btn-danger" aria-label="Quitar foto ${indice + 1}" onclick="quitarFotoPesaje(${indice})" style="position:absolute; top:4px; right:4px; padding:1px 6px;">&times;</button>
+        </div>`).join('');
+    contenedor.style.display = archivosFotosPesaje.length ? 'flex' : 'none';
+    actualizarEstadoFotosPesaje();
+}
+
+function actualizarEstadoFotosPesaje() {
+    const cantidad = archivosFotosPesaje.length;
+    const boton = document.getElementById('btnTomarFotoPesaje');
+    const estado = document.getElementById('estadoFotoPesaje');
+    boton.innerHTML = `<i class="fa-solid fa-camera"></i> Tomar foto (${cantidad}/3)`;
+    boton.style.display = cantidad >= 3 ? 'none' : '';
+    estado.className = cantidad ? 'text-success' : 'text-danger';
+    estado.textContent = cantidad === 3
+        ? 'Máximo de 3 fotos capturadas.'
+        : cantidad ? `${cantidad} foto(s) capturada(s). Puedes agregar ${3 - cantidad} más.`
+        : 'Toma al menos una foto. Puedes guardar hasta 3.';
+}
+
+function quitarFotoPesaje(indice) {
+    const foto = archivosFotosPesaje[indice];
+    if (foto) URL.revokeObjectURL(foto.previewUrl);
+    archivosFotosPesaje.splice(indice, 1);
+    renderFotosPesajeCapturadas();
+}
+
+function detenerCamaraPesaje() {
+    if (streamCamaraPesaje) streamCamaraPesaje.getTracks().forEach(track => track.stop());
+    streamCamaraPesaje = null;
+    document.getElementById('videoCamaraPesaje').srcObject = null;
+}
+document.getElementById('modalCantidadEnsamblaje').addEventListener('hidden.bs.modal', detenerCamaraPesaje);
 
 // Decide si se muestra el stepper único o el desglose por operario.
 function inicializarCantidadProducidaPorOperario(p) {
@@ -2042,6 +2236,11 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (archivosFotosPesaje.length < 1) {
+        Swal.fire('Foto obligatoria', 'Abre la cámara de la tablet y toma al menos una foto de la balanza para continuar.', 'warning');
+        return;
+    }
+
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
@@ -2067,12 +2266,28 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
         }
     }
 
-    const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
-        id: produccionIdParaEnsamblaje,
-        cantidad_producida: valor,
-        unidad: unidadProducida,
-        desglose_operarios: JSON.stringify(desglose),   // <-- NUEVO
-    });
+    const formData = await prepararFormDataConDevice(new FormData(), 'ENVIARAENSAMBLAJE');
+    formData.append('id', produccionIdParaEnsamblaje);
+    formData.append('cantidad_producida', valor);
+    formData.append('unidad', unidadProducida);
+    formData.append('desglose_operarios', JSON.stringify(desglose));
+    archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
+    const btnEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
+    const textoOriginalEnviar = btnEnviar.innerHTML;
+    btnEnviar.disabled = true;
+    btnEnviar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Subiendo fotos y enviando...';
+    let json;
+    try {
+        const resp = await fetch(CONTROLADOR_PRODUCCION, { method: 'POST', body: formData });
+        json = await resp.json();
+    } catch (error) {
+        btnEnviar.disabled = false;
+        btnEnviar.innerHTML = textoOriginalEnviar;
+        Swal.fire('Error', 'No se pudo enviar la foto del pesaje. Verifica la conexión e inténtalo otra vez.', 'error');
+        return;
+    }
+    btnEnviar.disabled = false;
+    btnEnviar.innerHTML = textoOriginalEnviar;
 
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 

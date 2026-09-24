@@ -390,6 +390,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             Este producto no tiene "Salida en Empaquetado" configurada — selecciónala aquí.
                         </small>
                     </div>
+                    <div class="mb-3" id="est_maquina_wrap" style="display:none;">
+                        <label class="form-label" for="est_maquina_id">Máquina *</label>
+                        <select class="form-select form-select-lg" id="est_maquina_id" style="max-width:420px;">
+                            <option value="">Selecciona una máquina...</option>
+                        </select>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Operarios * <span class="pc-chip-count" id="est_operarios_count"></span></label>
                         <div id="est_operarios_chips" class="pc-chip-wrap"></div>
@@ -488,6 +494,7 @@ const llamarSucursal    = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, 
 let estacionProductoIdActual = 0;
 let empUnidadesCache = null;
 let empOperariosCache = null;
+let empMaquinasCache = null;
 let origenesDisponiblesCache = [];
 let unidadEmpaquetadoProductoActual = null;
 let reglasEmpaquetadoActuales = null;
@@ -518,19 +525,25 @@ document.addEventListener('DOMContentLoaded', () => {
     actualizarResumenBarraAccion();
 });
 
-const POLL_INTERVAL_MS_EMP = 10000;
+const POLL_INTERVAL_MS_EMP = 30000;
 let pollTimerEmp = null;
+let refrescoAutoEmpEnCurso = false;
 function iniciarAutoRefreshEmp() {
     if (pollTimerEmp) clearInterval(pollTimerEmp);
-    pollTimerEmp = setInterval(() => {
-        if (document.hidden) return;
-        cargarMisRegistros();
-        cargarPendientesEmpaquetado();
-        // Solo refresca los sacos/colores disponibles si el operario no
-        // está con el dedo puesto en un input del formulario en ese instante
-        // (para no perderle el cursor mientras escribe una cantidad).
-        if (estacionProductoIdActual && !document.activeElement?.closest('#formEstacionArmado')) {
-            refrescarOrigenesSilencioso();
+    pollTimerEmp = setInterval(async () => {
+        if (document.hidden || refrescoAutoEmpEnCurso) return;
+        refrescoAutoEmpEnCurso = true;
+        try {
+            await Promise.all([cargarMisRegistros(), cargarPendientesEmpaquetado()]);
+            // Solo refresca los sacos/colores disponibles si el operario no
+            // está editando un campo (para no interrumpir la captura).
+            if (estacionProductoIdActual && !document.activeElement?.closest('#formEstacionArmado')) {
+                await refrescarOrigenesSilencioso();
+            }
+        } catch (error) {
+            console.error('No se pudo actualizar automáticamente Empaquetado:', error);
+        } finally {
+            refrescoAutoEmpEnCurso = false;
         }
     }, POLL_INTERVAL_MS_EMP);
     document.addEventListener('visibilitychange', () => {
@@ -846,6 +859,20 @@ async function cargarOrigenesDisponibles(productoId, miToken) {
     unidadEmpaquetadoProductoActual = json.success ? (json.unidad_empaquetado || null) : null;
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
     capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null;
+    aplicarMaquinaEmpaquetado();
+}
+
+function aplicarMaquinaEmpaquetado() {
+    const requerida = reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === true
+        || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === 1
+        || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === '1'
+        || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === 'true';
+    const contenedor = document.getElementById('est_maquina_wrap');
+    const select = document.getElementById('est_maquina_id');
+    if (!contenedor || !select) return;
+    contenedor.style.display = requerida ? '' : 'none';
+    select.required = requerida;
+    if (!requerida) select.value = '';
 }
 
 async function cargarMisRegistros() {
@@ -937,6 +964,13 @@ async function obtenerOperariosEmp() {
     empOperariosCache = json.success ? json.operario : [];
     return empOperariosCache;
 }
+async function obtenerMaquinasEmp() {
+    if (empMaquinasCache) return empMaquinasCache;
+    const json = await llamarEmpaquetado('BUSCARMAQUINAS');
+    if (!json.success) console.error('Error BUSCARMAQUINAS:', json.message);
+    empMaquinasCache = json.success ? (json.maquinas || []) : [];
+    return empMaquinasCache;
+}
 let empSucursalesCache = null;
 async function obtenerSucursalesEmp() {
     if (empSucursalesCache) return empSucursalesCache;
@@ -946,13 +980,16 @@ async function obtenerSucursalesEmp() {
 }
 
 async function cargarSelectsEstacion() {
-    const [unidades, operarios, sucursales] = await Promise.all([
-        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp()
+    const [unidades, operarios, sucursales, maquinas] = await Promise.all([
+        obtenerUnidadesEmp(), obtenerOperariosEmp(), obtenerSucursalesEmp(), obtenerMaquinasEmp()
     ]);
     const sUnidad = document.getElementById('est_unidad_medida');
     sUnidad.innerHTML = unidades.length
         ? '<option value="">Selecciona...</option>' + unidades.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('')
         : '<option value="">(sin unidades disponibles - revisar consola)</option>';
+
+    const sMaquina = document.getElementById('est_maquina_id');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
 
     const yoEstoyEnLista = (operarios || []).some(o => o.id == OPERARIO_ID);
     estOperariosSeleccionados = yoEstoyEnLista ? [OPERARIO_ID] : [];
@@ -971,6 +1008,7 @@ async function refrescarOrigenesSilencioso() {
     unidadEmpaquetadoProductoActual = json.unidad_empaquetado || null;
     reglasEmpaquetadoActuales = json.reglas_empaquetado || null;
     capacidadEnUnidadOrigenActual = json.capacidad_en_unidad_origen ?? null;
+    aplicarMaquinaEmpaquetado();
     if (esModoMezcla()) renderMezcla(); else renderBultos();
 }
 
@@ -1452,6 +1490,11 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
         Swal.fire('Falta información', 'Selecciona al menos un operario.', 'warning');
         return;
     }
+    const maquinaIdEmp = document.getElementById('est_maquina_id').value || '';
+    if (document.getElementById('est_maquina_id').required && !maquinaIdEmp) {
+        Swal.fire('Falta seleccionar máquina', 'Este producto requiere elegir la máquina utilizada en Empaquetado.', 'warning');
+        return;
+    }
 
     let params;
 
@@ -1470,6 +1513,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
             sucursal_id: estSucursalSeleccionada || '',
+            maquina_id: maquinaIdEmp,
             mezcla_origenes: JSON.stringify(origenesValidos.map(m => ({
                 origen_tipo: m.origen_tipo, origen_id: m.origen_id,
                 color_id: m.color_id, color_nombre: m.color_nombre,
@@ -1503,6 +1547,7 @@ document.getElementById('formEstacionArmado').addEventListener('submit', async f
             producto_id: estacionProductoIdActual,
             operarios: JSON.stringify(estOperariosSeleccionados),
             sucursal_id: estSucursalSeleccionada || '',
+            maquina_id: maquinaIdEmp,
             bultos: bultosJson,
         };
     }

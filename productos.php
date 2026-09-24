@@ -367,6 +367,23 @@ include("header.php");
         </div>
 
         <div class="config-venta-block">
+            <label class="form-label mb-2">Uso de máquina por etapa</label>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="config_requiere_maquina_ensamblaje">
+                <label class="form-check-label" for="config_requiere_maquina_ensamblaje">
+                    Este producto requiere máquina en Ensamblaje
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="config_requiere_maquina_empaquetado">
+                <label class="form-check-label" for="config_requiere_maquina_empaquetado">
+                    Este producto requiere máquina en Empaquetado
+                </label>
+            </div>
+            <small class="text-muted">La máquina concreta se selecciona al registrar cada etapa.</small>
+        </div>
+
+        <div class="config-venta-block">
             <label class="form-label mb-1">Distribución de colores por bulto</label>
             <select class="form-select" id="config_modo_distribucion_color" required>
                 <option value="libre">Libre (el operario decide las cantidades)</option>
@@ -672,7 +689,7 @@ function exportarExcel() {
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, 'Productos');
 
-    const fecha = new Date().toISOString().slice(0, 10);
+    const fecha = fechaLocalISO();
     XLSX.writeFile(libro, `productos_${fecha}.xlsx`);
 }
 
@@ -801,6 +818,8 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
     document.getElementById('config_modo_distribucion_color').value = configVentaActual.modo_distribucion_color || 'libre';
     document.getElementById('config_granularidad_color').value = configVentaActual.granularidad_color || 1;
     document.getElementById('config_conversion_peso_a_unidad').checked = !!configVentaActual.conversion_peso_a_unidad;
+    document.getElementById('config_requiere_maquina_ensamblaje').checked = !!configVentaActual.requiere_maquina_ensamblaje;
+    document.getElementById('config_requiere_maquina_empaquetado').checked = !!configVentaActual.requiere_maquina_empaquetado;
     actualizarAvisoPesoUnitario();
 
     construirTabsConfiguracion(moldesDelProducto, configActual);
@@ -926,6 +945,8 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     configuracionVenta.modo_distribucion_color = document.getElementById('config_modo_distribucion_color').value;
     configuracionVenta.granularidad_color = parseInt(document.getElementById('config_granularidad_color').value, 10);
     configuracionVenta.conversion_peso_a_unidad = requiereConversion;
+    configuracionVenta.requiere_maquina_ensamblaje = document.getElementById('config_requiere_maquina_ensamblaje').checked;
+    configuracionVenta.requiere_maquina_empaquetado = document.getElementById('config_requiere_maquina_empaquetado').checked;
     // ── Configuración por molde ──────────────────────────────────────────
     const panes = document.querySelectorAll('#configTabContent .tab-pane');
     const configuraciones = [];

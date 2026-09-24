@@ -28,7 +28,7 @@ if (isset($_POST['accion'])) {
 
 function controladorColor(string $accion): void
 {
-    $usuario = exigirSesion();
+    iniciarSesionSegura();
 
     $accionesLectura = [
         'LISTARCOLORES',
@@ -41,14 +41,19 @@ function controladorColor(string $accion): void
         'REACTIVARCOLOR',
     ];
 
-    if (in_array($accion, $accionesLectura, true)) {
-        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
-
-    } elseif (in_array($accion, $accionesAdministracion, true)) {
-        exigirRol($usuario, ['administrador']);
-
+    if (!empty($_SESSION['operario_id'])) {
+        if ($accion !== 'LISTARCOLORES') {
+            responderAcceso(403, 'No tienes permiso para realizar esta acción.');
+        }
     } else {
-        responderAcceso(400, 'Acción no reconocida.');
+        $usuario = exigirSesion();
+        if (in_array($accion, $accionesLectura, true)) {
+            exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+        } elseif (in_array($accion, $accionesAdministracion, true)) {
+            exigirRol($usuario, ['administrador']);
+        } else {
+            responderAcceso(400, 'Acción no reconocida.');
+        }
     }
 
     switch ($accion) {

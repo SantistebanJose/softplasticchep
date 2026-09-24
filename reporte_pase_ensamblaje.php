@@ -131,7 +131,11 @@ document.addEventListener('DOMContentLoaded', () => {
         .forEach(id => document.getElementById(id).addEventListener('change', cargarDashboard));
 });
 
-function hoyISO() { return new Date().toISOString().slice(0, 10); }
+function hoyISO() {
+    const hoy = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}-${pad(hoy.getDate())}`;
+}
 
 function actualizarVisibilidadFechas() {
     const esRango = document.getElementById('ppe_modo').value === 'rango';

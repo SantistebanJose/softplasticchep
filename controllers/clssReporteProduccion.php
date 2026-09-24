@@ -235,13 +235,33 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         responder(false, 'La fecha de inicio no puede ser posterior a la fecha final.');
     }
  
-    // NOTA: producción ahora es multi-operario (pd.js_operarios jsonb array).
-    // Este JOIN LATERAL + filtro por operario_id deja, en la práctica, una
-    // sola fila por avance (la del operario buscado), igual que antes con
-    // operario_id escalar — pero ahora "op" trae la cantidad_producida que
-    // le corresponde específicamente a ESE operario dentro del avance.
-    $joinOperario = "CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS op";
-    $producidoOperario = "COALESCE((op->>'cantidad_producida')::numeric, 0)";
+    // La lista de participantes es la fuente del desglose individual. En
+    // registros antiguos puede faltar la cantidad individual (o incluso la
+    // entrada del responsable principal), aunque el total sí esté guardado
+    // en produccion.cantidad_producida_kg. Se agrega una fila sintética del
+    // responsable solo cuando no está representado en el JSON.
+    $joinOperario = "CROSS JOIN LATERAL (
+        SELECT participante AS operario
+        FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS participantes(participante)
+        UNION ALL
+        SELECT jsonb_build_object('operario_id', pd.operario_id) AS operario
+        WHERE pd.operario_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS existentes(participante)
+              WHERE (existentes.participante->>'operario_id')::bigint = pd.operario_id
+          )
+    ) AS op";
+    $producidoOperario = "COALESCE(
+        NULLIF(op.operario->>'cantidad_producida', '')::numeric,
+        CASE
+            WHEN jsonb_array_length(COALESCE(pd.js_operarios, '[]'::jsonb)) <= 1
+              OR (op.operario->>'operario_id')::bigint = pd.operario_id
+            THEN pd.cantidad_producida_kg
+            ELSE NULL
+        END,
+        0
+    )";
  
     // Subconsulta correlacionada para sumar la merma real del avance desde
     // pd.js_cantidades_merma (jsonb array). El monto real está en la clave
@@ -256,7 +276,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
  
     $condiciones = [
         "pd.deleted_at IS NULL",
-        "(op->>'operario_id')::bigint = :operario_id",
+        "(op.operario->>'operario_id')::bigint = :operario_id",
         "pd.fecha::date BETWEEN :fecha_desde AND :fecha_hasta",
     ];
     $params = [

@@ -337,7 +337,9 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
         const formData = new FormData();
         formData.append('accion', 'MISENSAMBLAJESOPERARIO');
         formData.append('modo', modoActual);
-        formData.append('fecha', new Date().toISOString().slice(0, 10));
+        const hoyLocal = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        formData.append('fecha', `${hoyLocal.getFullYear()}-${pad(hoyLocal.getMonth() + 1)}-${pad(hoyLocal.getDate())}`);
 
         fetch(URL_CONTROLADOR, { method: 'POST', body: formData })
             .then(r => r.json())
