@@ -164,6 +164,13 @@ function controladorProduccion(string $accion): void
         }
     }
 
+    // Conserva $_SESSION en memoria para las validaciones/consultas de abajo,
+    // pero libera su bloqueo antes de acceder a la base. El tablero consulta
+    // periódicamente y puede coincidir con otras peticiones del mismo usuario.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
     switch ($accion) {
         case 'LISTARPRODUCCIONES':
             listarProducciones();

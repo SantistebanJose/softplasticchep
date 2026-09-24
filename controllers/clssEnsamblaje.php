@@ -217,6 +217,13 @@ function controladorEnsamblaje(string $accion): void
         }
     }
 
+    // Libera el bloqueo de sesión antes de las consultas y operaciones. Las
+    // sesiones concurrentes de las vistas de etapas no deben quedar esperando
+    // mientras una consulta a la base de datos termina.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
     switch ($accion) {
         case 'LISTARENSAMBLAJES':
             listarEnsamblajes();
