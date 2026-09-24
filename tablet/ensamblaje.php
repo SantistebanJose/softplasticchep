@@ -263,6 +263,40 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 /* Pie del formulario: dos zonas simétricas, una para cada pulgar */
 .pc-ens-footer{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px calc(14px + var(--safe-l)) calc(14px + var(--safe-b)) 14px !important; }
 .pc-ens-footer .btn{ min-height:54px; font-size:1.02em; font-weight:700; border-radius:12px; }
+
+/* Selector de color con muestra visual y nombre legible */
+.pc-color-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px;margin-top:7px}
+.pc-color-option{min-width:0;min-height:58px;display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid #e2ddcd;border-radius:12px;background:#fff;color:#263247;text-align:left;font-size:.86em;font-weight:600;cursor:pointer}
+.pc-color-option:active{transform:scale(.97)}
+.pc-color-option.activo{border:2px solid #2F6FED;background:#EAF0FE;padding:7px 9px}
+.pc-color-swatch{width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:var(--muestra,#ddd);border:1px solid rgba(21,34,56,.2);display:flex;align-items:center;justify-content:center;color:#152238;text-shadow:0 1px 2px #fff,0 -1px 2px #fff}
+.pc-color-option .nombre{min-width:0;overflow-wrap:anywhere;line-height:1.15}
+.pc-color-option .check{margin-left:auto;color:#2F6FED;display:none}
+.pc-color-option.activo .check{display:block}
+@media(max-width:767.98px){
+    #modalEnsamblaje .modal-header{padding:10px 14px}
+    #modalEnsamblaje .modal-title{font-size:1.05rem}
+    .pc-ens-form-body{height:auto;min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding:10px 10px calc(12px + var(--safe-b))}
+    .pc-ens-topbar{grid-template-columns:1fr;gap:8px}
+    .pc-ens-topbar-group{padding:10px 12px}
+    .pc-ens-layout{flex:0 0 auto;min-height:auto;gap:10px}
+    .pc-ens-content{gap:10px;max-height:none}
+    .pc-ens-ticket-col{position:static;max-height:none}
+    .pc-panel-body-scroll{min-height:120px;max-height:34vh;overscroll-behavior:contain}
+    .pc-prod-grid,.pc-mat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .pc-prod-card{padding:10px;min-height:60px;gap:8px}
+    .pc-prod-card .pellet{width:32px;height:32px}
+    .pc-mat-card{min-height:0;padding:10px 9px}
+    .pc-mat-tabs{gap:5px;padding-left:8px;padding-right:8px}
+    .pc-mat-tab{min-height:46px;padding:9px 4px;font-size:.78em;gap:4px}
+    .pc-ens-footer{position:sticky;bottom:0;z-index:2;gap:8px;padding:8px 10px calc(8px + var(--safe-b) + var(--safe-l)) 10px!important;background:#fbfaf7;border-top:1px solid #e7e4dd}
+    .pc-ens-footer .btn{min-height:48px;padding:8px;font-size:.95em}
+}
+@media(max-width:380px){
+    .pc-prod-grid,.pc-mat-grid{grid-template-columns:1fr}
+    .pc-mat-tab{font-size:.72em}
+    .pc-color-picker{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 </style>
 
 <div class="pc-card" style="margin:20px;">
@@ -333,8 +367,11 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <input type="text" id="ens_buscar_producto" class="form-control form-control-lg" placeholder="Buscar producto...">
                         </div>
                         <div style="padding:0 12px 10px;">
-                            <label for="ens_color_id" class="form-label">Color final del producto *</label>
-                            <select id="ens_color_id" class="form-select form-select-lg" onchange="cambioProductoEnsamblaje()">
+                            <label class="form-label mb-1">Color final del producto *</label>
+                            <div id="ens_color_picker" class="pc-color-picker" role="radiogroup" aria-label="Color final del producto">
+                                <div class="pc-mat-empty">Cargando colores...</div>
+                            </div>
+                            <select id="ens_color_id" class="visually-hidden" tabindex="-1" aria-hidden="true" onchange="cambioProductoEnsamblaje()">
                                 <option value="">Selecciona un color...</option>
                             </select>
                         </div>
@@ -470,6 +507,7 @@ let soloLecturaEns = false;
 // ── Estado de selección "en cards" (reemplaza a los <select>) ──────────
 let productoSeleccionadoEns = { producto_id: null, color_id: null };
 let productosGridDataEns = [];   // productos ya cargados para el picker
+let coloresEnsamblajeCache = [];
 let sucursalSeleccionadaEns = ''; // id de sucursal o ''
 let operariosCatalogoEns = [];    // catálogo completo de operarios
 let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
@@ -507,6 +545,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     iniciarAutoRefreshEns();
 });
+
+function escaparHtmlColorEns(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, caracter => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[caracter]));
+}
+
+function renderSelectorColorEns() {
+    const contenedor = document.getElementById('ens_color_picker');
+    if (!contenedor) return;
+    if (!coloresEnsamblajeCache.length) {
+        contenedor.innerHTML = '<div class="pc-mat-empty">No hay colores disponibles.</div>';
+        return;
+    }
+    const seleccionado = document.getElementById('ens_color_id').value;
+    contenedor.innerHTML = coloresEnsamblajeCache.map(color => {
+        const activo = String(color.id) === String(seleccionado);
+        const rgb = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(color.rgb || '')) ? color.rgb : '#dedbd2';
+        return `<button type="button" class="pc-color-option ${activo ? 'activo' : ''}" role="radio" aria-checked="${activo}" aria-label="${escaparHtmlColorEns(color.nombre)}" onclick="seleccionarColorEns('${escaparHtmlColorEns(color.id)}')">
+            <span class="pc-color-swatch" style="--muestra:${rgb}">${activo ? '<i class="fa-solid fa-check"></i>' : ''}</span>
+            <span class="nombre">${escaparHtmlColorEns(color.nombre)}</span><i class="fa-solid fa-circle-check check"></i>
+        </button>`;
+    }).join('');
+}
+
+function seleccionarColorEns(id) {
+    document.getElementById('ens_color_id').value = String(id);
+    productoSeleccionadoEns.color_id = String(id);
+    renderSelectorColorEns();
+    cambioProductoEnsamblaje();
+}
 // ── Auto-refresh silencioso, igual patrón que Producción ───────────────────
 const POLL_INTERVAL_MS_ENS = 8000;
 let pollTimerEns = null;
@@ -782,6 +849,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
         productoSeleccionadoEns = { producto_id: String(seleccion.producto_id), color_id: seleccion.color_id != null ? String(seleccion.color_id) : null };
     }
     colorSelect.value = seleccion.color_id ? String(seleccion.color_id) : '';
+    renderSelectorColorEns();
     maquinaSelect.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
     renderProductoGridEns();
     actualizarCampoMaquinaEnsamblaje();
@@ -1360,6 +1428,7 @@ function limpiarFormularioEnsamblaje() {
     ticketDetalleEns = [];
     productoSeleccionadoEns = { producto_id: null, color_id: null };
     document.getElementById('ens_color_id').value = '';
+    renderSelectorColorEns();
     document.getElementById('ens_maquina_id').value = '';
     document.getElementById('ens_maquina_wrap').style.display = 'none';
     sucursalSeleccionadaEns = '';
