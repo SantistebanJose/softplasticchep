@@ -495,7 +495,7 @@ let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = [];
 let productosDisponiblesEnsCache = null;
-let coloresEnsamblajeCache = null;
+let coloresEnsamblajeCache = [];
 let maquinasEnsamblajeCache = [];
 let ensamblajesCache = [];
 let productoTabActivoEns = null;
@@ -507,7 +507,6 @@ let soloLecturaEns = false;
 // ── Estado de selección "en cards" (reemplaza a los <select>) ──────────
 let productoSeleccionadoEns = { producto_id: null, color_id: null };
 let productosGridDataEns = [];   // productos ya cargados para el picker
-let coloresEnsamblajeCache = [];
 let sucursalSeleccionadaEns = ''; // id de sucursal o ''
 let operariosCatalogoEns = [];    // catálogo completo de operarios
 let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
