@@ -1371,6 +1371,15 @@ function limpiarFormularioEnsamblaje() {
     cerrarPickerOperarios();
     renderTicketDetalle();
     soloLecturaEns = false;
+    // Un ensamblaje finalizado deja el modal en solo lectura. Al abrir uno
+    // nuevo hay que restaurar el panel y los controles, no solo limpiar los datos.
+    const modalBody = document.querySelector('#modalEnsamblaje .modal-body');
+    modalBody.querySelectorAll('button, input').forEach(el => { el.disabled = false; });
+    document.getElementById('pc_panel_vincular').style.display = '';
+    document.querySelectorAll('#ens_ticket_list .pc-tk-remove').forEach(btn => { btn.style.display = ''; });
+    const footer = document.querySelector('#modalEnsamblaje .pc-ens-footer');
+    footer.querySelector('button[type="submit"]').style.display = '';
+    footer.querySelector('button[data-bs-dismiss]').textContent = 'Cancelar';
     document.getElementById('ens_requisito_banner').innerHTML =
         `<i class="fa-solid fa-circle-info"></i> Vincula al menos una producción finalizada, un derivado o un complemento.`;
 }
