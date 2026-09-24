@@ -2138,9 +2138,9 @@ function inicializarCantidadProducidaPorOperario(p) {
     document.getElementById('lista_cantidad_operarios').innerHTML = operarios.map(o => `
         <div class="pc-operario-cantidad-item">
             <span class="nombre">${o.nombre_completo}</span>
-            <input type="number" step="${esUnidadEntera(unidad) ? '1' : '0.0001'}" min="0"
-                   inputmode="decimal" placeholder="0"
-                   onchange="actualizarCantidadOperario(${o.operario_id}, this.value)">
+            <input type="number" step="${esUnidadEntera(unidad) ? '1' : '0.0001'}" min="0" required
+                   inputmode="decimal" placeholder="Cantidad"
+                   oninput="actualizarCantidadOperario(${o.operario_id}, this.value)">
         </div>
     `).join('');
 
@@ -2256,12 +2256,21 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
 
     let desglose = [];
     if (esMultiOperario) {
+        const inputsOperarios = [...document.querySelectorAll('#lista_cantidad_operarios input')];
+        if (inputsOperarios.some(input => input.value.trim() === '')) {
+            Swal.fire('Falta el desglose', 'Ingresa la cantidad de cada operario, aunque sea 0.', 'warning');
+            return;
+        }
         desglose = Object.entries(cantidadesPorOperario)
-            .map(([operario_id, cantidad]) => ({ operario_id: Number(operario_id), cantidad: Number(cantidad) || 0 }))
-            .filter(d => d.cantidad > 0);
-
-        if (desglose.length === 0) {
-            Swal.fire('Falta el desglose', 'Asigna la cantidad producida de cada operario.', 'warning');
+            .map(([operario_id, cantidad]) => ({ operario_id: Number(operario_id), cantidad: Number(cantidad) || 0 }));
+        if (desglose.some(d => !Number.isFinite(d.cantidad) || d.cantidad < 0
+            || (esUnidadEntera(unidadProducida) && !Number.isInteger(d.cantidad)))) {
+            Swal.fire('Dato inválido', `Revisa las cantidades individuales. La unidad ${unidadProducida} requiere valores enteros.`, 'warning');
+            return;
+        }
+        const sumaDesglose = desglose.reduce((suma, d) => suma + d.cantidad, 0);
+        if (sumaDesglose <= 0 || Math.abs(sumaDesglose - valor) > 0.0001) {
+            Swal.fire('Revisa el total', 'La suma del reparto debe coincidir con el total producido.', 'warning');
             return;
         }
     }

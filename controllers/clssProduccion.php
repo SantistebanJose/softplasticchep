@@ -1647,10 +1647,18 @@ function enviarAEnsamblaje()
     $desglosePorOperario = [];
     if (is_array($desgloseRaw)) {
         foreach ($desgloseRaw as $item) {
+            if (!is_array($item)) {
+                responder(false, 'El desglose por operario tiene un formato inválido.');
+            }
             $oid  = intval($item['operario_id'] ?? 0);
-            $cant = floatval($item['cantidad'] ?? 0);
-            if ($oid > 0 && $cant > 0) $desglosePorOperario[$oid] = $cant;
+            $cantRaw = $item['cantidad'] ?? null;
+            if ($oid <= 0 || !is_numeric($cantRaw) || (float)$cantRaw < 0 || isset($desglosePorOperario[$oid])) {
+                responder(false, 'El desglose por operario contiene una cantidad inválida o repetida.');
+            }
+            $desglosePorOperario[$oid] = (float)$cantRaw;
         }
+    } elseif (isset($_POST['desglose_operarios'])) {
+        responder(false, 'El desglose por operario no tiene un formato válido.');
     }
 
     if (!$id) responder(false, 'ID inválido.');
@@ -1726,6 +1734,29 @@ function enviarAEnsamblaje()
     // Si vino desglose, se inyecta 'cantidad_producida' dentro de cada
     // entrada de js_operarios que ya existía (id, nombre, cargo).
     $listaOperarios = json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [];
+
+    if (count($listaOperarios) > 1) {
+        $idsParticipantes = array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $listaOperarios);
+        $idsParticipantes = array_values(array_unique(array_filter($idsParticipantes, static fn($id) => $id > 0)));
+        if (count($idsParticipantes) !== count($listaOperarios)) {
+            responder(false, 'No se pudo validar la lista de operarios participantes.');
+        }
+        $idsConCantidad = array_keys($desglosePorOperario);
+        sort($idsParticipantes);
+        sort($idsConCantidad);
+        if ($idsParticipantes !== $idsConCantidad) {
+            responder(false, 'Asigna una cantidad a cada operario participante antes de enviar la producción.');
+        }
+        foreach ($desglosePorOperario as $cantidadIndividual) {
+            if ($unidadProduccion !== 'KG' && floor($cantidadIndividual) != $cantidadIndividual) {
+                responder(false, "Las cantidades individuales deben ser enteras (unidad configurada: $unidadProduccion).");
+            }
+        }
+        $sumaDesglose = array_sum($desglosePorOperario);
+        if (abs($sumaDesglose - $cantidadProducida) > 0.0001) {
+            responder(false, 'La suma del desglose debe coincidir con la cantidad producida total.');
+        }
+    }
 
     if (empty($desglosePorOperario) && count($listaOperarios) === 1) {
         $unicoId = intval($listaOperarios[0]['operario_id'] ?? 0);

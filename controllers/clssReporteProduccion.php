@@ -256,12 +256,10 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         NULLIF(op.operario->>'cantidad_producida', '')::numeric,
         CASE
             WHEN jsonb_array_length(COALESCE(pd.js_operarios, '[]'::jsonb)) <= 1
-              OR (op.operario->>'operario_id')::bigint = pd.operario_id
             THEN pd.cantidad_producida_kg
-            ELSE NULL
-        END,
-        0
+        END
     )";
+    $confirmadoOperario = "($producidoOperario) IS NOT NULL";
  
     // Subconsulta correlacionada para sumar la merma real del avance desde
     // pd.js_cantidades_merma (jsonb array). El monto real está en la clave
@@ -309,7 +307,8 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             COUNT(pd.id) AS total_avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
             COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado,
-            COALESCE(SUM($mermaOperario), 0) AS total_merma
+            COALESCE(SUM($mermaOperario), 0) AS total_merma,
+            COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
         $joinOperario
         WHERE $condicionBase
@@ -329,7 +328,9 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             COUNT(pd.id) AS avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
             COALESCE(SUM($producidoOperario), 0) AS total_producido,
-            ROUND(COALESCE(SUM($producidoOperario), 0)::numeric / NULLIF(COUNT(pd.id), 0), 2) AS promedio
+            ROUND(COALESCE(SUM($producidoOperario), 0)::numeric
+                / NULLIF(COUNT(pd.id) FILTER (WHERE $confirmadoOperario), 0), 2) AS promedio,
+            COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
         $joinOperario
         WHERE $condicionBase
@@ -344,7 +345,8 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             $turnoCase AS turno,
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
-            COALESCE(SUM($producidoOperario), 0) AS cantidad
+            COALESCE(SUM($producidoOperario), 0) AS cantidad,
+            COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
         $joinOperario
         WHERE $condicionBase
@@ -359,7 +361,8 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             COALESCE(ma.nombre, 'Sin máquina') AS maquina,
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
-            COALESCE(SUM($producidoOperario), 0) AS cantidad
+            COALESCE(SUM($producidoOperario), 0) AS cantidad,
+            COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
         $joinOperario
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
@@ -377,7 +380,8 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             pr.descripcion AS producto_descripcion,
             COUNT(pd.id) AS avances,
             COALESCE(SUM($producidoOperario), 0) AS kg_producido,
-            MAX($unidadSql) AS unidad
+            MAX($unidadSql) AS unidad,
+            COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
         $joinOperario
         LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -402,6 +406,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             co.nombre AS color_nombre,
             pd.cantidad AS kg_insertado,
             $producidoOperario AS kg_producido,
+            CASE WHEN $confirmadoOperario THEN 1 ELSE 0 END AS confirmado,
             $unidadSql AS unidad,
             pd.observaciones
         FROM produccion pd

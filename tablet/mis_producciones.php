@@ -373,6 +373,7 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
                 <div class="mp-hero-chip">
                     <span class="valor">${formatoNumero(u.total_producido)}</span>
                     <span class="unidad">${u.unidad}</span>
+                    ${parseInt(u.avances_pendientes, 10) > 0 ? `<small>${parseInt(u.avances_pendientes, 10)} pendiente(s) de desglose</small>` : ''}
                 </div>
             `).join('');
         }
@@ -403,6 +404,7 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
             topMoldesEl.innerHTML = data.top_moldes.map((m, i) => {
                 const rank = i + 1;
                 const rankClass = rank <= 3 ? `r${rank}` : '';
+                const pendientes = parseInt(m.avances_pendientes, 10) || 0;
                 return `
                     <div class="mp-molde-card">
                         <div class="mp-molde-rank ${rankClass}">${rank}</div>
@@ -412,7 +414,7 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
                         </div>
                         <div>
                             <div class="mp-molde-cantidad">${formatoNumero(m.kg_producido)} ${m.unidad || 'kg'}</div>
-                            <div class="mp-molde-avances">${m.avances} avance(s)</div>
+                            <div class="mp-molde-avances">${m.avances} avance(s)${pendientes ? ` · ${pendientes} pendiente(s)` : ''}</div>
                         </div>
                     </div>
                 `;
@@ -426,11 +428,14 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
             detalleEl.innerHTML = data.detalle.map(d => {
                 const turnoClass = 'turno-' + (d.turno || '');
                 const turnoLabel = TURNO_LABEL[d.turno] || d.turno;
+                const cantidadTexto = Number(d.confirmado) === 1
+                    ? `${formatoNumero(d.kg_producido)} ${d.unidad || 'kg'}`
+                    : '<span class="badge bg-warning text-dark">Pendiente de desglose</span>';
                 return `
                     <div class="mp-detalle-item ${turnoClass}">
                         <div class="fila-top">
                             <span>${d.molde_nombre || 'Sin molde'}</span>
-                            <span>${formatoNumero(d.kg_producido)} ${d.unidad || 'kg'}</span>
+                            <span>${cantidadTexto}</span>
                         </div>
                         <div class="fila-sub">
                             <span class="mp-turno-badge ${turnoClass}">${turnoLabel}</span>

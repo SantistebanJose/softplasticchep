@@ -503,9 +503,20 @@ include("header.php");
 
             <div class="pc-ens-step" id="pasoCantidadProducida">
                 <div class="pc-ens-step-num">1</div>
-                <div class="pc-ens-step-body">
-                <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>                    <input type="number" step="0.0001" min="0.0001" class="form-control"
+            <div class="pc-ens-step-body">
+                <div id="bloque_cantidad_individual">
+                    <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>
+                    <input type="number" step="0.0001" min="0.0001" class="form-control"
                            id="cantidad_producida_ensamblaje" placeholder="Ej. 25.5" required autofocus>
+                </div>
+                <div id="bloque_cantidad_por_operario" class="mt-2" style="display:none;">
+                    <div id="lista_cantidad_operarios" class="d-grid gap-2"></div>
+                    <div class="alert alert-primary d-flex justify-content-between align-items-center mt-3 mb-0">
+                        <strong>Total producido</strong>
+                        <strong><span id="total_cantidad_operarios">0</span> <span id="unidad_producida_badge_multi">kg</span></strong>
+                    </div>
+                    <div class="form-text">Reparte la cantidad entre todas las personas que participaron.</div>
+                </div>
                 </div>
             </div>
 
@@ -1660,6 +1671,7 @@ const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('mod
 let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;       // cache de colores activos, para los chips de merma
 let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
+let cantidadesPorOperario = {};
 
 let modoSoloMerma = false;
 
@@ -1676,10 +1688,59 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
         `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
 
     aplicarUnidadesEtapaModal(p);
+    inicializarCantidadProducidaPorOperario(p);
     renderInfoMermaModal(p);
 
     modalCantidadEnsamblaje.show();
 }
+
+function inicializarCantidadProducidaPorOperario(p) {
+    const operarios = Array.isArray(p?.js_operarios) ? p.js_operarios : [];
+    const bloqueIndividual = document.getElementById('bloque_cantidad_individual');
+    const bloqueMultiple = document.getElementById('bloque_cantidad_por_operario');
+    const inputTotal = document.getElementById('cantidad_producida_ensamblaje');
+    const unidad = inputTotal.dataset.unidad || 'kg';
+    cantidadesPorOperario = {};
+
+    if (operarios.length <= 1) {
+        bloqueIndividual.style.display = '';
+        bloqueMultiple.style.display = 'none';
+        inputTotal.required = true;
+        return;
+    }
+
+    bloqueIndividual.style.display = 'none';
+    bloqueMultiple.style.display = '';
+    inputTotal.required = false;
+    inputTotal.value = '0';
+    document.getElementById('unidad_producida_badge_multi').textContent = unidad.toUpperCase();
+    operarios.forEach(o => { cantidadesPorOperario[o.operario_id] = 0; });
+    document.getElementById('lista_cantidad_operarios').innerHTML = operarios.map(o => `
+        <label class="border rounded p-2">
+            <span class="form-label mb-1 d-block">${o.nombre_completo || `Operario #${o.operario_id}`}</span>
+            <input type="number" class="form-control" min="0" step="${esUnidadEntera(unidad) ? '1' : '0.0001'}"
+                   inputmode="decimal" data-operario-id="${o.operario_id}" required placeholder="Cantidad">
+        </label>
+    `).join('');
+    document.querySelectorAll('#lista_cantidad_operarios [data-operario-id]').forEach(input => {
+        input.addEventListener('input', () => actualizarCantidadOperario(input.dataset.operarioId, input.value));
+    });
+    actualizarTotalCantidadOperarios();
+}
+
+function actualizarCantidadOperario(operarioId, valor) {
+    const cantidad = valor === '' ? 0 : Number(valor);
+    cantidadesPorOperario[operarioId] = Number.isFinite(cantidad) && cantidad >= 0 ? cantidad : 0;
+    actualizarTotalCantidadOperarios();
+}
+
+function actualizarTotalCantidadOperarios() {
+    const total = Object.values(cantidadesPorOperario).reduce((s, n) => s + (Number(n) || 0), 0);
+    const input = document.getElementById('cantidad_producida_ensamblaje');
+    input.value = (Math.round(total * 10000) / 10000).toString();
+    document.getElementById('total_cantidad_operarios').textContent = formatearCantidadProd(total);
+}
+
 async function obtenerColoresParaMerma() {
     if (coloresMermaCache) return coloresMermaCache;
     const json = await llamarColor('LISTARCOLORES', { texto: '', estado: 'activa' });
@@ -1798,10 +1859,36 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
         return;
     }
 
+    const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
+    const esMultiOperario = Array.isArray(p?.js_operarios) && p.js_operarios.length > 1;
+    let desglose = [];
+    if (esMultiOperario) {
+        const inputs = [...document.querySelectorAll('#lista_cantidad_operarios [data-operario-id]')];
+        if (inputs.some(input => input.value.trim() === '')) {
+            Swal.fire('Falta el desglose', 'Ingresa la cantidad de cada operario, aunque sea 0.', 'warning');
+            return;
+        }
+        desglose = inputs.map(input => ({
+            operario_id: Number(input.dataset.operarioId),
+            cantidad: Number(input.value),
+        }));
+        if (desglose.some(item => !Number.isFinite(item.cantidad) || item.cantidad < 0
+            || (esUnidadEntera(unidadProducida) && !Number.isInteger(item.cantidad)))) {
+            Swal.fire('Dato inválido', `Revisa las cantidades individuales. La unidad ${unidadProducida} requiere valores enteros.`, 'warning');
+            return;
+        }
+        const suma = desglose.reduce((total, item) => total + item.cantidad, 0);
+        if (suma <= 0 || Math.abs(suma - valor) > 0.0001) {
+            Swal.fire('Revisa el total', 'La suma del reparto debe coincidir con el total producido.', 'warning');
+            return;
+        }
+    }
+
     const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
         id: produccionIdParaEnsamblaje,
         cantidad_producida: valor,
         unidad: unidadProducida,
+        desglose_operarios: JSON.stringify(desglose),
     });
 
     if (!json.success) {

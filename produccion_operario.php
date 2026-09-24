@@ -521,6 +521,7 @@ function pintarReporteOperario(json) {
         <div class="rep-stat-card">
             <div class="rep-stat-valor">${formatearCantidad(r.total_producido, r.unidad)}</div>
             <div class="rep-stat-label">Producido (${etiquetaUnidad(r.unidad)}) · ${r.avances} avance${r.avances == 1 ? '' : 's'} · prom. ${r.promedio ?? '-'}</div>
+            ${parseInt(r.avances_pendientes, 10) > 0 ? `<div class="rep-stat-label text-warning">${parseInt(r.avances_pendientes, 10)} pendiente(s) de desglose</div>` : ''}
         </div>
     `).join('');
 
@@ -609,7 +610,7 @@ function pintarTop5(filas) {
         return `
         <div class="rep-top5-item">
             <div class="fila">
-                <span>${i + 1}. ${nombre}</span>
+                <span>${i + 1}. ${nombre} ${parseInt(f.avances_pendientes, 10) > 0 ? `<small class="text-warning">${parseInt(f.avances_pendientes, 10)} pendiente(s)</small>` : ''}</span>
                 <b>${formatearCantidad(f.kg_producido, f.unidad)}</b>
             </div>
             <div class="rep-barra-wrap"><div class="rep-barra" style="width:${porcentaje}%"></div></div>
@@ -648,7 +649,7 @@ function pintarTablaDetalle(detalle) {
             <td data-label="Máquina">${d.maquina_nombre ?? '-'}</td>
             <td data-label="Color">${d.color_nombre ?? '-'}</td>
             <td data-label="Kg insertado">${formatearKg(d.kg_insertado)}</td>
-            <td data-label="Cant. producida">${d.kg_producido !== null ? formatearCantidad(d.kg_producido, d.unidad) : '-'}</td>
+            <td data-label="Cant. producida">${Number(d.confirmado) === 1 ? formatearCantidad(d.kg_producido, d.unidad) : '<span class="badge text-bg-warning">Pendiente de desglose</span>'}</td>
             <td data-label="Obs.">
                 ${d.observaciones
                     ? `<button class="pc-icon-btn" title="Ver observación" onclick="verObservacion('${escaparComillas(d.observaciones)}')"><i class="fa-solid fa-note-sticky"></i></button>`
