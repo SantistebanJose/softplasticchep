@@ -221,6 +221,17 @@ function resolverEtapasOperario($conectar, int $operarioId): array
 
 function guardarSesionOperario(array $usuario, array $etapas = []): void
 {
+    // Evita que una sesión administrativa previa haga que el backend trate
+    // esta sesión de tablet como usuario admin (y viceversa).
+    unset(
+        $_SESSION['usuario_id'],
+        $_SESSION['nombre_usuario'],
+        $_SESSION['user_usuario'],
+        $_SESSION['rol_usuario'],
+        $_SESSION['perfiles'],
+        $_SESSION['mostrar_bienvenida']
+    );
+
     $rolPerfiles = decodificarRolPerfiles($usuario['rol_y_perfiles']);
 
     // FIX 2: PK real de 'operario' (FK), no el PK propio de 'usuario'.

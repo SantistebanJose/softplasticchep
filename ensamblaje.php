@@ -715,7 +715,7 @@ function tarjetaEnsamblajeHtml(e) {
     const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
     const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
     const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
-    const puedeDecidirDestino = !e.deleted_at && e.fin && (esDeSegunda || esMultiMoldeCompleto) && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const complementoUsado = !!e.ensamblaje_id_referido;
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
@@ -751,7 +751,7 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Categoría material</span>
-                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo' : ''}</span>
+                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo, disponible en Empaquetado' : ''}</span>
             </div>
             <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
@@ -789,7 +789,7 @@ function tarjetaEnsamblajeHtml(e) {
                         : '0'}
                 </span>
             </div>
-            ${productoEmsamblado ? `
+            ${productoEmsamblado && !esMultiMoldeCompleto ? `
             <div class="pc-ens-field">
                 <span class="lbl">Complementa a</span>
                 <span class="val">

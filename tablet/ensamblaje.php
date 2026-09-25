@@ -953,7 +953,7 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
     const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
-    const puedeDecidirDestino = !e.deleted_at && e.fin && (esDeSegunda || esMultiMoldeCompleto) && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const complementoUsado = !!e.ensamblaje_id_referido;
 
     // NUEVO: nombres de lo que compone este armado (moldes de producción +
@@ -980,7 +980,7 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const tags = [];
     if (e.categoria_material_nombre) tags.push(e.categoria_material_nombre);
     if (esMultiMoldeCompleto) tags.push({ texto: 'Multi-molde completo · listo para empaquetado', clase: 'empaquetado' });
-    if (productoEmsamblado) {
+    if (productoEmsamblado && !esMultiMoldeCompleto) {
         tags.push({ texto: `Complementa a ${productoEmsamblado.codigo ?? ''}`, clase: 'complemento' });
         tags.push({ texto: complementoUsado ? `Usado en #${e.ensamblaje_id_referido}` : 'Disponible para vincular', clase: complementoUsado ? 'usado' : 'libre' });
     }

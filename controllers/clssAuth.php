@@ -151,6 +151,16 @@ function actualizarHashUsuario($conectar, int $usuarioId, string $password): voi
  */
 function guardarSesionUsuario(array $usuario): void
 {
+    // La cuenta administrativa y la sesión rápida de tablet no deben compartir
+    // identidades: una sesión de operario previa puede limitar listados admin.
+    unset(
+        $_SESSION['operario_id'],
+        $_SESSION['operario_dni'],
+        $_SESSION['operario_nombre'],
+        $_SESSION['operario_rol'],
+        $_SESSION['operario_etapas']
+    );
+
     $rolPerfilesRaw = $usuario['rol_y_perfiles'] ?? [];
     $rolPerfiles = [];
 

@@ -870,6 +870,8 @@ function sqlEsMultiMoldeCompleto(string $aliasEnsamblaje = 'e', string $aliasPro
 {
     $config = "jsonb_array_elements(COALESCE($aliasProducto.js_configuracion, '[]'::jsonb)) AS cfg(item)";
     return "(
+        $aliasEnsamblaje.ensamblaje_id_referido IS NULL
+        AND
         (SELECT COUNT(DISTINCT cfg.item->>'molde_id') FROM $config
          WHERE cfg.item->>'necesita_ensamblaje' = 'sí') > 1
         AND NOT EXISTS (
@@ -1837,7 +1839,8 @@ function finalizarEnsamblaje(int $id)
 
     $existe = executeQuery(
         $conectar,
-        "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id,
+        "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id, e.js_producto_emsamblado,
+                " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
                 p.js_configuracion_empaquetado
          FROM ensamblaje e
          LEFT JOIN producto p ON p.id = e.producto_id
@@ -1847,6 +1850,7 @@ function finalizarEnsamblaje(int $id)
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
     $ensamblaje = $existe[0];
     verificarPropiedadEnsamblaje($conectar, $id);
+    $enviarAutomaticamenteEmpaquetado = valorBooleanoEnsamblaje($ensamblaje['es_multi_molde_completo'] ?? false);
 
     $configEmpaquetado = json_decode($ensamblaje['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
     $unidadSalidaId = !empty($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
@@ -1873,6 +1877,12 @@ function finalizarEnsamblaje(int $id)
             'valor_antes' => '(en curso)',
             'valor_despues' => "Finalizado ahora · {$cantidadSalida} {$unidadLabel}",
         ]];
+        if ($enviarAutomaticamenteEmpaquetado) {
+            $cambios[] = ['campo' => 'Envío a empaquetado', 'valor_antes' => '(no enviado)', 'valor_despues' => 'Enviado automáticamente al finalizar el colgador multi-molde'];
+            if (!empty($ensamblaje['js_producto_emsamblado'])) {
+                $cambios[] = ['campo' => 'Complemento', 'valor_antes' => 'Marcado como complemento', 'valor_despues' => 'Liberado para empaquetado como colgador multi-molde completo'];
+            }
+        }
         $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -1882,6 +1892,9 @@ function finalizarEnsamblaje(int $id)
                 fin              = NOW(),
                 cantidad_peso_kg = :cantidad_salida,
                 unidad_salida_id = :unidad_salida_id,
+                enviado_empaquetado = CASE WHEN :auto_enviar THEN TRUE ELSE enviado_empaquetado END,
+                fecha_envio_empaquetado = CASE WHEN :auto_fecha THEN NOW() ELSE fecha_envio_empaquetado END,
+                js_producto_emsamblado = CASE WHEN :auto_liberar_complemento THEN NULL ELSE js_producto_emsamblado END,
                 update_at        = NOW(),
                 js_usuario       = :js_session,
                 js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
@@ -1890,12 +1903,17 @@ function finalizarEnsamblaje(int $id)
             'id'               => $id,
             'cantidad_salida'  => $cantidadSalida,
             'unidad_salida_id' => $unidadSalidaId,
+            'auto_enviar'      => $enviarAutomaticamenteEmpaquetado,
+            'auto_fecha'       => $enviarAutomaticamenteEmpaquetado,
+            'auto_liberar_complemento' => $enviarAutomaticamenteEmpaquetado,
             'js_session'       => $js_session,
             'js_historial'     => $js_historial,
         ]);
 
         $conectar->commit();
-        responder(true, 'Ensamblaje finalizado.');
+        responder(true, $enviarAutomaticamenteEmpaquetado
+            ? 'Ensamblaje finalizado y enviado automáticamente a Empaquetado.'
+            : 'Ensamblaje finalizado.');
     } catch (Throwable $e) {
         $conectar->rollBack();
         error_log("Error finalizando ensamblaje: " . $e->getMessage());
@@ -2104,13 +2122,13 @@ function pasarAEmpaquetado(int $id)
     if (!empty($e['deleted_at'])) responder(false, 'No puedes pasar a empaquetado un ensamblaje inactivo.');
     if (empty($e['fin'])) responder(false, 'Solo puedes pasar a empaquetado un ensamblaje ya finalizado.');
     if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado.');
-    if (!empty($e['js_producto_emsamblado'])) {
+    $esMultiMoldeCompleto = valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false);
+    if (!empty($e['js_producto_emsamblado']) && !$esMultiMoldeCompleto) {
         responder(false, 'Este ensamblaje ya fue marcado como complemento de otro producto; no puede pasar también a empaquetado.');
     }
     if (!empty($e['ensamblaje_id_referido'])) {
         responder(false, 'Este ensamblaje ya está siendo utilizado como complemento y no puede pasar también a empaquetado.');
     }
-    $esMultiMoldeCompleto = valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false);
     if (stripos(trim((string)($e['categoria_material_nombre'] ?? '')), 'segunda') === false && !$esMultiMoldeCompleto) {
         responder(false, 'Solo los ensamblajes de Segunda Categoría o los colgadores multi-molde completos pueden enviarse a empaquetado.');
     }
@@ -2119,6 +2137,9 @@ function pasarAEmpaquetado(int $id)
         'campo' => 'Envío a empaquetado', 'valor_antes' => '(no enviado)',
         'valor_despues' => 'Enviado a empaquetado',
     ]];
+    if ($esMultiMoldeCompleto && !empty($e['js_producto_emsamblado'])) {
+        $cambios[] = ['campo' => 'Complemento', 'valor_antes' => 'Marcado como complemento', 'valor_despues' => 'Liberado para empaquetado como colgador multi-molde completo'];
+    }
     $movimiento   = obtenerMovimientoSesion('enviar_empaquetado', $cambios);
     $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -2127,11 +2148,12 @@ function pasarAEmpaquetado(int $id)
         UPDATE ensamblaje SET
             enviado_empaquetado     = TRUE,
             fecha_envio_empaquetado = NOW(),
+            js_producto_emsamblado = CASE WHEN :limpiar_complemento THEN NULL ELSE js_producto_emsamblado END,
             update_at               = NOW(),
             js_usuario              = :js_session,
             js_historial            = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
         WHERE id = :id
-    ", ['id' => $id, 'js_session' => $js_session, 'js_historial' => $js_historial]);
+    ", ['id' => $id, 'limpiar_complemento' => $esMultiMoldeCompleto, 'js_session' => $js_session, 'js_historial' => $js_historial]);
 
     responder(true, 'Ensamblaje enviado a empaquetado correctamente.');
 }

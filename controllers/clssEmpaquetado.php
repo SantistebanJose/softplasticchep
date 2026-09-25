@@ -10,6 +10,11 @@ require_once __DIR__ . '/clssVerificarSession.php';
 
 iniciarSesionSegura();
 
+function esSesionTabletEmpaquetado(): bool
+{
+    return empty($_SESSION['usuario_id']) && !empty($_SESSION['operario_id']);
+}
+
 if (isset($_POST["accion"])) {
     try {
         controladorEmpaquetado($_POST["accion"]);
@@ -49,7 +54,7 @@ function controladorEmpaquetado(string $accion): void
 
     // La tablet identifica al operario mediante operario_id, no usuario_id.
     // Puede consultar y registrar empaquetados, pero no modificarlos ni revertirlos.
-    if (!empty($_SESSION['operario_id'])) {
+    if (esSesionTabletEmpaquetado()) {
         if (!in_array($accion, array_merge($accionesLectura, $accionesOperacion), true)) {
             responderAcceso(403, 'No tienes permiso para realizar esta acción.');
         }
@@ -177,6 +182,26 @@ function buscarUnidadesMedida()
     responder(true, 'OK', ['unidades' => $result]);
 }
 
+/** Permite que armados multi-molde finalizados sigan disponibles en empaquetado,
+ * incluso si fueron finalizados antes de habilitar el pase automático.
+ * La finalización del armado confirma que está listo; no se debe exigir que
+ * tenga una producción por cada molde configurado, porque hay armados válidos
+ * finalizados con solo algunos de los moldes requeridos (p. ej. COS #65). */
+function sqlEsMultiMoldeListoParaEmpaquetar(string $aliasEnsamblaje = 'e', string $aliasProducto = 'p'): string
+{
+    $config = "jsonb_array_elements(COALESCE($aliasProducto.js_configuracion, '[]'::jsonb)) AS cfg(item)";
+    return "(
+        (SELECT COUNT(DISTINCT cfg.item->>'molde_id') FROM $config
+         WHERE cfg.item->>'necesita_ensamblaje' = 'sí') > 1
+        AND (SELECT COUNT(DISTINCT pd.molde_id)
+             FROM rel_ensamblaje_producto rep
+             JOIN produccion pd ON pd.id = rep.molde_produccion_id
+             WHERE rep.ensamblaje_id = $aliasEnsamblaje.id
+               AND rep.deleted_at IS NULL
+               AND pd.deleted_at IS NULL) > 1
+    )";
+}
+
 // FIX: ahora también trae orígenes tipo "producción" para productos que van
 // directo de producción a empaquetado (necesita_ensamblaje = 'no', ej.
 // COLGADOR ADULTO, MATAMOSCA CUADRADA). Antes esta función solo miraba la
@@ -205,6 +230,7 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
                     WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
                 ), 0) AS disponible
             FROM ensamblaje e
+            LEFT JOIN producto pr_ens ON pr_ens.id = e.producto_id
             LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
             LEFT JOIN LATERAL (
                 SELECT COALESCE(e.color_id, own.color_id) AS color_id, co.nombre AS color_nombre, co.rgb AS color_hex
@@ -220,9 +246,9 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             ) col ON true
             WHERE e.producto_id = :producto_id
               AND e.deleted_at IS NULL AND e.fin IS NOT NULL
-              AND e.enviado_empaquetado IS TRUE
+              AND (e.enviado_empaquetado IS TRUE OR " . sqlEsMultiMoldeListoParaEmpaquetar('e', 'pr_ens') . ")
               AND e.ensamblaje_id_referido IS NULL
-              AND e.js_producto_emsamblado IS NULL
+              AND (e.js_producto_emsamblado IS NULL OR " . sqlEsMultiMoldeListoParaEmpaquetar('e', 'pr_ens') . ")
 
             UNION ALL
 
@@ -309,9 +335,9 @@ function listarEnsamblajesParaEmpaquetado()
     $where  = [
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
-        "e.enviado_empaquetado IS TRUE",
+        "(e.enviado_empaquetado IS TRUE OR " . sqlEsMultiMoldeListoParaEmpaquetar('e', 'p') . ")",
         "e.ensamblaje_id_referido IS NULL",
-        "e.js_producto_emsamblado IS NULL", 
+        "(e.js_producto_emsamblado IS NULL OR " . sqlEsMultiMoldeListoParaEmpaquetar('e', 'p') . ")",
         "(e.cantidad_peso_kg - COALESCE((
             SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
             WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
@@ -631,7 +657,7 @@ function listarTodosEmpaquetados()
 
     // La tablet consulta solo los empaquetados en los que participa el
     // operario autenticado. El panel administrativo conserva el listado global.
-    if (!empty($_SESSION['operario_id'])) {
+    if (esSesionTabletEmpaquetado()) {
         $where[] = "(emp.operario_id = :operario_id OR EXISTS (
             SELECT 1 FROM jsonb_array_elements(COALESCE(emp.js_operarios, '[]'::jsonb)) AS op
             WHERE (op->>'operario_id')::bigint = :operario_id_js
