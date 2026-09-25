@@ -951,9 +951,9 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const puedeIniciar   = !e.deleted_at && !e.inicio;
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
-    const esDePrimera = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de primera';
     const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
-    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
+    const puedeDecidirDestino = !e.deleted_at && e.fin && (esDeSegunda || esMultiMoldeCompleto) && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const complementoUsado = !!e.ensamblaje_id_referido;
 
     // NUEVO: nombres de lo que compone este armado (moldes de producción +
@@ -979,7 +979,7 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
 
     const tags = [];
     if (e.categoria_material_nombre) tags.push(e.categoria_material_nombre);
-    if (puedeDecidirDestino && esDePrimera) tags.push({ texto: 'Disponible como complemento para colgadores', clase: 'libre' });
+    if (esMultiMoldeCompleto) tags.push({ texto: 'Multi-molde completo · listo para empaquetado', clase: 'empaquetado' });
     if (productoEmsamblado) {
         tags.push({ texto: `Complementa a ${productoEmsamblado.codigo ?? ''}`, clase: 'complemento' });
         tags.push({ texto: complementoUsado ? `Usado en #${e.ensamblaje_id_referido}` : 'Disponible para vincular', clase: complementoUsado ? 'usado' : 'libre' });

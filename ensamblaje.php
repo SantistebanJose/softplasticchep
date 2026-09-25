@@ -713,9 +713,9 @@ function tarjetaEnsamblajeHtml(e) {
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
-    const esDePrimera = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de primera';
     const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
-    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
+    const puedeDecidirDestino = !e.deleted_at && e.fin && (esDeSegunda || esMultiMoldeCompleto) && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const complementoUsado = !!e.ensamblaje_id_referido;
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
@@ -751,13 +751,8 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Categoría material</span>
-                <span class="val">${e.categoria_material_nombre ?? '-'}</span>
+                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo' : ''}</span>
             </div>
-            ${puedeDecidirDestino && esDePrimera ? `
-            <div class="pc-ens-field">
-                <span class="lbl">Complemento</span>
-                <span class="val"><span class="badge-complemento-estado disponible"><i class="fa-solid fa-puzzle-piece"></i> Disponible al armar un colgador</span></span>
-            </div>` : ''}
             <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
                 <span class="val">

@@ -528,6 +528,7 @@ function buscarComplementos()
         "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
         "LOWER(COALESCE(cm.nombre, '')) LIKE '%primera%'",
+        "NOT " . sqlEsMultiMoldeCompleto('e', 'p'),
         "COALESCE(e.color_id, (
             SELECT pd.color_id FROM rel_ensamblaje_producto rep
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
@@ -863,6 +864,34 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
           AND ec.deleted_at IS NULL
     ) AS js_complementos_utilizados";
 }
+
+/** True when every configured assembly-required mold is linked to this assembly. */
+function sqlEsMultiMoldeCompleto(string $aliasEnsamblaje = 'e', string $aliasProducto = 'p'): string
+{
+    $config = "jsonb_array_elements(COALESCE($aliasProducto.js_configuracion, '[]'::jsonb)) AS cfg(item)";
+    return "(
+        (SELECT COUNT(DISTINCT cfg.item->>'molde_id') FROM $config
+         WHERE cfg.item->>'necesita_ensamblaje' = 'sí') > 1
+        AND NOT EXISTS (
+            SELECT 1 FROM $config
+            WHERE cfg.item->>'necesita_ensamblaje' = 'sí'
+              AND NOT EXISTS (
+                  SELECT 1 FROM rel_ensamblaje_producto rep
+                  JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                  WHERE rep.ensamblaje_id = $aliasEnsamblaje.id
+                    AND rep.deleted_at IS NULL
+                    AND pd.deleted_at IS NULL
+                    AND pd.molde_id = NULLIF(cfg.item->>'molde_id', '')::bigint
+              )
+        )
+    )";
+}
+
+function valorBooleanoEnsamblaje($valor): bool
+{
+    return $valor === true || $valor === 1 || in_array(strtolower((string)$valor), ['1', 't', 'true', 'yes', 'on'], true);
+}
+
 function listarEnsamblajes()
 {
     $conectar = conectar_oll_BD();
@@ -943,6 +972,7 @@ function listarEnsamblajes()
         e.js_derivados_utilizados,
         e.categoria_material_id,
         cmm.nombre AS categoria_material_nombre,
+        " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
         " . subquerySelectComplementosUtilizados('e') . ",
         e.js_producto_emsamblado,
         e.ensamblaje_id_referido,
@@ -1467,9 +1497,11 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             $comp = executeQuery(
                 $conectar,
                 "SELECT ec.id, ec.fin, ec.deleted_at, ec.js_producto_emsamblado, ec.ensamblaje_id_referido,
+                        " . sqlEsMultiMoldeCompleto('ec', 'pc') . " AS es_multi_molde_completo,
                         ec.categoria_material_id, cm.nombre AS categoria_material_nombre,
                         COALESCE(ec.color_id, own.color_id) AS color_id
                  FROM ensamblaje ec
+                 LEFT JOIN producto pc ON pc.id = ec.producto_id
                  LEFT JOIN categoria_material cm ON cm.id = ec.categoria_material_id
                  LEFT JOIN LATERAL (
                     SELECT pd.color_id
@@ -1489,6 +1521,9 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             }
             if (empty($comp[0]['fin'])) {
                 throw new Exception("El ensamblaje complemento #$complementoId aún no ha finalizado.");
+            }
+            if (valorBooleanoEnsamblaje($comp[0]['es_multi_molde_completo'] ?? false)) {
+                throw new Exception("El ensamblaje #$complementoId ya reúne todos los moldes de su producto y debe pasar a Empaquetado.");
             }
             if (stripos((string)($comp[0]['categoria_material_nombre'] ?? ''), 'primera') === false) {
                 throw new Exception("El ensamblaje complemento #$complementoId no es de Primera Categoría.");
@@ -1885,8 +1920,10 @@ function marcarComplemento()
     $existe = executeQuery(
         $conectar,
         "SELECT e.id, e.deleted_at, e.fin, e.producto_id, e.js_producto_emsamblado, e.ensamblaje_id_referido, e.categoria_material_id, e.enviado_empaquetado,
+                " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
                 cm.nombre AS categoria_material_nombre
          FROM ensamblaje e
+         LEFT JOIN producto p ON p.id = e.producto_id
          LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
          WHERE e.id = :id",
         ['id' => $id]
@@ -1900,6 +1937,9 @@ function marcarComplemento()
     if (!empty($e['js_producto_emsamblado'])) responder(false, 'Este ensamblaje ya fue marcado como complemento.');
     if (!empty($e['ensamblaje_id_referido'])) responder(false, 'Este ensamblaje ya está siendo utilizado como complemento.');
     if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado; no puede marcarse como complemento.');
+    if (valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false)) {
+        responder(false, 'Este producto ya reúne todos sus moldes de ensamblaje y debe pasar a Empaquetado, no quedar como complemento.');
+    }
     if ($e['categoria_material_id'] === null) {
         responder(false, 'Este armado no tiene una categoría de material definida (o mezcla varias): no puede complementar. Envíalo a Empaquetado en su lugar.');
     }
@@ -2049,8 +2089,10 @@ function pasarAEmpaquetado(int $id)
     $existe = executeQuery(
         $conectar,
         "SELECT e.id, e.deleted_at, e.fin, e.enviado_empaquetado, e.js_producto_emsamblado,
+                " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
                 e.ensamblaje_id_referido, cm.nombre AS categoria_material_nombre
          FROM ensamblaje e
+         LEFT JOIN producto p ON p.id = e.producto_id
          LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
          WHERE e.id = :id",
         ['id' => $id]
@@ -2068,8 +2110,9 @@ function pasarAEmpaquetado(int $id)
     if (!empty($e['ensamblaje_id_referido'])) {
         responder(false, 'Este ensamblaje ya está siendo utilizado como complemento y no puede pasar también a empaquetado.');
     }
-    if (stripos(trim((string)($e['categoria_material_nombre'] ?? '')), 'segunda') === false) {
-        responder(false, 'Solo los ensamblajes de Segunda Categoría pueden enviarse a empaquetado. Los de Primera quedan disponibles para usarse como complemento al armar un colgador.');
+    $esMultiMoldeCompleto = valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false);
+    if (stripos(trim((string)($e['categoria_material_nombre'] ?? '')), 'segunda') === false && !$esMultiMoldeCompleto) {
+        responder(false, 'Solo los ensamblajes de Segunda Categoría o los colgadores multi-molde completos pueden enviarse a empaquetado.');
     }
 
     $cambios = [[
