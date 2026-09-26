@@ -37,8 +37,6 @@ include("header.php");
     </div>
 </div>
 
-<?php require __DIR__ . '/components/ayuda_videos.php'; ?>
-
 <style>
 .pc-welcome-overlay {
     position: fixed;
@@ -160,6 +158,8 @@ window.addEventListener('load', function () {
 
     </div>
 </div>
+
+<?php require __DIR__ . '/components/ayuda_videos.php'; ?>
 
 <style>
 .pc-quick-section-title {
