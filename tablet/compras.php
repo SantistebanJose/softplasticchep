@@ -397,7 +397,8 @@ const llamarCompra = (accion, params = {}) => llamar(CONTROLADOR_COMPRA, accion,
 let modoEdicionCompra = false;
 let compraIdActual = 0;
 let comprasCache = [];
-let unidadesCache = null;
+let unidadesRaizCache = null;
+const unidadesCompatiblesCache = {};
 
 // Estado del formulario
 let proveedorSeleccionadoCompra = null; // {ruc, razon_social, nombre_comercial}
@@ -587,11 +588,20 @@ function cambiarProveedorCompra() {
 // =============================================================================
 // PASO 2: MATERIALES → sub-formulario de línea → ticket
 // =============================================================================
-async function obtenerUnidadesCompra() {
-    if (unidadesCache) return unidadesCache;
-    const json = await llamarCompra('BUSCARUNIDADES');
-    unidadesCache = json.success ? (json.unidades || []) : [];
-    return unidadesCache;
+async function obtenerUnidadesRaizCompra() {
+    if (unidadesRaizCache) return unidadesRaizCache;
+    const json = await llamarCompra('BUSCARUNIDADESRAIZ');
+    unidadesRaizCache = json.success ? (json.unidades || []) : [];
+    return unidadesRaizCache;
+}
+
+async function obtenerUnidadesCompatiblesCompra(unidadMedidaId) {
+    if (!unidadMedidaId) return [];
+    const key = String(unidadMedidaId);
+    if (unidadesCompatiblesCache[key]) return unidadesCompatiblesCache[key];
+    const json = await llamarCompra('BUSCARUNIDADESCOMPATIBLES', { unidad_medida_id: unidadMedidaId });
+    unidadesCompatiblesCache[key] = json.success ? (json.unidades || []) : [];
+    return unidadesCompatiblesCache[key];
 }
 
 async function buscarYRenderMateriales() {
@@ -704,8 +714,7 @@ async function abrirFormularioProveedorRapidoTablet() {
 
 async function abrirFormularioMaterialRapidoTablet() {
     const texto = document.getElementById('cmp_buscar_material').value.trim();
-    const unidades = await obtenerUnidadesCompra();
-    const raiz = unidades.filter(u => !u.unidad_base_id);
+    const raiz = await obtenerUnidadesRaizCompra();
     const opciones = raiz.map(u => `<option value="${u.id}">${u.nombre} (${u.nombre_corto})</option>`).join('');
 
     const { value } = await Swal.fire({
@@ -771,12 +780,17 @@ async function abrirFormularioMaterialRapidoTablet() {
 
 async function abrirFormularioLineaCompra(material) {
     materialSeleccionadoTemp = material;
-    const unidades = await obtenerUnidadesCompra();
+    const raizId = material.unidad_medida_id || '';
+    const unidades = await obtenerUnidadesCompatiblesCompra(raizId);
     const wrap = document.getElementById('cmp_linea_form_wrap');
 
-    const opcionesUnidad = unidades.map(u =>
-        `<option value="${u.id}" ${u.id == material.unidad_medida_id ? 'selected' : ''}>${u.nombre} (${u.nombre_corto})</option>`
-    ).join('');
+    const opcionesUnidad = raizId
+        ? unidades.map(u => `<option value="${u.id}" data-equiv="${u.equivalencia}"
+                ${u.id == raizId ? 'selected' : ''}>${u.nombre} (${u.nombre_corto})</option>`).join('')
+        : '<option value="">Este material no tiene unidad base asignada</option>';
+    const unidadBase = unidades.find(u => String(u.id) === String(raizId));
+    const equivalenciaMaterial = parseFloat(material.unidad_equivalencia ?? unidadBase?.equivalencia ?? 1) || 1;
+    const unidadBaseCorto = material.unidad_corto || unidadBase?.nombre_corto || '';
 
     wrap.innerHTML = `
         <div class="pc-linea-form">
@@ -788,7 +802,8 @@ async function abrirFormularioLineaCompra(material) {
                 </div>
                 <div>
                     <label>Unidad de medida *</label>
-                    <select id="linea_unidad" class="form-select form-select-lg">${opcionesUnidad}</select>
+                    <select id="linea_unidad" class="form-select form-select-lg" ${raizId ? '' : 'disabled'}>${raizId ? '<option value="">Selecciona...</option>' : ''}${opcionesUnidad}</select>
+                    <small id="linea_conversion_info" class="text-muted d-block mt-1"></small>
                 </div>
             </div>
             <div class="grid-campos">
@@ -816,6 +831,24 @@ async function abrirFormularioLineaCompra(material) {
     document.getElementById('linea_sub_total').addEventListener('input', function () {
         document.getElementById('linea_total').value = this.value;
     });
+
+    const cantidadInput = document.getElementById('linea_cantidad');
+    const unidadSelect = document.getElementById('linea_unidad');
+    const conversionInfo = document.getElementById('linea_conversion_info');
+    function actualizarConversionTablet() {
+        const unidad = unidades.find(u => String(u.id) === String(unidadSelect.value));
+        if (!unidad || !unidadBaseCorto) { conversionInfo.textContent = ''; return; }
+        const factor = (parseFloat(unidad.equivalencia) || 1) / equivalenciaMaterial;
+        if (Math.abs(factor - 1) < 1e-9) { conversionInfo.textContent = ''; return; }
+        const cantidad = parseFloat(cantidadInput.value) || 0;
+        const equivalente = cantidad > 0 ? cantidad * factor : factor;
+        conversionInfo.textContent = cantidad > 0
+            ? `Equivale a ${formatearCantidadCompra(equivalente)} ${unidadBaseCorto}`
+            : `1 ${unidad.nombre_corto} equivale a ${formatearCantidadCompra(equivalente)} ${unidadBaseCorto}`;
+    }
+    cantidadInput.addEventListener('input', actualizarConversionTablet);
+    unidadSelect.addEventListener('change', actualizarConversionTablet);
+    actualizarConversionTablet();
 
     wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -986,7 +1019,6 @@ async function abrirModalCrearCompra() {
     document.getElementById('modalCompraTitulo').textContent = 'Registrar compra';
     // Fecha de hoy por defecto
     document.getElementById('cmp_fecha_compra').value = fechaLocalISO();
-    await obtenerUnidadesCompra();
     modalCompra.show();
 }
 
@@ -1009,7 +1041,6 @@ async function abrirModalEditarCompra(id) {
     comprobanteUrlActual = c.img_comprobante || null;
     renderComprobantePreview();
 
-    await obtenerUnidadesCompra();
     const detalle = json.detalle || [];
     ticketDetalleCompra = detalle.map(d => ({
         tempId: ++contadorLineaTicketCompra,

@@ -50,7 +50,7 @@ function controladorCompraTablet(string $accion): void
     error_log('DEBUG accion recibida: [' . $accion . '] len=' . strlen($accion));
     $operarioId = exigirSesionConductorApi();
 
-    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES', 'CONSULTARDOCUMENTO'];
+    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES', 'BUSCARUNIDADESRAIZ', 'BUSCARUNIDADESCOMPATIBLES', 'CONSULTARDOCUMENTO'];
     $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
@@ -88,6 +88,12 @@ function controladorCompraTablet(string $accion): void
             break;
         case 'BUSCARUNIDADES':
             buscarUnidades();
+            break;
+        case 'BUSCARUNIDADESRAIZ':
+            buscarUnidadesRaiz();
+            break;
+        case 'BUSCARUNIDADESCOMPATIBLES':
+            buscarUnidadesCompatibles(intval($_POST['unidad_medida_id'] ?? 0));
             break;
     }
 }
@@ -654,7 +660,7 @@ function guardarMaterialTablet()
     if ($nombre === '') responder(false, 'El nombre del material es obligatorio.');
     if ($unidadMedidaId <= 0) responder(false, 'Selecciona la unidad de medida base.');
 
-    $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedidaId]);
+    $unidad = executeQuery($conectar, "SELECT id, nombre_corto, equivalencia FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedidaId]);
     if (empty($unidad)) responder(false, 'La unidad seleccionada no existe o está inactiva.');
 
     $duplicado = executeQuery($conectar, "SELECT id FROM material WHERE LOWER(nombre) = LOWER(:nombre) AND deleted_at IS NULL LIMIT 1", ['nombre' => $nombre]);
@@ -682,8 +688,40 @@ function guardarMaterialTablet()
     }
 
     responder(true, 'Material registrado correctamente.', [
-        'material' => ['id' => $id, 'nombre' => $nombre, 'stock_actual' => 0, 'unidad_medida_id' => $unidadMedidaId, 'color' => $esTinte, 'rgb' => $rgb ?: null],
+        'material' => [
+            'id' => $id, 'nombre' => $nombre, 'stock_actual' => 0,
+            'unidad_medida_id' => $unidadMedidaId,
+            'unidad_corto' => $unidad[0]['nombre_corto'] ?? '',
+            'unidad_equivalencia' => $unidad[0]['equivalencia'] ?? 1,
+            'color' => $esTinte, 'rgb' => $rgb ?: null,
+        ],
     ]);
+}
+
+function buscarUnidadesRaiz(): void
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery($conectar, "
+        SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id
+        FROM unidad_medida
+        WHERE unidad_base_id IS NULL AND deleted_at IS NULL
+        ORDER BY nombre
+    ");
+    responder(true, 'OK', ['unidades' => $result]);
+}
+
+function buscarUnidadesCompatibles(int $unidadMedidaId): void
+{
+    if ($unidadMedidaId <= 0) responder(false, 'Selecciona primero un material con unidad base.');
+    $conectar = conectar_oll_BD();
+    $result = executeQuery($conectar, "
+        SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id
+        FROM unidad_medida
+        WHERE deleted_at IS NULL
+          AND (id = :id OR unidad_base_id = :id)
+        ORDER BY equivalencia, nombre
+    ", ['id' => $unidadMedidaId]);
+    responder(true, 'OK', ['unidades' => $result]);
 }
 
 /** Mantiene en Colores el nombre sin el prefijo TINTE y conserva un RGB ya
