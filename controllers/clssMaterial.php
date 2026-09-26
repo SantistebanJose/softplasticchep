@@ -276,10 +276,14 @@ function guardarMaterial()
     $nombre      = trim($_POST['nombre'] ?? '');
     $nombre      = mb_strtoupper($nombre, 'UTF-8'); // NUEVO: normaliza a mayúsculas, respalda al frontend
     $rgb   = trim($_POST['rgb'] ?? '');
-    $color = obtenerColorPost();
+    // Compatibilidad con materiales antiguos: esta pantalla antes no enviaba
+    // el indicador de tinte, pero el prefijo del nombre permite reconocerlos.
+    $color = obtenerColorPost() || preg_match('/^\s*TINTE(?:\s|$|-)/iu', $nombre) === 1;
     $colorNombre = trim($_POST['color_nombre'] ?? '');
-    if ($colorNombre === '') {
-        $colorNombre = $nombre; // fallback si no mandan nombre de color explícito
+    if (preg_match('/^\s*TINTE\s*-?\s*/iu', $nombre) === 1) {
+        $colorNombre = preg_replace('/^\s*TINTE\s*-?\s*/iu', '', $nombre);
+    } elseif ($colorNombre === '') {
+        $colorNombre = $nombre;
     }
     $colorNombre = mb_strtoupper($colorNombre, 'UTF-8');
     $stockMinimo = $_POST['stock_minimo'] !== '' ? floatval($_POST['stock_minimo'] ?? 0) : 0;
@@ -409,7 +413,7 @@ function guardarMaterial()
                 stock_actual     = :stock_actual,
                 derivado         = :derivado,
                 color            = :color,
-                rgb              = :rgb,
+                rgb              = COALESCE(:rgb, rgb),
                 js_producto      = :js_producto,
                 update_at        = NOW(),
                 js_session       = :js_session,

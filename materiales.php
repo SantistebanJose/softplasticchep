@@ -68,6 +68,23 @@ include("header.php");
           </div>
 
           <div class="mb-2">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="color" id="material_color" value="1">
+                <label class="form-check-label" for="material_color">Es un tinte</label>
+            </div>
+          </div>
+          <div class="mb-2" id="material_tinte_datos" style="display:none;">
+            <label class="form-label">Nombre en Colores</label>
+            <input type="text" class="form-control" id="material_color_nombre" readonly>
+            <div class="form-text">Se quita automáticamente el prefijo TINTE. El material conserva su nombre completo.</div>
+            <label class="form-label mt-2">RGB / HEX</label>
+            <div class="d-flex gap-2 align-items-center">
+                <input type="color" class="form-control form-control-color" id="material_color_picker" value="#000000">
+                <input type="text" class="form-control" name="rgb" id="material_rgb" placeholder="#000000">
+            </div>
+          </div>
+
+          <div class="mb-2">
             <label class="form-label">Unidad de medida (opcional)</label>
             <select class="form-select" name="unidad_medida_id" id="material_unidad_medida_id">
                 <option value="">Sin unidad de medida</option>
@@ -128,6 +145,29 @@ include("header.php");
 const CONTROLADOR_MATERIALES = 'controllers/clssMaterial.php';
 const CONTROLADOR_UNIDADES   = 'controllers/clssUnidadMedida.php';
 const modalMaterial = new bootstrap.Modal(document.getElementById('modalMaterial'));
+
+function derivarNombreColorMaterial(nombre) {
+    return String(nombre || '').replace(/^\s*TINTE\s*-?\s*/i, '').trim().toLocaleUpperCase('es-PE');
+}
+
+function actualizarCamposTinteMaterial() {
+    const nombre = document.getElementById('material_nombre').value;
+    const empiezaConTinte = /^\s*TINTE(?:\s|$|-)/i.test(nombre);
+    const selectorTinte = document.getElementById('material_color');
+    if (empiezaConTinte) selectorTinte.checked = true;
+    const esTinte = selectorTinte.checked;
+    document.getElementById('material_tinte_datos').style.display = esTinte ? '' : 'none';
+    document.getElementById('material_color_nombre').value = derivarNombreColorMaterial(nombre);
+}
+
+document.getElementById('material_color').addEventListener('change', actualizarCamposTinteMaterial);
+document.getElementById('material_nombre').addEventListener('input', actualizarCamposTinteMaterial);
+document.getElementById('material_color_picker').addEventListener('input', e => {
+    document.getElementById('material_rgb').value = e.target.value;
+});
+document.getElementById('material_rgb').addEventListener('input', e => {
+    if (/^#[0-9a-f]{6}$/i.test(e.target.value)) document.getElementById('material_color_picker').value = e.target.value;
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarUnidadesSelect();
@@ -312,6 +352,9 @@ async function abrirModalCrearMaterial() {
     document.getElementById('formMaterial').reset();
     document.getElementById('material_id').value = '';
     document.getElementById('material_derivado').checked = false;
+    document.getElementById('material_color').checked = false;
+    document.getElementById('material_rgb').value = '';
+    actualizarCamposTinteMaterial();
     document.getElementById('modalMaterialTitulo').textContent = 'Nuevo material';
     await cargarChecklistProductosMaterial([]);
     modalMaterial.show();
@@ -329,6 +372,10 @@ async function abrirModalEditarMaterial(id) {
     document.getElementById('material_stock_minimo').value = m.stock_minimo ?? 0;
     document.getElementById('material_stock_actual').value = m.stock_actual ?? 0;
     document.getElementById('material_derivado').checked = (m.derivado === true || m.derivado === 't' || m.derivado === 'true');
+    document.getElementById('material_color').checked = (m.color === true || m.color === 't' || m.color === 'true' || /^\s*TINTE(?:\s|$|-)/i.test(m.nombre || ''));
+    document.getElementById('material_rgb').value = m.rgb ?? '';
+    if (/^#[0-9a-f]{6}$/i.test(m.rgb || '')) document.getElementById('material_color_picker').value = m.rgb;
+    actualizarCamposTinteMaterial();
     const idsSeleccionados = parseJsonColumnaMat(m.js_producto).map(x => x.producto_id);
     await cargarChecklistProductosMaterial(idsSeleccionados);
     modalMaterial.show();
@@ -343,6 +390,9 @@ document.getElementById('formMaterial').addEventListener('submit', async functio
     e.preventDefault();
     const formData = new FormData(this);
     formData.append('accion', 'GUARDARMATERIAL'); 
+    formData.set('nombre', document.getElementById('material_nombre').value.trim().toLocaleUpperCase('es-PE'));
+    formData.set('color', document.getElementById('material_color').checked ? '1' : '0');
+    formData.set('color_nombre', derivarNombreColorMaterial(document.getElementById('material_nombre').value));
     formData.append('productos_ids', JSON.stringify(Array.from(productosSeleccionadosMaterial)));
     formData.set('derivado', document.getElementById('material_derivado').checked ? '1' : '0');
     formData.append('device_id', DeviceTracking.getDeviceId());
