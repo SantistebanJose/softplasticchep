@@ -50,7 +50,7 @@ function controladorCompraTablet(string $accion): void
     error_log('DEBUG accion recibida: [' . $accion . '] len=' . strlen($accion));
     $operarioId = exigirSesionConductorApi();
 
-    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES'];
+    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES', 'CONSULTARDOCUMENTO'];
     $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
@@ -79,6 +79,9 @@ function controladorCompraTablet(string $accion): void
             break;
         case 'BUSCARPROVEEDORES':
             buscarProveedores();
+            break;
+        case 'CONSULTARDOCUMENTO':
+            consultarDocumentoProveedorTablet();
             break;
         case 'BUSCARMATERIALES':
             buscarMateriales();
@@ -711,4 +714,44 @@ function responder(bool $ok, string $msg, array $extra = []): void
     header('Content-Type: application/json');
     echo json_encode(array_merge(['success' => $ok, 'message' => $msg], $extra));
     exit;
+}
+
+/** Consulta el mismo servicio RUC/DNI usado por el formulario del admin,
+ * expuesto aquí para conservar la sesión y el permiso del conductor. */
+function consultarDocumentoProveedorTablet(): void
+{
+    $numero = preg_replace('/\D/', '', trim($_POST['numero'] ?? ''));
+    if (strlen($numero) !== 8 && strlen($numero) !== 11) {
+        responder(false, 'El número debe tener 8 dígitos (DNI) u 11 dígitos (RUC).');
+    }
+
+    $ch = curl_init("https://graphperu.daustinn.com/api/query/{$numero}");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_HTTPHEADER => ['Accept: application/json'],
+    ]);
+    $respuesta = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    if ($respuesta === false) {
+        responder(false, 'No se pudo conectar con el servicio de consulta: ' . $error);
+    }
+    if ($httpCode !== 200) {
+        responder(false, 'El servicio de consulta respondió con error (HTTP ' . $httpCode . ').');
+    }
+
+    $datos = json_decode($respuesta, true);
+    if (!is_array($datos) || empty($datos['documentID'])) {
+        responder(false, 'No se encontraron datos para ese número.');
+    }
+    if (strlen($numero) === 8) {
+        $nombre = $datos['fullName'] ?? trim(($datos['names'] ?? '') . ' ' . ($datos['surnames'] ?? ''));
+        $datos['name'] = $nombre !== '' ? $nombre : null;
+        $datos['tipo'] = 'DNI';
+    } else {
+        $datos['tipo'] = 'RUC';
+    }
+    responder(true, 'Consulta realizada correctamente.', ['data' => $datos]);
 }

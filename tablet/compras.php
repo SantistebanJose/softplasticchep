@@ -386,7 +386,9 @@ const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_COMPRA = '../controllers_tablet/clssCompraConductor.php';
 
-const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'));
+// La alta rápida usa SweetAlert encima del modal de compra; evita que el
+// focus trap de Bootstrap impida escribir en sus campos.
+const modalCompra = new bootstrap.Modal(document.getElementById('modalCompra'), { focus: false });
 
 // llamar() es el helper compartido (ver app-common.js) que hace un POST
 // application/x-www-form-urlencoded y devuelve el JSON ya parseado.
@@ -626,21 +628,71 @@ async function buscarYRenderMateriales() {
 }
 async function abrirFormularioProveedorRapidoTablet() {
     const texto = document.getElementById('cmp_buscar_proveedor').value.trim();
-    const { value } = await Swal.fire({
+    const documentoInicial = /^\d{8}$|^\d{11}$/.test(texto) ? texto : '';
+    const resultado = await Swal.fire({
         title: 'Registrar proveedor',
         html: `
-            <input id="pr_ruc" class="swal2-input" placeholder="RUC / DNI">
-            <input id="pr_razon" class="swal2-input" placeholder="Razón social / nombre" value="${texto.replace(/"/g,'')}">
+            <div class="pc-prov-rapido-doc" style="display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:0 1.25em">
+                <input id="pr_ruc" class="swal2-input" style="width:100%;max-width:100%;margin:0;box-sizing:border-box" inputmode="numeric" maxlength="11" placeholder="RUC / DNI" value="${documentoInicial}">
+                <button type="button" id="pr_consultar" class="swal2-styled" style="width:100%;margin:0;background:#64748b">Consultar RUC / DNI</button>
+            </div>
+            <input id="pr_razon" class="swal2-input" placeholder="Razón social / nombre">
             <input id="pr_comercial" class="swal2-input" placeholder="Nombre comercial (opcional)">
         `,
         confirmButtonText: 'Guardar',
         showCancelButton: true,
-        preConfirm: () => ({
-            ruc: document.getElementById('pr_ruc').value.trim(),
-            razon_social: document.getElementById('pr_razon').value.trim(),
-            nombre_comercial: document.getElementById('pr_comercial').value.trim(),
-        })
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            const input = document.getElementById('pr_ruc');
+            input?.focus();
+            document.getElementById('pr_consultar').addEventListener('click', async () => {
+                const numero = input.value.trim();
+                if (!/^\d{8}$|^\d{11}$/.test(numero)) {
+                    Swal.showValidationMessage('Ingresa un DNI de 8 dígitos o un RUC de 11 dígitos.');
+                    input.focus();
+                    return;
+                }
+                const boton = document.getElementById('pr_consultar');
+                boton.disabled = true;
+                boton.textContent = 'Consultando…';
+                Swal.resetValidationMessage();
+                try {
+                    const consulta = await llamarCompra('CONSULTARDOCUMENTO', { numero });
+                    if (!consulta.success) {
+                        Swal.showValidationMessage(consulta.message || 'No se pudo consultar el documento.');
+                        return;
+                    }
+                    const datos = consulta.data || {};
+                    document.getElementById('pr_razon').value = datos.name || '';
+                    document.getElementById('pr_comercial').value = datos.tradeName || datos.commercialName || '';
+                    document.getElementById('pr_razon').focus();
+                } catch (error) {
+                    Swal.showValidationMessage('No se pudo conectar con el servicio de consulta.');
+                } finally {
+                    const botonActual = document.getElementById('pr_consultar');
+                    if (botonActual) { botonActual.disabled = false; botonActual.textContent = 'Consultar RUC / DNI'; }
+                }
+            });
+        },
+        preConfirm: () => {
+            const ruc = document.getElementById('pr_ruc').value.trim();
+            const razon = document.getElementById('pr_razon').value.trim();
+            if (!/^\d{8}$|^\d{11}$/.test(ruc)) {
+                Swal.showValidationMessage('El RUC/DNI debe tener 8 u 11 dígitos.');
+                return false;
+            }
+            if (!razon) {
+                Swal.showValidationMessage('Consulta el documento o escribe la razón social / nombre.');
+                return false;
+            }
+            return {
+                ruc,
+                razon_social: razon,
+                nombre_comercial: document.getElementById('pr_comercial').value.trim(),
+            };
+        }
     });
+    const value = resultado.value;
     if (!value) return;
 
     const json = await llamarCompra('GUARDARPROVEEDORTABLET', value);
