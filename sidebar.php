@@ -178,9 +178,7 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="ayuda_videos.php" class="<?= pc_sub_class('ayuda_videos', $activePage) ?>">
                 <span class="dot"></span> Videos de ayuda
             </a>
-            <a href="configuracion.php" class="<?= pc_sub_class('configuracion', $activePage) ?>">
-                <span class="dot"></span> Configuración
-            </a>
+            
         </div>
     </details>
 
