@@ -245,6 +245,9 @@ function asegurarColorParaTinte($conectar, bool $esTinte, string $nombre, ?strin
         return;
     }
 
+    $nombre = mb_strtoupper(trim($nombre), 'UTF-8');
+    if ($nombre === '') return;
+
     $existente = executeQuery(
         $conectar,
         "SELECT id FROM color WHERE nombre ILIKE :nombre",
@@ -254,8 +257,8 @@ function asegurarColorParaTinte($conectar, bool $esTinte, string $nombre, ?strin
     if (!empty($existente)) {
         executeNonQuery(
             $conectar,
-            "UPDATE color SET rgb = :rgb, update_at = NOW() WHERE id = :id",
-            ['rgb' => $rgb ?: null, 'id' => $existente[0]['id']]
+            "UPDATE color SET rgb = COALESCE(NULLIF(:rgb, ''), rgb), update_at = NOW() WHERE id = :id",
+            ['rgb' => trim((string)$rgb), 'id' => $existente[0]['id']]
         );
         return;
     }

@@ -642,25 +642,66 @@ function guardarProveedorTablet()
 function guardarMaterialTablet()
 {
     $conectar = conectar_oll_BD();
-    $nombre = trim($_POST['nombre'] ?? '');
+    $nombre = mb_strtoupper(trim($_POST['nombre'] ?? ''), 'UTF-8');
     $unidadMedidaId = intval($_POST['unidad_medida_id'] ?? 0);
+    $esTinte = filter_var($_POST['color'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $rgb = trim($_POST['rgb'] ?? '');
+    $nombreColor = mb_strtoupper(trim($_POST['color_nombre'] ?? ''), 'UTF-8');
+    if ($nombreColor === '') {
+        $nombreColor = preg_replace('/^\s*TINTE\s*-?\s*/u', '', $nombre);
+    }
 
     if ($nombre === '') responder(false, 'El nombre del material es obligatorio.');
     if ($unidadMedidaId <= 0) responder(false, 'Selecciona la unidad de medida base.');
 
-    $nuevo = executeQuery($conectar, "
-        INSERT INTO material (nombre, unidad_medida_id, stock_actual, stock_minimo, color, created_at)
-        VALUES (:nombre, :unidad_medida_id, 0, 0, false, NOW())
-        RETURNING id
-    ", [
-        'nombre'           => $nombre,
-        'unidad_medida_id' => $unidadMedidaId,
-    ]);
-    $id = $nuevo[0]['id'] ?? null;
-    if (!$id) responder(false, 'No se pudo registrar el material.');
+    $unidad = executeQuery($conectar, "SELECT id FROM unidad_medida WHERE id = :id AND deleted_at IS NULL", ['id' => $unidadMedidaId]);
+    if (empty($unidad)) responder(false, 'La unidad seleccionada no existe o está inactiva.');
+
+    $duplicado = executeQuery($conectar, "SELECT id FROM material WHERE LOWER(nombre) = LOWER(:nombre) AND deleted_at IS NULL LIMIT 1", ['nombre' => $nombre]);
+    if (!empty($duplicado)) responder(false, 'Ya existe un material con ese nombre. Búscalo y selecciónalo.');
+
+    $conectar->beginTransaction();
+    try {
+        asegurarColorTinteCompraTablet($conectar, $esTinte, $nombreColor, $rgb);
+        $nuevo = executeQuery($conectar, "
+            INSERT INTO material (nombre, unidad_medida_id, stock_actual, stock_minimo, derivado, color, rgb, created_at)
+            VALUES (:nombre, :unidad_medida_id, 0, 0, false, :color, :rgb, NOW())
+            RETURNING id
+        ", [
+            'nombre'           => $nombre,
+            'unidad_medida_id' => $unidadMedidaId,
+            'color'            => $esTinte ? 'true' : 'false',
+            'rgb'              => $esTinte && $rgb !== '' ? $rgb : null,
+        ]);
+        $id = $nuevo[0]['id'] ?? null;
+        if (!$id) throw new RuntimeException('No se pudo registrar el material.');
+        $conectar->commit();
+    } catch (Throwable $e) {
+        if ($conectar->inTransaction()) $conectar->rollBack();
+        throw $e;
+    }
 
     responder(true, 'Material registrado correctamente.', [
-        'material' => ['id' => $id, 'nombre' => $nombre, 'stock_actual' => 0, 'unidad_medida_id' => $unidadMedidaId],
+        'material' => ['id' => $id, 'nombre' => $nombre, 'stock_actual' => 0, 'unidad_medida_id' => $unidadMedidaId, 'color' => $esTinte, 'rgb' => $rgb ?: null],
+    ]);
+}
+
+/** Mantiene en Colores el nombre sin el prefijo TINTE y conserva un RGB ya
+ * definido cuando la persona deja vacío el campo al registrar otro tinte. */
+function asegurarColorTinteCompraTablet($conectar, bool $esTinte, string $nombre, string $rgb): void
+{
+    if (!$esTinte || $nombre === '') return;
+    $nombre = mb_strtoupper(trim($nombre), 'UTF-8');
+    $existente = executeQuery($conectar, "SELECT id FROM color WHERE nombre ILIKE :nombre LIMIT 1", ['nombre' => $nombre]);
+    if (!empty($existente)) {
+        if ($rgb !== '') {
+            executeNonQuery($conectar, "UPDATE color SET rgb = :rgb, update_at = NOW() WHERE id = :id", ['rgb' => $rgb, 'id' => $existente[0]['id']]);
+        }
+        return;
+    }
+    executeNonQuery($conectar, "INSERT INTO color (nombre, rgb, created_at) VALUES (:nombre, :rgb, NOW())", [
+        'nombre' => $nombre,
+        'rgb' => $rgb !== '' ? $rgb : null,
     ]);
 }
 

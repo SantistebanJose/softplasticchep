@@ -645,7 +645,7 @@ document.getElementById('formMaterialRapido').addEventListener('submit', async f
         unidad_medida_id: unidadMedidaId,
         stock_minimo: document.getElementById('mat_rapido_stock_minimo').value || 0,
         stock_actual: 0,
-        color: '1', // siempre tinte desde este alta rápida
+        color: document.getElementById('mat_rapido_es_tinte').checked ? '1' : '0',
         rgb: document.getElementById('mat_rapido_rgb').value.trim(),
         color_nombre: document.getElementById('mat_rapido_color_nombre').value.trim(),
         productos_ids: '[]',

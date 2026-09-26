@@ -711,14 +711,53 @@ async function abrirFormularioMaterialRapidoTablet() {
     const { value } = await Swal.fire({
         title: 'Registrar material',
         html: `
-            <input id="mr_nombre" class="swal2-input" placeholder="Nombre del material" value="${texto.replace(/"/g,'')}">
+            <input id="mr_nombre" class="swal2-input" placeholder="Nombre del material">
             <select id="mr_unidad" class="swal2-select">${opciones}</select>
+            <div class="form-check text-start" style="margin:8px auto;max-width:22em">
+                <input class="form-check-input" type="checkbox" id="mr_es_tinte" checked>
+                <label class="form-check-label" for="mr_es_tinte">Es un tinte</label>
+            </div>
+            <div id="mr_tinte_wrap" style="max-width:22em;margin:0 auto;text-align:left">
+                <label for="mr_color_nombre" style="font-size:.85em">Nombre en Colores</label>
+                <input id="mr_color_nombre" class="swal2-input" placeholder="Ej: GRIS" style="margin:4px 0 10px;width:100%;box-sizing:border-box">
+                <label for="mr_rgb" style="font-size:.85em">RGB / HEX del color</label>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="color" id="mr_picker" value="#000000" style="width:48px;height:42px;padding:3px;border:1px solid #d9d9d9;border-radius:6px">
+                    <input id="mr_rgb" class="swal2-input" placeholder="#000000" style="margin:0;flex:1;min-width:0;box-sizing:border-box">
+                </div>
+                <small class="text-muted">Se guardará o actualizará en el catálogo Colores.</small>
+            </div>
         `,
         confirmButtonText: 'Guardar',
         showCancelButton: true,
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            const campoNombre = document.getElementById('mr_nombre');
+            const campoColor = document.getElementById('mr_color_nombre');
+            const derivarColor = nombre => nombre.replace(/^\s*tinte\s*-?\s*/i, '').trim().toLocaleUpperCase('es-PE');
+            campoNombre.value = texto;
+            campoColor.value = derivarColor(texto);
+            campoNombre.addEventListener('input', () => {
+                if (!campoColor.dataset.tocadoManual) campoColor.value = derivarColor(campoNombre.value);
+            });
+            campoColor.addEventListener('input', () => { campoColor.dataset.tocadoManual = '1'; });
+            document.getElementById('mr_es_tinte').addEventListener('change', e => {
+                document.getElementById('mr_tinte_wrap').style.display = e.target.checked ? '' : 'none';
+            });
+            document.getElementById('mr_picker').addEventListener('input', e => {
+                document.getElementById('mr_rgb').value = e.target.value;
+            });
+            document.getElementById('mr_rgb').addEventListener('input', e => {
+                if (/^#[0-9a-f]{6}$/i.test(e.target.value)) document.getElementById('mr_picker').value = e.target.value;
+            });
+            campoNombre.focus();
+        },
         preConfirm: () => ({
-            nombre: document.getElementById('mr_nombre').value.trim(),
+            nombre: document.getElementById('mr_nombre').value.trim().toLocaleUpperCase('es-PE'),
             unidad_medida_id: document.getElementById('mr_unidad').value,
+            color: document.getElementById('mr_es_tinte').checked ? '1' : '0',
+            color_nombre: document.getElementById('mr_color_nombre').value.trim().toLocaleUpperCase('es-PE'),
+            rgb: document.getElementById('mr_rgb').value.trim(),
         })
     });
     if (!value) return;
