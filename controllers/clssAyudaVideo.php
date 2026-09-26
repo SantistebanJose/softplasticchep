@@ -25,6 +25,18 @@ class ClssAyudaVideo
         return $videos;
     }
 
+    public function listarActivosPorRol(string $rol): array
+    {
+        if (!in_array($rol, self::ROLES, true)) return [];
+        $stmt = $this->pdo->prepare("SELECT v.id, v.titulo, v.descripcion, v.youtube_id, v.modulo
+            FROM ayuda_video v
+            INNER JOIN ayuda_video_rol r ON r.ayuda_video_id = v.id
+            WHERE v.activo = TRUE AND r.rol = :rol
+            ORDER BY v.orden, v.id DESC");
+        $stmt->execute(['rol' => $rol]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function guardar(array $datos): void
     {
         $id = (int)($datos['id'] ?? 0);

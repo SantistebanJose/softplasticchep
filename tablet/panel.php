@@ -14,6 +14,7 @@ $puedeProduccion  = operarioTieneEtapa('PRODUC');
 $puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
 $puedeEmpaquetado = operarioTieneEtapa('EMPAQUET');
 $esConductor      = ($_SESSION['operario_rol'] ?? '') === 'conductor';
+$ayudaVideosRol   = $esConductor ? 'conductor' : 'operario';
 $tieneAlgunAcceso = $puedeProduccion || $puedeEnsamblaje || $puedeEmpaquetado || $esConductor;
 
 // Saludo dinámico según la hora
@@ -121,6 +122,8 @@ else                 $saludo = 'Buenas noches';
         No tienes ninguna etapa asignada todavía. Pide a un administrador que te configure el acceso.
     </div>
     <?php endif; ?>
+
+    <?php require __DIR__ . '/../components/ayuda_videos.php'; ?>
 
 </div>
 </body>

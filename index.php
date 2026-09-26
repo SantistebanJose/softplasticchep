@@ -10,6 +10,7 @@ $pageTitle    = 'Resumen de producción';
 $mostrarBienvenida = !empty($_SESSION['mostrar_bienvenida']);
 unset($_SESSION['mostrar_bienvenida']); // se muestra una sola vez
 $nombreUsuario = $_SESSION['nombre_usuario'] ?? 'Usuario';
+$ayudaVideosRol = strtolower(trim((string)($_SESSION['rol_usuario'] ?? 'administrador')));
 
 require __DIR__ . '/controllers/bd.php';
 $pdo = conectar_oll_BD();
@@ -35,6 +36,8 @@ include("header.php");
         <p>Cargando panel de producción...</p>
     </div>
 </div>
+
+<?php require __DIR__ . '/components/ayuda_videos.php'; ?>
 
 <style>
 .pc-welcome-overlay {
