@@ -519,7 +519,7 @@ function buscarComplementos()
     $productoId = intval($_POST['producto_id'] ?? 0);
     $colorId    = intval($_POST['color_id'] ?? 0) ?: null;
     $excluirId  = intval($_POST['excluir_id'] ?? 0);
-    if ($productoId <= 0 || $colorId === null) {
+    if ($productoId <= 0) {
         responder(true, 'OK', ['complementos' => []]);
     }
 
@@ -529,17 +529,25 @@ function buscarComplementos()
         "e.ensamblaje_id_referido IS NULL",
         "LOWER(COALESCE(cm.nombre, '')) LIKE '%primera%'",
         "NOT " . sqlEsMultiMoldeCompleto('e', 'p'),
-        "COALESCE(e.color_id, (
+        sqlEsComplementoCompatible('e', 'p', 'pt'),
+    ];
+    $params = ['producto_id' => $productoId, 'producto_objetivo_id' => $productoId];
+    if ($colorId !== null) {
+        $where[] = "COALESCE(e.color_id, (
             SELECT pd.color_id FROM rel_ensamblaje_producto rep
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
             WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
-        )) = :color_id",
-        "(e.js_producto_emsamblado IS NULL OR (
+        )) = :color_id";
+        $params['color_id'] = $colorId;
+        $where[] = "(e.js_producto_emsamblado IS NULL OR (
             (e.js_producto_emsamblado->>'producto_id')::bigint = :producto_id
             AND (e.js_producto_emsamblado->>'color_id')::bigint = :marker_color_id
-        ))",
-    ];
-    $params = ['producto_id' => $productoId, 'color_id' => $colorId, 'marker_color_id' => $colorId];
+        ))";
+        $params['marker_color_id'] = $colorId;
+    } else {
+        $where[] = "(e.js_producto_emsamblado IS NULL OR
+            (e.js_producto_emsamblado->>'producto_id')::bigint = :producto_id)";
+    }
     if ($excluirId > 0) {
         $where[] = 'e.id <> :excluir_id';
         $params['excluir_id'] = $excluirId;
@@ -552,6 +560,7 @@ function buscarComplementos()
     $sql = "SELECT
             e.id AS ensamblaje_id,
             e.producto_id,
+            e.categoria_material_id,
             p.codigo AS producto_codigo,
             p.descripcion AS producto_descripcion,
             COALESCE(e.color_id, (
@@ -559,6 +568,11 @@ function buscarComplementos()
                 JOIN produccion pd ON pd.id = rep.molde_produccion_id
                 WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
             )) AS complemento_color_id,
+            COALESCE(e.color_id, (
+                SELECT pd.color_id FROM rel_ensamblaje_producto rep
+                JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
+            )) AS color_id,
             e.cantidad_peso_kg,
             e.fin,
             co.nombre AS complemento_color_nombre,
@@ -576,6 +590,7 @@ function buscarComplementos()
             ) AS unidad_salida_codigo
         FROM ensamblaje e
         LEFT JOIN producto p ON p.id = e.producto_id
+        INNER JOIN producto pt ON pt.id = :producto_objetivo_id
         LEFT JOIN color co ON co.id = COALESCE(e.color_id, (
             SELECT pd.color_id FROM rel_ensamblaje_producto rep
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
@@ -632,8 +647,14 @@ function buscarProductosParaComplementar()
         "t1.ensamblaje_id_referido IS NULL",
         "t1.categoria_material_id = :categoria_material_id_propio",
         "t1.id != :excluir_id",
+        "NOT " . sqlEsMultiMoldeCompleto('t1', 't2'),
+        sqlEsComplementoCompatible('origen', 'producto_origen', 't2'),
     ];
-    $params = ['categoria_material_id_propio' => $categoriaMaterialIdPropio, 'excluir_id' => $excluirId];
+    $params = [
+        'categoria_material_id_propio' => $categoriaMaterialIdPropio,
+        'excluir_id' => $excluirId,
+        'origen_id' => $excluirId,
+    ];
     // YA NO se excluye t2.id != producto_propio_id: el mismo producto es un
     // destino válido (auto-complemento).
     if ($texto !== '') {
@@ -650,6 +671,8 @@ function buscarProductosParaComplementar()
                 col.color_nombre
             FROM ensamblaje t1
             JOIN producto t2 ON t1.producto_id = t2.id
+            JOIN ensamblaje origen ON origen.id = :origen_id
+            JOIN producto producto_origen ON producto_origen.id = origen.producto_id
             LEFT JOIN LATERAL (
                 SELECT COALESCE(t1.color_id, pd.color_id) AS color_id, co.nombre AS color_nombre
                 FROM rel_ensamblaje_producto rep
@@ -712,6 +735,32 @@ function buscarProduccionesDisponibles()
             SELECT 1 FROM rel_ensamblaje_producto rep
             WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
         )",
+        // Si la producción ya forma parte de un complemento compatible de
+        // Primera Categoría, se ofrece el armado como complemento y no su
+        // producción cruda. Al seleccionar el producto fuente (p. ej. PI), la
+        // compatibilidad no se cumple contra sí mismo y ambas categorías
+        // siguen disponibles como producciones normales.
+        "NOT EXISTS (
+            SELECT 1 FROM ensamblaje ec
+            JOIN producto pc ON pc.id = ec.producto_id
+            JOIN categoria_material cmc ON cmc.id = ec.categoria_material_id
+            WHERE ec.deleted_at IS NULL
+              AND ec.fin IS NOT NULL
+              AND ec.ensamblaje_id_referido IS NULL
+              AND LOWER(COALESCE(cmc.nombre, '')) LIKE '%primera%'
+              AND NOT " . sqlEsMultiMoldeCompleto('ec', 'pc') . "
+              AND " . sqlEsComplementoCompatible('ec', 'pc', 't4') . "
+              AND (ec.js_producto_emsamblado IS NULL OR
+                   (ec.js_producto_emsamblado->>'producto_id')::bigint = t4.id)
+              AND EXISTS (
+                  SELECT 1 FROM rel_ensamblaje_producto rep_comp
+                  JOIN produccion pd_comp ON pd_comp.id = rep_comp.molde_produccion_id
+                  WHERE rep_comp.ensamblaje_id = ec.id
+                    AND rep_comp.deleted_at IS NULL
+                    AND pd_comp.deleted_at IS NULL
+                    AND pd_comp.molde_id = t1.molde_id
+              )
+        )",
     ];
     $params = [];
     $joinProducto = "INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint";
@@ -758,6 +807,7 @@ function buscarProduccionesDisponibles()
             t4.id AS producto_id,
             t1.color_id,
             t3.nombre AS color_nombre_verif,
+            t3.rgb AS color_rgb,
             t1.categoria_material_id,
             cm.nombre AS categoria_material_nombre_verif,
             COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo
@@ -843,6 +893,13 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
     return "(
         SELECT jsonb_agg(jsonb_build_object(
                    'ensamblaje_complemento_id', ec.id,
+                   'color_id', COALESCE(ec.color_id, (
+                       SELECT pd.color_id FROM rel_ensamblaje_producto rep0
+                       JOIN produccion pd ON pd.id = rep0.molde_produccion_id
+                       WHERE rep0.ensamblaje_id = ec.id AND rep0.deleted_at IS NULL LIMIT 1
+                   )),
+                   'color_nombre', co.nombre,
+                   'categoria_material_id', ec.categoria_material_id,
                    'producto_codigo', pc.codigo,
                    'producto_descripcion', pc.descripcion,
                    'cantidad_peso_kg', ec.cantidad_peso_kg,
@@ -860,12 +917,17 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
                ))
         FROM ensamblaje ec
         LEFT JOIN producto pc ON pc.id = ec.producto_id
+        LEFT JOIN color co ON co.id = COALESCE(ec.color_id, (
+            SELECT pd.color_id FROM rel_ensamblaje_producto rep0
+            JOIN produccion pd ON pd.id = rep0.molde_produccion_id
+            WHERE rep0.ensamblaje_id = ec.id AND rep0.deleted_at IS NULL LIMIT 1
+        ))
         WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id
           AND ec.deleted_at IS NULL
     ) AS js_complementos_utilizados";
 }
 
-/** True when every configured assembly-required mold is linked to this assembly. */
+/** True when every required mold is present directly or through a linked complement. */
 function sqlEsMultiMoldeCompleto(string $aliasEnsamblaje = 'e', string $aliasProducto = 'p'): string
 {
     $config = "jsonb_array_elements(COALESCE($aliasProducto.js_configuracion, '[]'::jsonb)) AS cfg(item)";
@@ -885,6 +947,74 @@ function sqlEsMultiMoldeCompleto(string $aliasEnsamblaje = 'e', string $aliasPro
                     AND pd.deleted_at IS NULL
                     AND pd.molde_id = NULLIF(cfg.item->>'molde_id', '')::bigint
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM ensamblaje ec
+                  JOIN categoria_material cmc ON cmc.id = ec.categoria_material_id
+                  WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id
+                    AND ec.deleted_at IS NULL
+                    AND ec.fin IS NOT NULL
+                    AND LOWER(COALESCE(cmc.nombre, '')) LIKE '%primera%'
+                    AND EXISTS (
+                        SELECT 1 FROM rel_ensamblaje_producto repc
+                        JOIN produccion pdc ON pdc.id = repc.molde_produccion_id
+                        WHERE repc.ensamblaje_id = ec.id
+                          AND repc.deleted_at IS NULL
+                          AND pdc.deleted_at IS NULL
+                          AND pdc.molde_id = NULLIF(cfg.item->>'molde_id', '')::bigint
+                    )
+              )
+        )
+    )";
+}
+
+/**
+ * A first-category assembly can complement a target only when the target
+ * product actually uses its source mold. The explicit complementa_a mapping
+ * takes precedence; for existing product data without that mapping, allow a
+ * single-mold source product only when every mold in the assembly is part of
+ * the target product configuration. This keeps unrelated items (e.g. PI for
+ * MMA) out while allowing PI to complement COS/COV through shared mold 1.
+ */
+function sqlEsComplementoCompatible(string $aliasEnsamblaje, string $aliasFuente, string $aliasDestino): string
+{
+    $fuenteConfig = "jsonb_array_elements(COALESCE($aliasFuente.js_configuracion, '[]'::jsonb)) AS cfg_fuente(item)";
+    $destinoConfig = "jsonb_array_elements(COALESCE($aliasDestino.js_configuracion, '[]'::jsonb)) AS cfg_destino(item)";
+    $moldesDestino = "jsonb_array_elements(COALESCE($aliasDestino.js_configuracion, '[]'::jsonb)) AS cfg_destino(item)";
+
+    return "(
+        EXISTS (
+            SELECT 1 FROM $fuenteConfig
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(cfg_fuente.item->'complementa_a', '[]'::jsonb)) AS destino(item)
+            WHERE NULLIF(destino.item->>'producto_id', '')::bigint = $aliasDestino.id
+        )
+        OR (
+            $aliasFuente.id <> $aliasDestino.id
+            AND (SELECT COUNT(DISTINCT cfg_fuente.item->>'molde_id') FROM $fuenteConfig
+                 WHERE cfg_fuente.item->>'necesita_ensamblaje' = 'sí') = 1
+            AND EXISTS (
+                SELECT 1 FROM rel_ensamblaje_producto rep_fuente
+                JOIN produccion pd_fuente ON pd_fuente.id = rep_fuente.molde_produccion_id
+                WHERE rep_fuente.ensamblaje_id = $aliasEnsamblaje.id
+                  AND rep_fuente.deleted_at IS NULL
+                  AND pd_fuente.deleted_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM $moldesDestino
+                      WHERE cfg_destino.item->>'necesita_ensamblaje' = 'sí'
+                        AND NULLIF(cfg_destino.item->>'molde_id', '')::bigint = pd_fuente.molde_id
+                  )
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM rel_ensamblaje_producto rep_fuente
+                JOIN produccion pd_fuente ON pd_fuente.id = rep_fuente.molde_produccion_id
+                WHERE rep_fuente.ensamblaje_id = $aliasEnsamblaje.id
+                  AND rep_fuente.deleted_at IS NULL
+                  AND pd_fuente.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM $destinoConfig
+                      WHERE cfg_destino.item->>'necesita_ensamblaje' = 'sí'
+                        AND NULLIF(cfg_destino.item->>'molde_id', '')::bigint = pd_fuente.molde_id
+                  )
+            )
         )
     )";
 }
@@ -1092,7 +1222,7 @@ function guardarEnsamblaje()
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
     if ($producto_id <= 0) responder(false, 'Debes seleccionar el producto a ensamblar.');
-    if ($color_id <= 0) responder(false, 'Debes seleccionar el color final del producto.');
+    if ($color_id <= 0) responder(false, 'Vincula una producción con color o un complemento para determinar el color final automáticamente.');
     $color = executeQuery($conectar, "SELECT id FROM color WHERE id = :id AND deleted_at IS NULL", ['id' => $color_id]);
     if (empty($color)) responder(false, 'El color seleccionado no existe o está inactivo.');
 
@@ -1129,9 +1259,15 @@ function guardarEnsamblaje()
         if ($tipo === 'produccion') {
             $prodId = intval($linea['molde_produccion_id'] ?? 0);
             if ($prodId <= 0) continue;
+            $cantidadEntrada = isset($linea['cantidad_entrada_produccion']) && $linea['cantidad_entrada_produccion'] !== ''
+                ? floatval($linea['cantidad_entrada_produccion']) : null;
+            if ($cantidadEntrada === null || $cantidadEntrada <= 0) {
+                responder(false, "Debes indicar la cantidad que estás recibiendo de la producción #$prodId antes de guardar.");
+            }
             $detalle[] = [
                 'tipo' => 'produccion', 'molde_produccion_id' => $prodId,
                 'derivado_id' => null, 'ensamblaje_complemento_id' => null,
+                'cantidad_entrada_produccion' => $cantidadEntrada,
             ];
         } elseif ($tipo === 'derivado') {
             $derId = intval($linea['derivado_id'] ?? 0);
@@ -1272,7 +1408,11 @@ function guardarEnsamblaje()
                     $tipo = 'derivado';
                 }
                 $k = $clave($tipo, $l['molde_produccion_id'], $l['derivado_id'], null);
-                $actualesPorClave[$k] = ['tipo' => $tipo, 'rel_id' => $l['id']];
+                $actualesPorClave[$k] = [
+                    'tipo' => $tipo,
+                    'rel_id' => $l['id'],
+                    'cantidad_entrada_produccion' => $l['cantidad_entrada_produccion'] ?? null,
+                ];
             }
             foreach ($complementosActuales as $c) {
                 $k = $clave('complemento', null, null, $c['ensamblaje_complemento_id']);
@@ -1314,7 +1454,25 @@ function guardarEnsamblaje()
             if (!empty($detalleNuevo)) {
                 insertarLineasEnsamblaje($conectar, $id, $detalleNuevo);
             }
-            // Las líneas que se mantienen (intersección) no se tocan.
+            // Las líneas que se mantienen (intersección) no se tocan, EXCEPTO
+            // la cantidad_entrada_produccion de las de tipo 'producción': si
+            // el usuario corrigió la cantidad recibida en edición, se actualiza
+            // in place (sin tocar el vínculo molde_produccion_id).
+            $clavesQueSeMantienen = array_intersect(array_keys($actualesPorClave), array_keys($nuevasPorClave));
+            foreach ($clavesQueSeMantienen as $k) {
+                $lineaActual = $actualesPorClave[$k];
+                if ($lineaActual['tipo'] !== 'produccion') continue;
+                $lineaNueva = $nuevasPorClave[$k];
+                $nuevaCantidad = $lineaNueva['cantidad_entrada_produccion'] ?? null;
+                $cantidadActual = $lineaActual['cantidad_entrada_produccion'] ?? null;
+                if ($nuevaCantidad !== null && (float)$nuevaCantidad !== (float)($cantidadActual ?? -1)) {
+                    executeNonQuery(
+                        $conectar,
+                        "UPDATE rel_ensamblaje_producto SET cantidad_entrada_produccion = :cantidad, update_at = NOW() WHERE id = :id",
+                        ['cantidad' => $nuevaCantidad, 'id' => $lineaActual['rel_id']]
+                    );
+                }
+            }
 
             $cambios = [[
                 'campo' => 'Ensamblaje',
@@ -1452,18 +1610,31 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             );
             $snapshot = json_encode($snapshotRows[0] ?? ['produccion_id' => $produccionId], JSON_UNESCAPED_UNICODE);
 
+            // La cantidad recibida se expresa en la MISMA unidad configurada
+            // como salida de esa producción para este producto (la que ya
+            // se usa para mostrar "cantidad_kg" en el modal), así la
+            // comparación contra pd.cantidad_producida_kg tiene sentido.
+            $unidadEntradaId = !empty($configObjetivoItem['salida_produccion_unidad_medida_id'])
+                ? intval($configObjetivoItem['salida_produccion_unidad_medida_id'])
+                : null;
+            $cantidadEntradaProduccion = $linea['cantidad_entrada_produccion'] ?? null;
+
             executeNonQuery($conectar, "
                 INSERT INTO rel_ensamblaje_producto (
                     ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
+                    cantidad_entrada_produccion, unidad_entrada_id,
                     created_at
                 ) VALUES (
                     :ensamblaje_id, :molde_produccion_id, :snapshot,
+                    :cantidad_entrada_produccion, :unidad_entrada_id,
                     NOW()
                 )
             ", [
                 'ensamblaje_id'        => $ensamblajeId,
                 'molde_produccion_id'  => $produccionId,
                 'snapshot'             => $snapshot,
+                'cantidad_entrada_produccion' => $cantidadEntradaProduccion,
+                'unidad_entrada_id'    => $unidadEntradaId,
             ]);
         } elseif ($linea['tipo'] === 'derivado') {
             // derivado_id apunta a material.id (material.derivado = TRUE)
@@ -1530,6 +1701,16 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if (stripos((string)($comp[0]['categoria_material_nombre'] ?? ''), 'primera') === false) {
                 throw new Exception("El ensamblaje complemento #$complementoId no es de Primera Categoría.");
             }
+            $compatibilidad = executeQuery($conectar, "
+                SELECT " . sqlEsComplementoCompatible('ec', 'pc', 'pt') . " AS compatible
+                FROM ensamblaje ec
+                JOIN producto pc ON pc.id = ec.producto_id
+                JOIN producto pt ON pt.id = :producto_objetivo_id
+                WHERE ec.id = :complemento_id
+            ", ['producto_objetivo_id' => $productoObjetivoId, 'complemento_id' => $complementoId]);
+            if (empty($compatibilidad) || !valorBooleanoEnsamblaje($compatibilidad[0]['compatible'] ?? false)) {
+                throw new Exception("El ensamblaje #$complementoId no está configurado como complemento para el producto que intentas armar.");
+            }
             if ($colorObjetivoId <= 0 || intval($comp[0]['color_id'] ?? 0) !== $colorObjetivoId) {
                 throw new Exception("El color del ensamblaje complemento #$complementoId no coincide con el color del producto que se está armando.");
             }
@@ -1573,15 +1754,19 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
     $moldes = executeQuery($conectar, "
         SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
-            pd.cantidad_producida_kg AS cantidad_kg, pd.fecha,
+            pd.cantidad_producida_kg AS cantidad_kg, pd.fecha, pd.color_id,
+            co.nombre AS color_nombre,
             pd.categoria_material_id,
             cm.nombre AS categoria_material_nombre,
-            COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo
+            COALESCE(upv.nombre_corto, 'KG') AS unidad_produccion_codigo,
+            rep.cantidad_entrada_produccion,
+            COALESCE(ue.nombre_corto, upv.nombre_corto, 'KG') AS unidad_entrada_codigo
         FROM rel_ensamblaje_producto rep
         JOIN produccion pd ON pd.id = rep.molde_produccion_id
         JOIN ensamblaje e ON e.id = rep.ensamblaje_id
         LEFT JOIN molde mo ON mo.id = pd.molde_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
+        LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN producto pr ON pr.id = e.producto_id
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item)
             ON (x.item->>'molde_id')::bigint = mo.id
@@ -1589,6 +1774,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
             WHEN split_part(pd.unico_molde_producto, '-', 2) = pr.id::text THEN COALESCE(pd.js_configuracion_moment, x.item)
             ELSE x.item END AS item) cfg ON true
         LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
+        LEFT JOIN unidad_medida ue ON ue.id = rep.unidad_entrada_id
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.molde_produccion_id IS NOT NULL
     ", ['id' => $ensamblajeId]);
 
@@ -2025,8 +2211,10 @@ function marcarComplemento()
             $conectar,
             "SELECT t1.id
              FROM ensamblaje t1
+             JOIN producto objetivo_pr ON objetivo_pr.id = t1.producto_id
              WHERE t1.producto_id = :producto_id AND t1.deleted_at IS NULL AND t1.fin IS NOT NULL
                AND t1.ensamblaje_id_referido IS NULL AND t1.categoria_material_id = :categoria_material_id
+               AND NOT " . sqlEsMultiMoldeCompleto('t1', 'objetivo_pr') . "
                AND t1.id != :propio_id
                AND COALESCE(t1.color_id, (
                     SELECT pd.color_id FROM rel_ensamblaje_producto rep
@@ -2056,6 +2244,19 @@ function marcarComplemento()
     );
     if (empty($productoObjetivo)) responder(false, 'El producto objetivo no existe o está inactivo.');
     $p = $productoObjetivo[0];
+
+    if (!$esAutoComplemento) {
+        $compatibilidad = executeQuery($conectar, "
+            SELECT " . sqlEsComplementoCompatible('e', 'origen', 'destino') . " AS compatible
+            FROM ensamblaje e
+            JOIN producto origen ON origen.id = e.producto_id
+            JOIN producto destino ON destino.id = :producto_objetivo_id
+            WHERE e.id = :ensamblaje_id
+        ", ['producto_objetivo_id' => $productoObjetivoId, 'ensamblaje_id' => $id]);
+        if (empty($compatibilidad) || !valorBooleanoEnsamblaje($compatibilidad[0]['compatible'] ?? false)) {
+            responder(false, 'Este producto ensamblado no es un complemento configurado ni comparte moldes con el producto elegido.');
+        }
+    }
 
     $jsProductoEmsamblado = json_encode([
         'producto_id'  => $p['id'],

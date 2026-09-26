@@ -227,6 +227,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-mat-card .nombre{ font-weight:600; font-size:.9em; line-height:1.25; display:block; min-height:2.2em; }
 .pc-mat-card .meta{ font-size:.78em; color:#8a8578; margin-top:4px; display:block; }
 .pc-mat-card .meta b{ color:#4a4636; }
+.ens-color-dot{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;margin:0 5px 0 2px;border:1px solid rgba(21,34,56,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
 .pc-mat-empty{ grid-column:1/-1; text-align:center; color:#9a9585; font-size:.92em; padding:22px 8px; }
 
 /* Panel ticket */
@@ -366,15 +367,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div class="pc-panel-search">
                             <input type="text" id="ens_buscar_producto" class="form-control form-control-lg" placeholder="Buscar producto...">
                         </div>
-                        <div style="padding:0 12px 10px;">
-                            <label class="form-label mb-1">Color final del producto *</label>
-                            <div id="ens_color_picker" class="pc-color-picker" role="radiogroup" aria-label="Color final del producto">
-                                <div class="pc-mat-empty">Cargando colores...</div>
-                            </div>
-                            <select id="ens_color_id" class="visually-hidden" tabindex="-1" aria-hidden="true" onchange="cambioProductoEnsamblaje()">
-                                <option value="">Selecciona un color...</option>
-                            </select>
-                        </div>
+                        <input type="hidden" id="ens_color_id" value="">
                         <div id="ens_maquina_wrap" style="display:none;padding:0 12px 10px;">
                             <label for="ens_maquina_id" class="form-label">Máquina *</label>
                             <select id="ens_maquina_id" class="form-select form-select-lg">
@@ -430,7 +423,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <div class="pc-tk-resumen-texto">
                                 <span class="total"><b id="ens_ticket_total">0</b> ítem(s)</span>
                                 <span class="detalle" id="ens_ticket_detalle">0 producción(es) · 0 derivado(s) · 0 complemento(s)</span>
-                                <span class="detalle">Cantidad producida vinculada: <b id="ens_ticket_peso_producido">0</b></span>
                             </div>
                         </div>
                     </div>
@@ -483,7 +475,8 @@ const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
-const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'));
+// El modal SweetAlert de cantidad se monta sobre el modal Bootstrap.
+const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'), { focus: false });
 const modalOperariosEns = new bootstrap.Modal(document.getElementById('modalOperariosEns'));
 
 const llamarEnsamblaje = (accion, params = {}) => llamar(CONTROLADOR_ENSAMBLAJE, accion, params);
@@ -495,7 +488,6 @@ let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = [];
 let productosDisponiblesEnsCache = null;
-let coloresEnsamblajeCache = [];
 let maquinasEnsamblajeCache = [];
 let ensamblajesCache = [];
 let productoTabActivoEns = null;
@@ -545,34 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
     iniciarAutoRefreshEns();
 });
 
-function escaparHtmlColorEns(valor) {
-    return String(valor ?? '').replace(/[&<>"']/g, caracter => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[caracter]));
-}
-
-function renderSelectorColorEns() {
-    const contenedor = document.getElementById('ens_color_picker');
-    if (!contenedor) return;
-    if (!coloresEnsamblajeCache.length) {
-        contenedor.innerHTML = '<div class="pc-mat-empty">No hay colores disponibles.</div>';
-        return;
-    }
-    const seleccionado = document.getElementById('ens_color_id').value;
-    contenedor.innerHTML = coloresEnsamblajeCache.map(color => {
-        const activo = String(color.id) === String(seleccionado);
-        const rgb = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(color.rgb || '')) ? color.rgb : '#dedbd2';
-        return `<button type="button" class="pc-color-option ${activo ? 'activo' : ''}" role="radio" aria-checked="${activo}" aria-label="${escaparHtmlColorEns(color.nombre)}" onclick="seleccionarColorEns('${escaparHtmlColorEns(color.id)}')">
-            <span class="pc-color-swatch" style="--muestra:${rgb}">${activo ? '<i class="fa-solid fa-check"></i>' : ''}</span>
-            <span class="nombre">${escaparHtmlColorEns(color.nombre)}</span><i class="fa-solid fa-circle-check check"></i>
-        </button>`;
-    }).join('');
-}
-
-function seleccionarColorEns(id) {
-    document.getElementById('ens_color_id').value = String(id);
-    productoSeleccionadoEns.color_id = String(id);
-    renderSelectorColorEns();
-    cambioProductoEnsamblaje();
-}
 // ── Auto-refresh silencioso, igual patrón que Producción ───────────────────
 const POLL_INTERVAL_MS_ENS = 8000;
 let pollTimerEns = null;
@@ -711,7 +675,10 @@ function renderProductoGridEns() {
 }
 
 function seleccionarProductoEns(productoId) {
-    productoSeleccionadoEns = { ...productoSeleccionadoEns, producto_id: productoId };
+    productoSeleccionadoEns = { producto_id: productoId, color_id: null };
+    ticketDetalleEns = [];
+    document.getElementById('ens_color_id').value = '';
+    renderTicketDetalle();
     renderProductoGridEns();
     cambioProductoEnsamblaje();
 }
@@ -723,6 +690,18 @@ function obtenerProductoIdSeleccionadoEns() {
 function cambioProductoEnsamblaje() {
     actualizarCampoMaquinaEnsamblaje();
     renderGridDetalle();
+}
+
+function esColorNeutroEns(datos) {
+    return /CADENITA/i.test(datos.molde_nombre || datos.nombre || '') && /^BLANCO$/i.test((datos.color_nombre || '').trim());
+}
+
+function recalcularColorFinalEnsamblaje() {
+    const fuente = ticketDetalleEns.find(l => l.tipo === 'complemento' && l.color_id)
+        || ticketDetalleEns.find(l => l.tipo === 'produccion' && l.color_id && !esColorNeutroEns(l));
+    const colorId = fuente?.color_id ? String(fuente.color_id) : '';
+    document.getElementById('ens_color_id').value = colorId;
+    productoSeleccionadoEns.color_id = colorId || null;
 }
 
 function actualizarCampoMaquinaEnsamblaje() {
@@ -828,9 +807,8 @@ function toggleOperarioEns(id) {
 
 // ── Carga de todos los "paneles" del modal (antes: selects) ────────────
 async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
-    const [productos, coloresResp, maquinasResp, operario, sucursales] = await Promise.all([
+    const [productos, maquinasResp, operario, sucursales] = await Promise.all([
         obtenerProductosDisponiblesEns(incluirEnsamblajeId),
-        llamarEnsamblaje('BUSCARCOLORESENSAMBLAJE'),
         llamarEnsamblaje('BUSCARMAQUINASENSAMBLAJE'),
         llamarEnsamblaje('BUSCAROPERARIOS'),
         obtenerSucursalesEns(),
@@ -838,17 +816,13 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
 
     // Producto
     productosGridDataEns = productos || [];
-    coloresEnsamblajeCache = coloresResp.success ? coloresResp.colores : [];
-    const colorSelect = document.getElementById('ens_color_id');
-    colorSelect.innerHTML = '<option value="">Selecciona un color...</option>' + (coloresEnsamblajeCache || []).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     maquinasEnsamblajeCache = maquinasResp.success ? maquinasResp.maquinas : [];
     const maquinaSelect = document.getElementById('ens_maquina_id');
     maquinaSelect.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
     if (seleccion.producto_id) {
         productoSeleccionadoEns = { producto_id: String(seleccion.producto_id), color_id: seleccion.color_id != null ? String(seleccion.color_id) : null };
     }
-    colorSelect.value = seleccion.color_id ? String(seleccion.color_id) : '';
-    renderSelectorColorEns();
+    document.getElementById('ens_color_id').value = seleccion.color_id ? String(seleccion.color_id) : '';
     maquinaSelect.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
     renderProductoGridEns();
     actualizarCampoMaquinaEnsamblaje();
@@ -1195,8 +1169,8 @@ async function renderGridDetalle() {
     const productoId = productoSeleccionadoEns.producto_id;
     const colorId = document.getElementById('ens_color_id').value;
 
-    if (!productoId || !colorId) {
-        grid.innerHTML = '<div class="pc-mat-empty">Selecciona el producto y su color final para ver componentes.</div>';
+    if (!productoId) {
+        grid.innerHTML = '<div class="pc-mat-empty">Selecciona un producto para ver componentes disponibles.</div>';
         return;
     }
 
@@ -1213,6 +1187,7 @@ async function renderGridDetalle() {
 
         grid.innerHTML = producciones.map(p => {
             const colorNombre = p.color_nombre_verif ?? p.color_nombre ?? '';
+            const colorRgb = p.color_rgb || '#ccc';
             const est = estiloPorNombre(p.molde_nombre || 'producción');
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.molde_produccion_id == p.produccion_id);
             return `
@@ -1221,7 +1196,9 @@ async function renderGridDetalle() {
             onclick='agregarLineaDetalle("produccion", ${JSON.stringify({
                 produccion_id: p.produccion_id,
                 molde_nombre: p.molde_nombre,
+                color_id: p.color_id,
                 color_nombre: colorNombre,
+                color_rgb: colorRgb,
                 cantidad_kg: p.cantidad_kg ?? p.cantidad,
                 fecha_hora_fin: p.fecha_hora_fin,
                 categoria_material_id: p.categoria_material_id,
@@ -1230,8 +1207,8 @@ async function renderGridDetalle() {
             })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id} · <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)}</b> ${p.unidad_produccion_codigo || 'KG'}</span>
-                <span class="meta">Color: <b>${colorNombre || '-'}</b></span>
+                <span class="meta">#${p.produccion_id} · ${p.unidad_produccion_codigo || 'KG'}</span>
+                <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
@@ -1291,6 +1268,9 @@ async function renderGridDetalle() {
                         ensamblaje_id: c.ensamblaje_id,
                         producto_codigo: c.producto_codigo,
                         producto_descripcion: c.producto_descripcion,
+                        color_id: c.complemento_color_id,
+                        color_nombre: c.complemento_color_nombre,
+                        categoria_material_id: c.categoria_material_id,
                         cantidad_peso_kg: c.cantidad_peso_kg,
                         unidad_salida_codigo: unidad,
                         nombre_mostrar: nombreMostrar,
@@ -1307,7 +1287,7 @@ async function renderGridDetalle() {
     }
 }
 
-function agregarLineaDetalle(tipo, datos) {
+async function agregarLineaDetalle(tipo, datos) {
     const nombreParaEstilo = tipo === 'produccion' ? (datos.molde_nombre || '')
         : tipo === 'derivado' ? (datos.nombre || '')
         : (datos.nombre_mostrar || datos.producto_codigo || '');
@@ -1319,6 +1299,20 @@ function agregarLineaDetalle(tipo, datos) {
             alert('No se pueden mezclar producciones de Primera y Segunda Categoría en el mismo armado.');
             return;
         }
+        const cantidadProducida = parseFloat(datos.cantidad_kg) || 0;
+        const unidad = datos.unidad_codigo || 'KG';
+        const { value: cantidadRecibida } = await Swal.fire({
+            title: 'Cantidad recibida',
+            html: `Pesa nuevamente la producción e indica cuánto <b>${unidad}</b> estás recibiendo para el armado.`,
+            icon: 'question', input: 'number',
+            inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
+            inputValue: '', inputPlaceholder: `Cantidad en ${unidad}`,
+            showCancelButton: true, confirmButtonText: 'Vincular', cancelButtonText: 'Cancelar',
+            didOpen: () => { const input = Swal.getInput(); if (input) { input.removeAttribute('readonly'); input.focus(); } },
+            inputValidator: value => (!value || parseFloat(value) <= 0) ? 'Ingresa una cantidad válida mayor a 0.' : undefined
+        });
+        if (!cantidadRecibida) return;
+        const cantidadRecibidaNum = parseFloat(cantidadRecibida);
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'produccion',
@@ -1326,11 +1320,14 @@ function agregarLineaDetalle(tipo, datos) {
             derivado_id: null,
             ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
-            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearCantidadEns(datos.cantidad_kg)} ${datos.unidad_codigo || 'KG'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
-            cantidad_kg: parseFloat(datos.cantidad_kg) || 0,
-            unidad_codigo: datos.unidad_codigo || 'KG',
+            color_id: datos.color_id,
+            color_nombre: datos.color_nombre,
+            cantidad_kg: cantidadProducida,
+            unidad_codigo: unidad,
+            cantidad_entrada_produccion: cantidadRecibidaNum,
             categoria_material_id: datos.categoria_material_id,
             categoria_material_nombre: datos.categoria_material_nombre,
         });
@@ -1353,18 +1350,23 @@ function agregarLineaDetalle(tipo, datos) {
             molde_produccion_id: null,
             derivado_id: null,
             ensamblaje_complemento_id: datos.ensamblaje_id,
+            color_id: datos.color_id,
+            color_nombre: datos.color_nombre,
+            categoria_material_id: datos.categoria_material_id,
             nombre: datos.nombre_mostrar || `${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''}`,
             meta: `Complementa a ${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''} · Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece',
             color: est.color, bg: est.bg,
         });
     }
+    recalcularColorFinalEnsamblaje();
     renderTicketDetalle();
     renderGridDetalle();
 }
 
 function quitarLineaDetalle(tempId) {
     ticketDetalleEns = ticketDetalleEns.filter(l => l.tempId !== tempId);
+    recalcularColorFinalEnsamblaje();
     renderTicketDetalle();
     renderGridDetalle();
 }
@@ -1373,7 +1375,6 @@ function renderTicketDetalle() {
     const list = document.getElementById('ens_ticket_list');
     const total = document.getElementById('ens_ticket_total');
     const detalle = document.getElementById('ens_ticket_detalle');
-    const pesoEl = document.getElementById('ens_ticket_peso_producido');
     if (ticketDetalleEns.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no vinculas nada.<br>Toca una card de arriba para empezar.</li>`;
     } else {
@@ -1396,17 +1397,6 @@ function renderTicketDetalle() {
     const nComp = ticketDetalleEns.filter(l => l.tipo === 'complemento').length;
     total.textContent = ticketDetalleEns.length;
     detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s) · ${nComp} complemento(s)`;
-    // NUEVO: agrupa por unidad real en vez de sumar todo como "kg"
-    const gruposCantidad = {};
-    ticketDetalleEns.filter(l => l.tipo === 'produccion').forEach(l => {
-        const u = l.unidad_codigo || 'KG';
-        gruposCantidad[u] = (gruposCantidad[u] || 0) + Number(l.cantidad_kg || 0);
-    });
-    const pesoProducido = ticketDetalleEns
-        .filter(l => l.tipo === 'produccion')
-        .reduce((s, l) => s + Number(l.cantidad_kg || 0), 0);
-    pesoEl.textContent = formatearCantidadEns(pesoProducido);
-
 }
 
 function obtenerDetalleJsonEns() {
@@ -1415,6 +1405,7 @@ function obtenerDetalleJsonEns() {
         molde_produccion_id: l.molde_produccion_id,
         derivado_id: l.derivado_id,
         ensamblaje_complemento_id: l.ensamblaje_complemento_id ?? null,
+        cantidad_entrada_produccion: l.tipo === 'produccion' ? l.cantidad_entrada_produccion : null,
     })));
 }
 
@@ -1427,7 +1418,6 @@ function limpiarFormularioEnsamblaje() {
     ticketDetalleEns = [];
     productoSeleccionadoEns = { producto_id: null, color_id: null };
     document.getElementById('ens_color_id').value = '';
-    renderSelectorColorEns();
     document.getElementById('ens_maquina_id').value = '';
     document.getElementById('ens_maquina_wrap').style.display = 'none';
     sucursalSeleccionadaEns = '';
@@ -1599,7 +1589,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     };
 
     if (!params.producto_id || !params.color_id) {
-        Swal.fire('Falta seleccionar', 'Selecciona el producto y el color final que van a armar.', 'warning');
+        Swal.fire('Falta vincular un color', 'El color final se determina al vincular una producción con color o un complemento.', 'warning');
         return;
     }
 

@@ -182,23 +182,43 @@ function buscarUnidadesMedida()
     responder(true, 'OK', ['unidades' => $result]);
 }
 
-/** Permite que armados multi-molde finalizados sigan disponibles en empaquetado,
- * incluso si fueron finalizados antes de habilitar el pase automático.
- * La finalización del armado confirma que está listo; no se debe exigir que
- * tenga una producción por cada molde configurado, porque hay armados válidos
- * finalizados con solo algunos de los moldes requeridos (p. ej. COS #65). */
+/** Reconoce armados multi-molde completos en Empaquetado, incluidos los
+ * finalizados antes del pase automático y los que completan un molde con un
+ * ensamblaje de Primera Categoría vinculado como complemento. */
 function sqlEsMultiMoldeListoParaEmpaquetar(string $aliasEnsamblaje = 'e', string $aliasProducto = 'p'): string
 {
     $config = "jsonb_array_elements(COALESCE($aliasProducto.js_configuracion, '[]'::jsonb)) AS cfg(item)";
     return "(
         (SELECT COUNT(DISTINCT cfg.item->>'molde_id') FROM $config
          WHERE cfg.item->>'necesita_ensamblaje' = 'sí') > 1
-        AND (SELECT COUNT(DISTINCT pd.molde_id)
-             FROM rel_ensamblaje_producto rep
-             JOIN produccion pd ON pd.id = rep.molde_produccion_id
-             WHERE rep.ensamblaje_id = $aliasEnsamblaje.id
-               AND rep.deleted_at IS NULL
-               AND pd.deleted_at IS NULL) > 1
+        AND NOT EXISTS (
+            SELECT 1 FROM $config
+            WHERE cfg.item->>'necesita_ensamblaje' = 'sí'
+              AND NOT EXISTS (
+                  SELECT 1 FROM rel_ensamblaje_producto rep
+                  JOIN produccion pd ON pd.id = rep.molde_produccion_id
+                  WHERE rep.ensamblaje_id = $aliasEnsamblaje.id
+                    AND rep.deleted_at IS NULL
+                    AND pd.deleted_at IS NULL
+                    AND pd.molde_id = NULLIF(cfg.item->>'molde_id', '')::bigint
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM ensamblaje ec
+                  JOIN categoria_material cmc ON cmc.id = ec.categoria_material_id
+                  WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id
+                    AND ec.deleted_at IS NULL
+                    AND ec.fin IS NOT NULL
+                    AND LOWER(COALESCE(cmc.nombre, '')) LIKE '%primera%'
+                    AND EXISTS (
+                        SELECT 1 FROM rel_ensamblaje_producto repc
+                        JOIN produccion pdc ON pdc.id = repc.molde_produccion_id
+                        WHERE repc.ensamblaje_id = ec.id
+                          AND repc.deleted_at IS NULL
+                          AND pdc.deleted_at IS NULL
+                          AND pdc.molde_id = NULLIF(cfg.item->>'molde_id', '')::bigint
+                    )
+              )
+        )
     )";
 }
 
