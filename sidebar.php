@@ -46,7 +46,7 @@ $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
 $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
-$administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion'];
+$administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
@@ -174,6 +174,9 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             </a>
             <a href="compras.php" class="<?= pc_sub_class('compras', $activePage) ?>">
                 <span class="dot"></span> Compras
+            </a>
+            <a href="ayuda_videos.php" class="<?= pc_sub_class('ayuda_videos', $activePage) ?>">
+                <span class="dot"></span> Videos de ayuda
             </a>
             <a href="configuracion.php" class="<?= pc_sub_class('configuracion', $activePage) ?>">
                 <span class="dot"></span> Configuración
