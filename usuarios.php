@@ -132,6 +132,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 echo json_encode($controller->reactivateUser($id));
                 exit;
 
+            case 'vincular_operario':
+                $id = (int) ($_POST['id'] ?? 0);
+                echo json_encode($controller->linkOperarioByDni($id), JSON_UNESCAPED_UNICODE);
+                exit;
+
             default:
                 http_response_code(400);
 
@@ -426,6 +431,27 @@ function reactivarUsuario(id) {
     });
 }
 
+function vincularOperario(id) {
+    Swal.fire({
+        title: '¿Vincular ficha de operario?',
+        text: 'Se buscará una ficha cuyo DNI coincida exactamente con el usuario de esta cuenta.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Vincular',
+        cancelButtonText: 'Cancelar'
+    }).then(async resultado => {
+        if (!resultado.isConfirmed) return;
+        try {
+            const json = await llamarUsuarios('vincular_operario', { id });
+            if (!json.ok) throw new Error(json.msg || json.message || 'No se pudo vincular la cuenta.');
+            await cargarUsuarios();
+            Swal.fire('Vinculada', json.msg, 'success');
+        } catch (error) {
+            Swal.fire('No se pudo vincular', error.message || 'Verifica el DNI y el estado de la ficha.', 'error');
+        }
+    });
+}
+
 async function cargarUsuarios() {
     const texto = document.getElementById('fusu_texto').value.trim();
     const estado = document.getElementById('fusu_estado').value;
@@ -493,6 +519,20 @@ async function cargarUsuarios() {
                     >
                         <i class="fa-solid fa-pen"></i>
                     </button>
+
+                    ${!usuario.operario_id && ['operario', 'conductor'].includes(rol.toLowerCase())
+                        ? `
+                            <button
+                                class="pc-icon-btn"
+                                type="button"
+                                onclick="vincularOperario(${Number(usuario.id)})"
+                                title="Vincular con ficha de operario por DNI"
+                            >
+                                <i class="fa-solid fa-link"></i>
+                            </button>
+                        `
+                        : ''
+                    }
 
                     ${usuario.deleted_at
                         ? `

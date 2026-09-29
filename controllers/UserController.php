@@ -158,6 +158,63 @@ class UserController
         if (!$usuario) return ['ok' => false, 'msg' => 'Usuario no encontrado.'];
         return ['ok' => false, 'msg' => 'Este usuario ya se encuentra activo.'];
     }
+
+    public function linkOperarioByDni(int $id): array
+    {
+        if ($id <= 0) return ['ok' => false, 'msg' => 'ID de usuario inválido.'];
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('SELECT id, user_, operario_id, rol_y_perfiles FROM usuario WHERE id = :id FOR UPDATE');
+            $stmt->execute(['id' => $id]);
+            $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$usuario) throw new InvalidArgumentException('Usuario no encontrado.');
+            if (!empty($usuario['operario_id'])) throw new InvalidArgumentException('Esta cuenta ya está vinculada a un operario.');
+
+            $rolData = is_array($usuario['rol_y_perfiles'])
+                ? $usuario['rol_y_perfiles']
+                : (json_decode((string)$usuario['rol_y_perfiles'], true) ?: []);
+            $rol = strtolower(trim((string)($rolData['rol'] ?? '')));
+            if (!in_array($rol, ['operario', 'conductor'], true)) {
+                throw new InvalidArgumentException('Solo las cuentas de operario o conductor se pueden vincular a una ficha de operario.');
+            }
+
+            $dni = trim((string)$usuario['user_']);
+            if (!preg_match('/^\d{8}$/', $dni)) {
+                throw new InvalidArgumentException('El usuario debe ser un DNI de 8 dígitos para buscar su ficha de operario.');
+            }
+
+            $stmtOperario = $this->pdo->prepare('SELECT id, deleted_at FROM operario WHERE dni = :dni FOR UPDATE');
+            $stmtOperario->execute(['dni' => $dni]);
+            $operarios = $stmtOperario->fetchAll(PDO::FETCH_ASSOC);
+            if (count($operarios) !== 1) {
+                throw new InvalidArgumentException(count($operarios) === 0
+                    ? 'No se encontró una ficha de operario con el mismo DNI. Registra o corrige el DNI en Operarios.'
+                    : 'Hay más de una ficha con ese DNI; corrige los duplicados antes de vincular.');
+            }
+            $operario = $operarios[0];
+
+            $stmtOcupado = $this->pdo->prepare('SELECT id FROM usuario WHERE operario_id = :operario_id AND id <> :usuario_id LIMIT 1');
+            $stmtOcupado->execute(['operario_id' => $operario['id'], 'usuario_id' => $id]);
+            if ($stmtOcupado->fetchColumn()) {
+                throw new InvalidArgumentException('La ficha de operario ya está vinculada a otra cuenta.');
+            }
+
+            $update = $this->pdo->prepare('UPDATE usuario SET operario_id = :operario_id, updated_at = NOW() WHERE id = :id');
+            $update->execute(['operario_id' => $operario['id'], 'id' => $id]);
+            $this->pdo->commit();
+
+            $mensaje = 'Cuenta vinculada a la ficha de operario correctamente.';
+            if (!empty($operario['deleted_at'])) {
+                $mensaje .= ' La ficha de operario sigue inactiva; reactívala también desde Personal → Operarios si debe volver a trabajar.';
+            }
+            return ['ok' => true, 'msg' => $mensaje];
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            if ($e instanceof InvalidArgumentException) return ['ok' => false, 'msg' => $e->getMessage()];
+            throw $e;
+        }
+    }
 }
 
 
