@@ -138,6 +138,26 @@ class UserController
         $stmt->execute(['id' => $id]);
         return ['ok' => true, 'msg' => 'Usuario eliminado correctamente.'];
     }
+
+    public function reactivateUser(int $id): array
+    {
+        if ($id <= 0) return ['ok' => false, 'msg' => 'ID de usuario inválido.'];
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE usuario SET deleted_at = NULL, updated_at = NOW()
+             WHERE id = :id AND deleted_at IS NOT NULL'
+        );
+        $stmt->execute(['id' => $id]);
+        if ($stmt->rowCount() > 0) {
+            return ['ok' => true, 'msg' => 'Usuario reactivado correctamente.'];
+        }
+
+        $check = $this->pdo->prepare('SELECT deleted_at FROM usuario WHERE id = :id');
+        $check->execute(['id' => $id]);
+        $usuario = $check->fetch();
+        if (!$usuario) return ['ok' => false, 'msg' => 'Usuario no encontrado.'];
+        return ['ok' => false, 'msg' => 'Este usuario ya se encuentra activo.'];
+    }
 }
 
 

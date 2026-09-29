@@ -123,6 +123,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 echo json_encode($controller->deleteUser($id));
                 exit;
 
+            case 'reactivar':
+                $id = (int) ($_POST['id'] ?? 0);
+                if ($id <= 0) {
+                    echo json_encode(['ok' => false, 'msg' => 'ID inválido.']);
+                    exit;
+                }
+                echo json_encode($controller->reactivateUser($id));
+                exit;
+
             default:
                 http_response_code(400);
 
@@ -371,6 +380,7 @@ async function llamarUsuarios(accion, params = {}) {
 
     const resp = await fetch('usuarios.php', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
         },
@@ -379,12 +389,41 @@ async function llamarUsuarios(accion, params = {}) {
 
     const texto = await resp.text();
 
+    let json;
     try {
-        return JSON.parse(texto);
+        json = JSON.parse(texto);
     } catch {
         console.error(`Respuesta no válida para accion=${accion}:`, texto);
         throw new Error('El servidor no devolvió una respuesta JSON válida.');
     }
+    if (resp.status === 401) throw new Error('Tu sesión de administrador expiró. Inicia sesión nuevamente y vuelve a intentarlo.');
+    if (!resp.ok) throw new Error(json.msg || json.message || 'No se pudo completar la solicitud.');
+    return json;
+}
+
+function reactivarUsuario(id) {
+    Swal.fire({
+        title: '¿Reactivar usuario?',
+        text: 'La cuenta volverá a estar habilitada para iniciar sesión.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, reactivar',
+        cancelButtonText: 'Cancelar'
+    }).then(async resultado => {
+        if (!resultado.isConfirmed) return;
+        try {
+            const json = await llamarUsuarios('reactivar', { id });
+            if (json.ok) {
+                await cargarUsuarios();
+                Swal.fire('Reactivado', json.msg, 'success');
+                return;
+            }
+            Swal.fire('No se pudo reactivar', json.msg || json.message || 'Inténtalo nuevamente.', 'error');
+        } catch (error) {
+            console.error('Error reactivando usuario:', error);
+            Swal.fire('Error', error.message || 'No se pudo reactivar el usuario. Verifica que tu sesión de administrador siga activa.', 'error');
+        }
+    });
 }
 
 async function cargarUsuarios() {
@@ -455,8 +494,18 @@ async function cargarUsuarios() {
                         <i class="fa-solid fa-pen"></i>
                     </button>
 
-                    ${!usuario.deleted_at
+                    ${usuario.deleted_at
                         ? `
+                            <button
+                                class="pc-icon-btn"
+                                type="button"
+                                onclick="reactivarUsuario(${Number(usuario.id)})"
+                                title="Reactivar usuario"
+                            >
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                        `
+                        : `
                             <button
                                 class="pc-icon-btn"
                                 type="button"
@@ -466,7 +515,6 @@ async function cargarUsuarios() {
                                 <i class="fa-solid fa-trash"></i>
                             </button>
                         `
-                        : ''
                     }
                 </td>
             </tr>
@@ -521,10 +569,14 @@ document.getElementById('formUsuario').addEventListener('submit', async function
 
         const respuesta = await fetch('usuarios.php', {
             method: 'POST',
+            credentials: 'same-origin',
             body: formData
         });
 
         const json = await respuesta.json();
+        if (respuesta.status === 401) {
+            throw new Error('Tu sesión de administrador expiró. Inicia sesión nuevamente y vuelve a intentarlo.');
+        }
 
         if (json.ok) {
             alertaDespuesDeCerrarModal('Listo', json.msg, 'success');
@@ -532,12 +584,10 @@ document.getElementById('formUsuario').addEventListener('submit', async function
             return;
         }
 
-        mostrarErrorFormulario(json.msg);
+        mostrarErrorFormulario(json.msg || json.message || 'No se pudo guardar el usuario.');
     } catch (error) {
         console.error('Error guardando usuario:', error);
-        mostrarErrorFormulario(
-            'No se pudo procesar la respuesta del servidor. Inténtalo nuevamente.'
-        );
+        mostrarErrorFormulario(error.message || 'No se pudo procesar la respuesta del servidor. Inténtalo nuevamente.');
     }
 });
 
