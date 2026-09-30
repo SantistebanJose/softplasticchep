@@ -62,13 +62,54 @@ require __DIR__ . '/header.php';
         <div><h2 class="mb-1">Videos de ayuda</h2><div class="text-muted">Asigna cada tutorial a uno o más roles y módulos.</div></div>
         <button class="pc-btn pc-btn-primary" type="button" onclick="abrirVideo()"><i class="fa-solid fa-plus"></i> Agregar video</button>
     </div>
-    <div class="table-responsive">
+    <div class="pc-table-wrap pc-table-responsive-cards pc-video-admin-table">
         <table class="pc-table">
             <thead><tr><th>Video</th><th>Módulo</th><th>Visible para</th><th>Orden</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody id="videosBody"><tr><td colspan="6" class="text-center">Cargando videos...</td></tr></tbody>
         </table>
     </div>
 </div>
+
+<style>
+.pc-video-admin-table { min-width: 0; }
+.pc-video-admin-table table { width: 100%; }
+.pc-video-admin-table td[data-label="Video"] strong { display: block; line-height: 1.4; }
+.pc-video-admin-table td[data-label="Video"] .small { display: block; margin-top: 4px; line-height: 1.45; }
+.pc-video-admin-table td[data-label="Video"] a { display: inline-block; margin-top: 5px; }
+@media (max-width: 640px) {
+    .pc-video-admin-table { overflow: visible; }
+    .pc-video-admin-table tbody td[data-label="Video"] {
+        display: block;
+        padding: 12px 14px;
+        text-align: left;
+    }
+    .pc-video-admin-table tbody td[data-label="Video"]::before {
+        display: block;
+        margin-bottom: 7px;
+    }
+    .pc-video-admin-table td[data-label="Video"] strong,
+    .pc-video-admin-table td[data-label="Video"] .small {
+        overflow-wrap: anywhere;
+        word-break: normal;
+    }
+    .pc-video-admin-table tbody td[data-label="Visible para"] {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+    .pc-video-admin-table tbody td[data-label="Visible para"]::before { margin-right: auto; }
+    .pc-video-admin-table tbody td[data-label="Acciones"] {
+        justify-content: flex-start;
+        gap: 8px;
+    }
+    .pc-video-admin-table tbody td[data-label="Acciones"] button {
+        width: 40px;
+        height: 40px;
+        margin: 0 !important;
+    }
+    .pc-card-header h2 { font-size: 1.45rem; }
+    .pc-card-header > div { min-width: 0; }
+}
+</style>
 
 <div class="modal fade" id="modalVideo" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
