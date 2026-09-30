@@ -521,7 +521,29 @@ include("header.php");
             </div>
 
             <div class="pc-ens-step">
-                <div class="pc-ens-step-num alt">2</div>
+                <div class="pc-ens-step-num">2</div>
+                <div class="pc-ens-step-body w-100">
+                    <label class="form-label mb-1">Foto de la balanza *</label>
+                    <div class="text-muted small mb-2">Toma al menos una foto (máximo 3) con la cámara. No se permite elegir desde la galería.</div>
+                    <button type="button" class="btn btn-outline-primary" id="btnTomarFotoPesaje" onclick="abrirCamaraPesaje()"><i class="fa-solid fa-camera"></i> Tomar foto (0/3)</button>
+                    <span id="estadoFotoPesaje" class="small text-danger ms-2">Toma al menos una foto.</span>
+                    <div id="fotosPesajePreview" style="display:none;padding-top:12px;gap:10px;flex-wrap:wrap;"></div>
+                    <div id="panelCamaraPesaje" style="display:none;padding-top:12px;">
+                        <video id="videoCamaraPesaje" autoplay playsinline style="display:none;width:100%;max-height:360px;background:#111;border-radius:10px;"></video>
+                        <canvas id="canvasCamaraPesaje" style="display:none;"></canvas>
+                        <img id="capturaCamaraPesaje" alt="Foto capturada de la balanza" style="display:none;width:100%;max-height:360px;object-fit:contain;background:#111;border-radius:10px;">
+                        <div id="errorCamaraPesaje" class="text-danger small mt-2" style="display:none;"></div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <button type="button" class="btn btn-outline-primary" id="btnCapturarPesaje" style="display:none;" onclick="capturarFotoPesaje()"><i class="fa-solid fa-camera"></i> Capturar</button>
+                            <button type="button" class="btn btn-outline-secondary" id="btnNuevaCapturaPesaje" style="display:none;" onclick="reintentarFotoPesaje()">Repetir</button>
+                            <button type="button" class="btn btn-success" id="btnConfirmarPesaje" style="display:none;" onclick="confirmarFotoPesaje()">Usar esta foto</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pc-ens-step">
+                <div class="pc-ens-step-num alt">3</div>
                 <div class="pc-ens-step-body">
                     <label class="form-label mb-1">Merma <span class="text-muted fw-normal">(opcional)</span></label>
 
@@ -1672,12 +1694,24 @@ let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;       // cache de colores activos, para los chips de merma
 let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
 let cantidadesPorOperario = {};
+let archivosFotosPesaje = [];
+let capturaPendienteFotoPesaje = false;
+let streamCamaraPesaje = null;
 
 let modoSoloMerma = false;
 
 function abrirModalCantidadParaEnsamblaje(produccionId) {
+    detenerCamaraPesaje();
+    archivosFotosPesaje.forEach(foto => URL.revokeObjectURL(foto.previewUrl));
+    archivosFotosPesaje = [];
+    capturaPendienteFotoPesaje = false;
     produccionIdParaEnsamblaje = produccionId;
     document.getElementById('formCantidadEnsamblaje').reset();
+    renderFotosPesajeCapturadas();
+    document.getElementById('panelCamaraPesaje').style.display = 'none';
+    document.getElementById('errorCamaraPesaje').style.display = 'none';
+    document.getElementById('videoCamaraPesaje').style.display = 'none';
+    document.getElementById('capturaCamaraPesaje').style.display = 'none';
 
     const p = produccionesCache.find(x => x.id == produccionId);
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
@@ -1693,6 +1727,105 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
 
     modalCantidadEnsamblaje.show();
 }
+
+async function abrirCamaraPesaje() {
+    if (archivosFotosPesaje.length >= 3) return;
+    const error = document.getElementById('errorCamaraPesaje');
+    error.style.display = 'none';
+    document.getElementById('panelCamaraPesaje').style.display = '';
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        error.textContent = 'La cámara requiere HTTPS o localhost y un navegador compatible.';
+        error.style.display = '';
+        return;
+    }
+    try {
+        streamCamaraPesaje = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        const video = document.getElementById('videoCamaraPesaje');
+        video.srcObject = streamCamaraPesaje;
+        await video.play();
+        video.style.display = '';
+        document.getElementById('capturaCamaraPesaje').style.display = 'none';
+        document.getElementById('btnCapturarPesaje').style.display = '';
+        document.getElementById('btnNuevaCapturaPesaje').style.display = 'none';
+        document.getElementById('btnConfirmarPesaje').style.display = 'none';
+    } catch (e) {
+        detenerCamaraPesaje();
+        error.textContent = e?.name === 'NotAllowedError'
+            ? 'Permite el acceso a la cámara en el navegador y vuelve a intentarlo.'
+            : e?.name === 'NotFoundError' ? 'No se encontró una cámara disponible.'
+            : 'No se pudo abrir la cámara. Verifica el permiso del navegador.';
+        error.style.display = '';
+    }
+}
+
+function capturarFotoPesaje() {
+    const video = document.getElementById('videoCamaraPesaje');
+    if (!streamCamaraPesaje || !video.videoWidth) return;
+    const canvas = document.getElementById('canvasCamaraPesaje');
+    const escala = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * escala);
+    canvas.height = Math.round(video.videoHeight * escala);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    document.getElementById('capturaCamaraPesaje').src = canvas.toDataURL('image/jpeg', .78);
+    document.getElementById('capturaCamaraPesaje').style.display = '';
+    video.style.display = 'none';
+    document.getElementById('btnCapturarPesaje').style.display = 'none';
+    document.getElementById('btnNuevaCapturaPesaje').style.display = '';
+    document.getElementById('btnConfirmarPesaje').style.display = '';
+    capturaPendienteFotoPesaje = true;
+}
+
+function reintentarFotoPesaje() {
+    document.getElementById('capturaCamaraPesaje').style.display = 'none';
+    document.getElementById('videoCamaraPesaje').style.display = '';
+    document.getElementById('btnCapturarPesaje').style.display = '';
+    document.getElementById('btnNuevaCapturaPesaje').style.display = 'none';
+    document.getElementById('btnConfirmarPesaje').style.display = 'none';
+}
+
+async function confirmarFotoPesaje() {
+    if (!capturaPendienteFotoPesaje || archivosFotosPesaje.length >= 3) return;
+    const canvas = document.getElementById('canvasCamaraPesaje');
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .78));
+    if (!blob) {
+        const error = document.getElementById('errorCamaraPesaje');
+        error.textContent = 'No se pudo preparar la foto. Captúrala nuevamente.';
+        error.style.display = '';
+        return;
+    }
+    const n = archivosFotosPesaje.length + 1;
+    archivosFotosPesaje.push({ file: new File([blob], `pesaje_${n}.jpg`, {type:'image/jpeg'}), previewUrl: URL.createObjectURL(blob) });
+    capturaPendienteFotoPesaje = false;
+    renderFotosPesajeCapturadas();
+    document.getElementById('panelCamaraPesaje').style.display = 'none';
+    detenerCamaraPesaje();
+}
+
+function renderFotosPesajeCapturadas() {
+    const cont = document.getElementById('fotosPesajePreview');
+    cont.innerHTML = archivosFotosPesaje.map((foto, i) => `<div style="position:relative;width:110px"><img src="${foto.previewUrl}" alt="Foto ${i + 1} de balanza" style="width:110px;height:90px;object-fit:cover;border-radius:8px;border:1px solid #dee2e6"><span class="small d-block text-center">Foto ${i + 1}</span><button type="button" class="btn btn-sm btn-danger" aria-label="Quitar foto ${i + 1}" onclick="quitarFotoPesaje(${i})" style="position:absolute;top:3px;right:3px;padding:0 6px">&times;</button></div>`).join('');
+    cont.style.display = archivosFotosPesaje.length ? 'flex' : 'none';
+    const boton = document.getElementById('btnTomarFotoPesaje');
+    boton.innerHTML = `<i class="fa-solid fa-camera"></i> Tomar foto (${archivosFotosPesaje.length}/3)`;
+    boton.style.display = archivosFotosPesaje.length >= 3 ? 'none' : '';
+    const estado = document.getElementById('estadoFotoPesaje');
+    estado.className = `small ms-2 ${archivosFotosPesaje.length ? 'text-success' : 'text-danger'}`;
+    estado.textContent = archivosFotosPesaje.length ? `${archivosFotosPesaje.length} foto(s) capturada(s).` : 'Toma al menos una foto.';
+}
+
+function quitarFotoPesaje(i) {
+    if (archivosFotosPesaje[i]) URL.revokeObjectURL(archivosFotosPesaje[i].previewUrl);
+    archivosFotosPesaje.splice(i, 1);
+    renderFotosPesajeCapturadas();
+}
+
+function detenerCamaraPesaje() {
+    if (streamCamaraPesaje) streamCamaraPesaje.getTracks().forEach(track => track.stop());
+    streamCamaraPesaje = null;
+    const video = document.getElementById('videoCamaraPesaje');
+    if (video) video.srcObject = null;
+}
+document.getElementById('modalCantidadEnsamblaje').addEventListener('hidden.bs.modal', detenerCamaraPesaje);
 
 function inicializarCantidadProducidaPorOperario(p) {
     const operarios = Array.isArray(p?.js_operarios) ? p.js_operarios : [];
@@ -1846,6 +1979,11 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    if (archivosFotosPesaje.length < 1) {
+        Swal.fire('Foto obligatoria', 'Toma al menos una foto de la balanza con la cámara antes de enviar la producción.', 'warning');
+        return;
+    }
+
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
@@ -1884,12 +2022,28 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
         }
     }
 
-    const json = await llamarProduccion('ENVIARAENSAMBLAJE', {
-        id: produccionIdParaEnsamblaje,
-        cantidad_producida: valor,
-        unidad: unidadProducida,
-        desglose_operarios: JSON.stringify(desglose),
-    });
+    const formData = await prepararFormDataConDevice(new FormData(), 'ENVIARAENSAMBLAJE');
+    formData.append('id', produccionIdParaEnsamblaje);
+    formData.append('cantidad_producida', valor);
+    formData.append('unidad', unidadProducida);
+    formData.append('desglose_operarios', JSON.stringify(desglose));
+    archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
+    const botonEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
+    const textoBoton = botonEnviar.innerHTML;
+    botonEnviar.disabled = true;
+    botonEnviar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Subiendo foto y enviando...';
+    let json;
+    try {
+        const respuesta = await fetch(CONTROLADOR_PRODUCCION, { method: 'POST', body: formData });
+        json = await respuesta.json();
+    } catch (error) {
+        botonEnviar.disabled = false;
+        botonEnviar.innerHTML = textoBoton;
+        Swal.fire('Error', 'No se pudo subir la foto. Verifica la conexión e inténtalo nuevamente.', 'error');
+        return;
+    }
+    botonEnviar.disabled = false;
+    botonEnviar.innerHTML = textoBoton;
 
     if (!json.success) {
         Swal.fire('Error', json.message, 'error');
@@ -1897,6 +2051,8 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     modalCantidadEnsamblaje.hide();
+    archivosFotosPesaje.forEach(foto => URL.revokeObjectURL(foto.previewUrl));
+    archivosFotosPesaje = [];
     Swal.fire('Listo', json.message, 'success');
     cargarProducciones();
 });

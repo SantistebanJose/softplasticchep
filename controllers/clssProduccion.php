@@ -1664,9 +1664,9 @@ function enviarAEnsamblaje()
     if (!$id) responder(false, 'ID inválido.');
     if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
-    // La evidencia solo se acepta como archivo JPEG capturado desde el flujo
-    // de cámara en vivo de la tablet; nunca se ofrece un selector de galería.
-    $requiereFotoPesaje = !empty($_SESSION['operario_id']);
+    // La evidencia de pesaje es obligatoria tanto para el admin como para el
+    // operario. Ambos flujos capturan desde cámara en vivo (sin galería).
+    $requiereFotoPesaje = true;
     $fotosPesaje = [];
     $totalBytesFotos = 0;
     $archivosSubidos = $_FILES['fotos_pesaje'] ?? null;
