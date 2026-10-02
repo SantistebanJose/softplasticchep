@@ -13,13 +13,9 @@
  * verdad; si viene vacío/null, se usa operario_ortorgado (resuelto contra
  * las tablas operario/cargo). Ver joinOperarioEnsamblajeSql().
  *
- * LIMITACIÓN CONOCIDA: un ensamblaje no reparte cantidad_peso_kg por
- * operario (a diferencia de produccion.js_operarios, que sí trae
- * cantidad_producida por persona). Cuando un ensamblaje tiene varios
- * operarios en js_operarios, el kg completo del registro se le atribuye
- * a CADA operario en los rankings "top operarios" — es una atribución de
- * autoría compartida, no un reparto exacto. El total general del
- * dashboard (resumen_general) NO usa este join, así que no se infla.
+ * En ensamblajes automáticos provenientes de producción, js_operarios puede
+ * incluir cantidad_producida por persona. En esos casos se usa ese desglose;
+ * los ensamblajes normales conservan la atribución completa por participante.
  *
  * SUPUESTOS DE ESQUEMA (ajustar nombres si no calzan con tu BD real):
  *   - categoria_material(id, nombre)
@@ -201,7 +197,7 @@ function misEnsamblajesOperario()
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
             cm.nombre AS categoria_material,
-            e.cantidad_peso_kg AS cantidad,
+            COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg) AS cantidad,
             um.nombre AS unidad,
             e.proveniente,
             e.enviado_empaquetado
@@ -330,7 +326,7 @@ function reporteEnsamblajeDashboard()
             op->>'cargo' AS cargo,
             $unidadSql AS unidad,
             COUNT(DISTINCT e.id) AS ensamblajes,
-            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+            COALESCE(SUM(COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg)), 0) AS cantidad_total
         FROM ensamblaje e
         $joinOperario
         $joinUnidad
@@ -472,7 +468,7 @@ function reporteEnsamblajeOperarioDetalle()
         SELECT
             $unidadSql AS unidad,
             COUNT(e.id) AS ensamblajes,
-            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+            COALESCE(SUM(COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg)), 0) AS cantidad_total
         FROM ensamblaje e
         $joinOperario
         $joinUnidad
@@ -489,7 +485,7 @@ function reporteEnsamblajeOperarioDetalle()
             p.id AS producto_id, p.codigo, p.descripcion,
             $unidadSql AS unidad,
             COUNT(e.id) AS ensamblajes,
-            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+            COALESCE(SUM(COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg)), 0) AS cantidad_total
         FROM ensamblaje e
         $joinOperario
         $joinUnidad
@@ -507,7 +503,7 @@ function reporteEnsamblajeOperarioDetalle()
             COALESCE(cm.nombre, 'Sin categoría') AS categoria,
             $unidadSql AS unidad,
             COUNT(e.id) AS ensamblajes,
-            COALESCE(SUM(e.cantidad_peso_kg), 0) AS cantidad_total
+            COALESCE(SUM(COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg)), 0) AS cantidad_total
         FROM ensamblaje e
         $joinOperario
         $joinUnidad
@@ -527,7 +523,7 @@ function reporteEnsamblajeOperarioDetalle()
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
             cm.nombre AS categoria_material,
-            e.cantidad_peso_kg,
+            COALESCE(NULLIF(op->>'cantidad_producida', '')::numeric, e.cantidad_peso_kg) AS cantidad_peso_kg,
             um.nombre AS unidad_salida,
             e.proveniente,
             e.enviado_empaquetado,

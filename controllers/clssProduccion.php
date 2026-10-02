@@ -450,7 +450,9 @@ function crearEnsamblajeAutomaticoParaProduccion(
     int $produccionId,
     int $productoId,
     float $cantidadProducida,
-    ?int $unidadSalidaId
+    ?int $unidadSalidaId,
+    array $operariosParticipantes = [],
+    string $unidadProducida = 'KG'
 ): int {
     $prodRow = executeQuery(
         $conectar,
@@ -459,8 +461,20 @@ function crearEnsamblajeAutomaticoParaProduccion(
     );
     $operarioId = !empty($prodRow[0]['operario_id']) ? intval($prodRow[0]['operario_id']) : null;
 
-    $jsOperarios = '[]';
-    if ($operarioId) {
+    // El pase automático a empaquetado debe conservar el reparto que ya se
+    // guardó en la producción; no reducir el equipo al responsable principal.
+    $listaOperariosAuto = array_values(array_filter(
+        $operariosParticipantes,
+        static fn($op) => is_array($op) && (int)($op['operario_id'] ?? 0) > 0
+    ));
+    foreach ($listaOperariosAuto as &$operarioAuto) {
+        $operarioAuto['cantidad_producida'] = (float)($operarioAuto['cantidad_producida'] ?? 0);
+        $operarioAuto['unidad_producida'] = strtoupper($unidadProducida);
+    }
+    unset($operarioAuto);
+
+    $idsAuto = array_map(static fn($op) => (int)$op['operario_id'], $listaOperariosAuto);
+    if ($operarioId && !in_array($operarioId, $idsAuto, true)) {
         // cargo ya no es columna de operario -> se resuelve con JOIN a cargo.
         $op = executeQuery(
             $conectar,
@@ -471,13 +485,16 @@ function crearEnsamblajeAutomaticoParaProduccion(
             ['id' => $operarioId]
         );
         if (!empty($op)) {
-            $jsOperarios = json_encode([[
+            $listaOperariosAuto[] = [
                 'operario_id'     => (int)$op[0]['id'],
                 'nombre_completo' => $op[0]['nombre_completo'],
                 'cargo'           => $op[0]['cargo'],
-            ]], JSON_UNESCAPED_UNICODE);
+                'cantidad_producida' => (float)$cantidadProducida,
+                'unidad_producida' => strtoupper($unidadProducida),
+            ];
         }
     }
+    $jsOperarios = json_encode($listaOperariosAuto, JSON_UNESCAPED_UNICODE);
 
     $cambios = [[
         'campo' => 'Ensamblaje automático',
@@ -1092,10 +1109,9 @@ function guardarProduccion()
 
     $id = intval($_POST['id'] ?? 0);
 
-    // Lista de IDs de operarios participantes en este avance. Si viene desde
-    // la tablet (sesión de operario), solo hay uno: el propio operario. Si
-    // viene del panel de admin, puede traer varios vía $_POST['operarios']
-    // (JSON array de IDs), además del operario_id "principal".
+    // Lista de operarios participantes. En tablet se incluye siempre al
+    // usuario de sesión y también los adicionales seleccionados; en admin se
+    // usa operario_id como principal más el array recibido en "operarios".
     $operariosParticipantesIds = [];   // <-- NUEVO
 
     if (!empty($_SESSION['operario_id'])) {
@@ -1117,9 +1133,8 @@ function guardarProduccion()
         if ($operario_id) $operariosParticipantesIds[] = $operario_id;   // <-- NUEVO
     }
 
-    // Operarios adicionales enviados desde el panel de admin (opcional).
-    // <-- NUEVO (bloque completo)
-    $operariosExtraRaw = empty($_SESSION['operario_id']) ? json_decode($_POST['operarios'] ?? '[]', true) : [];
+    // Operarios adicionales enviados desde tablet o admin (opcional).
+    $operariosExtraRaw = json_decode($_POST['operarios'] ?? '[]', true);
     if (is_array($operariosExtraRaw)) {
         foreach ($operariosExtraRaw as $oid) {
             $oid = intval($oid);
@@ -1844,7 +1859,13 @@ function enviarAEnsamblaje()
             $unidadSalidaId = !empty($item['salida_produccion_unidad_medida_id'])
                 ? intval($item['salida_produccion_unidad_medida_id']) : null;
             $ensamblajeAutoId = crearEnsamblajeAutomaticoParaProduccion(
-                $conectar, $id, $productoId, $cantidadProducida, $unidadSalidaId
+                $conectar,
+                $id,
+                $productoId,
+                $cantidadProducida,
+                $unidadSalidaId,
+                json_decode($jsOperariosActualizado ?? '[]', true) ?: [],
+                $unidadProduccion
             );
         }
 
