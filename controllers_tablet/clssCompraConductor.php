@@ -32,6 +32,7 @@ require_once __DIR__ . '/../controllers/bd.php';
 require_once __DIR__ . '/../controllers/executeQuery.php';
 require_once __DIR__ . '/../controllers/auditoria.php';
 require_once __DIR__ . '/../controllers/cloudinaryHelper.php';
+require_once __DIR__ . '/../controllers/tipoCambio.php';
 
 if (isset($_POST['accion'])) {
     try {
@@ -50,7 +51,7 @@ function controladorCompraTablet(string $accion): void
     error_log('DEBUG accion recibida: [' . $accion . '] len=' . strlen($accion));
     $operarioId = exigirSesionConductorApi();
 
-    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES', 'BUSCARUNIDADESRAIZ', 'BUSCARUNIDADESCOMPATIBLES', 'CONSULTARDOCUMENTO'];
+    $accionesLectura   = ['LISTARMISCOMPRAS', 'OBTENERCOMPRA', 'BUSCARPROVEEDORES', 'BUSCARMATERIALES', 'BUSCARUNIDADES', 'BUSCARUNIDADESRAIZ', 'BUSCARUNIDADESCOMPATIBLES', 'CONSULTARDOCUMENTO', 'CONSULTARTIPOCAMBIO'];
     $accionesEscritura = ['GUARDARCOMPRA', 'GUARDARPROVEEDORTABLET', 'GUARDARMATERIALTABLET'];
 
     if (!in_array($accion, array_merge($accionesLectura, $accionesEscritura), true)) {
@@ -95,6 +96,14 @@ function controladorCompraTablet(string $accion): void
         case 'BUSCARUNIDADESCOMPATIBLES':
             buscarUnidadesCompatibles(intval($_POST['unidad_medida_id'] ?? 0));
             break;
+        case 'CONSULTARTIPOCAMBIO':
+            try {
+                responder(true, 'OK', ['tipo_cambio' => consultarTipoCambio(
+                    trim($_POST['fecha'] ?? ''), strtoupper(trim($_POST['moneda'] ?? 'USD'))
+                )]);
+            } catch (Throwable $e) {
+                responder(false, $e->getMessage());
+            }
     }
 }
 
@@ -279,21 +288,41 @@ function guardarCompraTablet(int $operarioId)
     $id           = intval($_POST['id'] ?? 0);
     $proveedor_id = trim($_POST['proveedor_id'] ?? '');
     $fecha_compra = trim($_POST['fecha_compra'] ?? '');
+    $moneda = strtoupper(trim($_POST['moneda'] ?? 'PEN'));
+    $cambioProveedorRaw = trim($_POST['cambio_proveedor'] ?? '');
+    $cambioProveedor = $cambioProveedorRaw === '' ? null : (float) $cambioProveedorRaw;
     $descripcion  = trim($_POST['descripcion'] ?? '');
     $detalleJson  = trim($_POST['detalle'] ?? '[]');
     $eliminarComprobante = ($_POST['eliminar_comprobante'] ?? '') === '1';
 
     $totalImgCargadoRaw = trim($_POST['total_img_cargado'] ?? '');
-    $totalImgCargado = ($totalImgCargadoRaw !== '') ? floatval($totalImgCargadoRaw) : null;
+    if ($totalImgCargadoRaw === '' || !is_numeric($totalImgCargadoRaw)) {
+        responder(false, 'El monto del comprobante es obligatorio.');
+    }
+    $totalImgCargado = (float) $totalImgCargadoRaw;
 
     if (empty($proveedor_id)) responder(false, 'Debes seleccionar un proveedor.');
     if (empty($fecha_compra)) responder(false, 'La fecha de compra es obligatoria.');
+    if (!in_array($moneda, ['PEN', 'USD', 'EUR'], true)) responder(false, 'Selecciona una moneda válida.');
+    if ($cambioProveedor !== null && $cambioProveedor <= 0) responder(false, 'El tipo de cambio del proveedor debe ser mayor a cero.');
+    if ($moneda === 'PEN') $cambioProveedor = null;
     if ($totalImgCargado !== null && $totalImgCargado < 0) {
         responder(false, 'El monto del comprobante no puede ser negativo.');
     }
 
     $proveedor = executeQuery($conectar, "SELECT ruc FROM proveedor WHERE ruc = :ruc", ['ruc' => $proveedor_id]);
     if (empty($proveedor)) responder(false, 'El proveedor seleccionado no existe.');
+    try {
+        $snapshotTipoCambio = $moneda === 'PEN'
+            ? ['fecha' => $fecha_compra, 'compra' => 1, 'venta' => 1, 'fuente' => 'local', 'moneda' => 'PEN']
+            : consultarTipoCambio($fecha_compra, $moneda);
+    } catch (Throwable $e) {
+        if ($moneda !== 'PEN' && $cambioProveedor !== null && $cambioProveedor > 0) {
+            $snapshotTipoCambio = ['fecha' => $fecha_compra, 'compra' => null, 'venta' => null, 'fuente' => 'proveedor', 'moneda' => $moneda];
+        } else {
+            responder(false, $e->getMessage());
+        }
+    }
 
     // Si es edición, la compra debe pertenecer al conductor logueado.
     $compraAnterior = null;
@@ -404,6 +433,11 @@ function guardarCompraTablet(int $operarioId)
     unset($linea);
 
     $totalCompra = array_sum(array_column($detalle, 'total'));
+    $tipoCambioAplicado = $moneda === 'PEN' ? 1.0 : ($cambioProveedor ?? (float) $snapshotTipoCambio['venta']);
+    $snapshotTipoCambio['tc_aplicado'] = round($tipoCambioAplicado, 4);
+    $snapshotTipoCambio['origen_tc'] = $moneda === 'PEN' ? 'local' : ($cambioProveedor !== null ? 'proveedor' : 'oficial');
+    $snapshotTipoCambio['total_pen'] = round($totalCompra * $tipoCambioAplicado, 2);
+    $snapshotTipoCambioJson = json_encode($snapshotTipoCambio, JSON_UNESCAPED_UNICODE);
 
     $jsDetalleSnapshot = array_map(function ($linea) use ($infoMaterial, $infoUnidad) {
         return [
@@ -435,11 +469,13 @@ function guardarCompraTablet(int $operarioId)
             $nuevaCompra = executeQuery($conectar, "
                 INSERT INTO compra (
                     proveedor_id, fecha_compra, img_comprobante, descripcion,
-                    total, total_img_cargado, js_detalle, operario_id,
+                    total, total_img_cargado, moneda, js_tipo_cambio, cambio_proveedor,
+                    js_detalle, operario_id,
                     created_at, js_session, js_historial
                 ) VALUES (
                     :proveedor_id, :fecha_compra, :img_comprobante, :descripcion,
-                    :total, :total_img_cargado, :js_detalle::jsonb, :operario_id,
+                    :total, :total_img_cargado, :moneda, :js_tipo_cambio::jsonb, :cambio_proveedor,
+                    :js_detalle::jsonb, :operario_id,
                     NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
@@ -449,6 +485,9 @@ function guardarCompraTablet(int $operarioId)
                 'descripcion'       => $descripcion ?: null,
                 'total'             => $totalCompra,
                 'total_img_cargado' => $totalImgCargado,
+                'moneda'            => $moneda,
+                'js_tipo_cambio'    => $snapshotTipoCambioJson,
+                'cambio_proveedor'  => $cambioProveedor,
                 'js_detalle'        => $jsDetalleJson,
                 'operario_id'       => $operarioId,
                 'js_session'        => $js_session,
@@ -579,6 +618,9 @@ function guardarCompraTablet(int $operarioId)
                     descripcion        = :descripcion,
                     total              = :total,
                     total_img_cargado  = :total_img_cargado,
+                    moneda             = :moneda,
+                    js_tipo_cambio     = :js_tipo_cambio::jsonb,
+                    cambio_proveedor   = :cambio_proveedor,
                     js_detalle         = :js_detalle::jsonb,
                     update_at          = NOW(),
                     js_session         = :js_session,
@@ -591,6 +633,9 @@ function guardarCompraTablet(int $operarioId)
                 'descripcion'       => $descripcion ?: null,
                 'total'             => $totalCompra,
                 'total_img_cargado' => $totalImgCargado,
+                'moneda'            => $moneda,
+                'js_tipo_cambio'    => $snapshotTipoCambioJson,
+                'cambio_proveedor'  => $cambioProveedor,
                 'js_detalle'        => $jsDetalleJson,
                 'js_session'        => $js_session,
                 'js_historial'      => $js_historial,

@@ -4,3 +4,6 @@ services:
     runtime: php
     buildCommand: apt-get install -y php-zip php-curl php-mbstring php-pgsql && composer install --no-dev --optimize-autoloader
     startCommand: php -S 0.0.0.0:$PORT -t /var/www/html
+    envVars:
+      - key: CHEQUEA_API_TOKEN
+        sync: false

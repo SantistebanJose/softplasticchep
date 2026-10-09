@@ -98,6 +98,7 @@ require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/cloudinaryHelper.php';
 require_once __DIR__ . '/clssVerificarSession.php';
+require_once __DIR__ . '/tipoCambio.php';
 
 // Carpeta donde se guardan los comprobantes subidos.
 define('CARPETA_COMPROBANTES', __DIR__ . '/../uploads/comprobantes/');
@@ -125,6 +126,7 @@ function controladorCompra(string $accion): void
         'BUSCARPROVEEDORES',
         'BUSCARMATERIALES',
         'BUSCARUNIDADES',
+        'CONSULTARTIPOCAMBIO',
     ];
 
     $accionesCompras = [
@@ -182,6 +184,15 @@ function controladorCompra(string $accion): void
         case 'BUSCARUNIDADES':
             buscarUnidades();
             break;
+
+        case 'CONSULTARTIPOCAMBIO':
+            $fecha = trim($_POST['fecha'] ?? '');
+            $moneda = strtoupper(trim($_POST['moneda'] ?? 'USD'));
+            try {
+                responder(true, 'OK', ['tipo_cambio' => consultarTipoCambio($fecha, $moneda)]);
+            } catch (Throwable $e) {
+                responder(false, $e->getMessage());
+            }
     }
 }
 
@@ -401,24 +412,43 @@ function guardarCompra()
     $id           = intval($_POST['id'] ?? 0);
     $proveedor_id = trim($_POST['proveedor_id'] ?? '');
     $fecha_compra = trim($_POST['fecha_compra'] ?? '');
+    $moneda = strtoupper(trim($_POST['moneda'] ?? 'PEN'));
+    $cambioProveedorRaw = trim($_POST['cambio_proveedor'] ?? '');
+    $cambioProveedor = $cambioProveedorRaw === '' ? null : (float) $cambioProveedorRaw;
     $descripcion  = trim($_POST['descripcion'] ?? '');
     $detalleJson  = trim($_POST['detalle'] ?? '[]');
     $eliminarComprobante = ($_POST['eliminar_comprobante'] ?? '') === '1';
 
     // Monto real del comprobante subido (para el futuro módulo de egresos).
-    // Opcional: si no lo mandan o mandan vacío, queda NULL.
     $totalImgCargadoRaw = trim($_POST['total_img_cargado'] ?? '');
-    $totalImgCargado = ($totalImgCargadoRaw !== '') ? floatval($totalImgCargadoRaw) : null;
+    if ($totalImgCargadoRaw === '' || !is_numeric($totalImgCargadoRaw)) {
+        responder(false, 'El monto del comprobante es obligatorio.');
+    }
+    $totalImgCargado = (float) $totalImgCargadoRaw;
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
     if (empty($proveedor_id)) responder(false, 'Debes seleccionar un proveedor.');
     if (empty($fecha_compra)) responder(false, 'La fecha de compra es obligatoria.');
+    if (!in_array($moneda, ['PEN', 'USD', 'EUR'], true)) responder(false, 'Selecciona una moneda válida.');
+    if ($cambioProveedor !== null && $cambioProveedor <= 0) responder(false, 'El tipo de cambio del proveedor debe ser mayor a cero.');
+    if ($moneda === 'PEN') $cambioProveedor = null;
     if ($totalImgCargado !== null && $totalImgCargado < 0) {
         responder(false, 'El monto del comprobante no puede ser negativo.');
     }
 
     $proveedor = executeQuery($conectar, "SELECT ruc FROM proveedor WHERE ruc = :ruc", ['ruc' => $proveedor_id]);
     if (empty($proveedor)) responder(false, 'El proveedor seleccionado no existe.');
+    try {
+        $snapshotTipoCambio = $moneda === 'PEN'
+            ? ['fecha' => $fecha_compra, 'compra' => 1, 'venta' => 1, 'fuente' => 'local', 'moneda' => 'PEN']
+            : consultarTipoCambio($fecha_compra, $moneda);
+    } catch (Throwable $e) {
+        if ($moneda !== 'PEN' && $cambioProveedor !== null && $cambioProveedor > 0) {
+            $snapshotTipoCambio = ['fecha' => $fecha_compra, 'compra' => null, 'venta' => null, 'fuente' => 'proveedor', 'moneda' => $moneda];
+        } else {
+            responder(false, $e->getMessage());
+        }
+    }
 
     $detalleEntrada = json_decode($detalleJson, true);
     if (!is_array($detalleEntrada)) $detalleEntrada = [];
@@ -534,6 +564,11 @@ function guardarCompra()
     unset($linea);
 
     $totalCompra = array_sum(array_column($detalle, 'total'));
+    $tipoCambioAplicado = $moneda === 'PEN' ? 1.0 : ($cambioProveedor ?? (float) $snapshotTipoCambio['venta']);
+    $snapshotTipoCambio['tc_aplicado'] = round($tipoCambioAplicado, 4);
+    $snapshotTipoCambio['origen_tc'] = $moneda === 'PEN' ? 'local' : ($cambioProveedor !== null ? 'proveedor' : 'oficial');
+    $snapshotTipoCambio['total_pen'] = round($totalCompra * $tipoCambioAplicado, 2);
+    $snapshotTipoCambioJson = json_encode($snapshotTipoCambio, JSON_UNESCAPED_UNICODE);
 
     $jsDetalleSnapshot = array_map(function ($linea) use ($infoMaterial, $infoUnidad) {
         return [
@@ -568,10 +603,12 @@ function guardarCompra()
             $nuevaCompra = executeQuery($conectar, "
                 INSERT INTO compra (
                     proveedor_id, fecha_compra, img_comprobante, descripcion,
-                    total, total_img_cargado, js_detalle, created_at, js_session, js_historial
+                    total, total_img_cargado, moneda, js_tipo_cambio, cambio_proveedor,
+                    js_detalle, created_at, js_session, js_historial
                 ) VALUES (
                     :proveedor_id, :fecha_compra, :img_comprobante, :descripcion,
-                    :total, :total_img_cargado, :js_detalle::jsonb, NOW(), :js_session, :js_historial
+                    :total, :total_img_cargado, :moneda, :js_tipo_cambio::jsonb, :cambio_proveedor,
+                    :js_detalle::jsonb, NOW(), :js_session, :js_historial
                 ) RETURNING id
             ", [
                 'proveedor_id'      => $proveedor_id,
@@ -580,6 +617,9 @@ function guardarCompra()
                 'descripcion'       => $descripcion ?: null,
                 'total'             => $totalCompra,
                 'total_img_cargado' => $totalImgCargado,
+                'moneda'            => $moneda,
+                'js_tipo_cambio'    => $snapshotTipoCambioJson,
+                'cambio_proveedor'  => $cambioProveedor,
                 'js_detalle'        => $jsDetalleJson,
                 'js_session'        => $js_session,
                 'js_historial'      => $js_historial,
@@ -743,6 +783,9 @@ function guardarCompra()
                     descripcion        = :descripcion,
                     total              = :total,
                     total_img_cargado  = :total_img_cargado,
+                    moneda             = :moneda,
+                    js_tipo_cambio     = :js_tipo_cambio::jsonb,
+                    cambio_proveedor   = :cambio_proveedor,
                     js_detalle         = :js_detalle::jsonb,
                     update_at          = NOW(),
                     js_session         = :js_session,
@@ -755,6 +798,9 @@ function guardarCompra()
                 'descripcion'       => $descripcion ?: null,
                 'total'             => $totalCompra,
                 'total_img_cargado' => $totalImgCargado,
+                'moneda'            => $moneda,
+                'js_tipo_cambio'    => $snapshotTipoCambioJson,
+                'cambio_proveedor'  => $cambioProveedor,
                 'js_detalle'        => $jsDetalleJson,
                 'js_session'        => $js_session,
                 'js_historial'      => $js_historial,

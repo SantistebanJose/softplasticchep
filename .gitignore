@@ -3,3 +3,4 @@ includes/config.php
 Thumbs.db
 /vendor/
 /node_modules/
+/controllers/config_tipo_cambio.php

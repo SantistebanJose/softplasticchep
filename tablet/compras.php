@@ -28,6 +28,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
+    <link rel="stylesheet" href="../assets/css/responsive.css">
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
 <body>
@@ -138,8 +139,24 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 .pc-cmp-topbar{ display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:0 0 auto; }
 @media (max-width:560px){ .pc-cmp-topbar{ grid-template-columns:1fr; } }
+.pc-cmp-topbar-moneda{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+@media (min-width:880px){ .pc-cmp-topbar-moneda{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:560px){ .pc-cmp-topbar-moneda{ grid-template-columns:1fr; } }
 .pc-cmp-topbar-group{ border:1px solid #e7e4dd; border-radius:14px; background:#fff; padding:12px 14px; }
 .pc-cmp-topbar-group > label{ display:flex; align-items:center; gap:6px; font-size:.78em; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:#8a8578; margin-bottom:8px; }
+
+.pc-cmp-detail-wrap{ overflow-x:auto; padding:0 12px 12px; }
+.pc-cmp-detail-table{ min-width:900px; }
+.pc-cmp-detail-table .form-control,.pc-cmp-detail-table .form-select{ min-width:90px; }
+.pc-cmp-detail-table .mat-material{ min-width:180px; font-weight:600; }
+.pc-cmp-detail-total{ padding:12px 18px 18px; text-align:right; }
+@media(max-width:700px){
+    .pc-cmp-detail-wrap{ overflow:visible; padding:0 8px 8px; }
+    .pc-cmp-detail-table{ min-width:0; }
+    .pc-cmp-detail-table .form-control,.pc-cmp-detail-table .form-select{ min-width:0; width:58%; }
+    .pc-cmp-detail-table td[data-label="Material"]{ display:block; }
+    .pc-cmp-detail-table td[data-label="Material"] .mat-material{ width:100%; }
+}
 
 /* Materiales */
 .pc-mat-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(170px,1fr)); gap:10px; }
@@ -188,10 +205,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-cmp-layout{ flex:1; min-height:0; display:flex; flex-direction:column; gap:14px; }
 .pc-cmp-content{ display:flex; flex-direction:column; gap:14px; }
 @media (min-width:880px) and (orientation:landscape){
-    .pc-cmp-layout{ display:grid; grid-template-columns:1fr 320px; align-items:start; gap:14px; }
+    .pc-cmp-layout{ display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:14px; }
     .pc-cmp-content{ max-height:100%; }
-    .pc-cmp-ticket-col{ position:sticky; top:0; align-self:start; display:flex; flex-direction:column; max-height:calc(100vh - 210px); }
-    .pc-cmp-ticket-col .pc-panel{ flex:1; min-height:0; }
 }
 @media (min-width:1180px) and (orientation:landscape){
     .pc-cmp-layout{ grid-template-columns:1fr 340px; }
@@ -263,7 +278,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
         <div class="modal-body pc-cmp-form-body">
 
-            <div class="pc-cmp-topbar">
+            <div class="pc-cmp-topbar pc-cmp-topbar-moneda">
                 <div class="pc-cmp-topbar-group">
                     <label><i class="fa-solid fa-calendar"></i> Fecha de compra *</label>
                     <input type="date" id="cmp_fecha_compra" class="form-control form-control-lg">
@@ -273,6 +288,18 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     <input type="text" id="cmp_descripcion" class="form-control form-control-lg" placeholder="Opcional">
                 </div>
             </div>
+
+            <div class="pc-cmp-topbar">
+                <div class="pc-cmp-topbar-group">
+                    <label>Moneda de la compra</label>
+                    <select id="cmp_moneda" class="form-select form-select-lg"><option value="PEN">Soles (PEN)</option><option value="USD">Dólares (USD)</option><option value="EUR">Euros (EUR)</option></select>
+                </div>
+                <div class="pc-cmp-topbar-group">
+                    <label>Tipo de cambio del proveedor (S/ por unidad)</label>
+                    <input type="number" id="cmp_cambio_proveedor" class="form-control form-control-lg" min="0.0001" step="0.0001" placeholder="Opcional">
+                </div>
+            </div>
+            <div id="cmp_tipo_cambio_info" hidden>PEN: 1.0000</div>
 
             <div class="pc-cmp-layout">
                 <div class="pc-cmp-content">
@@ -314,7 +341,24 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                 <div class="pc-mat-empty">Escribe para buscar un material.</div>
                             </div>
                         </div>
-                        <div id="cmp_linea_form_wrap" style="padding:0 12px 12px 12px;"></div>
+                        <div class="pc-cmp-detail-wrap pc-table-wrap pc-table-responsive-cards">
+                            <table class="pc-table pc-cmp-detail-table">
+                                <thead><tr>
+                                    <th style="min-width:190px">Material</th>
+                                    <th style="min-width:150px">Unidad</th>
+                                    <th style="width:110px">Cantidad</th>
+                                    <th style="width:110px">P.U.</th>
+                                    <th style="width:130px">Total</th>
+                                    <th style="min-width:150px">Comentario</th>
+                                    <th style="width:48px"></th>
+                                </tr></thead>
+                                <tbody id="cmp_ticket_list"></tbody>
+                            </table>
+                        </div>
+                        <div class="pc-cmp-detail-total">
+                            <span>Total de la compra: <strong id="cmp_ticket_total_monto">S/ 0.00</strong></span>
+                            <div><small class="text-muted" id="cmp_ticket_total_pen_info"></small></div>
+                        </div>
                     </div>
 
                     <!-- Comprobante -->
@@ -336,31 +380,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                 </button>
                             </div>
                             <div>
-                                <label style="font-size:.78em; font-weight:700; color:#5c5947;">Monto del comprobante (S/)</label>
-                                <input type="number" id="cmp_total_img_cargado" class="form-control form-control-lg" min="0" step="0.01" placeholder="Opcional">
+                                <label style="font-size:.78em; font-weight:700; color:#5c5947;">Monto del comprobante *</label>
+                                <input type="number" id="cmp_total_img_cargado" class="form-control form-control-lg" min="0" step="0.01" required>
                             </div>
                         </div>
                     </div>
 
-                </div>
-
-                <!-- Ticket -->
-                <div class="pc-cmp-ticket-col">
-                    <div class="pc-panel accent-teal">
-                        <div class="pc-panel-head"><h6><i class="fa-solid fa-cart-shopping"></i> Resumen de la compra</h6></div>
-                        <div class="pc-panel-body-scroll" style="padding:0;">
-                            <ul class="pc-tk-list" id="cmp_ticket_list">
-                                <li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca uno de arriba para empezar.</li>
-                            </ul>
-                        </div>
-                        <div class="pc-tk-resumen">
-                            <div class="pc-tk-resumen-icon"><i class="fa-solid fa-coins"></i></div>
-                            <div class="pc-tk-resumen-texto">
-                                <span class="total">Total: <b id="cmp_ticket_total_monto">S/ 0.00</b></span>
-                                <span class="detalle" id="cmp_ticket_detalle">0 material(es)</span>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
             </div>
@@ -410,6 +435,9 @@ let comprobanteUrlActual = null;        // URL ya guardada (modo edición)
 let eliminarComprobanteFlag = false;
 
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('cmp_moneda').addEventListener('change', actualizarTipoCambioCompraTablet);
+    document.getElementById('cmp_fecha_compra').addEventListener('change', actualizarTipoCambioCompraTablet);
+    document.getElementById('cmp_cambio_proveedor').addEventListener('input', renderTicketCompra);
     cargarCompras().catch(err => {
         console.error('Error cargando compras:', err);
         document.getElementById('gridCompras').innerHTML =
@@ -442,9 +470,27 @@ document.addEventListener('DOMContentLoaded', () => {
 // =============================================================================
 // Utilidades de formato
 // =============================================================================
-function formatearMontoCompra(n) {
+function formatearMontoCompra(n, moneda = null) {
     const num = Number(n) || 0;
-    return 'S/ ' + num.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    moneda = moneda || document.getElementById('cmp_moneda')?.value || 'PEN';
+    return new Intl.NumberFormat('es-PE', { style: 'currency', currency: moneda }).format(num);
+}
+
+async function actualizarTipoCambioCompraTablet() {
+    const moneda = document.getElementById('cmp_moneda').value;
+    const campoCambioProveedor = document.getElementById('cmp_cambio_proveedor');
+    campoCambioProveedor.disabled = moneda === 'PEN';
+    if (moneda === 'PEN') campoCambioProveedor.value = '';
+    const fecha = document.getElementById('cmp_fecha_compra').value;
+    const info = document.getElementById('cmp_tipo_cambio_info');
+    if (moneda === 'PEN') { info.textContent = 'PEN: 1.0000'; renderTicketCompra(); return; }
+    if (!fecha) { info.textContent = 'Selecciona la fecha'; return; }
+    info.textContent = 'Consultando…';
+    const r = await llamarCompra('CONSULTARTIPOCAMBIO', { fecha, moneda });
+    if (!r.success) { info.textContent = r.message; return; }
+    const tc = r.tipo_cambio;
+    info.textContent = `${tc.moneda} · compra ${Number(tc.compra).toFixed(4)} / venta ${Number(tc.venta).toFixed(4)} (${tc.fecha})`;
+    renderTicketCompra();
 }
 function formatearCantidadCompra(n) {
     if (n === null || n === undefined || n === '') return '-';
@@ -484,13 +530,18 @@ async function cargarCompras() {
 
 function renderStatRowCompras(compras) {
     const cantidad = compras.length;
-    const totalGastado = compras.reduce((s, c) => s + Number(c.total || 0), 0);
+    const totalesPorMoneda = compras.reduce((s, c) => {
+        const moneda = c.moneda || 'PEN';
+        s[moneda] = (s[moneda] || 0) + Number(c.total || 0);
+        return s;
+    }, {});
+    const totalGastado = Object.entries(totalesPorMoneda).map(([m, t]) => formatearMontoCompra(t, m)).join(' · ') || formatearMontoCompra(0, 'PEN');
     const conComprobante = compras.filter(c => !!c.img_comprobante).length;
     const sinComprobante = cantidad - conComprobante;
 
     document.getElementById('statRowCompras').innerHTML = `
         <div class="pc-stat-chip s-gray"><div class="ico"><i class="fa-solid fa-cart-shopping"></i></div><div class="txt"><div class="n">${cantidad}</div><div class="l">Compras</div></div></div>
-        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-sack-dollar"></i></div><div class="txt"><div class="n">${formatearMontoCompra(totalGastado)}</div><div class="l">Total gastado</div></div></div>
+        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-sack-dollar"></i></div><div class="txt"><div class="n">${totalGastado}</div><div class="l">Total gastado</div></div></div>
         <div class="pc-stat-chip s-success"><div class="ico"><i class="fa-solid fa-receipt"></i></div><div class="txt"><div class="n">${conComprobante}</div><div class="l">Con comprobante</div></div></div>
         <div class="pc-stat-chip s-purple"><div class="ico"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="txt"><div class="n">${sinComprobante}</div><div class="l">Sin comprobante</div></div></div>
     `;
@@ -513,7 +564,7 @@ function tarjetaCompraHtml(c) {
         </div>
         <div class="pc-cmp-stats">
             <div class="pc-cmp-stat"><div class="num">${c.items_count ?? 0}</div><div class="lbl">Material(es)</div></div>
-            <div class="pc-cmp-stat"><div class="num">${formatearMontoCompra(c.total)}</div><div class="lbl">Total</div></div>
+            <div class="pc-cmp-stat"><div class="num">${formatearMontoCompra(c.total, c.moneda || 'PEN')}</div><div class="lbl">Total</div></div>
         </div>
         ${c.img_comprobante
             ? `<span class="pc-cmp-tag si-comprobante"><i class="fa-solid fa-check"></i> Con comprobante</span>`
@@ -778,163 +829,117 @@ async function abrirFormularioMaterialRapidoTablet() {
     abrirFormularioLineaCompra(json.material); // lo deja listo para agregar cantidad
 }
 
-async function abrirFormularioLineaCompra(material) {
-    materialSeleccionadoTemp = material;
-    const raizId = material.unidad_medida_id || '';
-    const unidades = await obtenerUnidadesCompatiblesCompra(raizId);
-    const wrap = document.getElementById('cmp_linea_form_wrap');
-
-    const opcionesUnidad = raizId
-        ? unidades.map(u => `<option value="${u.id}" data-equiv="${u.equivalencia}"
-                ${u.id == raizId ? 'selected' : ''}>${u.nombre} (${u.nombre_corto})</option>`).join('')
-        : '<option value="">Este material no tiene unidad base asignada</option>';
-    const unidadBase = unidades.find(u => String(u.id) === String(raizId));
-    const equivalenciaMaterial = parseFloat(material.unidad_equivalencia ?? unidadBase?.equivalencia ?? 1) || 1;
-    const unidadBaseCorto = material.unidad_corto || unidadBase?.nombre_corto || '';
-
-    wrap.innerHTML = `
-        <div class="pc-linea-form">
-            <div class="titulo"><i class="fa-solid fa-cube"></i> ${material.nombre}</div>
-            <div class="grid-campos">
-                <div>
-                    <label>Cantidad *</label>
-                    <input type="number" id="linea_cantidad" class="form-control form-control-lg" min="0.0001" step="0.0001" placeholder="0">
-                </div>
-                <div>
-                    <label>Unidad de medida *</label>
-                    <select id="linea_unidad" class="form-select form-select-lg" ${raizId ? '' : 'disabled'}>${raizId ? '<option value="">Selecciona...</option>' : ''}${opcionesUnidad}</select>
-                    <small id="linea_conversion_info" class="text-muted d-block mt-1"></small>
-                </div>
-            </div>
-            <div class="grid-campos">
-                <div>
-                    <label>Subtotal (S/)</label>
-                    <input type="number" id="linea_sub_total" class="form-control form-control-lg" min="0" step="0.01" placeholder="0.00">
-                </div>
-                <div>
-                    <label>Total (S/)</label>
-                    <input type="number" id="linea_total" class="form-control form-control-lg" min="0" step="0.01" placeholder="0.00">
-                </div>
-            </div>
-            <div class="grid-campos full">
-                <div>
-                    <label>Comentario</label>
-                    <input type="text" id="linea_comentario" class="form-control form-control-lg" placeholder="Opcional">
-                </div>
-            </div>
-            <div class="acciones">
-                <button type="button" class="btn btn-secondary" onclick="cerrarFormularioLineaCompra()">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="confirmarLineaCompra()"><i class="fa-solid fa-plus"></i> Agregar a la compra</button>
-            </div>
-        </div>`;
-
-    document.getElementById('linea_sub_total').addEventListener('input', function () {
-        document.getElementById('linea_total').value = this.value;
-    });
-
-    const cantidadInput = document.getElementById('linea_cantidad');
-    const unidadSelect = document.getElementById('linea_unidad');
-    const conversionInfo = document.getElementById('linea_conversion_info');
-    function actualizarConversionTablet() {
-        const unidad = unidades.find(u => String(u.id) === String(unidadSelect.value));
-        if (!unidad || !unidadBaseCorto) { conversionInfo.textContent = ''; return; }
-        const factor = (parseFloat(unidad.equivalencia) || 1) / equivalenciaMaterial;
-        if (Math.abs(factor - 1) < 1e-9) { conversionInfo.textContent = ''; return; }
-        const cantidad = parseFloat(cantidadInput.value) || 0;
-        const equivalente = cantidad > 0 ? cantidad * factor : factor;
-        conversionInfo.textContent = cantidad > 0
-            ? `Equivale a ${formatearCantidadCompra(equivalente)} ${unidadBaseCorto}`
-            : `1 ${unidad.nombre_corto} equivale a ${formatearCantidadCompra(equivalente)} ${unidadBaseCorto}`;
-    }
-    cantidadInput.addEventListener('input', actualizarConversionTablet);
-    unidadSelect.addEventListener('change', actualizarConversionTablet);
-    actualizarConversionTablet();
-
-    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+// El conductor usa el mismo detalle tabular que el administrador.
+function escapeHtmlCompraTablet(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
 }
 
 function cerrarFormularioLineaCompra() {
     materialSeleccionadoTemp = null;
-    document.getElementById('cmp_linea_form_wrap').innerHTML = '';
 }
 
-function confirmarLineaCompra() {
-    const cantidad = parseFloat(document.getElementById('linea_cantidad').value);
-    const unidadSelect = document.getElementById('linea_unidad');
-    const unidadMedidaId = parseInt(unidadSelect.value);
-    const unidadTexto = unidadSelect.options[unidadSelect.selectedIndex].text;
-    const subTotal = parseFloat(document.getElementById('linea_sub_total').value) || 0;
-    const totalRaw = document.getElementById('linea_total').value;
-    const total = totalRaw !== '' ? parseFloat(totalRaw) : subTotal;
-    const comentario = document.getElementById('linea_comentario').value.trim();
+async function abrirFormularioLineaCompra(material) {
+    await agregarFilaDetalleCompraTablet(material);
+}
 
-    if (!cantidad || cantidad <= 0) {
-        Swal.fire('Cantidad inválida', 'Ingresa una cantidad mayor a 0.', 'warning');
-        return;
-    }
-    if (!unidadMedidaId) {
-        Swal.fire('Falta la unidad', 'Selecciona la unidad de medida.', 'warning');
-        return;
-    }
-
+async function agregarFilaDetalleCompraTablet(material, datos = null) {
+    const unidades = await obtenerUnidadesCompatiblesCompra(material.unidad_medida_id);
+    const unidadBase = Number(material.unidad_medida_id || 0);
     ticketDetalleCompra.push({
         tempId: ++contadorLineaTicketCompra,
-        id: null,
-        material_id: materialSeleccionadoTemp.id,
-        material_nombre: materialSeleccionadoTemp.nombre,
-        unidad_medida_id: unidadMedidaId,
-        unidad_texto: unidadTexto,
-        cantidad,
-        sub_total: subTotal,
-        total,
-        comentario: comentario || null,
-        usado_en_produccion: false,
+        id: datos?.id ?? null,
+        material_id: Number(material.id),
+        material_nombre: material.nombre,
+        material_unidad_medida_id: unidadBase,
+        unidades,
+        unidad_medida_id: Number(datos?.unidad_medida_id || unidadBase),
+        cantidad: datos ? Number(datos.cantidad) : 0,
+        sub_total: datos ? Number(datos.sub_total) : 0,
+        total: datos ? Number(datos.total) : 0,
+        comentario: datos?.comentario || '',
+        usado_en_produccion: !!datos?.usado_en_produccion,
+        total_tocado: datos
+            ? Math.abs(Number(datos.total || 0) - Number(datos.cantidad || 0) * Number(datos.sub_total || 0)) > 0.01
+            : false,
     });
-
-    cerrarFormularioLineaCompra();
-    document.getElementById('cmp_buscar_material').value = '';
-    document.getElementById('cmp_material_grid').innerHTML = '<div class="pc-mat-empty">Escribe para buscar un material.</div>';
     renderTicketCompra();
+    document.getElementById('cmp_ticket_list').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function quitarLineaCompra(tempId) {
-    const linea = ticketDetalleCompra.find(l => l.tempId === tempId);
-    if (linea && linea.usado_en_produccion) {
-        Swal.fire('No se puede quitar', 'Este lote ya fue usado en un registro de producción. Puedes editar su cantidad, pero no eliminarlo.', 'warning');
-        return;
-    }
-    ticketDetalleCompra = ticketDetalleCompra.filter(l => l.tempId !== tempId);
-    renderTicketCompra();
+function actualizarTotalFilaCompraTablet(linea) {
+    linea.total = Number((Number(linea.cantidad || 0) * Number(linea.sub_total || 0)).toFixed(2));
+    linea.total_tocado = false;
+    const fila = document.querySelector(`#cmp_ticket_list tr[data-tempid="${linea.tempId}"]`);
+    const totalInput = fila?.querySelector('.mat-total');
+    if (totalInput) totalInput.value = linea.total ? linea.total.toFixed(2) : '';
+    actualizarResumenCompraTablet();
+}
+
+function actualizarResumenCompraTablet() {
+    const total = ticketDetalleCompra.reduce((suma, linea) => suma + Number(linea.total || 0), 0);
+    document.getElementById('cmp_ticket_total_monto').textContent = formatearMontoCompra(total);
+    const moneda = document.getElementById('cmp_moneda').value;
+    const tcTexto = document.getElementById('cmp_tipo_cambio_info').textContent;
+    const tcOficial = Number((tcTexto.match(/venta ([\d.]+)/) || [])[1]) || 0;
+    const rate = moneda === 'PEN' ? 1 : (Number(document.getElementById('cmp_cambio_proveedor').value) || tcOficial);
+    document.getElementById('cmp_ticket_total_pen_info').textContent = rate
+        ? `Equivalente aprox.: ${formatearMontoCompra(total * rate, 'PEN')}`
+        : '';
 }
 
 function renderTicketCompra() {
-    const list = document.getElementById('cmp_ticket_list');
-    const totalMontoEl = document.getElementById('cmp_ticket_total_monto');
-    const detalleEl = document.getElementById('cmp_ticket_detalle');
-
+    const tbody = document.getElementById('cmp_ticket_list');
     if (ticketDetalleCompra.length === 0) {
-        list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca uno de arriba para empezar.</li>`;
-    } else {
-        list.innerHTML = ticketDetalleCompra.map(l => `
-            <li class="pc-tk-item">
-                <span class="pellet-sm"><i class="fa-solid fa-cube"></i></span>
-                <div class="cuerpo">
-                    <span class="nombre">${l.material_nombre}</span>
-                    <div class="lote-info">
-                        ${formatearCantidadCompra(l.cantidad)} ${l.unidad_texto} · ${formatearMontoCompra(l.total)}
-                        ${l.comentario ? ' · ' + l.comentario : ''}
-                        ${l.usado_en_produccion ? ' · <b style="color:#D97706;">usado en producción</b>' : ''}
-                    </div>
-                </div>
-                <button type="button" class="pc-tk-remove" onclick="quitarLineaCompra(${l.tempId})" title="Quitar">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </li>`).join('');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Agrega un material para comenzar.</td></tr>';
+        actualizarResumenCompraTablet();
+        return;
     }
 
-    const totalMonto = ticketDetalleCompra.reduce((s, l) => s + Number(l.total || 0), 0);
-    totalMontoEl.textContent = formatearMontoCompra(totalMonto);
-    detalleEl.textContent = `${ticketDetalleCompra.length} material(es)`;
+    tbody.innerHTML = ticketDetalleCompra.map(linea => {
+        const opcionesUnidad = linea.unidades.map(unidad => `
+            <option value="${unidad.id}" ${Number(unidad.id) === Number(linea.unidad_medida_id) ? 'selected' : ''}>
+                ${escapeHtmlCompraTablet(unidad.nombre)} (${escapeHtmlCompraTablet(unidad.nombre_corto)})
+            </option>`).join('');
+        return `<tr class="fila-detalle-material" data-tempid="${linea.tempId}">
+            <td data-label="Material"><div class="mat-material">${escapeHtmlCompraTablet(linea.material_nombre)}</div></td>
+            <td data-label="Unidad"><select class="form-select mat-unidad" required>${opcionesUnidad}</select></td>
+            <td data-label="Cantidad"><input type="number" class="form-control mat-cantidad" min="0.0001" step="0.0001" value="${linea.cantidad || ''}" required></td>
+            <td data-label="P.U."><input type="number" class="form-control mat-pu" min="0" step="0.01" value="${linea.sub_total || ''}" placeholder="0.00"></td>
+            <td data-label="Total"><input type="number" class="form-control mat-total" min="0" step="0.01" value="${linea.total || ''}" placeholder="0.00"></td>
+            <td data-label="Comentario"><input type="text" class="form-control mat-comentario" value="${escapeHtmlCompraTablet(linea.comentario)}" placeholder="Opcional"></td>
+            <td data-label="" class="pc-td-acciones"><button type="button" class="btn btn-outline-danger btn-sm eliminar-fila-btn" title="Quitar material"><i class="fa-solid fa-xmark"></i></button></td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('tr[data-tempid]').forEach(fila => {
+        const linea = ticketDetalleCompra.find(item => item.tempId === Number(fila.dataset.tempid));
+        fila.querySelector('.mat-unidad').addEventListener('change', event => { linea.unidad_medida_id = Number(event.target.value); });
+        fila.querySelector('.mat-cantidad').addEventListener('input', event => {
+            linea.cantidad = Number(event.target.value) || 0;
+            if (!linea.total_tocado) actualizarTotalFilaCompraTablet(linea);
+        });
+        fila.querySelector('.mat-pu').addEventListener('input', event => {
+            linea.sub_total = Number(event.target.value) || 0;
+            actualizarTotalFilaCompraTablet(linea);
+        });
+        fila.querySelector('.mat-total').addEventListener('input', event => {
+            linea.total = Number(event.target.value) || 0;
+            linea.total_tocado = true;
+            actualizarResumenCompraTablet();
+        });
+        fila.querySelector('.mat-comentario').addEventListener('input', event => { linea.comentario = event.target.value; });
+        fila.querySelector('.eliminar-fila-btn').addEventListener('click', () => {
+            if (linea.usado_en_produccion) {
+                Swal.fire('No se puede quitar', 'Este lote ya fue usado en producción. Puedes editar sus valores.', 'warning');
+                return;
+            }
+            ticketDetalleCompra = ticketDetalleCompra.filter(item => item.tempId !== linea.tempId);
+            renderTicketCompra();
+        });
+    });
+    actualizarResumenCompraTablet();
 }
 
 function obtenerDetalleJsonCompra() {
@@ -1000,6 +1005,10 @@ function limpiarFormularioCompra() {
     document.getElementById('cmp_fecha_compra').value = '';
     document.getElementById('cmp_descripcion').value = '';
     document.getElementById('cmp_total_img_cargado').value = '';
+    document.getElementById('cmp_moneda').value = 'PEN';
+    document.getElementById('cmp_cambio_proveedor').value = '';
+    document.getElementById('cmp_cambio_proveedor').disabled = true;
+    document.getElementById('cmp_tipo_cambio_info').textContent = 'PEN: 1.0000';
     document.getElementById('cmp_buscar_material').value = '';
     document.getElementById('cmp_material_grid').innerHTML = '<div class="pc-mat-empty">Escribe para buscar un material.</div>';
     ticketDetalleCompra = [];
@@ -1019,6 +1028,7 @@ async function abrirModalCrearCompra() {
     document.getElementById('modalCompraTitulo').textContent = 'Registrar compra';
     // Fecha de hoy por defecto
     document.getElementById('cmp_fecha_compra').value = fechaLocalISO();
+    actualizarTipoCambioCompraTablet();
     modalCompra.show();
 }
 
@@ -1035,6 +1045,9 @@ async function abrirModalEditarCompra(id) {
     document.getElementById('cmp_fecha_compra').value = (c.fecha_compra || '').split(' ')[0];
     document.getElementById('cmp_descripcion').value = c.descripcion || '';
     document.getElementById('cmp_total_img_cargado').value = c.total_img_cargado ?? '';
+    document.getElementById('cmp_moneda').value = c.moneda || 'PEN';
+    document.getElementById('cmp_cambio_proveedor').value = c.cambio_proveedor ?? '';
+    await actualizarTipoCambioCompraTablet();
 
     seleccionarProveedorCompra({ ruc: c.proveedor_id, razon_social: c.razon_social, nombre_comercial: c.nombre_comercial });
 
@@ -1042,20 +1055,16 @@ async function abrirModalEditarCompra(id) {
     renderComprobantePreview();
 
     const detalle = json.detalle || [];
-    ticketDetalleCompra = detalle.map(d => ({
-        tempId: ++contadorLineaTicketCompra,
-        id: d.id,
-        material_id: d.material_id,
-        material_nombre: d.material_nombre,
-        unidad_medida_id: d.unidad_medida_id,
-        unidad_texto: `${d.unidad_nombre ?? ''} (${d.unidad_corto ?? ''})`,
-        cantidad: parseFloat(d.cantidad),
-        sub_total: parseFloat(d.sub_total),
-        total: parseFloat(d.total),
-        comentario: d.comentario,
-        usado_en_produccion: !!d.usado_en_produccion,
-    }));
-    renderTicketCompra();
+    ticketDetalleCompra = [];
+    for (const d of detalle) {
+        await agregarFilaDetalleCompraTablet({
+            id: d.material_id,
+            nombre: d.material_nombre,
+            unidad_medida_id: d.material_unidad_base_id,
+            unidad_corto: d.material_unidad_base_corto,
+        }, d);
+    }
+    if (detalle.length === 0) renderTicketCompra();
 
     modalCompra.show();
 }
@@ -1071,8 +1080,18 @@ document.getElementById('formCompra').addEventListener('submit', async function 
         Swal.fire('Falta la fecha', 'Indica la fecha de la compra.', 'warning');
         return;
     }
+    const montoComprobante = document.getElementById('cmp_total_img_cargado').value.trim();
+    if (montoComprobante === '' || !Number.isFinite(Number(montoComprobante)) || Number(montoComprobante) < 0) {
+        Swal.fire('Falta el monto', 'Ingresa el monto que figura en el comprobante.', 'warning');
+        document.getElementById('cmp_total_img_cargado').focus();
+        return;
+    }
     if (ticketDetalleCompra.length === 0) {
         Swal.fire('Falta agregar materiales', 'Debes agregar al menos un material con cantidad y unidad válidas.', 'warning');
+        return;
+    }
+    if (ticketDetalleCompra.some(linea => !(linea.cantidad > 0) || !(linea.unidad_medida_id > 0))) {
+        Swal.fire('Detalle incompleto', 'Completa una cantidad y unidad válidas en cada material.', 'warning');
         return;
     }
 
@@ -1086,6 +1105,8 @@ document.getElementById('formCompra').addEventListener('submit', async function 
         fd.append('id', compraIdActual);
         fd.append('proveedor_id', proveedorSeleccionadoCompra.ruc);
         fd.append('fecha_compra', document.getElementById('cmp_fecha_compra').value);
+        fd.append('moneda', document.getElementById('cmp_moneda').value);
+        fd.append('cambio_proveedor', document.getElementById('cmp_cambio_proveedor').value);
         fd.append('descripcion', document.getElementById('cmp_descripcion').value.trim());
         fd.append('detalle', obtenerDetalleJsonCompra());
         fd.append('total_img_cargado', document.getElementById('cmp_total_img_cargado').value);

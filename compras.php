@@ -84,6 +84,18 @@ include("header.php");
 
           <div class="row">
             <div class="col-md-6 mb-2">
+                <label class="form-label">Moneda de la compra</label>
+                <select class="form-select" id="compra_moneda"><option value="PEN">Soles (PEN)</option><option value="USD">Dólares (USD)</option><option value="EUR">Euros (EUR)</option></select>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Tipo de cambio del proveedor (S/ por unidad)</label>
+                <input type="number" min="0.0001" step="0.0001" class="form-control" id="compra_cambio_proveedor" placeholder="Opcional">
+            </div>
+          </div>
+          <div id="compra_tipo_cambio_info" hidden>PEN: 1.0000</div>
+
+          <div class="row">
+            <div class="col-md-6 mb-2">
                 <label class="form-label">Comprobante</label>
                 <div class="d-flex gap-2">
                     <input type="file" class="form-control" id="compra_comprobante" accept=".jpg,.jpeg,.png,.webp,.pdf">
@@ -95,8 +107,8 @@ include("header.php");
                 <div class="form-text" id="compra_comprobante_preview"></div>
             </div>
             <div class="col-md-6 mb-2">
-                <label class="form-label">Monto del comprobante (S/)</label>
-                <input type="number" step="0.01" min="0" class="form-control" id="compra_total_img_cargado"
+                <label class="form-label">Monto del comprobante *</label>
+                <input type="number" step="0.01" min="0" class="form-control" id="compra_total_img_cargado" required
                        placeholder="Ej: 1180.00">
                 <div class="form-text">Monto real que figura en el documento subido (para el módulo de egresos).</div>
             </div>
@@ -140,6 +152,7 @@ include("header.php");
             <div class="text-end">
                 <div class="form-label mb-0">Total de la compra</div>
                 <h4 id="compra_total_visual">S/ 0.00</h4>
+                <small class="text-muted" id="compra_total_pen_info"></small>
             </div>
           </div>
 
@@ -482,9 +495,30 @@ function badgeRegistro(deletedAt) {
         : '<span class="badge bg-secondary">Inactiva</span>';
 }
 
-function formatearMoneda(n) {
-    return 'S/ ' + Number(n ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatearMoneda(n, moneda = null) {
+    moneda = moneda || document.getElementById('compra_moneda')?.value || 'PEN';
+    return new Intl.NumberFormat('es-PE', { style: 'currency', currency: moneda }).format(Number(n ?? 0));
 }
+
+async function actualizarTipoCambioCompra() {
+    const moneda = document.getElementById('compra_moneda').value;
+    const campoCambioProveedor = document.getElementById('compra_cambio_proveedor');
+    campoCambioProveedor.disabled = moneda === 'PEN';
+    if (moneda === 'PEN') campoCambioProveedor.value = '';
+    const fecha = document.getElementById('compra_fecha').value;
+    const info = document.getElementById('compra_tipo_cambio_info');
+    if (moneda === 'PEN') { info.textContent = 'PEN: 1.0000'; recalcularTotalCompra(); return; }
+    if (!fecha) { info.textContent = 'Selecciona la fecha'; return; }
+    info.textContent = 'Consultando…';
+    const r = await llamarCompras('CONSULTARTIPOCAMBIO', { fecha, moneda });
+    if (!r.success) { info.textContent = r.message; return; }
+    const tc = r.tipo_cambio;
+    info.textContent = `${tc.moneda} · compra ${Number(tc.compra).toFixed(4)} / venta ${Number(tc.venta).toFixed(4)} (${tc.fecha})`;
+    recalcularTotalCompra();
+}
+document.getElementById('compra_moneda').addEventListener('change', actualizarTipoCambioCompra);
+document.getElementById('compra_fecha').addEventListener('change', actualizarTipoCambioCompra);
+document.getElementById('compra_cambio_proveedor').addEventListener('input', recalcularTotalCompra);
 
 function aplicarMayusculasEnVivo(input) {
     if (!input) return;
@@ -509,9 +543,10 @@ function renderMontoComprobante(c) {
     const montoImg = parseFloat(c.total_img_cargado);
     const montoCalculado = parseFloat(c.total);
     const diferencia = Math.abs(montoImg - montoCalculado);
-    const texto = formatearMoneda(montoImg);
+    const moneda = c.moneda || 'PEN';
+    const texto = formatearMoneda(montoImg, moneda);
     if (diferencia > 0.01) {
-        return `<span title="Difiere del total calculado (${formatearMoneda(montoCalculado)}) por ${formatearMoneda(diferencia)}">
+        return `<span title="Difiere del total calculado (${formatearMoneda(montoCalculado, moneda)}) por ${formatearMoneda(diferencia, moneda)}">
                     ${texto} <i class="fa-solid fa-triangle-exclamation text-warning"></i>
                 </span>`;
     }
@@ -798,7 +833,7 @@ async function cargarCompras() {
             <td data-label="Fecha">${c.fecha_compra}</td>
             <td data-label="Descripción">${c.descripcion ?? '-'}</td>
             <td data-label="Materiales">${c.items_count}</td>
-            <td data-label="Total">${formatearMoneda(c.total)}</td>
+            <td data-label="Total">${formatearMoneda(c.total, c.moneda || 'PEN')}</td>
             <td data-label="Monto comprobante">${renderMontoComprobante(c)}</td>
             <td data-label="Comprobante">${c.img_comprobante
                 ? `<button type="button" class="pc-icon-btn" onclick="verComprobante(${c.id})" title="Ver comprobante">
@@ -1020,6 +1055,13 @@ function recalcularTotalCompra() {
         total += parseFloat(input.value) || 0;
     });
     document.getElementById('compra_total_visual').textContent = formatearMoneda(total);
+    const moneda = document.getElementById('compra_moneda').value;
+    const tcTexto = document.getElementById('compra_tipo_cambio_info').textContent;
+    const tcOficial = Number((tcTexto.match(/venta ([\d.]+)/) || [])[1]) || 0;
+    const rate = moneda === 'PEN' ? 1 : (Number(document.getElementById('compra_cambio_proveedor').value) || tcOficial);
+    document.getElementById('compra_total_pen_info').textContent = rate
+        ? `Equivalente aprox.: ${new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(total * rate)} (cambio ${rate.toFixed(4)})`
+        : '';
 }
 
 function obtenerDetalleJson() {
@@ -1053,6 +1095,11 @@ function limpiarFormularioCompra() {
     document.getElementById('compra_comprobante_actual').innerHTML = '';
     document.getElementById('compra_total_visual').textContent = formatearMoneda(0);
     document.getElementById('compra_total_img_cargado').value = '';
+    document.getElementById('compra_moneda').value = 'PEN';
+    document.getElementById('compra_cambio_proveedor').value = '';
+    document.getElementById('compra_cambio_proveedor').disabled = true;
+    document.getElementById('compra_tipo_cambio_info').textContent = 'PEN: 1.0000';
+    document.getElementById('compra_total_pen_info').textContent = '';
     if (tomSelectModalProveedor) tomSelectModalProveedor.clear(true);
     compraIdActual = 0;
     comprobanteActualRuta = null;
@@ -1083,6 +1130,9 @@ async function abrirModalEditarCompra(id) {
     document.getElementById('compra_fecha').value = c.fecha_compra;
     document.getElementById('compra_descripcion').value = c.descripcion ?? '';
     document.getElementById('compra_total_img_cargado').value = c.total_img_cargado ?? '';
+    document.getElementById('compra_moneda').value = c.moneda || 'PEN';
+    document.getElementById('compra_cambio_proveedor').value = c.cambio_proveedor ?? '';
+    await actualizarTipoCambioCompra();
 
     await cargarProveedoresModal(c.proveedor_id);
 
@@ -1125,6 +1175,13 @@ document.getElementById('formCompra').addEventListener('submit', async function 
         return;
     }
 
+    const montoComprobante = document.getElementById('compra_total_img_cargado').value.trim();
+    if (montoComprobante === '' || !Number.isFinite(Number(montoComprobante)) || Number(montoComprobante) < 0) {
+        Swal.fire('Falta el monto', 'Ingresa el monto que figura en el comprobante.', 'warning');
+        document.getElementById('compra_total_img_cargado').focus();
+        return;
+    }
+
     const detalleJson = obtenerDetalleJson();
     if (JSON.parse(detalleJson).length === 0) {
         Swal.fire('Atención', 'Agrega al menos un material con cantidad y unidad de medida válidas.', 'warning');
@@ -1135,6 +1192,8 @@ document.getElementById('formCompra').addEventListener('submit', async function 
     formData.append('id', compraIdActual);
     formData.append('proveedor_id', document.getElementById('compra_proveedor_id').value);
     formData.append('fecha_compra', document.getElementById('compra_fecha').value);
+    formData.append('moneda', document.getElementById('compra_moneda').value);
+    formData.append('cambio_proveedor', document.getElementById('compra_cambio_proveedor').value);
     formData.append('descripcion', document.getElementById('compra_descripcion').value.trim());
     formData.append('detalle', detalleJson);
     formData.append('eliminar_comprobante', eliminarComprobanteFlag ? '1' : '0');
