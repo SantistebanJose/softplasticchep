@@ -473,7 +473,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje2.php';
+const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 // El modal SweetAlert de cantidad se monta sobre el modal Bootstrap.
 const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'), { focus: false });

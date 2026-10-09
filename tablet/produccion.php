@@ -777,7 +777,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_PRODUCCION = '../controllers/clssProduccion2.php';
+const CONTROLADOR_PRODUCCION = '../controllers/clssProduccion.php';
 const CONTROLADOR_MOLDES     = '../controllers/clssMoldes.php';
 const CONTROLADOR_COLOR      = '../controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';

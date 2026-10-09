@@ -416,7 +416,7 @@ include("header.php");
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
 <script>
-const CONTROLADOR_ENSAMBLAJE = 'controllers/clssEnsamblaje2.php';
+const CONTROLADOR_ENSAMBLAJE = 'controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = 'controllers/clssSucursal.php';
 // SweetAlert de cantidad se abre sobre este modal; desactivar el focus trap
 // de Bootstrap permite escribir en el campo anidado.
