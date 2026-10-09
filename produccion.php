@@ -1160,7 +1160,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            ${puedeGestionar && !salidas.length ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+            ${puedeGestionar ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
             </button>` : ''}
         </div>

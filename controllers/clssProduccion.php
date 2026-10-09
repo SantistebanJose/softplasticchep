@@ -1519,9 +1519,6 @@ function guardarProduccion()
                     throw new Exception('Esta producción ya finalizó. Solo un administrador puede editarla.');
                 }
             }
-            if (!empty(json_decode($actual[0]['js_cantidades_salientes'] ?? '[]', true))) {
-                throw new Exception('No puedes editar los datos de producción después de registrar una salida.');
-            }
             if (!empty($actual[0]['deleted_at'])) {
                 throw new Exception('No puedes editar un registro inactivo. Reactívalo primero.');
             }
