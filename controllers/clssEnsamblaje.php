@@ -394,8 +394,12 @@ function buscarProductosDisponiblesEnsamblaje()
     $incluirEnsamblajeId = intval($_POST['incluir_ensamblaje_id'] ?? 0);
 
     $condicionLibre = "NOT EXISTS (
-        SELECT 1 FROM rel_ensamblaje_producto rep
-        WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+        SELECT 1
+        FROM rel_ensamblaje_producto rep
+        LEFT JOIN ensamblaje er ON er.id = rep.ensamblaje_id
+        WHERE rep.molde_produccion_id = t1.id
+          AND rep.deleted_at IS NULL
+          AND COALESCE(er.proveniente, '') <> 'prod2_pendiente'
     )";
     if ($incluirEnsamblajeId > 0) {
         $condicionLibre = "(" . $condicionLibre . " OR EXISTS (
@@ -406,9 +410,24 @@ function buscarProductosDisponiblesEnsamblaje()
     }
 
     $where = [
-        "t1.enviado_ensamblaje = TRUE",
+        "(t1.enviado_ensamblaje = TRUE OR t1.pases_finalizados = TRUE
+          OR jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) > 0 OR EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep_p
+            JOIN ensamblaje ep ON ep.id = rep_p.ensamblaje_id
+            WHERE rep_p.molde_produccion_id = t1.id
+              AND rep_p.deleted_at IS NULL
+              AND ep.deleted_at IS NULL
+              AND ep.proveniente = 'prod2_pendiente'
+        ))",
         "t1.deleted_at IS NULL",
-        "t1.fecha_hora_fin IS NOT NULL",
+        "(t1.fecha_hora_fin IS NOT NULL OR EXISTS (
+            SELECT 1 FROM rel_ensamblaje_producto rep_p
+            JOIN ensamblaje ep ON ep.id = rep_p.ensamblaje_id
+            WHERE rep_p.molde_produccion_id = t1.id
+              AND rep_p.deleted_at IS NULL
+              AND ep.deleted_at IS NULL
+              AND ep.proveniente = 'prod2_pendiente'
+        ))",
         // NUEVO: solo moldes que SÍ necesitan pasar por Ensamblaje. Si el
         // avance no tiene foto de configuración guardada (viejo) ni molde
         // configurado, se asume 'sí' por compatibilidad (comportamiento
@@ -728,13 +747,11 @@ function buscarProduccionesDisponibles()
     $where  = [
         "t1.deleted_at IS NULL",
         "t1.fecha_hora_fin IS NOT NULL",
-        "t1.enviado_ensamblaje = TRUE",
+        "(t1.enviado_ensamblaje = TRUE OR t1.pases_finalizados = TRUE OR ep.id IS NOT NULL
+          OR jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) > 0)",
         "x.item IS NOT NULL",
         "COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no'",
-        "NOT EXISTS (
-            SELECT 1 FROM rel_ensamblaje_producto rep
-            WHERE rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
-        )",
+        "(rep.id IS NULL OR ep.proveniente = 'prod2_pendiente')",
         // Si la producción ya forma parte de un complemento compatible de
         // Primera Categoría, se ofrece el armado como complemento y no su
         // producción cruda. Al seleccionar el producto fuente (p. ej. PI), la
@@ -800,10 +817,18 @@ function buscarProduccionesDisponibles()
 
     $sql = "SELECT
             t1.id AS produccion_id,
+            rep.id AS relacion_id,
+            rep.ensamblaje_id AS ensamblaje_pendiente_id,
             t1.fecha_envio_ensamblaje,
             t2.nombre AS molde_nombre,
-            t1.cantidad_producida_kg AS cantidad_kg,
-            t1.fecha_hora_fin,
+            COALESCE(
+                rep.cantidad_entrada_produccion,
+                NULLIF(pase.item->>'cantidad', '')::numeric,
+                NULLIF(pase.item->>'cantidad_kg', '')::numeric,
+                t1.cantidad_producida_kg
+            ) AS cantidad_kg,
+            COALESCE(rep.created_at, NULLIF(pase.item->>'fecha', '')::timestamp, t1.fecha_hora_fin) AS fecha_hora_fin,
+            NULLIF(pase.item->>'pasada', '')::integer AS pasada,
             t4.id AS producto_id,
             t1.color_id,
             t3.nombre AS color_nombre_verif,
@@ -814,6 +839,25 @@ function buscarProduccionesDisponibles()
         FROM produccion t1
         LEFT JOIN molde t2 ON t2.id = t1.molde_id
         LEFT JOIN color t3 ON t3.id = t1.color_id
+        LEFT JOIN rel_ensamblaje_producto rep
+          ON rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+        LEFT JOIN ensamblaje ep ON ep.id = rep.ensamblaje_id AND ep.deleted_at IS NULL
+        LEFT JOIN LATERAL (
+            SELECT salida AS item
+            FROM jsonb_array_elements(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) salida
+            WHERE rep.id IS NULL
+            UNION ALL
+            SELECT rep.js_query_consulta_produccion AS item
+            WHERE rep.id IS NOT NULL
+            UNION ALL
+            SELECT jsonb_build_object(
+                'cantidad', t1.cantidad_producida_kg,
+                'fecha', t1.fecha_hora_fin,
+                'pasada', NULL
+            )
+            WHERE rep.id IS NULL
+              AND jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) = 0
+        ) pase ON TRUE
         $joinProducto
         LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
         LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
@@ -863,7 +907,7 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
          WHERE t1.id = :id
            AND t1.deleted_at IS NULL
            AND t1.fecha_hora_fin IS NOT NULL
-           AND t1.enviado_ensamblaje = TRUE
+           AND (t1.enviado_ensamblaje = TRUE OR t1.pases_finalizados = TRUE)
            AND x.item IS NOT NULL
            AND NOT EXISTS (
                SELECT 1 FROM rel_ensamblaje_producto rep
@@ -1261,12 +1305,16 @@ function guardarEnsamblaje()
             if ($prodId <= 0) continue;
             $cantidadEntrada = isset($linea['cantidad_entrada_produccion']) && $linea['cantidad_entrada_produccion'] !== ''
                 ? floatval($linea['cantidad_entrada_produccion']) : null;
+            $relacionId = intval($linea['relacion_id'] ?? 0);
+            $pasada = intval($linea['pasada'] ?? 0);
             if ($cantidadEntrada === null || $cantidadEntrada <= 0) {
                 responder(false, "Debes indicar la cantidad que estás recibiendo de la producción #$prodId antes de guardar.");
             }
             $detalle[] = [
                 'tipo' => 'produccion', 'molde_produccion_id' => $prodId,
                 'derivado_id' => null, 'ensamblaje_complemento_id' => null,
+                'relacion_id' => $relacionId > 0 ? $relacionId : null,
+                'pasada' => $pasada > 0 ? $pasada : null,
                 'cantidad_entrada_produccion' => $cantidadEntrada,
             ];
         } elseif ($tipo === 'derivado') {
@@ -1394,8 +1442,8 @@ function guardarEnsamblaje()
 
             // Claves de comparación: "p:123" producción, "d:45" derivado,
             // "c:78" complemento.
-            $clave = function ($tipo, $prodId, $derId, $compId) {
-                if ($tipo === 'produccion')  return "p:$prodId";
+            $clave = function ($tipo, $prodId, $derId, $compId, $relacionId = null) {
+                if ($tipo === 'produccion')  return !empty($relacionId) ? "r:$relacionId" : "p:$prodId";
                 if ($tipo === 'derivado')    return "d:$derId";
                 return "c:$compId";
             };
@@ -1407,7 +1455,7 @@ function guardarEnsamblaje()
                 } else {
                     $tipo = 'derivado';
                 }
-                $k = $clave($tipo, $l['molde_produccion_id'], $l['derivado_id'], null);
+                $k = $clave($tipo, $l['molde_produccion_id'], $l['derivado_id'], null, $l['id'] ?? null);
                 $actualesPorClave[$k] = [
                     'tipo' => $tipo,
                     'rel_id' => $l['id'],
@@ -1420,8 +1468,15 @@ function guardarEnsamblaje()
             }
 
             $nuevasPorClave = [];
+            foreach ($detalle as &$detalleLinea) {
+                $relacionSolicitada = intval($detalleLinea['relacion_id'] ?? 0);
+                if ($relacionSolicitada > 0 && !isset($actualesPorClave["r:$relacionSolicitada"])) {
+                    $detalleLinea['relacion_id'] = null;
+                }
+            }
+            unset($detalleLinea);
             foreach ($detalle as $d) {
-                $k = $clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id']);
+                $k = $clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id'], $d['relacion_id'] ?? null);
                 $nuevasPorClave[$k] = $d;
             }
 
@@ -1449,7 +1504,7 @@ function guardarEnsamblaje()
             $clavesAInsertar = array_diff(array_keys($nuevasPorClave), array_keys($actualesPorClave));
             $detalleNuevo = array_values(array_filter(
                 $detalle,
-                fn($d) => in_array($clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id']), $clavesAInsertar)
+                fn($d) => in_array($clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id'], $d['relacion_id'] ?? null), $clavesAInsertar)
             ));
             if (!empty($detalleNuevo)) {
                 insertarLineasEnsamblaje($conectar, $id, $detalleNuevo);
@@ -1542,10 +1597,68 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
     foreach ($detalle as $linea) {
         if ($linea['tipo'] === 'produccion') {
             $produccionId = $linea['molde_produccion_id'];
+            $relacionIdPendiente = intval($linea['relacion_id'] ?? 0);
+
+            // Las pasadas recibidas desde Producción 2 ya tienen su fila.
+            // Al guardar este armado se mueve esa misma fila desde el armado
+            // temporal, sin crear un duplicado ni esperar la última pasada.
+            if ($relacionIdPendiente > 0) {
+                $relacionPendiente = executeQuery($conectar, "
+                    SELECT rep.id, rep.ensamblaje_id AS origen_id,
+                           rep.molde_produccion_id, origen.proveniente,
+                           origen.producto_id AS producto_origen_id,
+                           origen.deleted_at AS origen_deleted_at
+                    FROM rel_ensamblaje_producto rep
+                    JOIN ensamblaje origen ON origen.id = rep.ensamblaje_id
+                    WHERE rep.id = :relacion_id
+                      AND rep.molde_produccion_id = :produccion_id
+                      AND rep.deleted_at IS NULL
+                    FOR UPDATE OF rep, origen
+                ", [
+                    'relacion_id' => $relacionIdPendiente,
+                    'produccion_id' => $produccionId,
+                ]);
+                if (empty($relacionPendiente)
+                    || ($relacionPendiente[0]['proveniente'] ?? '') !== 'prod2_pendiente'
+                    || !empty($relacionPendiente[0]['origen_deleted_at'])) {
+                    throw new Exception("La pasada de la producción #$produccionId ya no está disponible para vincular.");
+                }
+                if ((int)$relacionPendiente[0]['producto_origen_id'] !== $productoObjetivoId) {
+                    throw new Exception("La pasada de la producción #$produccionId pertenece a otro producto.");
+                }
+
+                $origenId = (int)$relacionPendiente[0]['origen_id'];
+                if ($origenId !== $ensamblajeId) {
+                    executeNonQuery($conectar, "
+                        UPDATE rel_ensamblaje_producto
+                        SET ensamblaje_id = :destino_id, update_at = NOW()
+                        WHERE id = :relacion_id AND deleted_at IS NULL
+                    ", [
+                        'destino_id' => $ensamblajeId,
+                        'relacion_id' => $relacionIdPendiente,
+                    ]);
+
+                    $restantesOrigen = executeQuery($conectar, "
+                        SELECT id FROM rel_ensamblaje_producto
+                        WHERE ensamblaje_id = :origen_id AND deleted_at IS NULL
+                        LIMIT 1
+                    ", ['origen_id' => $origenId]);
+                    if (empty($restantesOrigen)) {
+                        executeNonQuery($conectar, "
+                            UPDATE ensamblaje
+                            SET deleted_at = NOW(), update_at = NOW()
+                            WHERE id = :origen_id AND proveniente = 'prod2_pendiente'
+                        ", ['origen_id' => $origenId]);
+                    } else {
+                        recalcularResumenesEnsamblaje($conectar, $origenId);
+                    }
+                }
+                continue;
+            }
 
             $prod = executeQuery(
                 $conectar,
-                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje FROM produccion WHERE id = :id",
+                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje, pases_finalizados, js_cantidades_salientes FROM produccion WHERE id = :id",
                 ['id' => $produccionId]
             );
             if (empty($prod)) {
@@ -1576,15 +1689,31 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if (empty($prod[0]['fecha_hora_fin'])) {
                 throw new Exception("La producción #$produccionId aún no ha finalizado su corrida.");
             }
-            if (empty($prod[0]['enviado_ensamblaje'])) {
+            $pasadaSolicitada = intval($linea['pasada'] ?? 0);
+            $salidas = json_decode($prod[0]['js_cantidades_salientes'] ?? '[]', true);
+            if (!is_array($salidas)) $salidas = [];
+            $salidaSolicitada = null;
+            if ($pasadaSolicitada > 0) {
+                foreach ($salidas as $salida) {
+                    if (intval($salida['pasada'] ?? 0) === $pasadaSolicitada) {
+                        $salidaSolicitada = $salida;
+                        break;
+                    }
+                }
+                if ($salidaSolicitada === null) {
+                    throw new Exception("La pasada $pasadaSolicitada de la producción #$produccionId ya no existe.");
+                }
+            }
+            if (empty($prod[0]['enviado_ensamblaje']) && empty($prod[0]['pases_finalizados']) && $salidaSolicitada === null) {
                 throw new Exception("La producción #$produccionId aún no fue pasada a ensamblaje desde Producción.");
             }
 
             $yaUsada = executeQuery(
                 $conectar,
                 "SELECT id FROM rel_ensamblaje_producto
-                 WHERE molde_produccion_id = :produccion_id AND deleted_at IS NULL",
-                ['produccion_id' => $produccionId]
+                 WHERE molde_produccion_id = :produccion_id AND deleted_at IS NULL
+                   AND ensamblaje_id <> :ensamblaje_id",
+                ['produccion_id' => $produccionId, 'ensamblaje_id' => $ensamblajeId]
             );
             if (!empty($yaUsada)) {
                 throw new Exception("La producción #$produccionId ya está vinculada a otro ensamblaje activo.");
@@ -1609,6 +1738,13 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 ['id' => $produccionId, 'ensamblaje_id' => $ensamblajeId]
             );
             $snapshot = json_encode($snapshotRows[0] ?? ['produccion_id' => $produccionId], JSON_UNESCAPED_UNICODE);
+            if ($pasadaSolicitada > 0) {
+                $snapshotData = json_decode($snapshot, true) ?: [];
+                $snapshotData['pasada'] = $pasadaSolicitada;
+                $snapshotData['cantidad_kg'] = $salidaSolicitada['cantidad'] ?? $salidaSolicitada['cantidad_kg'] ?? ($linea['cantidad_entrada_produccion'] ?? null);
+                $snapshotData['fecha'] = $salidaSolicitada['fecha'] ?? ($snapshotData['fecha_hora_fin'] ?? null);
+                $snapshot = json_encode($snapshotData, JSON_UNESCAPED_UNICODE);
+            }
 
             // La cantidad recibida se expresa en la MISMA unidad configurada
             // como salida de esa producción para este producto (la que ya
@@ -1753,8 +1889,15 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
     $moldes = executeQuery($conectar, "
-        SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
-            pd.cantidad_producida_kg AS cantidad_kg, pd.fecha, pd.color_id,
+        SELECT rep.id AS relacion_id,
+            rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
+            COALESCE(
+                NULLIF(rep.js_query_consulta_produccion->>'cantidad_kg', '')::numeric,
+                rep.cantidad_entrada_produccion,
+                pd.cantidad_producida_kg
+            ) AS cantidad_kg,
+            NULLIF(rep.js_query_consulta_produccion->>'pasada', '')::integer AS pasada,
+            pd.fecha, pd.color_id,
             co.nombre AS color_nombre,
             pd.categoria_material_id,
             cm.nombre AS categoria_material_nombre,
@@ -1776,6 +1919,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
         LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
         LEFT JOIN unidad_medida ue ON ue.id = rep.unidad_entrada_id
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.molde_produccion_id IS NOT NULL
+        ORDER BY rep.id
     ", ['id' => $ensamblajeId]);
 
     $derivados = executeQuery($conectar, "

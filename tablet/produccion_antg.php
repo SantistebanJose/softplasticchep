@@ -632,14 +632,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         </div>
                     </div>
 
-                    <div class="px-3 pt-3">
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" role="switch" id="produccion_completo">
-                            <label class="form-check-label" for="produccion_completo">La producción está completa</label>
-                            <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
-                        </div>
-                    </div>
-
                     <!-- Un solo operario: stepper de siempre -->
                     <div id="bloque_cantidad_individual">
                         <div class="pc-ens-stepper-main">
@@ -734,22 +726,6 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
                 </div>
 
-                <div class="pc-ens-card" id="bloque_ultima_pasada">
-                    <div class="pc-ens-card-header">
-                        <span class="num">4</span>
-                        <div class="titulos">
-                            <div class="titulo">Última pasada</div>
-                            <div class="sub">Marca Sí cuando ya no habrá más pasadas.</div>
-                        </div>
-                    </div>
-                    <div class="px-3 pb-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="produccion_ultima_pasada">
-                            <label class="form-check-label" for="produccion_ultima_pasada">Sí, esta es la última pasada</label>
-                        </div>
-                    </div>
-                </div>
-
             </div>
         </div>
         <div class="modal-footer pc-footer-thumb" style="flex-direction:column; align-items:stretch; gap:0; padding:0;">
@@ -777,7 +753,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_PRODUCCION = '../controllers/clssProduccion2.php';
+const CONTROLADOR_PRODUCCION = '../controllers/clssProduccion.php';
 const CONTROLADOR_MOLDES     = '../controllers/clssMoldes.php';
 const CONTROLADOR_COLOR      = '../controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
@@ -1541,7 +1517,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
     const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
     const puedeFinalizar = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.pases_finalizados;
+    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
     const requiereEnsamblaje = necesitaEnsamblaje(p);
     const etapaTexto = requiereEnsamblaje ? 'ensamblaje' : 'empaquetado';
@@ -1561,8 +1537,6 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
     if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
-    const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
-    if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
     if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });
 
     return `
@@ -1572,7 +1546,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            ${puedeGestionar && !p.deleted_at && !p.fecha_hora_fin && !p.enviado_ensamblaje && !salidas.length
+            ${puedeGestionar && !p.deleted_at && !p.fecha_hora_fin && !p.enviado_ensamblaje
                 ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
                 </button>`
@@ -1588,7 +1562,6 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
         ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
-        ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
         <div class="pc-prod-operarios">
@@ -2000,32 +1973,15 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
 
     const p = produccionesCache.find(x => x.id == produccionId);
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
-    const numeroPasada = (Array.isArray(p?.js_cantidades_salientes) ? p.js_cantidades_salientes.length : 0) + 1;
 
-    document.getElementById('tituloModalCantidadEnsamblaje').innerHTML = `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — pasada ${numeroPasada}, antes de pasar a ${etapaTexto}`;
+    document.getElementById('tituloModalCantidadEnsamblaje').innerHTML = `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — antes de pasar a ${etapaTexto}`;
     document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
 
     aplicarUnidadesEtapaModal(p);
     inicializarCantidadProducidaPorOperario(p);   // <-- NUEVO
     renderInfoMermaModal(p);
-    document.getElementById('produccion_completo').checked = false;
-    document.getElementById('produccion_ultima_pasada').checked = false;
-    document.getElementById('produccion_completo').disabled = numeroPasada > 1;
-    if (numeroPasada > 1) document.getElementById('produccion_completo').checked = false;
-    sincronizarUltimaPasadaCompletaTablet();
 
     modalCantidadEnsamblaje.show();
-}
-
-document.getElementById('produccion_completo').addEventListener('change', sincronizarUltimaPasadaCompletaTablet);
-function sincronizarUltimaPasadaCompletaTablet() {
-    const completa = document.getElementById('produccion_completo').checked;
-    const ultima = document.getElementById('produccion_ultima_pasada');
-    const estabaForzada = ultima.disabled;
-    if (completa) ultima.checked = true;
-    else if (estabaForzada) ultima.checked = false;
-    ultima.disabled = completa;
-    document.getElementById('bloque_ultima_pasada').style.display = completa ? 'none' : '';
 }
 
 async function abrirCamaraPesaje() {
@@ -2280,9 +2236,6 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    const completaRaw = document.getElementById('produccion_completo').checked ? 'true' : 'false';
-    const ultimaPasada = completaRaw === 'true' || document.getElementById('produccion_ultima_pasada').checked;
-
     if (archivosFotosPesaje.length < 1) {
         Swal.fire('Foto obligatoria', 'Abre la cámara de la tablet y toma al menos una foto de la balanza para continuar.', 'warning');
         return;
@@ -2327,8 +2280,6 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('cantidad_producida', valor);
     formData.append('unidad', unidadProducida);
     formData.append('desglose_operarios', JSON.stringify(desglose));
-    formData.append('completo', completaRaw);
-    formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
     const btnEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
     const textoOriginalEnviar = btnEnviar.innerHTML;

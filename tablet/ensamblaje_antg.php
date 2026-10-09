@@ -473,7 +473,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje2.php';
+const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 // El modal SweetAlert de cantidad se monta sobre el modal Bootstrap.
 const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'), { focus: false });
@@ -1402,7 +1402,6 @@ function renderTicketDetalle() {
 function obtenerDetalleJsonEns() {
     return JSON.stringify(ticketDetalleEns.map(l => ({
         tipo: l.tipo,
-        relacion_id: l.relacion_id ?? null,
         molde_produccion_id: l.molde_produccion_id,
         derivado_id: l.derivado_id,
         ensamblaje_complemento_id: l.ensamblaje_complemento_id ?? null,
@@ -1493,18 +1492,14 @@ async function abrirModalEditarEnsamblaje(id) {
         const est = estiloPorNombre(item.molde_nombre || '');
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns, tipo: 'produccion',
-            relacion_id: item.relacion_id ? parseInt(item.relacion_id, 10) : null,
             molde_produccion_id: item.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
-            meta: `#${item.produccion_id}`
-                + (item.pasada ? ` · Pasada ${item.pasada}` : '')
-                + ` · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
+            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
                 + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
                 + (item.fecha ? ` · ${formatearFechaHoraLegibleEns(item.fecha)}` : ''),
             icono: 'fa-industry', color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(item.cantidad_kg) || 0,
             unidad_codigo: item.unidad_produccion_codigo || 'KG',
-            cantidad_entrada_produccion: parseFloat(item.cantidad_entrada_produccion ?? item.cantidad_kg) || 0,
         });
     });
 

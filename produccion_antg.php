@@ -504,11 +504,6 @@ include("header.php");
             <div class="pc-ens-step" id="pasoCantidadProducida">
                 <div class="pc-ens-step-num">1</div>
             <div class="pc-ens-step-body">
-                <div class="form-check form-switch mb-3">
-                    <input class="form-check-input" type="checkbox" role="switch" id="produccion_completo">
-                    <label class="form-check-label" for="produccion_completo">La producción está completa</label>
-                    <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
-                </div>
                 <div id="bloque_cantidad_individual">
                     <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>
                     <input type="number" step="0.0001" min="0.0001" class="form-control"
@@ -566,17 +561,6 @@ include("header.php");
                             </button>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <div class="pc-ens-step mt-3" id="bloque_ultima_pasada">
-                <div class="pc-ens-step-num alt">4</div>
-                <div class="pc-ens-step-body w-100">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="produccion_ultima_pasada">
-                        <label class="form-check-label" for="produccion_ultima_pasada">Última pasada</label>
-                    </div>
-                    <div class="form-text">Marca Sí para cerrar las pasadas y habilitar esta producción en Ensamblaje.</div>
                 </div>
             </div>
 
@@ -760,7 +744,7 @@ function actualizarTextoUltimaActualizacion() {
     el.innerHTML = texto;
 }
 
-const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion2.php';
+const CONTROLADOR_PRODUCCION = 'controllers/clssProduccion.php';
 const CONTROLADOR_MOLDES     = 'controllers/clssMoldes.php';
 const CONTROLADOR_COLOR      = 'controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = 'controllers/clssSucursal.php';
@@ -1117,7 +1101,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
     const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
     const puedeFinalizar = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.pases_finalizados;
+    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.enviado_ensamblaje;
 
     // Ahora SIEMPRE que la corrida terminó se muestra el botón de avanzar:
     // el texto (y el destino real) depende de si el molde/producto
@@ -1149,8 +1133,6 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
     const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
     if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
-    const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
-    if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
     if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });
 
     return `
@@ -1160,7 +1142,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             <span class="pc-prod-id">#${p.id}</span>
             <span class="pc-prod-estado-txt">${p.deleted_at ? 'Inactivo' : textoEstado}</span>
             <span class="pc-prod-card-spacer"></span>
-            ${puedeGestionar && !salidas.length ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
+            ${puedeGestionar ? `<button type="button" class="pc-prod-edit-btn" onclick="abrirModalEditarProduccion(${p.id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
             </button>` : ''}
         </div>
@@ -1184,7 +1166,6 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
 
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
-        ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
 
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
@@ -1734,34 +1715,17 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
 
     const p = produccionesCache.find(x => x.id == produccionId);
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
-    const numeroPasada = (Array.isArray(p?.js_cantidades_salientes) ? p.js_cantidades_salientes.length : 0) + 1;
 
     document.getElementById('tituloModalCantidadEnsamblaje').innerHTML =
-        `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — pasada ${numeroPasada}, antes de pasar a ${etapaTexto}`;
+        `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — antes de pasar a ${etapaTexto}`;
     document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML =
         `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
 
     aplicarUnidadesEtapaModal(p);
     inicializarCantidadProducidaPorOperario(p);
     renderInfoMermaModal(p);
-    document.getElementById('produccion_completo').checked = false;
-    document.getElementById('produccion_ultima_pasada').checked = false;
-    document.getElementById('produccion_completo').disabled = numeroPasada > 1;
-    if (numeroPasada > 1) document.getElementById('produccion_completo').checked = false;
-    sincronizarUltimaPasadaCompleta();
 
     modalCantidadEnsamblaje.show();
-}
-
-document.getElementById('produccion_completo').addEventListener('change', sincronizarUltimaPasadaCompleta);
-function sincronizarUltimaPasadaCompleta() {
-    const completa = document.getElementById('produccion_completo').checked;
-    const ultima = document.getElementById('produccion_ultima_pasada');
-    const estabaForzada = ultima.disabled;
-    if (completa) ultima.checked = true;
-    else if (estabaForzada) ultima.checked = false;
-    ultima.disabled = completa;
-    document.getElementById('bloque_ultima_pasada').style.display = completa ? 'none' : '';
 }
 
 async function abrirCamaraPesaje() {
@@ -2015,9 +1979,6 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
 
-    const completaRaw = document.getElementById('produccion_completo').checked ? 'true' : 'false';
-    const ultimaPasada = completaRaw === 'true' || document.getElementById('produccion_ultima_pasada').checked;
-
     if (archivosFotosPesaje.length < 1) {
         Swal.fire('Foto obligatoria', 'Toma al menos una foto de la balanza con la cámara antes de enviar la producción.', 'warning');
         return;
@@ -2066,8 +2027,6 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('cantidad_producida', valor);
     formData.append('unidad', unidadProducida);
     formData.append('desglose_operarios', JSON.stringify(desglose));
-    formData.append('completo', completaRaw);
-    formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
     const botonEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
     const textoBoton = botonEnviar.innerHTML;

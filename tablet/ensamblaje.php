@@ -473,7 +473,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
-const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje.php';
+const CONTROLADOR_ENSAMBLAJE = '../controllers/clssEnsamblaje2.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 // El modal SweetAlert de cantidad se monta sobre el modal Bootstrap.
 const modalEnsamblaje   = new bootstrap.Modal(document.getElementById('modalEnsamblaje'), { focus: false });
@@ -1189,12 +1189,19 @@ async function renderGridDetalle() {
             const colorNombre = p.color_nombre_verif ?? p.color_nombre ?? '';
             const colorRgb = p.color_rgb || '#ccc';
             const est = estiloPorNombre(p.molde_nombre || 'producción');
-            const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.molde_produccion_id == p.produccion_id);
+            const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'produccion' && (
+                p.pasada ? (l.molde_produccion_id == p.produccion_id && l.pasada == p.pasada)
+                    : p.relacion_id ? l.relacion_id == p.relacion_id
+                    : (!l.relacion_id && l.molde_produccion_id == p.produccion_id)
+            ));
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
             onclick='agregarLineaDetalle("produccion", ${JSON.stringify({
                 produccion_id: p.produccion_id,
+                relacion_id: p.relacion_id,
+                pasada: p.pasada,
+                ensamblaje_pendiente_id: p.ensamblaje_pendiente_id,
                 molde_nombre: p.molde_nombre,
                 color_id: p.color_id,
                 color_nombre: colorNombre,
@@ -1207,7 +1214,7 @@ async function renderGridDetalle() {
             })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id} · ${p.unidad_produccion_codigo || 'KG'}</span>
+                <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
@@ -1301,26 +1308,33 @@ async function agregarLineaDetalle(tipo, datos) {
         }
         const cantidadProducida = parseFloat(datos.cantidad_kg) || 0;
         const unidad = datos.unidad_codigo || 'KG';
-        const { value: cantidadRecibida } = await Swal.fire({
-            title: 'Cantidad recibida',
-            html: `Pesa nuevamente la producción e indica cuánto <b>${unidad}</b> estás recibiendo para el armado.`,
-            icon: 'question', input: 'number',
-            inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
-            inputValue: '', inputPlaceholder: `Cantidad en ${unidad}`,
-            showCancelButton: true, confirmButtonText: 'Vincular', cancelButtonText: 'Cancelar',
-            didOpen: () => { const input = Swal.getInput(); if (input) { input.removeAttribute('readonly'); input.focus(); } },
-            inputValidator: value => (!value || parseFloat(value) <= 0) ? 'Ingresa una cantidad válida mayor a 0.' : undefined
-        });
-        if (!cantidadRecibida) return;
-        const cantidadRecibidaNum = parseFloat(cantidadRecibida);
+        let cantidadRecibidaNum = cantidadProducida;
+        if (!datos.relacion_id && !datos.pasada) {
+            const { value: cantidadRecibida } = await Swal.fire({
+                title: 'Cantidad recibida',
+                html: `Pesa nuevamente la producción e indica cuánto <b>${unidad}</b> estás recibiendo para el armado.`,
+                icon: 'question', input: 'number',
+                inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
+                inputValue: '', inputPlaceholder: `Cantidad en ${unidad}`,
+                showCancelButton: true, confirmButtonText: 'Vincular', cancelButtonText: 'Cancelar',
+                didOpen: () => { const input = Swal.getInput(); if (input) { input.removeAttribute('readonly'); input.focus(); } },
+                inputValidator: value => (!value || parseFloat(value) <= 0) ? 'Ingresa una cantidad válida mayor a 0.' : undefined
+            });
+            if (!cantidadRecibida) return;
+            cantidadRecibidaNum = parseFloat(cantidadRecibida);
+        }
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'produccion',
+            relacion_id: datos.relacion_id ? parseInt(datos.relacion_id, 10) : null,
+            pasada: datos.pasada ? parseInt(datos.pasada, 10) : null,
             molde_produccion_id: datos.produccion_id,
             derivado_id: null,
             ensamblaje_complemento_id: null,
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
-            meta: `#${datos.produccion_id} · Color: ${datos.color_nombre || '-'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+            meta: `#${datos.produccion_id}`
+                + (datos.pasada ? ` · Pasada ${datos.pasada}` : '')
+                + ` · Color: ${datos.color_nombre || '-'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             color_id: datos.color_id,
@@ -1402,6 +1416,8 @@ function renderTicketDetalle() {
 function obtenerDetalleJsonEns() {
     return JSON.stringify(ticketDetalleEns.map(l => ({
         tipo: l.tipo,
+        relacion_id: l.relacion_id ?? null,
+        pasada: l.pasada ?? null,
         molde_produccion_id: l.molde_produccion_id,
         derivado_id: l.derivado_id,
         ensamblaje_complemento_id: l.ensamblaje_complemento_id ?? null,
@@ -1492,14 +1508,18 @@ async function abrirModalEditarEnsamblaje(id) {
         const est = estiloPorNombre(item.molde_nombre || '');
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns, tipo: 'produccion',
+            relacion_id: item.relacion_id ? parseInt(item.relacion_id, 10) : null,
             molde_produccion_id: item.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
-            meta: `#${item.produccion_id} · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
+            meta: `#${item.produccion_id}`
+                + (item.pasada ? ` · Pasada ${item.pasada}` : '')
+                + ` · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
                 + (item.categoria_material_nombre ? ` · ${item.categoria_material_nombre}` : '')
                 + (item.fecha ? ` · ${formatearFechaHoraLegibleEns(item.fecha)}` : ''),
             icono: 'fa-industry', color: est.color, bg: est.bg,
             cantidad_kg: parseFloat(item.cantidad_kg) || 0,
             unidad_codigo: item.unidad_produccion_codigo || 'KG',
+            cantidad_entrada_produccion: parseFloat(item.cantidad_entrada_produccion ?? item.cantidad_kg) || 0,
         });
     });
 
