@@ -357,6 +357,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         </div>
                         <div class="pc-cmp-detail-total">
                             <span>Total de la compra: <strong id="cmp_ticket_total_monto">S/ 0.00</strong></span>
+                            <div><small class="text-muted" id="cmp_ticket_igv_info">Subtotal: S/ 0.00 · IGV (18%): S/ 0.00</small></div>
                             <div><small class="text-muted" id="cmp_ticket_total_pen_info"></small></div>
                         </div>
                     </div>
@@ -878,8 +879,11 @@ function actualizarTotalFilaCompraTablet(linea) {
 }
 
 function actualizarResumenCompraTablet() {
-    const total = ticketDetalleCompra.reduce((suma, linea) => suma + Number(linea.total || 0), 0);
+    const subtotal = ticketDetalleCompra.reduce((suma, linea) => suma + Number(linea.total || 0), 0);
+    const igv = ticketDetalleCompra.reduce((suma, linea) => suma + Math.round((Number(linea.total || 0) * 0.18 + Number.EPSILON) * 100) / 100, 0);
+    const total = Math.round((subtotal + igv + Number.EPSILON) * 100) / 100;
     document.getElementById('cmp_ticket_total_monto').textContent = formatearMontoCompra(total);
+    document.getElementById('cmp_ticket_igv_info').textContent = `Subtotal: ${formatearMontoCompra(subtotal)} · IGV (18%): ${formatearMontoCompra(igv)}`;
     const moneda = document.getElementById('cmp_moneda').value;
     const tcTexto = document.getElementById('cmp_tipo_cambio_info').textContent;
     const tcOficial = Number((tcTexto.match(/venta ([\d.]+)/) || [])[1]) || 0;

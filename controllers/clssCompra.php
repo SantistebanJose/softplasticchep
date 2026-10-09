@@ -563,7 +563,20 @@ function guardarCompra()
     }
     unset($linea);
 
-    $totalCompra = array_sum(array_column($detalle, 'total'));
+    // El IGV se calcula y redondea por cada material para que el total
+    // coincida con la suma de los importes tributarios de cada línea.
+    $subtotalCompra = 0.0;
+    $totalIgvCompra = 0.0;
+    foreach ($detalle as &$linea) {
+        $linea['igv'] = round((float) $linea['total'] * 0.18, 2);
+        $linea['total_con_igv'] = round((float) $linea['total'] + $linea['igv'], 2);
+        $subtotalCompra += (float) $linea['total'];
+        $totalIgvCompra += $linea['igv'];
+    }
+    unset($linea);
+    $subtotalCompra = round($subtotalCompra, 2);
+    $totalIgvCompra = round($totalIgvCompra, 2);
+    $totalCompra = round($subtotalCompra + $totalIgvCompra, 2);
     $tipoCambioAplicado = $moneda === 'PEN' ? 1.0 : ($cambioProveedor ?? (float) $snapshotTipoCambio['venta']);
     $snapshotTipoCambio['tc_aplicado'] = round($tipoCambioAplicado, 4);
     $snapshotTipoCambio['origen_tc'] = $moneda === 'PEN' ? 'local' : ($cambioProveedor !== null ? 'proveedor' : 'oficial');
@@ -580,6 +593,8 @@ function guardarCompra()
             'cantidad_base'    => $linea['cantidad_base'],
             'sub_total'        => $linea['sub_total'], // P.U de la línea
             'total'            => $linea['total'],
+            'igv'              => $linea['igv'],
+            'total_con_igv'    => $linea['total_con_igv'],
             'comentario'       => $linea['comentario'],
         ];
     }, $detalle);

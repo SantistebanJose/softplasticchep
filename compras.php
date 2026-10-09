@@ -152,6 +152,7 @@ include("header.php");
             <div class="text-end">
                 <div class="form-label mb-0">Total de la compra</div>
                 <h4 id="compra_total_visual">S/ 0.00</h4>
+                <small class="text-muted" id="compra_igv_info">Subtotal: S/ 0.00 · IGV (18%): S/ 0.00</small><br>
                 <small class="text-muted" id="compra_total_pen_info"></small>
             </div>
           </div>
@@ -1050,11 +1051,21 @@ async function agregarFilaMaterial(datos = null) {
 }
 
 function recalcularTotalCompra() {
-    let total = 0;
+    let subtotal = 0;
     document.querySelectorAll('#compra_detalle_wrap .mat-total').forEach(input => {
-        total += parseFloat(input.value) || 0;
+        const importeMaterial = parseFloat(input.value) || 0;
+        subtotal += importeMaterial;
     });
+    subtotal = Math.round((subtotal + Number.EPSILON) * 100) / 100;
+    let igv = 0;
+    document.querySelectorAll('#compra_detalle_wrap .mat-total').forEach(input => {
+        const importeMaterial = parseFloat(input.value) || 0;
+        igv += Math.round((importeMaterial * 0.18 + Number.EPSILON) * 100) / 100;
+    });
+    igv = Math.round((igv + Number.EPSILON) * 100) / 100;
+    const total = Math.round((subtotal + igv + Number.EPSILON) * 100) / 100;
     document.getElementById('compra_total_visual').textContent = formatearMoneda(total);
+    document.getElementById('compra_igv_info').textContent = `Subtotal: ${formatearMoneda(subtotal)} · IGV (18%): ${formatearMoneda(igv)}`;
     const moneda = document.getElementById('compra_moneda').value;
     const tcTexto = document.getElementById('compra_tipo_cambio_info').textContent;
     const tcOficial = Number((tcTexto.match(/venta ([\d.]+)/) || [])[1]) || 0;
