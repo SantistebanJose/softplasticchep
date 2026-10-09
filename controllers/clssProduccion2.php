@@ -707,14 +707,14 @@ function registrarProduccionEnEnsamblajePendiente(
     $unidadEntradaId = !empty($config['salida_produccion_unidad_medida_id'])
         ? (int)$config['salida_produccion_unidad_medida_id'] : null;
 
-    executeNonQuery($conectar, "
+    $nuevaRelacion = executeQuery($conectar, "
         INSERT INTO rel_ensamblaje_producto (
             ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
             cantidad_entrada_produccion, unidad_entrada_id, created_at
         ) VALUES (
             :ensamblaje_id, :produccion_id, :snapshot,
             :cantidad, :unidad_id, NOW()
-        )
+        ) RETURNING id
     ", [
         'ensamblaje_id' => $ensamblajeId,
         'produccion_id' => $produccionId,
@@ -723,18 +723,43 @@ function registrarProduccionEnEnsamblajePendiente(
         'unidad_id' => $unidadEntradaId,
     ]);
 
+    $resumenActual = executeQuery(
+        $conectar,
+        "SELECT js_moldes_utilizados FROM ensamblaje WHERE id = :id",
+        ['id' => $ensamblajeId]
+    );
+    $moldesResumen = !empty($resumenActual[0]['js_moldes_utilizados'])
+        ? json_decode($resumenActual[0]['js_moldes_utilizados'], true) : [];
+    if (!is_array($moldesResumen)) $moldesResumen = [];
+    $moldesResumen[] = [
+        'relacion_id' => (int)($nuevaRelacion[0]['id'] ?? 0),
+        'produccion_id' => $produccionId,
+        'molde_nombre' => $produccion[0]['molde_nombre'],
+        'cantidad_kg' => $cantidadPasada,
+        'pasada' => $numeroPasada,
+        'fecha' => date('Y-m-d H:i:s'),
+        'color_id' => $produccion[0]['color_id'],
+        'color_nombre' => $produccion[0]['color_nombre'],
+        'categoria_material_id' => $produccion[0]['categoria_material_id'],
+        'categoria_material_nombre' => $produccion[0]['categoria_material_nombre'],
+        'unidad_produccion_codigo' => strtoupper($unidadProduccion),
+        'cantidad_entrada_produccion' => $cantidadPasada,
+        'unidad_entrada_codigo' => strtoupper($unidadProduccion),
+    ];
+
     executeNonQuery($conectar, "
         UPDATE ensamblaje
-        SET js_historial = COALESCE(js_historial, '[]'::jsonb) || :historial::jsonb,
+        SET js_moldes_utilizados = :moldes,
+            js_historial = COALESCE(js_historial, '[]'::jsonb) || :historial::jsonb,
             js_usuario = :js_usuario,
             update_at = NOW()
         WHERE id = :id
     ", [
+        'moldes' => json_encode($moldesResumen, JSON_UNESCAPED_UNICODE),
         'historial' => $jsHistorial,
         'js_usuario' => $jsSesion,
         'id' => $ensamblajeId,
     ]);
-    recalcularResumenesEnsamblaje($conectar, $ensamblajeId);
 
     return $ensamblajeId;
 }
