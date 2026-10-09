@@ -601,7 +601,8 @@ function crearEnsamblajeAutomaticoParaProduccion(
 function registrarProduccionEnEnsamblajePendiente(
     $conectar,
     int $produccionId,
-    float $cantidadAcumulada,
+    float $cantidadPasada,
+    int $numeroPasada,
     string $unidadProduccion
 ): int {
     $produccion = executeQuery($conectar, "
@@ -635,7 +636,7 @@ function registrarProduccionEnEnsamblajePendiente(
     if ($productoId <= 0) throw new Exception('No se pudo determinar el producto asociado a esta producción.');
 
     $existente = executeQuery($conectar, "
-        SELECT rep.id AS relacion_id, rep.ensamblaje_id, e.proveniente
+        SELECT rep.ensamblaje_id, e.proveniente
         FROM rel_ensamblaje_producto rep
         JOIN ensamblaje e ON e.id = rep.ensamblaje_id
         WHERE rep.molde_produccion_id = :produccion_id AND rep.deleted_at IS NULL
@@ -645,7 +646,7 @@ function registrarProduccionEnEnsamblajePendiente(
     $movimiento = obtenerMovimientoSesion('recibir_produccion', [[
         'campo' => 'Producción recibida en Ensamblaje',
         'valor_antes' => '(pendiente)',
-        'valor_despues' => "Producción #$produccionId · $cantidadAcumulada " . strtoupper($unidadProduccion),
+        'valor_despues' => "Producción #$produccionId · pasada $numeroPasada · $cantidadPasada " . strtoupper($unidadProduccion),
     ]]);
     $jsSesion = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
     $jsHistorial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
@@ -687,16 +688,18 @@ function registrarProduccionEnEnsamblajePendiente(
                :cantidad AS cantidad_kg, pd.fecha_hora_fin,
                :producto_id AS producto_id, pd.color_id,
                co.nombre AS color_nombre_verif, cm.nombre AS categoria_material_nombre_verif,
-               UPPER(:unidad) AS unidad_produccion_codigo
+               UPPER(:unidad) AS unidad_produccion_codigo,
+               :pasada AS pasada
         FROM produccion pd
         LEFT JOIN molde m ON m.id = pd.molde_id
         LEFT JOIN color co ON co.id = pd.color_id
         LEFT JOIN categoria_material cm ON cm.id = pd.categoria_material_id
         WHERE pd.id = :id
     ", [
-        'cantidad' => $cantidadAcumulada,
+        'cantidad' => $cantidadPasada,
         'producto_id' => $productoId,
         'unidad' => strtoupper($unidadProduccion),
+        'pasada' => $numeroPasada,
         'id' => $produccionId,
     ]);
     $snapshot = json_encode($snapshotRows[0] ?? ['produccion_id' => $produccionId], JSON_UNESCAPED_UNICODE);
@@ -704,61 +707,34 @@ function registrarProduccionEnEnsamblajePendiente(
     $unidadEntradaId = !empty($config['salida_produccion_unidad_medida_id'])
         ? (int)$config['salida_produccion_unidad_medida_id'] : null;
 
-    if (!empty($existente)) {
-        executeNonQuery($conectar, "
-            UPDATE rel_ensamblaje_producto
-            SET js_query_consulta_produccion = :snapshot,
-                cantidad_entrada_produccion = :cantidad,
-                unidad_entrada_id = :unidad_id,
-                update_at = NOW()
-            WHERE id = :id
-        ", [
-            'snapshot' => $snapshot,
-            'cantidad' => $cantidadAcumulada,
-            'unidad_id' => $unidadEntradaId,
-            'id' => (int)$existente[0]['relacion_id'],
-        ]);
-    } else {
-        executeNonQuery($conectar, "
-            INSERT INTO rel_ensamblaje_producto (
-                ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
-                cantidad_entrada_produccion, unidad_entrada_id, created_at
-            ) VALUES (
-                :ensamblaje_id, :produccion_id, :snapshot,
-                :cantidad, :unidad_id, NOW()
-            )
-        ", [
-            'ensamblaje_id' => $ensamblajeId,
-            'produccion_id' => $produccionId,
-            'snapshot' => $snapshot,
-            'cantidad' => $cantidadAcumulada,
-            'unidad_id' => $unidadEntradaId,
-        ]);
-    }
-
-    $moldeResumen = [[
+    executeNonQuery($conectar, "
+        INSERT INTO rel_ensamblaje_producto (
+            ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
+            cantidad_entrada_produccion, unidad_entrada_id, created_at
+        ) VALUES (
+            :ensamblaje_id, :produccion_id, :snapshot,
+            :cantidad, :unidad_id, NOW()
+        )
+    ", [
+        'ensamblaje_id' => $ensamblajeId,
         'produccion_id' => $produccionId,
-        'molde_nombre' => $produccion[0]['molde_nombre'],
-        'cantidad_kg' => $cantidadAcumulada,
-        'unidad_produccion_codigo' => strtoupper($unidadProduccion),
-        'categoria_material_id' => $produccion[0]['categoria_material_id'],
-        'categoria_material_nombre' => $produccion[0]['categoria_material_nombre'],
-    ]];
+        'snapshot' => $snapshot,
+        'cantidad' => $cantidadPasada,
+        'unidad_id' => $unidadEntradaId,
+    ]);
+
     executeNonQuery($conectar, "
         UPDATE ensamblaje
-        SET js_moldes_utilizados = :moldes,
-            categoria_material_id = :categoria_id,
-            js_historial = COALESCE(js_historial, '[]'::jsonb) || :historial::jsonb,
+        SET js_historial = COALESCE(js_historial, '[]'::jsonb) || :historial::jsonb,
             js_usuario = :js_usuario,
             update_at = NOW()
         WHERE id = :id
     ", [
-        'moldes' => json_encode($moldeResumen, JSON_UNESCAPED_UNICODE),
-        'categoria_id' => $produccion[0]['categoria_material_id'],
         'historial' => $jsHistorial,
         'js_usuario' => $jsSesion,
         'id' => $ensamblajeId,
     ]);
+    recalcularResumenesEnsamblaje($conectar, $ensamblajeId);
 
     return $ensamblajeId;
 }
@@ -2151,7 +2127,8 @@ function enviarAEnsamblaje()
             $ensamblajeAutoId = registrarProduccionEnEnsamblajePendiente(
                 $conectar,
                 $id,
-                $cantidadSalidaAcumulada,
+                $cantidadProducida,
+                (int)$salidaActual['pasada'],
                 $unidadProduccion
             );
         }

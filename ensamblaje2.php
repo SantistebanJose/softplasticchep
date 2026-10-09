@@ -1476,6 +1476,7 @@ function renderTicketDetalle() {
 function obtenerDetalleJsonEns() {
     return JSON.stringify(ticketDetalleEns.map(l => ({
         tipo: l.tipo,
+        relacion_id: l.relacion_id ?? null,
         molde_produccion_id: l.molde_produccion_id,
         derivado_id: l.derivado_id,
         ensamblaje_complemento_id: l.ensamblaje_complemento_id ?? null,
@@ -1589,6 +1590,7 @@ async function abrirModalEditarEnsamblaje(id) {
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
             tipo: 'produccion',
+            relacion_id: item.relacion_id ? parseInt(item.relacion_id, 10) : null,
             molde_produccion_id: item.produccion_id,
             derivado_id: null,
             ensamblaje_complemento_id: null,
@@ -1596,7 +1598,9 @@ async function abrirModalEditarEnsamblaje(id) {
             molde_nombre: item.molde_nombre,
             color_id: item.color_id,
             color_nombre: item.color_nombre,
-            meta: `#${item.produccion_id} · Producido: ${formatearCantidadEns(item.cantidad_kg)} ${unidad}`
+            meta: `#${item.produccion_id}`
+                + (item.pasada ? ` · Pasada ${item.pasada}` : '')
+                + ` · Cantidad: ${formatearCantidadEns(item.cantidad_kg)} ${unidad}`
                 + (tieneRecibida
                     ? ` · Recibido: ${formatearCantidadEns(cantidadRecibida)} ${item.unidad_entrada_codigo || unidad}`
                         + (coincide ? ' <span style="color:#16A34A;">✓ coincide</span>' : ' <span style="color:#D97706;">⚠ diferente</span>')

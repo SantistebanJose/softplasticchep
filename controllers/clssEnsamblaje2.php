@@ -1261,12 +1261,14 @@ function guardarEnsamblaje()
             if ($prodId <= 0) continue;
             $cantidadEntrada = isset($linea['cantidad_entrada_produccion']) && $linea['cantidad_entrada_produccion'] !== ''
                 ? floatval($linea['cantidad_entrada_produccion']) : null;
+            $relacionId = intval($linea['relacion_id'] ?? 0);
             if ($cantidadEntrada === null || $cantidadEntrada <= 0) {
                 responder(false, "Debes indicar la cantidad que estás recibiendo de la producción #$prodId antes de guardar.");
             }
             $detalle[] = [
                 'tipo' => 'produccion', 'molde_produccion_id' => $prodId,
                 'derivado_id' => null, 'ensamblaje_complemento_id' => null,
+                'relacion_id' => $relacionId > 0 ? $relacionId : null,
                 'cantidad_entrada_produccion' => $cantidadEntrada,
             ];
         } elseif ($tipo === 'derivado') {
@@ -1394,8 +1396,8 @@ function guardarEnsamblaje()
 
             // Claves de comparación: "p:123" producción, "d:45" derivado,
             // "c:78" complemento.
-            $clave = function ($tipo, $prodId, $derId, $compId) {
-                if ($tipo === 'produccion')  return "p:$prodId";
+            $clave = function ($tipo, $prodId, $derId, $compId, $relacionId = null) {
+                if ($tipo === 'produccion')  return !empty($relacionId) ? "r:$relacionId" : "p:$prodId";
                 if ($tipo === 'derivado')    return "d:$derId";
                 return "c:$compId";
             };
@@ -1407,7 +1409,7 @@ function guardarEnsamblaje()
                 } else {
                     $tipo = 'derivado';
                 }
-                $k = $clave($tipo, $l['molde_produccion_id'], $l['derivado_id'], null);
+                $k = $clave($tipo, $l['molde_produccion_id'], $l['derivado_id'], null, $l['id'] ?? null);
                 $actualesPorClave[$k] = [
                     'tipo' => $tipo,
                     'rel_id' => $l['id'],
@@ -1420,8 +1422,15 @@ function guardarEnsamblaje()
             }
 
             $nuevasPorClave = [];
+            foreach ($detalle as &$detalleLinea) {
+                $relacionSolicitada = intval($detalleLinea['relacion_id'] ?? 0);
+                if ($relacionSolicitada > 0 && !isset($actualesPorClave["r:$relacionSolicitada"])) {
+                    $detalleLinea['relacion_id'] = null;
+                }
+            }
+            unset($detalleLinea);
             foreach ($detalle as $d) {
-                $k = $clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id']);
+                $k = $clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id'], $d['relacion_id'] ?? null);
                 $nuevasPorClave[$k] = $d;
             }
 
@@ -1449,7 +1458,7 @@ function guardarEnsamblaje()
             $clavesAInsertar = array_diff(array_keys($nuevasPorClave), array_keys($actualesPorClave));
             $detalleNuevo = array_values(array_filter(
                 $detalle,
-                fn($d) => in_array($clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id']), $clavesAInsertar)
+                fn($d) => in_array($clave($d['tipo'], $d['molde_produccion_id'], $d['derivado_id'], $d['ensamblaje_complemento_id'], $d['relacion_id'] ?? null), $clavesAInsertar)
             ));
             if (!empty($detalleNuevo)) {
                 insertarLineasEnsamblaje($conectar, $id, $detalleNuevo);
@@ -1753,8 +1762,15 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
 {
     $moldes = executeQuery($conectar, "
-        SELECT rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
-            pd.cantidad_producida_kg AS cantidad_kg, pd.fecha, pd.color_id,
+        SELECT rep.id AS relacion_id,
+            rep.molde_produccion_id AS produccion_id, mo.nombre AS molde_nombre,
+            COALESCE(
+                NULLIF(rep.js_query_consulta_produccion->>'cantidad_kg', '')::numeric,
+                rep.cantidad_entrada_produccion,
+                pd.cantidad_producida_kg
+            ) AS cantidad_kg,
+            NULLIF(rep.js_query_consulta_produccion->>'pasada', '')::integer AS pasada,
+            pd.fecha, pd.color_id,
             co.nombre AS color_nombre,
             pd.categoria_material_id,
             cm.nombre AS categoria_material_nombre,
@@ -1776,6 +1792,7 @@ function recalcularResumenesEnsamblaje($conectar, int $ensamblajeId): void
         LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
         LEFT JOIN unidad_medida ue ON ue.id = rep.unidad_entrada_id
         WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL AND rep.molde_produccion_id IS NOT NULL
+        ORDER BY rep.id
     ", ['id' => $ensamblajeId]);
 
     $derivados = executeQuery($conectar, "
