@@ -654,7 +654,7 @@ function registrarProduccionEnEnsamblajePendiente(
     $jsOperariosProduccion = json_encode($operariosProduccion, JSON_UNESCAPED_UNICODE);
 
     if (!empty($existente)) {
-        if (($existente[0]['proveniente'] ?? '') !== 'produccion2_pendiente') {
+        if (($existente[0]['proveniente'] ?? '') !== 'prod2_pendiente') {
             throw new Exception("La producción #$produccionId ya está vinculada a otro ensamblaje.");
         }
         $ensamblajeId = (int)$existente[0]['ensamblaje_id'];
@@ -667,7 +667,7 @@ function registrarProduccionEnEnsamblajePendiente(
             ) VALUES (
                 :producto_id, :color_id, :categoria_material_id, :operario_id,
                 '[]'::jsonb, '[]'::jsonb, :js_operarios,
-                NOW(), :js_usuario, :js_historial, 'produccion2_pendiente'
+                NOW(), :js_usuario, :js_historial, 'prod2_pendiente'
             ) RETURNING id
         ", [
             'producto_id' => $productoId,
