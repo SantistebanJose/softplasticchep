@@ -577,7 +577,8 @@ include("header.php");
                                placeholder='Nota opcional (ej. "combinado azul y rojo", "purga")'>
                         <div class="input-group">
                             <input type="number" step="0.0001" min="0.0001" class="form-control"
-                                   id="cantidad_merma_kg" placeholder="Kg de merma">
+                                   id="cantidad_merma_kg" placeholder="Cantidad de merma">
+                            <span class="input-group-text" id="unidad_merma_badge">KG</span>
                             <button type="button" class="btn btn-outline-danger" id="btnRegistrarMerma">
                                 <i class="fa-solid fa-triangle-exclamation"></i> Registrar
                             </button>
@@ -849,6 +850,14 @@ function renderListaMermas(p) {
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
+function resumenMermasPorUnidad(mermas) {
+    const totales = new Map();
+    (mermas || []).forEach(m => {
+        const unidad = String(m.unidad_medida || 'KG').trim().toUpperCase();
+        totales.set(unidad, (totales.get(unidad) || 0) + Number(m.cantidad || 0));
+    });
+    return [...totales.entries()].map(([unidad, cantidad]) => `${formatearCantidadProd(cantidad)} ${unidad}`).join(' · ');
+}
 function unidadEtapa(p, campo) {
     const item = p && p.item ? p.item : null;
     if (item && item[campo]) return String(item[campo]).trim();
@@ -895,6 +904,7 @@ function aplicarUnidadesEtapaModal(p) {
 
     const inputMerma = document.getElementById('cantidad_merma_kg');
     inputMerma.placeholder = `${unidadMerma} de merma`;
+    document.getElementById('unidad_merma_badge').textContent = unidadMerma.toUpperCase();
     inputMerma.step = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
     inputMerma.min = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
     inputMerma.dataset.unidad = unidadMerma;
@@ -1164,8 +1174,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
 
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
-    const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
-    if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
+    const resumenMerma = resumenMermasPorUnidad(mermas);
+    if (resumenMerma) tags.push(`Merma: ${resumenMerma}`);
     const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
     if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
     if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });

@@ -728,7 +728,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                     placeholder='Ej. "combinado azul y rojo", "purga"'>
                             </div>
                             <div class="campo">
-                                <label for="cantidad_merma_kg">Cantidad</label>
+                                <label for="cantidad_merma_kg" id="lbl_cantidad_merma">Cantidad (KG)</label>
                                 <div class="pc-num-stepper">
                                     <button type="button" onclick="ajustarCantidadMerma(-1)"><i class="fa-solid fa-minus"></i></button>
                                     <input type="number" step="0.0001" min="0.0001" class="form-control"
@@ -769,7 +769,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <div class="pc-ens-resumen">
                 <div class="item"><span class="n" id="resumen_producido">0</span><span class="l">Producido</span></div>
                 <div class="sep"></div>
-                <div class="item"><span class="n" id="resumen_merma">0</span><span class="l">Merma</span></div>
+                <div class="item"><span class="n" id="resumen_merma">0</span><span class="l">Merma registrada</span></div>
             </div>
             <div style="display:flex; gap:16px; padding:16px 22px;">
                 <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal" style="flex:0 1 260px;">Cancelar</button>
@@ -908,9 +908,8 @@ function actualizarResumenEnsamblaje() {
     resumenProducido.textContent = formatearCantidadProd(parseFloat(document.getElementById('cantidad_producida_ensamblaje').value) || 0);
 
     const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
-    const totalMerma = (p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [])
-        .reduce((s, m) => s + Number(m.cantidad || 0), 0);
-    document.getElementById('resumen_merma').textContent = formatearCantidadProd(totalMerma);
+    const mermas = p && Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+    document.getElementById('resumen_merma').textContent = resumenMermasPorUnidad(mermas) || '0';
 }
 function seleccionarDesdeSelectorGenerico(id) {
     const cfg = SELECTOR_CONFIG[selectorGenericoContexto];
@@ -1080,6 +1079,14 @@ function renderListaMermas(p) {
     }).join('');
 }
 function formatearCantidadProd(n) { return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 }); }
+function resumenMermasPorUnidad(mermas) {
+    const totales = new Map();
+    (mermas || []).forEach(m => {
+        const unidad = String(m.unidad_medida || 'KG').trim().toUpperCase();
+        totales.set(unidad, (totales.get(unidad) || 0) + Number(m.cantidad || 0));
+    });
+    return [...totales.entries()].map(([unidad, cantidad]) => `${formatearCantidadProd(cantidad)} ${unidad}`).join(' · ');
+}
 
 function unidadEtapa(p, campo) {
     const item = p && p.item ? p.item : null;
@@ -1110,6 +1117,7 @@ function aplicarUnidadesEtapaModal(p) {
 
     const inputMerma = document.getElementById('cantidad_merma_kg');
     inputMerma.placeholder = `${unidadMerma} de merma`;
+    document.getElementById('lbl_cantidad_merma').textContent = `Cantidad (${unidadMerma.toUpperCase()})`;
     inputMerma.step = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
     inputMerma.min = esUnidadEntera(unidadMerma) ? '1' : '0.0001';
     inputMerma.dataset.unidad = unidadMerma;
@@ -1570,8 +1578,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const tags = [];
     if (p.categoria_material_nombre) tags.push(p.categoria_material_nombre);
     const mermas = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
-    const totalMerma = mermas.reduce((s, m) => s + Number(m.cantidad || 0), 0);
-    if (totalMerma > 0) tags.push(`Merma: ${formatearCantidadProd(totalMerma)} kg`);
+    const resumenMerma = resumenMermasPorUnidad(mermas);
+    if (resumenMerma) tags.push(`Merma: ${resumenMerma}`);
     const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
     if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
     if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });

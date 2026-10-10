@@ -96,7 +96,7 @@ include("header.php");
                 <h2>Artículos</h2>
             </div>
             <div class="p-3">
-                <input type="text" id="pv_producto_texto" class="form-control mb-3" placeholder="Buscar producto o color..." autocomplete="off">
+                <input type="text" id="pv_producto_texto" class="form-control mb-3" placeholder="Buscar producto..." autocomplete="off">
                 <div id="pv_grid" class="pc-venta-grid">
                     <div class="text-muted text-center py-4" style="grid-column:1/-1;">Cargando artículos...</div>
                 </div>
@@ -321,14 +321,6 @@ async function cargarGridProductos(texto) {
     }
 
     grid.innerHTML = json.disponibles.map(d => {
-        const esLegado = d.color_id === null || d.color_id === undefined;
-        const esMezcla = d.color_id === -1;
-        let dotClase = 'pc-venta-color-dot';
-        let dotStyle = '';
-        if (esLegado) dotClase += ' sin-color';
-        else if (esMezcla) dotClase += ' mezcla';
-        else dotStyle = `style="background:${colorHexParaVenta(d.color, d.color_hex)};"`;
-
         const imagen = resolverImagenVenta(d.producto_imagen);
         const imgHtml = imagen
             ? `<img class="pc-venta-card-img" src="${imagen}" loading="lazy" alt="" onerror="this.outerHTML='<div class=&quot;pc-venta-card-img-vacio&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>'">`
@@ -339,7 +331,7 @@ async function cargarGridProductos(texto) {
             ${imgHtml}
             <div class="pc-venta-card-codigo">${d.producto_codigo}</div>
             <div class="pc-venta-card-nombre">${d.producto}</div>
-            <div class="pc-venta-card-color"><span class="${dotClase}" ${dotStyle}></span>${d.color ?? 'Sin color'}</div>
+            <div class="pc-venta-card-color">Todos los colores</div>
             <div class="pc-venta-card-stock">Disponible: <b>${formatearCantidadVenta(d.paquetes_disponibles)} ${d.unidad_venta_corto ?? 'paq.'}</b></div>
             <button type="button" class="pc-venta-card-add" onclick='abrirAgregarCarrito(${JSON.stringify(d)})' title="Agregar al carrito">
                 <i class="fa-solid fa-plus"></i>
@@ -361,7 +353,7 @@ function abrirAgregarCarrito(datos, filaExistente = null) {
         title: `${datos.producto_codigo} - ${datos.producto}`,
         html: `
           <div class="text-start">
-            <p class="mb-2">Color: <b>${datos.color ?? 'Sin color'}</b> &middot; Disponible: <b>${formatearCantidadVenta(disp)} ${datos.unidad_venta_corto ?? 'paq.'}</b></p>
+            <p class="mb-2">Stock agrupado de todos los colores &middot; Disponible: <b>${formatearCantidadVenta(disp)} ${datos.unidad_venta_corto ?? 'paq.'}</b></p>
             <label class="form-label mb-1">Cantidad (paquetes)</label>
             <input type="number" id="swal_pv_cantidad" class="swal2-input" min="1" max="${disp}" step="1" value="${cantidadInicial}">
             <label class="form-label mb-1">Precio unitario (S/)</label>
@@ -391,7 +383,7 @@ function abrirAgregarCarrito(datos, filaExistente = null) {
                 producto_codigo: datos.producto_codigo,
                 producto: datos.producto,
                 color_id: datos.color_id ?? null,
-                color: datos.color ?? 'Sin color',
+                color: 'Todos los colores',
                 disponible: disp,
                 unidad: datos.unidad_venta_corto ?? 'paq.',
                 cantidad: res.value.cantidad,

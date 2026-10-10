@@ -250,7 +250,8 @@ function buscarClientes()
 // REESCRITO (2026-08-29): "paquetes_disponibles" sale de la unidad REAL de
 // venta del producto (igual que el reporte de Disponibilidad), no de
 // cantidad_tota en la unidad operativa de empaquetado. Se sigue
-// clasificando el color vía rel_empaquetado_origen (único / mezcla / legado).
+// agrupando el inventario por producto, sin separar por color. En punto de
+// venta todos los colores y mezclas del mismo producto comparten stock.
 //
 // REESCRITO (2026-08-29 bis): confirmado que no hay venta por otra unidad
 // como excepción, así que ahora el JOIN a producto_venta es INNER y exige
@@ -278,30 +279,15 @@ function buscarDisponiblesVenta()
     }
 
     $sql = "
-        WITH color_stats AS (
-            SELECT
-                reo.empaquetado_id,
-                COUNT(DISTINCT reo.color_id) AS colores_distintos,
-                MIN(reo.color_id) AS unico_color_id
-            FROM rel_empaquetado_origen reo
-            WHERE reo.deleted_at IS NULL
-            GROUP BY reo.empaquetado_id
-        ),
         detalle AS (
             SELECT
                 emp.id AS empaquetado_id,
                 emp.producto_id,
-                CASE
-                    WHEN cs.colores_distintos IS NULL THEN NULL
-                    WHEN cs.colores_distintos = 1 THEN cs.unico_color_id
-                    ELSE -1
-                END AS color_id_efectivo,
                 -- CAMBIO: cantidad_disponible_tmp es el disponible real para
                 -- venta (cantidad_tota es histórico inmutable de lo armado).
                 -- COALESCE por si algún registro no tiene backfill todavía.
                 COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) * COALESCE(um.equivalencia, 1) AS cantidad_base
             FROM empaquetado emp
-            LEFT JOIN color_stats cs ON cs.empaquetado_id = emp.id
             JOIN unidad_medida um ON um.id = emp.unidad_medida
             WHERE emp.deleted_at IS NULL
               AND COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) > 0.0001
@@ -321,27 +307,20 @@ function buscarDisponiblesVenta()
             p.codigo AS producto_codigo,
             p.descripcion AS producto,
             p.img_ruta AS producto_imagen,
-            dc.color_id_efectivo AS color_id,
-            CASE
-                WHEN dc.color_id_efectivo IS NULL THEN 'Sin color (registro legado)'
-                WHEN dc.color_id_efectivo = -1 THEN 'Mezcla'
-                ELSE co.nombre
-            END AS color,
-            co.rgb AS color_hex,
+            NULL::integer AS color_id,
+            'Todos los colores' AS color,
+            NULL::text AS color_hex,
             FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) AS paquetes_disponibles,
             pv.unidad_venta_corto
         FROM detalle dc
         JOIN producto p ON p.id = dc.producto_id
         JOIN producto_venta pv ON pv.producto_id = dc.producto_id
                                 AND pv.capacidad_paquete_venta_base > 0
-        LEFT JOIN color co ON co.id = dc.color_id_efectivo AND dc.color_id_efectivo <> -1
         WHERE " . implode(' AND ', $whereDetalle) . "
-        GROUP BY dc.producto_id, p.codigo, p.descripcion, p.img_ruta, dc.color_id_efectivo, co.nombre, co.rgb,
+        GROUP BY dc.producto_id, p.codigo, p.descripcion, p.img_ruta,
                  pv.unidad_venta_corto, pv.capacidad_paquete_venta_base
         HAVING FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) > 0
-        ORDER BY p.descripcion,
-                 CASE WHEN dc.color_id_efectivo = -1 THEN 1 ELSE 0 END,
-                 co.nombre NULLS LAST
+        ORDER BY p.descripcion
         LIMIT 30
     ";
 
@@ -357,7 +336,7 @@ function buscarDisponiblesVenta()
 // base directo del frontend.
 // =============================================================================
 
-function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectivo, float $cantidadNecesariaBase): array
+function consumirStockFIFOVenta($conectar, int $productoId, float $cantidadNecesariaBase): array
 {
     $stmt = $conectar->prepare("
         SELECT t1.id, t1.cantidad_disponible_tmp, um.equivalencia, um.unidad_base_id
@@ -366,21 +345,11 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
         WHERE t1.producto_id = :producto_id
           AND t1.deleted_at IS NULL
           AND t1.cantidad_disponible_tmp > 0
-          AND (
-              SELECT CASE
-                  WHEN COUNT(DISTINCT reo.color_id) = 0 THEN NULL
-                  WHEN COUNT(DISTINCT reo.color_id) = 1 THEN MIN(reo.color_id)
-                  ELSE -1
-              END
-              FROM rel_empaquetado_origen reo
-              WHERE reo.empaquetado_id = t1.id AND reo.deleted_at IS NULL
-          ) IS NOT DISTINCT FROM :color_id_efectivo
         ORDER BY t1.created_at ASC, t1.id ASC
         FOR UPDATE OF t1
     ");
     $stmt->execute([
         'producto_id'       => $productoId,
-        'color_id_efectivo' => $colorIdEfectivo,
     ]);
     $registros = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -413,10 +382,7 @@ function consumirStockFIFOVenta($conectar, int $productoId, ?int $colorIdEfectiv
     }
 
     if ($restante > 0.0001) {
-        $etiquetaColor = $colorIdEfectivo === null
-            ? 'sin color (registro legado)'
-            : ($colorIdEfectivo === -1 ? 'Mezcla' : "color #$colorIdEfectivo");
-        throw new RuntimeException("Stock insuficiente para producto #$productoId ($etiquetaColor): faltan $restante (unidad base).");
+        throw new RuntimeException("Stock insuficiente para producto #$productoId: faltan $restante (unidad base).");
     }
 
     foreach ($consumo as $c) {
@@ -637,7 +603,9 @@ function guardarVenta()
             $productoId       = (int)($item['producto_id'] ?? 0);
             $cantidadPaquetes = (float)($item['cantidad'] ?? 0);
             $precio           = (float)($item['precio_unitario'] ?? 0);
-            $colorIdEfectivo  = !empty($item['color_id']) ? (int)$item['color_id'] : null;
+            // El color ya no divide el artículo de venta; se consumen paquetes
+            // del producto consolidando todos sus colores.
+            $colorIdEfectivo  = null;
 
             if ($productoId <= 0 || $cantidadPaquetes <= 0) {
                 throw new RuntimeException('Cada ítem debe tener producto y cantidad válidos.');
@@ -657,9 +625,12 @@ function guardarVenta()
             }
 
             $info = resolverInfoItemVenta($conectar, $productoId, $colorIdEfectivo);
+            // En ventas el color no identifica una línea de producto: se
+            // vende por producto y paquete, consolidando todos los colores.
+            $info['color'] = 'Todos los colores';
             $cantidadBaseNecesaria = round($cantidadPaquetes * $capacidadVenta['capacidad_base'], 4);
 
-            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $colorIdEfectivo, $cantidadBaseNecesaria);
+            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $cantidadBaseNecesaria);
             $subtotal = round($cantidadPaquetes * $precio, 2);
             $montoTotal += $subtotal;
 
