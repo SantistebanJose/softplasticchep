@@ -587,10 +587,11 @@ function guardarConfigArmadoProducto(): void
         $cantidad = $fila['cantidad_a_utilizar'] ?? null;
         $peso = $fila['peso_molde'] ?? null;
         $unidadPeso = strtoupper(trim((string)($fila['unidad_peso_molde'] ?? '')));
-        if (!in_array($tipo, ['molde', 'producto'], true) || ($tipo === 'molde' && $moldeId <= 0) || ($tipo === 'producto' && ($componenteProductoId <= 0 || $componenteProductoId === $productoId)) || $unidadId <= 0 || !is_numeric($cantidad) || (float)$cantidad <= 0 || !is_numeric($peso) || (float)$peso <= 0) {
-            responder(false, 'Cada componente debe tener molde o producto, unidad, cantidad y peso mayores a cero.');
+        if (!in_array($tipo, ['molde', 'producto'], true) || ($tipo === 'molde' && $moldeId <= 0) || ($tipo === 'producto' && ($componenteProductoId <= 0 || $componenteProductoId === $productoId)) || $unidadId <= 0 || !is_numeric($cantidad) || (float)$cantidad <= 0 || ($peso !== null && $peso !== '' && (!is_numeric($peso) || (float)$peso <= 0))) {
+            responder(false, 'Cada componente debe tener molde o producto, unidad y cantidad válidos. El peso es opcional, pero si se indica debe ser mayor a cero.');
         }
-        if (!in_array($unidadPeso, ['GRAMOS', 'KILOGRAMOS'], true)) responder(false, 'La unidad del peso del componente debe ser gramos o kilogramos.');
+        $tienePeso = $peso !== null && $peso !== '';
+        if ($tienePeso && !in_array($unidadPeso, ['GRAMOS', 'KILOGRAMOS'], true)) responder(false, 'La unidad del peso del componente debe ser gramos o kilogramos.');
         $componenteId = $tipo === 'molde' ? $moldeId : $componenteProductoId;
         $claveComponente = $tipo . ':' . $componenteId;
         if (isset($componentesVistos[$claveComponente])) responder(false, 'No repitas el mismo componente; agrega sus cantidades en una sola configuración.');
@@ -622,8 +623,8 @@ function guardarConfigArmadoProducto(): void
             'unidad_me' => $unidad[0]['nombre_corto'],
             'unidad_id' => $unidadId,
             'cantidad_a_utilizar' => (float)$cantidad,
-            'unidad_peso_molde' => $unidadPeso,
-            'peso_molde' => (float)$peso,
+            'unidad_peso_molde' => $tienePeso ? $unidadPeso : null,
+            'peso_molde' => $tienePeso ? (float)$peso : null,
         ], $tipo === 'molde'
             ? ['molde' => $nombreComponente, 'molde_id' => $moldeId]
             : ['producto' => $nombreComponente, 'producto_id' => $componenteProductoId]);

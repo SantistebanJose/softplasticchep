@@ -1016,7 +1016,7 @@ function agregarFilaConfiguracionArmado(config = {}) {
             <div class="col-md-8 armado-selector-producto" ${tipo !== 'producto' ? 'hidden' : ''}><label class="form-label">Producto</label><select class="form-select armado-producto"><option value="">Selecciona un producto...</option>${productosSeleccion}</select></div>
             <div class="col-md-6"><label class="form-label">Unidad de cantidad</label><select class="form-select armado-unidad"><option value="">Selecciona unidad...</option>${unidadesSeleccion}</select></div>
             <div class="col-md-6"><label class="form-label">Cantidad a utilizar</label><input class="form-control armado-cantidad" type="number" min="0.0001" step="0.0001" value="${escapeHtmlArmado(config.cantidad_a_utilizar ?? '')}" placeholder="Ej. 4"></div>
-            <div class="col-md-6"><label class="form-label">Peso de cada pieza</label><div class="input-group"><input class="form-control armado-peso" type="number" min="0.0001" step="0.0001" value="${escapeHtmlArmado(config.peso_molde ?? '')}" placeholder="Ej. 5"><select class="form-select armado-unidad-peso" style="max-width:145px"><option value="GRAMOS" ${String(config.unidad_peso_molde || 'GRAMOS').toUpperCase() === 'GRAMOS' ? 'selected' : ''}>Gramos (g)</option><option value="KILOGRAMOS" ${String(config.unidad_peso_molde || '').toUpperCase() === 'KILOGRAMOS' ? 'selected' : ''}>Kilogramos (kg)</option></select></div></div>
+            <div class="col-md-6"><label class="form-label">Peso de cada pieza <span class="text-muted fw-normal">(opcional)</span></label><div class="input-group"><input class="form-control armado-peso" type="number" min="0.0001" step="0.0001" value="${escapeHtmlArmado(config.peso_molde ?? '')}" placeholder="Dejar vacío si se controla por unidades"><select class="form-select armado-unidad-peso" style="max-width:145px"><option value="GRAMOS" ${String(config.unidad_peso_molde || 'GRAMOS').toUpperCase() === 'GRAMOS' ? 'selected' : ''}>Gramos (g)</option><option value="KILOGRAMOS" ${String(config.unidad_peso_molde || '').toUpperCase() === 'KILOGRAMOS' ? 'selected' : ''}>Kilogramos (kg)</option></select></div></div>
             <div class="col-12 small text-muted armado-subtotal"></div>
         </div>`;
     document.getElementById('configArmadoFilas').appendChild(fila);
@@ -1032,17 +1032,24 @@ function agregarFilaConfiguracionArmado(config = {}) {
 
 function actualizarPesoTotalArmado() {
     let totalGramos = 0;
+    let componentesSinPeso = 0;
     document.querySelectorAll('#configArmadoFilas [data-fila-armado]').forEach(fila => {
         const cantidad = parseFloat(fila.querySelector('.armado-cantidad').value) || 0;
-        const peso = parseFloat(fila.querySelector('.armado-peso').value) || 0;
+        const pesoTexto = fila.querySelector('.armado-peso').value.trim();
+        const peso = parseFloat(pesoTexto) || 0;
         const enKg = fila.querySelector('.armado-unidad-peso').value === 'KILOGRAMOS';
         const subtotal = cantidad * peso * (enKg ? 1000 : 1);
         totalGramos += subtotal;
-        fila.querySelector('.armado-subtotal').textContent = cantidad && peso
-            ? `Peso utilizado por unidad armada: ${subtotal.toLocaleString('es-PE', {maximumFractionDigits: 4})} g`
-            : '';
+        if (cantidad && peso) {
+            fila.querySelector('.armado-subtotal').textContent = `Peso utilizado por unidad armada: ${subtotal.toLocaleString('es-PE', {maximumFractionDigits: 4})} g`;
+        } else if (cantidad && !pesoTexto) {
+            componentesSinPeso++;
+            fila.querySelector('.armado-subtotal').textContent = 'Componente controlado por cantidad; no se incluye en el peso.';
+        } else {
+            fila.querySelector('.armado-subtotal').textContent = '';
+        }
     });
-    document.getElementById('configArmadoPesoTotal').textContent = `${totalGramos.toLocaleString('es-PE', {maximumFractionDigits: 4})} g${totalGramos >= 1000 ? ` (${(totalGramos / 1000).toLocaleString('es-PE', {maximumFractionDigits: 4})} kg)` : ''}`;
+    document.getElementById('configArmadoPesoTotal').textContent = `${totalGramos.toLocaleString('es-PE', {maximumFractionDigits: 4})} g${totalGramos >= 1000 ? ` (${(totalGramos / 1000).toLocaleString('es-PE', {maximumFractionDigits: 4})} kg)` : ''}${componentesSinPeso ? ` · ${componentesSinPeso} componente(s) por unidades, sin peso` : ''}`;
 }
 
 document.getElementById('formConfigArmadoProducto').addEventListener('submit', async function (e) {
@@ -1057,8 +1064,8 @@ document.getElementById('formConfigArmadoProducto').addEventListener('submit', a
         const cantidadTxt = fila.querySelector('.armado-cantidad').value.trim();
         const pesoTxt = fila.querySelector('.armado-peso').value.trim();
         if (!moldeId && !productoId && !unidadId && !cantidadTxt && !pesoTxt) return;
-        if ((!moldeId && !productoId) || !unidadId || !cantidadTxt || !pesoTxt || Number(cantidadTxt) <= 0 || Number(pesoTxt) <= 0) {
-            error = 'Completa el molde o producto, unidad, cantidad y peso en cada fila.';
+        if ((!moldeId && !productoId) || !unidadId || !cantidadTxt || Number(cantidadTxt) <= 0 || (pesoTxt && Number(pesoTxt) <= 0)) {
+            error = 'Completa el molde o producto, unidad y cantidad. El peso es opcional, pero si lo ingresas debe ser mayor a cero.';
             return;
         }
         const molde = moldesDisponiblesArmado.find(m => String(m.molde_id) === String(moldeId));
@@ -1069,8 +1076,8 @@ document.getElementById('formConfigArmadoProducto').addEventListener('submit', a
             ...(tipo === 'molde' ? {molde_id: Number(moldeId), molde: molde?.nombre || ''} : {producto_id: Number(productoId), producto: producto?.descripcion || ''}),
             unidad_me: unidad?.codigo || '', unidad_id: Number(unidadId),
             cantidad_a_utilizar: Number(cantidadTxt),
-            unidad_peso_molde: fila.querySelector('.armado-unidad-peso').value,
-            peso_molde: Number(pesoTxt),
+            unidad_peso_molde: pesoTxt ? fila.querySelector('.armado-unidad-peso').value : null,
+            peso_molde: pesoTxt ? Number(pesoTxt) : null,
         });
     });
     if (error) { Swal.fire('Falta información', error, 'warning'); return; }
