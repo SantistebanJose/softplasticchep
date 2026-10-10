@@ -1079,7 +1079,10 @@ function listarEnsamblajes()
     $fecha_desde  = trim($_POST['fecha_desde'] ?? '');
     $fecha_hasta  = trim($_POST['fecha_hasta'] ?? '');
 
-    $where  = ["1=1"];
+    // Los ensamblajes temporales solo reservan las pasadas que Producción
+    // envía. Se ofrecen en el selector de "Registrar ensamblaje", pero no
+    // son armados reales y no deben aparecer en el listado ni en sus contadores.
+    $where  = ["COALESCE(e.proveniente, '') <> 'prod2_pendiente'"];
     $params = [];
 
     if ($texto !== '') {

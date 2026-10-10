@@ -1511,6 +1511,8 @@ async function abrirModalEditarEnsamblaje(id) {
             relacion_id: item.relacion_id ? parseInt(item.relacion_id, 10) : null,
             molde_produccion_id: item.produccion_id, derivado_id: null, ensamblaje_complemento_id: null,
             nombre: item.molde_nombre ?? ('Producción #' + item.produccion_id),
+            color_id: item.color_id,
+            color_nombre: item.color_nombre,
             meta: `#${item.produccion_id}`
                 + (item.pasada ? ` · Pasada ${item.pasada}` : '')
                 + ` · ${formatearCantidadEns(item.cantidad_kg)} ${item.unidad_produccion_codigo || 'KG'}`
@@ -1542,12 +1544,21 @@ async function abrirModalEditarEnsamblaje(id) {
             molde_produccion_id: null,
             derivado_id: null,
             ensamblaje_complemento_id: item.ensamblaje_complemento_id,
+            color_id: item.color_id,
+            color_nombre: item.color_nombre,
             nombre: nombreMostrar,
             meta: `Complementa a ${item.producto_codigo ?? ''} - ${item.producto_descripcion ?? ''} · Armado #${item.ensamblaje_complemento_id} · ${formatearCantidadEns(item.cantidad_peso_kg)} ${item.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece',
             color: est.color, bg: est.bg,
         });
     });
+
+    const fuenteColorEdicion = ticketDetalleEns.find(l => l.tipo === 'complemento' && l.color_id)
+        || ticketDetalleEns.find(l => l.tipo === 'produccion' && l.color_id && !esColorNeutroEns(l));
+    if (fuenteColorEdicion?.color_id) {
+        document.getElementById('ens_color_id').value = String(fuenteColorEdicion.color_id);
+        productoSeleccionadoEns.color_id = String(fuenteColorEdicion.color_id);
+    }
 
     renderTicketDetalle();
     await renderGridDetalle();
