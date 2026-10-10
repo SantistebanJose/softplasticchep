@@ -1161,12 +1161,15 @@ async function renderGridDetalle() {
                 categoria_material_id: p.categoria_material_id,
                 categoria_material_nombre: p.categoria_material_nombre_verif,
                 unidad_codigo: p.unidad_produccion_codigo || 'KG',
+                cantidad_por_unidad_armada: p.cantidad_por_unidad_armada,
+                unidad_componente_configurada: p.unidad_componente_configurada,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
                 <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
+                ${p.cantidad_por_unidad_armada ? `<span class="meta">Receta: <b>${formatearCantidadEns(p.cantidad_por_unidad_armada)} ${p.unidad_componente_configurada || ''}</b> por unidad armada</span>` : ''}
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
         }).join('');
@@ -1262,8 +1265,8 @@ async function agregarLineaDetalle(tipo, datos) {
             return;
         }
 
-        // NUEVO: se pide la cantidad que REALMENTE se está recibiendo para
-        // este armado, para poder compararla luego contra lo producido.
+        // Se registra solo lo usado; el saldo de esta producción/pasada
+        // seguirá disponible para otros armados.
         const cantidadProducida = parseFloat(datos.cantidad_kg) || 0;
         const unidad = datos.unidad_codigo || 'KG';
         const colorActual = document.getElementById('ens_color_id').value;
@@ -1273,13 +1276,13 @@ async function agregarLineaDetalle(tipo, datos) {
             return;
         }
         let cantidadRecibidaNum = cantidadProducida;
-        if (!datos.relacion_id && !datos.pasada) {
+        if (datos.componente_configuracion) {
             const { value: cantidadRecibida } = await Swal.fire({
-                title: 'Cantidad recibida',
-                html: `Pesa nuevamente la producción e indica cuánto <b>${unidad}</b> estás recibiendo para el armado.`,
+                title: 'Cantidad que usarás',
+                html: `Disponible: <b>${formatearCantidadEns(cantidadProducida)} ${unidad}</b><br>Indica cuánto <b>${unidad}</b> usarás en este armado. El saldo quedará disponible para otros armados.`,
                 icon: 'question',
                 input: 'number',
-                inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
+                inputAttributes: { min: 0, max: cantidadProducida, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
                 inputValue: '',
                 inputPlaceholder: `Cantidad en ${unidad}`,
                 showCancelButton: true,
@@ -1290,13 +1293,16 @@ async function agregarLineaDetalle(tipo, datos) {
                     if (input) { input.removeAttribute('readonly'); input.focus(); }
                 },
                 inputValidator: (value) => {
-                    if (!value || parseFloat(value) <= 0) return 'Ingresa una cantidad válida mayor a 0.';
+                    if (!value || parseFloat(value) <= 0 || parseFloat(value) > cantidadProducida) return `Ingresa una cantidad entre 0 y ${formatearCantidadEns(cantidadProducida)} ${unidad}.`;
                 }
             });
             if (!cantidadRecibida) return;
             cantidadRecibidaNum = parseFloat(cantidadRecibida);
         }
         const coincide = Math.abs(cantidadRecibidaNum - cantidadProducida) < 0.0001;
+        const recetaMeta = datos.cantidad_por_unidad_armada
+            ? ` · Receta: ${formatearCantidadEns(datos.cantidad_por_unidad_armada)} ${datos.unidad_componente_configurada || ''} por unidad armada`
+            : '';
 
         ticketDetalleEns.push({
             tempId: ++contadorLineaTicketEns,
@@ -1312,8 +1318,9 @@ async function agregarLineaDetalle(tipo, datos) {
             color_nombre: datos.color_nombre,
             meta: `#${datos.produccion_id}`
                 + (datos.pasada ? ` · Pasada ${datos.pasada}` : '')
-                + ` · Color: ${datos.color_nombre || '-'} · Producido: ${formatearCantidadEns(cantidadProducida)} ${unidad} · Recibido: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}`
-                + (coincide ? ' <span style="color:#16A34A;">✓ coincide</span>' : ' <span style="color:#D97706;">⚠ diferente</span>')
+            + ` · Color: ${datos.color_nombre || '-'} · Disponible: ${formatearCantidadEns(cantidadProducida)} ${unidad} · Se usará: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}`
+            + (coincide ? ' <span style="color:#16A34A;">✓ se usa todo</span>' : ' <span style="color:#D97706;">↳ quedará saldo</span>')
+            + recetaMeta
                 + ` · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
@@ -1374,8 +1381,8 @@ function editarCantidadEntradaLinea(tempId) {
     if (!linea || linea.tipo !== 'produccion') return;
     const unidad = linea.unidad_codigo || 'KG';
     Swal.fire({
-        title: 'Editar cantidad recibida',
-        html: `Producido: <b>${formatearCantidadEns(linea.cantidad_kg)} ${unidad}</b>`,
+        title: 'Editar cantidad que usarás',
+        html: `Cantidad vinculada: <b>${formatearCantidadEns(linea.cantidad_entrada_produccion)} ${unidad}</b>`,
         input: 'number',
         inputAttributes: { min: 0, step: '0.01' },
         inputValue: linea.cantidad_entrada_produccion ?? '',

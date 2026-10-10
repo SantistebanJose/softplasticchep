@@ -102,10 +102,11 @@
  *   (se refleja directo en ensamblaje.ensamblaje_id_referido, SIN fila en
  *   rel_ensamblaje_producto).
  *
- * REGLA DE UNICIDAD:
- *   Un mismo avance de producción (molde_produccion_id) solo puede estar
- *   vinculado a UN ensamblaje activo a la vez (NOT EXISTS sobre
- *   rel_ensamblaje_producto). Un mismo ensamblaje-complemento solo puede
+ * REGLA DE CONSUMO:
+ *   Una producción o pasada puede alimentar varios armados: cada fila activa
+ *   registra la cantidad realmente usada y la disponibilidad se calcula
+ *   restando esos consumos de la cantidad original. Los ensamblajes no pueden
+ *   consumir más que el saldo disponible. Un mismo ensamblaje-complemento solo puede
  *   estar tomado por UN ensamblaje a la vez (ensamblaje_id_referido IS NULL
  *   como condición del UPDATE atómico).
  *
@@ -362,10 +363,13 @@ function buscarProductosConfiguradosEnsamblaje(): void
         SELECT DISTINCT p.id AS producto_id, p.codigo, p.descripcion,
             CASE WHEN p.js_configuracion_empaquetado->>'requiere_maquina_ensamblaje' = 'true' THEN 1 ELSE 0 END AS requiere_maquina_ensamblaje
         FROM producto p
-        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.js_configuracion, '[]'::jsonb)) cfg(item)
-        JOIN molde m ON m.id = NULLIF(cfg.item->>'molde_id', '')::bigint
-        WHERE p.activo = TRUE AND m.deleted_at IS NULL
-          AND COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no'
+        LEFT JOIN LATERAL jsonb_array_elements(COALESCE(p.js_configuracion, '[]'::jsonb)) cfg(item) ON TRUE
+        LEFT JOIN molde m ON m.id = NULLIF(cfg.item->>'molde_id', '')::bigint
+        WHERE p.activo = TRUE AND (
+            (m.id IS NOT NULL AND m.deleted_at IS NULL
+             AND COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no')
+            OR cardinality(COALESCE(p.js_configuracion_armado, ARRAY[]::jsonb[])) > 0
+        )
         ORDER BY p.descripcion
     ");
     responder(true, 'OK', ['productos' => $result]);
@@ -432,8 +436,8 @@ function buscarProductosDisponiblesEnsamblaje()
         // avance no tiene foto de configuración guardada (viejo) ni molde
         // configurado, se asume 'sí' por compatibilidad (comportamiento
         // previo a que existiera esta bandera).
-        "COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no'",
-        "x.item IS NOT NULL",
+        "(receta.item IS NOT NULL OR COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no')",
+        "(x.item IS NOT NULL OR receta.item IS NOT NULL)",
         $condicionLibre,
     ];
     $params = [];
@@ -546,6 +550,7 @@ function buscarComplementos()
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
+        "GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0)) > 0",
         "LOWER(COALESCE(cm.nombre, '')) LIKE '%primera%'",
         "NOT " . sqlEsMultiMoldeCompleto('e', 'p'),
         sqlEsComplementoCompatible('e', 'p', 'pt'),
@@ -592,7 +597,7 @@ function buscarComplementos()
                 JOIN produccion pd ON pd.id = rep.molde_produccion_id
                 WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
             )) AS color_id,
-            e.cantidad_peso_kg,
+            GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0)) AS cantidad_peso_kg,
             e.fin,
             co.nombre AS complemento_color_nombre,
             cm.nombre AS categoria_material_nombre,
@@ -603,12 +608,14 @@ function buscarComplementos()
                  FROM jsonb_array_elements(COALESCE(e.js_derivados_utilizados,'[]'::jsonb)) d)
             ) AS moldes_nombres,
             COALESCE(
+                ue.nombre_corto,
                 (SELECT (m->>'unidad_produccion_codigo')
                  FROM jsonb_array_elements(COALESCE(e.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1),
                 'kg'
             ) AS unidad_salida_codigo
         FROM ensamblaje e
         LEFT JOIN producto p ON p.id = e.producto_id
+        LEFT JOIN unidad_medida ue ON ue.id = e.unidad_salida_id
         INNER JOIN producto pt ON pt.id = :producto_objetivo_id
         LEFT JOIN color co ON co.id = COALESCE(e.color_id, (
             SELECT pd.color_id FROM rel_ensamblaje_producto rep
@@ -790,10 +797,19 @@ function buscarProduccionesDisponibles()
     } else {
         if ($productoId > 0) {
             $joinProducto = "INNER JOIN producto t4 ON t4.id = :target_producto";
-            $where[] = "EXISTS (
+            $where[] = "(EXISTS (
                 SELECT 1 FROM jsonb_array_elements(COALESCE(t2.js_producto, '[]'::jsonb)) assoc
                 WHERE (assoc->>'producto_id')::bigint = t4.id
-            )";
+            ) OR EXISTS (
+                SELECT 1 FROM unnest(COALESCE(t4.js_configuracion_armado, ARRAY[]::jsonb[])) receta0(item)
+                WHERE (COALESCE(receta0.item->>'tipo_componente', 'molde') = 'molde'
+                       AND NULLIF(receta0.item->>'molde_id', '')::bigint = t2.id)
+                   OR (receta0.item->>'tipo_componente' = 'producto'
+                       AND EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(COALESCE(t2.js_producto, '[]'::jsonb)) assoc_producto
+                           WHERE NULLIF(assoc_producto->>'producto_id', '')::bigint = NULLIF(receta0.item->>'producto_id', '')::bigint
+                       ))
+            ))";
             $params['target_producto'] = $productoId;
         }
     }
@@ -828,10 +844,20 @@ function buscarProduccionesDisponibles()
                 NULLIF(pase.item->>'cantidad', '')::numeric,
                 NULLIF(pase.item->>'cantidad_kg', '')::numeric,
                 t1.cantidad_producida_kg
-            ) AS cantidad_kg,
+            ) AS cantidad_producida,
+            GREATEST(0, COALESCE(
+                rep.cantidad_entrada_produccion,
+                NULLIF(pase.item->>'cantidad', '')::numeric,
+                NULLIF(pase.item->>'cantidad_kg', '')::numeric,
+                t1.cantidad_producida_kg
+            ) - COALESCE(consumo.cantidad_usada, 0)) AS cantidad_kg,
             COALESCE(rep.created_at, NULLIF(pase.item->>'fecha', '')::timestamp, t1.fecha_hora_fin) AS fecha_hora_fin,
             NULLIF(pase.item->>'pasada', '')::integer AS pasada,
             t4.id AS producto_id,
+            COALESCE(psrc.producto_id, t4.id) AS producto_fuente_id,
+            receta.item AS componente_configuracion,
+            NULLIF(receta.item->>'cantidad_a_utilizar', '')::numeric AS cantidad_por_unidad_armada,
+            receta.item->>'unidad_me' AS unidad_componente_configurada,
             t1.color_id,
             t3.nombre AS color_nombre_verif,
             t3.rgb AS color_rgb,
@@ -843,6 +869,11 @@ function buscarProduccionesDisponibles()
         LEFT JOIN color t3 ON t3.id = t1.color_id
         LEFT JOIN rel_ensamblaje_producto rep
           ON rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
+         AND EXISTS (
+             SELECT 1 FROM ensamblaje origen0
+             WHERE origen0.id = rep.ensamblaje_id AND origen0.deleted_at IS NULL
+               AND origen0.proveniente = 'prod2_pendiente'
+         )
         LEFT JOIN ensamblaje ep ON ep.id = rep.ensamblaje_id AND ep.deleted_at IS NULL
         LEFT JOIN LATERAL (
             SELECT salida AS item
@@ -860,15 +891,59 @@ function buscarProduccionesDisponibles()
             WHERE rep.id IS NULL
               AND jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) = 0
         ) pase ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(COALESCE(rep_usado.cantidad_entrada_produccion, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_usado.cantidad_producida_kg, 0)), 0) AS cantidad_usada
+            FROM rel_ensamblaje_producto rep_usado
+            JOIN ensamblaje e_usado ON e_usado.id = rep_usado.ensamblaje_id
+            JOIN produccion pd_usado ON pd_usado.id = rep_usado.molde_produccion_id
+            WHERE rep_usado.molde_produccion_id = t1.id
+              AND rep_usado.deleted_at IS NULL AND e_usado.deleted_at IS NULL
+              AND COALESCE(e_usado.proveniente, '') <> 'prod2_pendiente'
+              AND rep_usado.js_query_consulta_produccion->>'pasada'
+                    IS NOT DISTINCT FROM pase.item->>'pasada'
+        ) consumo ON TRUE
         $joinProducto
+        LEFT JOIN LATERAL (
+            SELECT NULLIF(assoc_fuente->>'producto_id', '')::bigint AS producto_id
+            FROM jsonb_array_elements(COALESCE(t2.js_producto, '[]'::jsonb)) assoc_fuente
+            WHERE (NULLIF(assoc_fuente->>'producto_id', '')::bigint = t4.id)
+               OR EXISTS (
+                    SELECT 1 FROM unnest(COALESCE(t4.js_configuracion_armado, ARRAY[]::jsonb[])) rec_fuente(item)
+                    WHERE (rec_fuente.item->>'tipo_componente' = 'producto'
+                           AND NULLIF(rec_fuente.item->>'producto_id', '')::bigint = NULLIF(assoc_fuente->>'producto_id', '')::bigint)
+                       OR (COALESCE(rec_fuente.item->>'tipo_componente', 'molde') = 'molde'
+                           AND NULLIF(rec_fuente.item->>'molde_id', '')::bigint = t2.id)
+               )
+            ORDER BY CASE WHEN NULLIF(assoc_fuente->>'producto_id', '')::bigint = t4.id THEN 0 ELSE 1 END
+            LIMIT 1
+        ) psrc ON TRUE
+        LEFT JOIN producto producto_fuente ON producto_fuente.id = psrc.producto_id
         LEFT JOIN categoria_material cm ON cm.id = t1.categoria_material_id
-        LEFT JOIN LATERAL jsonb_array_elements(t4.js_configuracion) AS x(item)
+        LEFT JOIN LATERAL jsonb_array_elements(COALESCE(producto_fuente.js_configuracion, t4.js_configuracion, '[]'::jsonb)) AS x(item)
             ON (x.item->>'molde_id')::bigint = t2.id
+        LEFT JOIN LATERAL (
+            SELECT receta1.item
+            FROM unnest(COALESCE(t4.js_configuracion_armado, ARRAY[]::jsonb[])) receta1(item)
+            WHERE (COALESCE(receta1.item->>'tipo_componente', 'molde') = 'molde'
+                   AND NULLIF(receta1.item->>'molde_id', '')::bigint = t2.id)
+               OR (receta1.item->>'tipo_componente' = 'producto'
+                   AND EXISTS (
+                       SELECT 1 FROM jsonb_array_elements(COALESCE(t2.js_producto, '[]'::jsonb)) assoc_producto
+                       WHERE NULLIF(assoc_producto->>'producto_id', '')::bigint = NULLIF(receta1.item->>'producto_id', '')::bigint
+                   ))
+            LIMIT 1
+        ) receta ON TRUE
         LEFT JOIN LATERAL (SELECT CASE
-            WHEN split_part(t1.unico_molde_producto, '-', 2) = t4.id::text THEN COALESCE(t1.js_configuracion_moment, x.item)
+            WHEN split_part(t1.unico_molde_producto, '-', 2) = COALESCE(psrc.producto_id, t4.id)::text THEN COALESCE(t1.js_configuracion_moment, x.item)
             ELSE x.item END AS item) cfg ON true
         LEFT JOIN unidad_medida upv ON upv.id = NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint
         WHERE " . implode(' AND ', $where) . "
+          AND COALESCE(
+                rep.cantidad_entrada_produccion,
+                NULLIF(pase.item->>'cantidad', '')::numeric,
+                NULLIF(pase.item->>'cantidad_kg', '')::numeric,
+                t1.cantidad_producida_kg
+              ) > COALESCE(consumo.cantidad_usada, 0)
         ORDER BY t1.fecha_hora_fin DESC";
 
     $result = executeQuery($conectar, $sql, $params);
@@ -937,39 +1012,41 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): string
 {
     return "(
-        SELECT jsonb_agg(jsonb_build_object(
-                   'ensamblaje_complemento_id', ec.id,
-                   'color_id', COALESCE(ec.color_id, (
-                       SELECT pd.color_id FROM rel_ensamblaje_producto rep0
-                       JOIN produccion pd ON pd.id = rep0.molde_produccion_id
-                       WHERE rep0.ensamblaje_id = ec.id AND rep0.deleted_at IS NULL LIMIT 1
-                   )),
-                   'color_nombre', co.nombre,
-                   'categoria_material_id', ec.categoria_material_id,
-                   'producto_codigo', pc.codigo,
-                   'producto_descripcion', pc.descripcion,
-                   'cantidad_peso_kg', ec.cantidad_peso_kg,
-                   'moldes_nombres', COALESCE(
-                       (SELECT string_agg(DISTINCT (m->>'molde_nombre'), ', ' ORDER BY (m->>'molde_nombre'))
-                        FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m),
-                       (SELECT string_agg(DISTINCT (d->>'derivado_nombre'), ', ' ORDER BY (d->>'derivado_nombre'))
-                        FROM jsonb_array_elements(COALESCE(ec.js_derivados_utilizados,'[]'::jsonb)) d)
-                   ),
-                   'unidad_salida_codigo', COALESCE(
-                       (SELECT (m->>'unidad_produccion_codigo')
-                        FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1),
-                       'kg'
-                   )
-               ))
-        FROM ensamblaje ec
-        LEFT JOIN producto pc ON pc.id = ec.producto_id
-        LEFT JOIN color co ON co.id = COALESCE(ec.color_id, (
-            SELECT pd.color_id FROM rel_ensamblaje_producto rep0
-            JOIN produccion pd ON pd.id = rep0.molde_produccion_id
-            WHERE rep0.ensamblaje_id = ec.id AND rep0.deleted_at IS NULL LIMIT 1
-        ))
-        WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id
-          AND ec.deleted_at IS NULL
+        SELECT jsonb_agg(complemento.item)
+        FROM (
+            SELECT jsonb_build_object(
+                'ensamblaje_complemento_id', ec.id,
+                'color_id', COALESCE(ec.color_id, (SELECT pd.color_id FROM rel_ensamblaje_producto r0 JOIN produccion pd ON pd.id = r0.molde_produccion_id WHERE r0.ensamblaje_id = ec.id AND r0.deleted_at IS NULL LIMIT 1)),
+                'color_nombre', co.nombre, 'categoria_material_id', ec.categoria_material_id,
+                'producto_codigo', pc.codigo, 'producto_descripcion', pc.descripcion,
+                'cantidad_peso_kg', ec.cantidad_peso_kg,
+                'moldes_nombres', COALESCE((SELECT string_agg(DISTINCT (m->>'molde_nombre'), ', ' ORDER BY (m->>'molde_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m), (SELECT string_agg(DISTINCT (d->>'derivado_nombre'), ', ' ORDER BY (d->>'derivado_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_derivados_utilizados,'[]'::jsonb)) d)),
+                'unidad_salida_codigo', COALESCE(ue.nombre_corto, (SELECT (m->>'unidad_produccion_codigo') FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1), 'kg')
+            ) AS item
+            FROM ensamblaje ec
+            LEFT JOIN producto pc ON pc.id = ec.producto_id
+            LEFT JOIN unidad_medida ue ON ue.id = ec.unidad_salida_id
+            LEFT JOIN color co ON co.id = ec.color_id
+            WHERE ec.ensamblaje_id_referido = $aliasEnsamblaje.id AND ec.deleted_at IS NULL
+            UNION ALL
+            SELECT jsonb_build_object(
+                'ensamblaje_complemento_id', ec.id,
+                'color_id', COALESCE(ec.color_id, (SELECT pd.color_id FROM rel_ensamblaje_producto r0 JOIN produccion pd ON pd.id = r0.molde_produccion_id WHERE r0.ensamblaje_id = ec.id AND r0.deleted_at IS NULL LIMIT 1)),
+                'color_nombre', co.nombre, 'categoria_material_id', ec.categoria_material_id,
+                'producto_codigo', pc.codigo, 'producto_descripcion', pc.descripcion,
+                'cantidad_peso_kg', NULLIF(ev->>'cantidad', '')::numeric,
+                'moldes_nombres', COALESCE((SELECT string_agg(DISTINCT (m->>'molde_nombre'), ', ' ORDER BY (m->>'molde_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m), (SELECT string_agg(DISTINCT (d->>'derivado_nombre'), ', ' ORDER BY (d->>'derivado_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_derivados_utilizados,'[]'::jsonb)) d)),
+                'unidad_salida_codigo', COALESCE(ev->>'unidad_codigo', ue.nombre_corto, (SELECT (m->>'unidad_produccion_codigo') FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1), 'kg')
+            ) AS item
+            FROM ensamblaje ec
+            JOIN LATERAL jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev ON TRUE
+            LEFT JOIN producto pc ON pc.id = ec.producto_id
+            LEFT JOIN unidad_medida ue ON ue.id = ec.unidad_salida_id
+            LEFT JOIN color co ON co.id = ec.color_id
+            WHERE ec.deleted_at IS NULL AND ev->>'tipo' = 'consumo_complemento'
+              AND ev->>'ensamblaje_id' = $aliasEnsamblaje.id::text
+              AND COALESCE(ev->>'anulado','false') <> 'true'
+        ) complemento
     ) AS js_complementos_utilizados";
 }
 
@@ -1435,14 +1512,19 @@ function guardarEnsamblaje()
                 ['id' => $id]
             );
 
-            // Complemento: vive como ensamblaje.ensamblaje_id_referido = $id,
-            // tanto si quedó reservado manualmente como si se vinculó desde
-            // la lista automática de armados de Primera Categoría.
+            // Los complementos completos antiguos se reservan en el puntero;
+            // los consumos parciales de recetas quedan como líneas del padre.
             $complementosActuales = executeQuery(
                 $conectar,
-                "SELECT id AS ensamblaje_complemento_id FROM ensamblaje
-                 WHERE ensamblaje_id_referido = :id AND deleted_at IS NULL",
-                ['id' => $id]
+                "SELECT ec.id AS ensamblaje_complemento_id, NULL::bigint AS rel_id, FALSE AS es_consumo
+                 FROM ensamblaje ec WHERE ec.ensamblaje_id_referido = :id_ref AND ec.deleted_at IS NULL
+                 UNION ALL
+                 SELECT ec.id, NULL::bigint AS rel_id, TRUE AS es_consumo
+                 FROM ensamblaje ec
+                 JOIN LATERAL jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev ON TRUE
+                 WHERE ev->>'tipo' = 'consumo_complemento' AND ev->>'ensamblaje_id' = :id_rel::text
+                   AND COALESCE(ev->>'anulado','false') <> 'true' AND ec.deleted_at IS NULL",
+                ['id_ref' => $id, 'id_rel' => $id]
             );
 
             // Claves de comparación: "p:123" producción, "d:45" derivado,
@@ -1465,11 +1547,18 @@ function guardarEnsamblaje()
                     'tipo' => $tipo,
                     'rel_id' => $l['id'],
                     'cantidad_entrada_produccion' => $l['cantidad_entrada_produccion'] ?? null,
+                    'molde_produccion_id' => $l['molde_produccion_id'] ?? null,
+                    'js_query_consulta_produccion' => $l['js_query_consulta_produccion'] ?? null,
                 ];
             }
             foreach ($complementosActuales as $c) {
                 $k = $clave('complemento', null, null, $c['ensamblaje_complemento_id']);
-                $actualesPorClave[$k] = ['tipo' => 'complemento', 'ensamblaje_complemento_id' => $c['ensamblaje_complemento_id']];
+                $actualesPorClave[$k] = [
+                    'tipo' => 'complemento',
+                    'ensamblaje_complemento_id' => $c['ensamblaje_complemento_id'],
+                    'rel_id' => $c['rel_id'] ?? null,
+                    'es_consumo' => valorBooleanoEnsamblaje($c['es_consumo'] ?? false),
+                ];
             }
 
             $nuevasPorClave = [];
@@ -1490,12 +1579,27 @@ function guardarEnsamblaje()
             foreach ($clavesAEliminar as $k) {
                 $linea = $actualesPorClave[$k];
                 if ($linea['tipo'] === 'complemento') {
-                    executeNonQuery(
-                        $conectar,
-                        "UPDATE ensamblaje SET ensamblaje_id_referido = NULL, update_at = NOW()
-                         WHERE id = :id AND ensamblaje_id_referido = :padre",
-                        ['id' => $linea['ensamblaje_complemento_id'], 'padre' => $id]
-                    );
+                    if (!empty($linea['rel_id'])) {
+                        executeNonQuery($conectar, "UPDATE rel_ensamblaje_producto SET deleted_at = NOW(), update_at = NOW() WHERE id = :id", ['id' => $linea['rel_id']]);
+                    } elseif (!empty($linea['es_consumo'])) {
+                        executeNonQuery($conectar, "
+                            UPDATE ensamblaje ec SET js_historial = (
+                                SELECT COALESCE(jsonb_agg(CASE
+                                    WHEN ev->>'tipo' = 'consumo_complemento'
+                                     AND ev->>'ensamblaje_id' = :padre::text
+                                    THEN ev || '{\"anulado\":true}'::jsonb ELSE ev END), '[]'::jsonb)
+                                FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                            ), update_at = NOW()
+                            WHERE ec.id = :id
+                        ", ['id' => $linea['ensamblaje_complemento_id'], 'padre' => $id]);
+                    } else {
+                        executeNonQuery(
+                            $conectar,
+                            "UPDATE ensamblaje SET ensamblaje_id_referido = NULL, update_at = NOW()
+                             WHERE id = :id AND ensamblaje_id_referido = :padre",
+                            ['id' => $linea['ensamblaje_complemento_id'], 'padre' => $id]
+                        );
+                    }
                 } else {
                     executeNonQuery(
                         $conectar,
@@ -1526,6 +1630,40 @@ function guardarEnsamblaje()
                 $nuevaCantidad = $lineaNueva['cantidad_entrada_produccion'] ?? null;
                 $cantidadActual = $lineaActual['cantidad_entrada_produccion'] ?? null;
                 if ($nuevaCantidad !== null && (float)$nuevaCantidad !== (float)($cantidadActual ?? -1)) {
+                    $snapshotActual = json_decode($lineaActual['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+                    $pasadaActual = $snapshotActual['pasada'] ?? null;
+                    $produccionActual = executeQuery($conectar, "
+                        SELECT cantidad_producida_kg, js_cantidades_salientes
+                        FROM produccion WHERE id = :id FOR UPDATE
+                    ", ['id' => $lineaActual['molde_produccion_id']]);
+                    if (empty($produccionActual)) throw new Exception('No se encontró la producción que intentas ajustar.');
+                    $cantidadBaseActual = (float)($produccionActual[0]['cantidad_producida_kg'] ?? 0);
+                    $salidasActuales = json_decode($produccionActual[0]['js_cantidades_salientes'] ?? '[]', true) ?: [];
+                    foreach ($salidasActuales as $salidaActual) {
+                        if ((string)($salidaActual['pasada'] ?? '') === (string)($pasadaActual ?? '')) {
+                            $cantidadBaseActual = (float)($salidaActual['cantidad'] ?? $salidaActual['cantidad_kg'] ?? $cantidadBaseActual);
+                            break;
+                        }
+                    }
+                    $otrosConsumos = executeQuery($conectar, "
+                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                    FROM rel_ensamblaje_producto rep_u
+                        JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
+                    JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
+                        WHERE rep_u.molde_produccion_id = :produccion_id
+                          AND rep_u.deleted_at IS NULL AND e_u.deleted_at IS NULL
+                          AND COALESCE(e_u.proveniente, '') <> 'prod2_pendiente'
+                          AND rep_u.js_query_consulta_produccion->>'pasada' IS NOT DISTINCT FROM :pasada
+                          AND rep_u.id <> :rel_id
+                    ", [
+                        'produccion_id' => $lineaActual['molde_produccion_id'],
+                        'pasada' => $pasadaActual === null ? null : (string)$pasadaActual,
+                        'rel_id' => $lineaActual['rel_id'],
+                    ]);
+                    $cantidadDisponibleEditar = max(0, $cantidadBaseActual - (float)($otrosConsumos[0]['cantidad'] ?? 0));
+                    if ((float)$nuevaCantidad > $cantidadDisponibleEditar + 0.000001) {
+                        throw new Exception('La nueva cantidad supera el saldo disponible de esa producción/pasada (' . number_format($cantidadDisponibleEditar, 4, '.', '') . ').');
+                    }
                     executeNonQuery(
                         $conectar,
                         "UPDATE rel_ensamblaje_producto SET cantidad_entrada_produccion = :cantidad, update_at = NOW() WHERE id = :id",
@@ -1610,7 +1748,9 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if ($relacionIdPendiente > 0) {
                 $relacionPendiente = executeQuery($conectar, "
                     SELECT rep.id, rep.ensamblaje_id AS origen_id,
-                           rep.molde_produccion_id, origen.proveniente,
+                           rep.molde_produccion_id, rep.cantidad_entrada_produccion,
+                           rep.unidad_entrada_id, rep.js_query_consulta_produccion,
+                           origen.proveniente,
                            origen.producto_id AS producto_origen_id,
                            origen.deleted_at AS origen_deleted_at
                     FROM rel_ensamblaje_producto rep
@@ -1631,29 +1771,80 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 if ((int)$relacionPendiente[0]['producto_origen_id'] !== $productoObjetivoId) {
                     throw new Exception("La pasada de la producción #$produccionId pertenece a otro producto.");
                 }
-
                 $origenId = (int)$relacionPendiente[0]['origen_id'];
-                if ($origenId !== $ensamblajeId) {
-                    executeNonQuery($conectar, "
-                        UPDATE rel_ensamblaje_producto
-                        SET ensamblaje_id = :destino_id, update_at = NOW()
-                        WHERE id = :relacion_id AND deleted_at IS NULL
-                    ", [
-                        'destino_id' => $ensamblajeId,
-                        'relacion_id' => $relacionIdPendiente,
-                    ]);
+                $produccionBloqueada = executeQuery($conectar, "SELECT id FROM produccion WHERE id = :id FOR UPDATE", ['id' => $produccionId]);
+                if (empty($produccionBloqueada)) throw new Exception("La producción #$produccionId ya no existe.");
+                $snapshotOrigen = json_decode($relacionPendiente[0]['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+                $pasadaOrigen = $snapshotOrigen['pasada'] ?? null;
+                $baseDisponible = (float)($relacionPendiente[0]['cantidad_entrada_produccion']
+                    ?? $snapshotOrigen['cantidad_kg'] ?? $snapshotOrigen['cantidad'] ?? $snapshotOrigen['cantidad_kg'] ?? 0);
+                $consumido = executeQuery($conectar, "
+                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                    FROM rel_ensamblaje_producto rep_u
+                    JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
+                    JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
+                    WHERE rep_u.molde_produccion_id = :produccion_id
+                      AND rep_u.deleted_at IS NULL AND e_u.deleted_at IS NULL
+                      AND COALESCE(e_u.proveniente, '') <> 'prod2_pendiente'
+                      AND rep_u.js_query_consulta_produccion->>'pasada' IS NOT DISTINCT FROM :pasada
+                ", ['produccion_id' => $produccionId, 'pasada' => $pasadaOrigen === null ? null : (string)$pasadaOrigen]);
+                $cantidadYaUsada = (float)($consumido[0]['cantidad'] ?? 0);
+                $cantidadDisponible = max(0, $baseDisponible - $cantidadYaUsada);
+                $cantidadUsar = (float)$linea['cantidad_entrada_produccion'];
+                if ($cantidadUsar > $cantidadDisponible + 0.000001) {
+                    throw new Exception("La producción #$produccionId solo tiene " . number_format($cantidadDisponible, 4, '.', '') . ' disponible para esta pasada.');
+                }
+                $tieneReceta = executeQuery($conectar, "
+                    SELECT EXISTS (
+                        SELECT 1 FROM ensamblaje e
+                        JOIN producto p ON p.id = e.producto_id
+                        JOIN produccion pd ON pd.id = :produccion_id
+                        JOIN molde m ON m.id = pd.molde_id
+                        WHERE e.id = :ensamblaje_id AND EXISTS (
+                            SELECT 1 FROM unnest(COALESCE(p.js_configuracion_armado, ARRAY[]::jsonb[])) r(item)
+                            WHERE (COALESCE(r.item->>'tipo_componente', 'molde') = 'molde'
+                                   AND NULLIF(r.item->>'molde_id', '')::bigint = m.id)
+                               OR (r.item->>'tipo_componente' = 'producto'
+                                   AND EXISTS (
+                                       SELECT 1 FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) a
+                                       WHERE NULLIF(a->>'producto_id', '')::bigint = NULLIF(r.item->>'producto_id', '')::bigint
+                                   ))
+                        )
+                    ) AS valor
+                ", ['produccion_id' => $produccionId, 'ensamblaje_id' => $ensamblajeId]);
+                if (!valorBooleanoEnsamblaje($tieneReceta[0]['valor'] ?? false) && abs($cantidadUsar - $cantidadDisponible) > 0.000001) {
+                    throw new Exception('Este producto no tiene configuración de armado para consumo parcial; se debe usar toda la producción/pasada.');
+                }
 
+                $snapshotOrigen['produccion_id'] = $produccionId;
+                $snapshotOrigen['pasada'] = $pasadaOrigen;
+                $snapshotOrigen['cantidad_kg'] = $cantidadUsar;
+                $snapshotOrigen['cantidad_consumida'] = $cantidadUsar;
+                $snapshotConsumo = json_encode($snapshotOrigen, JSON_UNESCAPED_UNICODE);
+                executeNonQuery($conectar, "
+                    INSERT INTO rel_ensamblaje_producto (
+                        ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
+                        cantidad_entrada_produccion, unidad_entrada_id, created_at
+                    ) VALUES (
+                        :ensamblaje_id, :produccion_id, :snapshot,
+                        :cantidad, :unidad_id, NOW()
+                    )
+                ", [
+                    'ensamblaje_id' => $ensamblajeId,
+                    'produccion_id' => $produccionId,
+                    'snapshot' => $snapshotConsumo,
+                    'cantidad' => $cantidadUsar,
+                    'unidad_id' => $relacionPendiente[0]['unidad_entrada_id'],
+                ]);
+
+                if ($cantidadUsar >= $cantidadDisponible - 0.000001) {
+                    executeNonQuery($conectar, "UPDATE rel_ensamblaje_producto SET deleted_at = NOW(), update_at = NOW() WHERE id = :id", ['id' => $relacionIdPendiente]);
                     $restantesOrigen = executeQuery($conectar, "
                         SELECT id FROM rel_ensamblaje_producto
-                        WHERE ensamblaje_id = :origen_id AND deleted_at IS NULL
-                        LIMIT 1
+                        WHERE ensamblaje_id = :origen_id AND deleted_at IS NULL LIMIT 1
                     ", ['origen_id' => $origenId]);
                     if (empty($restantesOrigen)) {
-                        executeNonQuery($conectar, "
-                            UPDATE ensamblaje
-                            SET deleted_at = NOW(), update_at = NOW()
-                            WHERE id = :origen_id AND proveniente = 'prod2_pendiente'
-                        ", ['origen_id' => $origenId]);
+                        executeNonQuery($conectar, "UPDATE ensamblaje SET deleted_at = NOW(), update_at = NOW() WHERE id = :origen_id AND proveniente = 'prod2_pendiente'", ['origen_id' => $origenId]);
                     } else {
                         recalcularResumenesEnsamblaje($conectar, $origenId);
                     }
@@ -1663,28 +1854,37 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 
             $prod = executeQuery(
                 $conectar,
-                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje, pases_finalizados, js_cantidades_salientes FROM produccion WHERE id = :id",
+                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje, pases_finalizados, js_cantidades_salientes, cantidad_producida_kg FROM produccion WHERE id = :id FOR UPDATE",
                 ['id' => $produccionId]
             );
             if (empty($prod)) {
                 throw new Exception("La producción #$produccionId ya no existe.");
             }
             $configObjetivo = executeQuery($conectar, "
-                SELECT x.item
+                SELECT x.item, receta.item AS receta_item
                 FROM produccion pd
                 JOIN molde m ON m.id = pd.molde_id
                 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
                 JOIN producto pr ON pr.id = :producto_id
-                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) x(item)
+                JOIN producto fuente ON fuente.id = NULLIF(rel->>'producto_id', '')::bigint
+                LEFT JOIN LATERAL jsonb_array_elements(COALESCE(fuente.js_configuracion, '[]'::jsonb)) x(item)
+                  ON NULLIF(x.item->>'molde_id', '')::bigint = m.id
+                LEFT JOIN LATERAL unnest(COALESCE(pr.js_configuracion_armado, ARRAY[]::jsonb[])) receta(item)
+                  ON (COALESCE(receta.item->>'tipo_componente', 'molde') = 'molde'
+                      AND NULLIF(receta.item->>'molde_id', '')::bigint = m.id)
+                  OR (receta.item->>'tipo_componente' = 'producto'
+                      AND NULLIF(rel->>'producto_id', '')::bigint = NULLIF(receta.item->>'producto_id', '')::bigint)
                 WHERE pd.id = :produccion_id
-                  AND (rel->>'producto_id')::bigint = pr.id
-                  AND (x.item->>'molde_id')::bigint = m.id
+                  AND ((NULLIF(rel->>'producto_id', '')::bigint = pr.id AND x.item IS NOT NULL)
+                       OR receta.item IS NOT NULL)
                 LIMIT 1
             ", ['produccion_id' => $produccionId, 'producto_id' => $productoObjetivoId]);
             if (empty($configObjetivo)) {
                 throw new Exception("El molde de la producción #$produccionId no está configurado para el producto que intentas ensamblar.");
             }
-            $configObjetivoItem = json_decode($configObjetivo[0]['item'] ?? '[]', true) ?: [];
+            $configObjetivoItem = json_decode($configObjetivo[0]['receta_item'] ?? '[]', true)
+                ?: (json_decode($configObjetivo[0]['item'] ?? '[]', true) ?: []);
+            $configProduccionItem = json_decode($configObjetivo[0]['item'] ?? '[]', true) ?: [];
             if (strtolower(trim($configObjetivoItem['necesita_ensamblaje'] ?? 'sí')) === 'no') {
                 throw new Exception("El molde de la producción #$produccionId está configurado para pasar directo a empaquetado.");
             }
@@ -1713,15 +1913,29 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 throw new Exception("La producción #$produccionId aún no fue pasada a ensamblaje desde Producción.");
             }
 
-            $yaUsada = executeQuery(
-                $conectar,
-                "SELECT id FROM rel_ensamblaje_producto
-                 WHERE molde_produccion_id = :produccion_id AND deleted_at IS NULL
-                   AND ensamblaje_id <> :ensamblaje_id",
-                ['produccion_id' => $produccionId, 'ensamblaje_id' => $ensamblajeId]
-            );
-            if (!empty($yaUsada)) {
-                throw new Exception("La producción #$produccionId ya está vinculada a otro ensamblaje activo.");
+            $cantidadBase = (float)($salidaSolicitada['cantidad'] ?? $salidaSolicitada['cantidad_kg'] ?? $prod[0]['cantidad_producida_kg'] ?? 0);
+            $consumoExistente = executeQuery($conectar, "
+                SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                FROM rel_ensamblaje_producto rep_u
+                JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
+                JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
+                WHERE rep_u.molde_produccion_id = :produccion_id
+                  AND rep_u.deleted_at IS NULL AND e_u.deleted_at IS NULL
+                  AND COALESCE(e_u.proveniente, '') <> 'prod2_pendiente'
+                  AND rep_u.js_query_consulta_produccion->>'pasada' IS NOT DISTINCT FROM :pasada
+                  AND e_u.id <> :ensamblaje_id
+            ", [
+                'produccion_id' => $produccionId,
+                'pasada' => $pasadaSolicitada > 0 ? (string)$pasadaSolicitada : null,
+                'ensamblaje_id' => $ensamblajeId,
+            ]);
+            $disponibleActual = max(0, $cantidadBase - (float)($consumoExistente[0]['cantidad'] ?? 0));
+            $cantidadSolicitada = (float)$linea['cantidad_entrada_produccion'];
+            if ($cantidadSolicitada > $disponibleActual + 0.000001) {
+                throw new Exception("La producción #$produccionId solo tiene " . number_format($disponibleActual, 4, '.', '') . ' disponible para esta pasada.');
+            }
+            if (empty($configObjetivo[0]['receta_item']) && abs($cantidadSolicitada - $disponibleActual) > 0.000001) {
+                throw new Exception('Este producto no tiene configuración de armado para consumo parcial; se debe usar toda la producción/pasada.');
             }
 
             $snapshotRows = executeQuery(
@@ -1746,8 +1960,15 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if ($pasadaSolicitada > 0) {
                 $snapshotData = json_decode($snapshot, true) ?: [];
                 $snapshotData['pasada'] = $pasadaSolicitada;
-                $snapshotData['cantidad_kg'] = $salidaSolicitada['cantidad'] ?? $salidaSolicitada['cantidad_kg'] ?? ($linea['cantidad_entrada_produccion'] ?? null);
+                $snapshotData['cantidad_producida_original'] = $salidaSolicitada['cantidad'] ?? $salidaSolicitada['cantidad_kg'] ?? null;
+                $snapshotData['cantidad_kg'] = $linea['cantidad_entrada_produccion'] ?? null;
                 $snapshotData['fecha'] = $salidaSolicitada['fecha'] ?? ($snapshotData['fecha_hora_fin'] ?? null);
+                $snapshot = json_encode($snapshotData, JSON_UNESCAPED_UNICODE);
+            }
+            if ($pasadaSolicitada <= 0) {
+                $snapshotData = json_decode($snapshot, true) ?: [];
+                $snapshotData['cantidad_producida_original'] = $prod[0]['cantidad_producida_kg'] ?? null;
+                $snapshotData['cantidad_kg'] = $linea['cantidad_entrada_produccion'] ?? null;
                 $snapshot = json_encode($snapshotData, JSON_UNESCAPED_UNICODE);
             }
 
@@ -1755,9 +1976,9 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             // como salida de esa producción para este producto (la que ya
             // se usa para mostrar "cantidad_kg" en el modal), así la
             // comparación contra pd.cantidad_producida_kg tiene sentido.
-            $unidadEntradaId = !empty($configObjetivoItem['salida_produccion_unidad_medida_id'])
-                ? intval($configObjetivoItem['salida_produccion_unidad_medida_id'])
-                : null;
+            $unidadEntradaId = !empty($configProduccionItem['salida_produccion_unidad_medida_id'])
+                ? intval($configProduccionItem['salida_produccion_unidad_medida_id'])
+                : (!empty($configObjetivoItem['unidad_id']) ? intval($configObjetivoItem['unidad_id']) : null);
             $cantidadEntradaProduccion = $linea['cantidad_entrada_produccion'] ?? null;
 
             executeNonQuery($conectar, "
@@ -2074,16 +2295,39 @@ function reactivarEnsamblaje()
 
         foreach ($lineas as $linea) {
             if (!empty($linea['molde_produccion_id'])) {
-                $ocupada = executeQuery(
-                    $conectar,
-                    "SELECT id FROM rel_ensamblaje_producto
-                     WHERE molde_produccion_id = :pid AND deleted_at IS NULL AND ensamblaje_id != :eid",
-                    ['pid' => $linea['molde_produccion_id'], 'eid' => $id]
-                );
-                if (!empty($ocupada)) {
-                    throw new Exception(
-                        "No se puede reactivar: la producción #{$linea['molde_produccion_id']} ya fue usada en otro ensamblaje mientras este estaba inactivo."
-                    );
+                $pid = (int)$linea['molde_produccion_id'];
+                $produccionRestaurar = executeQuery($conectar, "
+                    SELECT cantidad_producida_kg, js_cantidades_salientes
+                    FROM produccion WHERE id = :id FOR UPDATE
+                ", ['id' => $pid]);
+                if (empty($produccionRestaurar)) throw new Exception("No se puede reactivar: la producción #$pid ya no existe.");
+                $snapshotRestaurar = json_decode($linea['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+                $pasadaRestaurar = $snapshotRestaurar['pasada'] ?? null;
+                $cantidadBaseRestaurar = (float)($snapshotRestaurar['cantidad_producida_original'] ?? $produccionRestaurar[0]['cantidad_producida_kg'] ?? 0);
+                $salidasRestaurar = json_decode($produccionRestaurar[0]['js_cantidades_salientes'] ?? '[]', true) ?: [];
+                foreach ($salidasRestaurar as $salidaRestaurar) {
+                    if ((string)($salidaRestaurar['pasada'] ?? '') === (string)($pasadaRestaurar ?? '')) {
+                        $cantidadBaseRestaurar = (float)($salidaRestaurar['cantidad'] ?? $salidaRestaurar['cantidad_kg'] ?? $cantidadBaseRestaurar);
+                        break;
+                    }
+                }
+                $otrosRestaurados = executeQuery($conectar, "
+                    SELECT COALESCE(SUM(COALESCE(rep_o.cantidad_entrada_produccion,
+                        NULLIF(rep_o.js_query_consulta_produccion->>'cantidad_kg', '')::numeric,
+                        NULLIF(rep_o.js_query_consulta_produccion->>'cantidad', '')::numeric,
+                        pd_o.cantidad_producida_kg, 0)), 0) AS cantidad
+                    FROM rel_ensamblaje_producto rep_o
+                    JOIN ensamblaje e_o ON e_o.id = rep_o.ensamblaje_id
+                    JOIN produccion pd_o ON pd_o.id = rep_o.molde_produccion_id
+                    WHERE rep_o.molde_produccion_id = :pid AND rep_o.deleted_at IS NULL
+                      AND e_o.deleted_at IS NULL AND rep_o.ensamblaje_id <> :eid
+                      AND COALESCE(e_o.proveniente, '') <> 'prod2_pendiente'
+                      AND rep_o.js_query_consulta_produccion->>'pasada' IS NOT DISTINCT FROM :pasada
+                ", ['pid' => $pid, 'eid' => $id, 'pasada' => $pasadaRestaurar === null ? null : (string)$pasadaRestaurar]);
+                $cantidadRestaurar = (float)($linea['cantidad_entrada_produccion'] ?? $snapshotRestaurar['cantidad_kg'] ?? $cantidadBaseRestaurar);
+                $saldoRestaurar = max(0, $cantidadBaseRestaurar - (float)($otrosRestaurados[0]['cantidad'] ?? 0));
+                if ($cantidadRestaurar > $saldoRestaurar + 0.000001) {
+                    throw new Exception("No se puede reactivar: la producción #$pid solo tiene " . number_format($saldoRestaurar, 4, '.', '') . ' disponible para esta pasada.');
                 }
             }
         }
@@ -2152,6 +2396,188 @@ function iniciarEnsamblaje(int $id)
     responder(true, 'Ensamblaje iniciado.');
 }
 
+/**
+ * Al cerrar un armado configurado, ajusta las cantidades reservadas desde
+ * Producción a lo realmente requerido por el número de unidades armadas.
+ * Cualquier excedente de las líneas vuelve a quedar disponible para otros
+ * armados; las producciones no incluidas en la receta no se modifican.
+ */
+function cantidadRequeridaRecetaEnUnidad(array $componente, float $unidadesArmadas, string $unidad): float
+{
+    $requerido = (float)$componente['cantidad'] * $unidadesArmadas;
+    $unidad = strtoupper(trim($unidad));
+    if (in_array($unidad, ['DOC', 'DOCENA'], true)) return $requerido / 12;
+    if (in_array($unidad, ['UND', 'UNID', 'UNIDAD', 'UNIDADES', 'PZA', 'PIEZA'], true)) return $requerido;
+    if ((float)($componente['peso'] ?? 0) <= 0) {
+        throw new Exception("La receta de {$componente['nombre']} necesita indicar el peso por pieza para descontar producción en $unidad.");
+    }
+    $pesoGramos = (float)$componente['peso'] * (in_array(strtoupper((string)$componente['unidad_peso']), ['KG', 'KILOGRAMO', 'KILOGRAMOS'], true) ? 1000 : 1);
+    $gramosPorUnidad = in_array($unidad, ['KG', 'KILOGRAMO', 'KILOGRAMOS'], true) ? 1000 : 1;
+    return $requerido * $pesoGramos / $gramosPorUnidad;
+}
+
+function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $unidadesArmadas, array $configuracion): void
+{
+    $receta = [];
+    foreach ($configuracion as $componente) {
+        if (!is_array($componente) || (float)($componente['cantidad_a_utilizar'] ?? 0) <= 0) continue;
+        $tipo = ($componente['tipo_componente'] ?? 'molde') === 'producto' ? 'producto' : 'molde';
+        $id = (int)($tipo === 'producto' ? ($componente['producto_id'] ?? 0) : ($componente['molde_id'] ?? 0));
+        if ($id <= 0) continue;
+        $clave = $tipo . ':' . $id;
+        $receta[$clave] = [
+            'tipo' => $tipo,
+            'id' => $id,
+            // Se guarda la cantidad por unidad; cantidadRequeridaRecetaEnUnidad
+            // aplica el número de unidades armadas una sola vez.
+            'cantidad' => (float)$componente['cantidad_a_utilizar'],
+            'peso' => (float)($componente['peso_molde'] ?? 0),
+            'unidad_peso' => strtoupper((string)($componente['unidad_peso_molde'] ?? 'GRAMOS')),
+            'nombre' => (string)($componente['componente'] ?? $componente['molde'] ?? $componente['producto'] ?? 'componente'),
+        ];
+    }
+    if (!$receta) return;
+
+    $lineas = executeQuery($conectar, "
+        SELECT rep.id, rep.molde_produccion_id, rep.cantidad_entrada_produccion,
+               rep.unidad_entrada_id, rep.js_query_consulta_produccion,
+               pd.molde_id, pd.unico_molde_producto, pd.js_configuracion_moment,
+               pd.cantidad_producida_kg, up.nombre_corto AS unidad_codigo,
+               mo.nombre AS molde_nombre, mo.js_producto
+        FROM rel_ensamblaje_producto rep
+        JOIN produccion pd ON pd.id = rep.molde_produccion_id
+        LEFT JOIN unidad_medida up ON up.id = rep.unidad_entrada_id
+        LEFT JOIN molde mo ON mo.id = pd.molde_id
+        JOIN ensamblaje e ON e.id = rep.ensamblaje_id
+        WHERE rep.ensamblaje_id = :ensamblaje_id AND rep.deleted_at IS NULL
+          AND e.deleted_at IS NULL AND COALESCE(e.proveniente, '') <> 'prod2_pendiente'
+          AND rep.molde_produccion_id IS NOT NULL
+        ORDER BY rep.id
+        FOR UPDATE OF rep
+    ", ['ensamblaje_id' => $ensamblajeId]);
+
+    $grupos = [];
+    foreach ($lineas as $linea) {
+        $asociaciones = json_decode($linea['js_producto'] ?? '[]', true) ?: [];
+        $claveComponente = null;
+        foreach ($receta as $clave => $componente) {
+            if ($componente['tipo'] === 'molde' && (int)$linea['molde_id'] === $componente['id']) {
+                $claveComponente = $clave;
+                break;
+            }
+            if ($componente['tipo'] === 'producto') {
+                foreach ($asociaciones as $asociacion) {
+                    if ((int)($asociacion['producto_id'] ?? 0) === $componente['id']) {
+                        $claveComponente = $clave;
+                        break 2;
+                    }
+                }
+            }
+        }
+        if ($claveComponente === null) continue;
+
+        $unidad = strtoupper(trim((string)($linea['unidad_codigo'] ?? 'KG')));
+        $componente = $receta[$claveComponente];
+        $requerido = cantidadRequeridaRecetaEnUnidad($componente, $unidadesArmadas, $unidad);
+        $snapshot = json_decode($linea['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+        $cantidad = (float)($linea['cantidad_entrada_produccion'] ?? $snapshot['cantidad_kg'] ?? $linea['cantidad_producida_kg'] ?? 0);
+        $grupos[$claveComponente][] = ['tipo' => 'produccion', 'linea' => $linea, 'cantidad' => $cantidad, 'requerido' => $requerido];
+    }
+
+    // Un producto también puede llegar como un armado terminado marcado
+    // como complemento (p. ej. Pinza Palanita). Se trata igual que otro lote:
+    // se registra el consumo real en rel_ensamblaje_producto y se libera el
+    // saldo para que pueda alimentar otro armado.
+    $complementos = executeQuery($conectar, "
+        SELECT ec.id, ec.producto_id, ec.cantidad_peso_kg, ec.unidad_salida_id,
+               ec.js_producto_emsamblado, ec.js_moldes_utilizados,
+               COALESCE(ue.nombre_corto, (SELECT m->>'unidad_produccion_codigo'
+                   FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados, '[]'::jsonb)) m LIMIT 1), 'kg') AS unidad_codigo
+        FROM ensamblaje ec
+        LEFT JOIN unidad_medida ue ON ue.id = ec.unidad_salida_id
+        WHERE ec.ensamblaje_id_referido = :ensamblaje_id AND ec.deleted_at IS NULL
+        ORDER BY ec.id
+        FOR UPDATE OF ec
+    ", ['ensamblaje_id' => $ensamblajeId]);
+    foreach ($complementos as $comp) {
+        $marcado = json_decode($comp['js_producto_emsamblado'] ?? '{}', true) ?: [];
+        foreach ($receta as $clave => $componente) {
+            if ($componente['tipo'] !== 'producto') continue;
+            if ((int)($marcado['producto_id'] ?? 0) !== $componente['id'] && (int)$comp['producto_id'] !== $componente['id']) continue;
+            $unidad = strtoupper(trim((string)$comp['unidad_codigo']));
+            $requerido = cantidadRequeridaRecetaEnUnidad($componente, $unidadesArmadas, $unidad);
+            $usadoAntes = executeQuery($conectar, "
+                SELECT COALESCE(SUM(NULLIF(ev->>'cantidad', '')::numeric), 0) AS usado
+                FROM ensamblaje ec
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                JOIN ensamblaje e ON e.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                WHERE ec.id = :id AND ev->>'tipo' = 'consumo_complemento'
+                  AND COALESCE(ev->>'anulado','false') <> 'true' AND e.deleted_at IS NULL
+            ", ['id' => $comp['id']]);
+            $disponible = max(0, (float)$comp['cantidad_peso_kg'] - (float)($usadoAntes[0]['usado'] ?? 0));
+            $grupos[$clave][] = [
+                'tipo' => 'complemento', 'complemento_id' => (int)$comp['id'],
+                'unidad_id' => $comp['unidad_salida_id'], 'cantidad' => $disponible,
+                'requerido' => $requerido,
+            ];
+        }
+    }
+
+    foreach ($receta as $clave => $componente) {
+        $lotes = $grupos[$clave] ?? [];
+        if (!$lotes) throw new Exception("Falta vincular producción o complemento de {$componente['nombre']} antes de finalizar el armado.");
+        $requerido = $lotes[0]['requerido'];
+        $disponibleVinculado = array_sum(array_column($lotes, 'cantidad'));
+        if ($disponibleVinculado + 0.000001 < $requerido) {
+            throw new Exception("{$componente['nombre']}: vinculaste " . number_format($disponibleVinculado, 4, '.', '') . ' y la receta requiere ' . number_format($requerido, 4, '.', '') . '. Vincula más producción para finalizar.');
+        }
+        $restante = $requerido;
+        foreach ($lotes as $lote) {
+            $usar = min($lote['cantidad'], $restante);
+            if ($lote['tipo'] === 'complemento') {
+                if ($usar > 0.000001) {
+                    $eventoConsumo = json_encode([
+                        'tipo' => 'consumo_complemento',
+                        'ensamblaje_id' => $ensamblajeId,
+                        'cantidad' => $usar,
+                        'unidad_id' => $lote['unidad_id'],
+                        'unidad_codigo' => $lote['unidad_codigo'],
+                        'componente_receta' => $componente['nombre'],
+                        'fecha' => date('c'),
+                    ], JSON_UNESCAPED_UNICODE);
+                    executeNonQuery($conectar, "
+                        UPDATE ensamblaje
+                        SET js_historial = COALESCE(js_historial, '[]'::jsonb) || :evento::jsonb,
+                            ensamblaje_id_referido = NULL,
+                            update_at = NOW()
+                        WHERE id = :id AND ensamblaje_id_referido = :padre
+                    ", ['evento' => $eventoConsumo, 'id' => $lote['complemento_id'], 'padre' => $ensamblajeId]);
+                } else {
+                    executeNonQuery($conectar, "UPDATE ensamblaje SET ensamblaje_id_referido = NULL, update_at = NOW() WHERE id = :id AND ensamblaje_id_referido = :padre", [
+                        'id' => $lote['complemento_id'], 'padre' => $ensamblajeId,
+                    ]);
+                }
+                $restante -= $usar;
+                continue;
+            }
+            $snapshot = json_decode($lote['linea']['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+            $snapshot['cantidad_kg'] = $usar;
+            $snapshot['cantidad_consumida'] = $usar;
+            $snapshot['cantidad_requerida_receta'] = $requerido;
+            $snapshot['componente_receta'] = $componente['nombre'];
+            executeNonQuery($conectar, "
+                UPDATE rel_ensamblaje_producto
+                SET cantidad_entrada_produccion = :cantidad,
+                    js_query_consulta_produccion = :snapshot::jsonb,
+                    update_at = NOW()
+                WHERE id = :id
+            ", ['cantidad' => $usar, 'snapshot' => json_encode($snapshot, JSON_UNESCAPED_UNICODE), 'id' => $lote['linea']['id']]);
+            $restante -= $usar;
+        }
+    }
+    recalcularResumenesEnsamblaje($conectar, $ensamblajeId);
+}
+
 // Marca el fin real del armado con la hora del servidor. Exige el peso
 // (kg) de salida del armado ('peso_kg'), que se guarda en
 // ensamblaje.cantidad_peso_kg.
@@ -2176,7 +2602,8 @@ function finalizarEnsamblaje(int $id)
         $conectar,
         "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id, e.js_producto_emsamblado,
                 " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
-                p.js_configuracion_empaquetado
+                p.js_configuracion_empaquetado,
+                to_json(p.js_configuracion_armado) AS js_configuracion_armado_json
          FROM ensamblaje e
          LEFT JOIN producto p ON p.id = e.producto_id
          WHERE e.id = :id",
@@ -2221,6 +2648,11 @@ function finalizarEnsamblaje(int $id)
         $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+        $configArmado = json_decode($ensamblaje['js_configuracion_armado_json'] ?? '[]', true) ?: [];
+        if (!empty($configArmado)) {
+            aplicarConsumoConfiguracionArmado($conectar, $id, $cantidadSalida, $configArmado);
+        }
 
         executeNonQuery($conectar, "
             UPDATE ensamblaje SET

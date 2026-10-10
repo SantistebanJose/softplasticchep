@@ -1211,12 +1211,15 @@ async function renderGridDetalle() {
                 categoria_material_id: p.categoria_material_id,
                 categoria_material_nombre: p.categoria_material_nombre_verif,
                 unidad_codigo: p.unidad_produccion_codigo || 'KG',
+                cantidad_por_unidad_armada: p.cantidad_por_unidad_armada,
+                unidad_componente_configurada: p.unidad_componente_configurada,
             })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
                 <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
+                ${p.cantidad_por_unidad_armada ? `<span class="meta">Receta: <b>${formatearCantidadEns(p.cantidad_por_unidad_armada)} ${p.unidad_componente_configurada || ''}</b> por unidad armada</span>` : ''}
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
         }).join('');
@@ -1308,17 +1311,20 @@ async function agregarLineaDetalle(tipo, datos) {
         }
         const cantidadProducida = parseFloat(datos.cantidad_kg) || 0;
         const unidad = datos.unidad_codigo || 'KG';
+        const recetaMeta = datos.cantidad_por_unidad_armada
+            ? ` · Receta: ${formatearCantidadEns(datos.cantidad_por_unidad_armada)} ${datos.unidad_componente_configurada || ''} por unidad armada`
+            : '';
         let cantidadRecibidaNum = cantidadProducida;
-        if (!datos.relacion_id && !datos.pasada) {
+        if (datos.componente_configuracion) {
             const { value: cantidadRecibida } = await Swal.fire({
-                title: 'Cantidad recibida',
-                html: `Pesa nuevamente la producción e indica cuánto <b>${unidad}</b> estás recibiendo para el armado.`,
+                title: 'Cantidad que usarás',
+                html: `Disponible: <b>${formatearCantidadEns(cantidadProducida)} ${unidad}</b><br>Indica cuánto <b>${unidad}</b> usarás en este armado. El saldo quedará disponible para otros armados.`,
                 icon: 'question', input: 'number',
-                inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
+                inputAttributes: { min: 0, max: cantidadProducida, step: '0.01', inputmode: 'decimal', autocomplete: 'off' },
                 inputValue: '', inputPlaceholder: `Cantidad en ${unidad}`,
                 showCancelButton: true, confirmButtonText: 'Vincular', cancelButtonText: 'Cancelar',
                 didOpen: () => { const input = Swal.getInput(); if (input) { input.removeAttribute('readonly'); input.focus(); } },
-                inputValidator: value => (!value || parseFloat(value) <= 0) ? 'Ingresa una cantidad válida mayor a 0.' : undefined
+                inputValidator: value => (!value || parseFloat(value) <= 0 || parseFloat(value) > cantidadProducida) ? `Ingresa una cantidad entre 0 y ${formatearCantidadEns(cantidadProducida)} ${unidad}.` : undefined
             });
             if (!cantidadRecibida) return;
             cantidadRecibidaNum = parseFloat(cantidadRecibida);
@@ -1334,7 +1340,7 @@ async function agregarLineaDetalle(tipo, datos) {
             nombre: datos.molde_nombre ?? ('Producción #' + datos.produccion_id),
             meta: `#${datos.produccion_id}`
                 + (datos.pasada ? ` · Pasada ${datos.pasada}` : '')
-                + ` · Color: ${datos.color_nombre || '-'} · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
+                + ` · Color: ${datos.color_nombre || '-'} · Disponible: ${formatearCantidadEns(cantidadProducida)} ${unidad} · Se usará: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}` + recetaMeta + ` · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
             color_id: datos.color_id,
