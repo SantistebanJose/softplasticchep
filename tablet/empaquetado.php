@@ -347,7 +347,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     <i class="fa-solid fa-layer-group"></i> Pendientes
                 </button>
                 <button type="button" class="pc-list-switch-btn" id="btnVistaRegistros" onclick="cambiarVistaLista('registros')" role="tab" aria-selected="false">
-                    <i class="fa-solid fa-clock-rotate-left"></i> Mis paquetes
+                    <i class="fa-solid fa-clock-rotate-left"></i> Mis empaquetados
                 </button>
             </div>
 
@@ -362,6 +362,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
             <div class="pc-list-section" id="seccionRegistros" style="display:none;">
                 <p class="pc-panel-lead">Solo consulta. Si hay un error, comunícate con el administrador.</p>
+                <div class="pc-stat-row" id="resumenMisEmpaquetados"></div>
                 <div class="pc-mis-registros" id="misRegistrosLista">
                     <div class="pc-est-empty">Cargando...</div>
                 </div>
@@ -888,8 +889,21 @@ async function cargarMisRegistros() {
 
     const misRegistros = registrosGlobalCache
         .filter(registroEsDeOperarioActual)
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-        .slice(0, 15);
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+    const cantidadesPorUnidad = misRegistros.reduce((totales, r) => {
+        const unidad = r.unidad_corto || 'Unidad';
+        totales[unidad] = (totales[unidad] || 0) + Number(r.cantidad_tota || 0);
+        return totales;
+    }, {});
+    const totalPropio = Object.entries(cantidadesPorUnidad).map(([unidad, cantidad]) => `${formatearCantidadEmp(cantidad)} ${unidad}`).join(' · ') || '0';
+    const disponiblesPropios = misRegistros.filter(r => !r.pasado_venta).length;
+    const vendidosPropios = misRegistros.length - disponiblesPropios;
+    document.getElementById('resumenMisEmpaquetados').innerHTML = `
+        <div class="pc-stat-chip s-info"><div class="ico"><i class="fa-solid fa-box"></i></div><div class="txt"><div class="n">${misRegistros.length}</div><div class="l">Registros</div></div></div>
+        <div class="pc-stat-chip s-success"><div class="ico"><i class="fa-solid fa-scale-balanced"></i></div><div class="txt"><div class="n">${totalPropio}</div><div class="l">Cantidad empaquetada por unidad</div></div></div>
+        <div class="pc-stat-chip s-purple"><div class="ico"><i class="fa-solid fa-warehouse"></i></div><div class="txt"><div class="n">${disponiblesPropios}</div><div class="l">Disponibles</div></div></div>
+        <div class="pc-stat-chip s-gray"><div class="ico"><i class="fa-solid fa-cart-check"></i></div><div class="txt"><div class="n">${vendidosPropios}</div><div class="l">Vendidos</div></div></div>`;
 
     if (misRegistros.length === 0) {
         cont.innerHTML = '<div class="pc-est-empty">Aún no tienes registros de empaquetado.</div>';

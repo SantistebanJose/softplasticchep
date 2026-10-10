@@ -47,6 +47,7 @@ function controladorEmpaquetado(string $accion): void
     ];
 
     $accionesSoloAdmin = [
+        'REPORTEEMPAQUETADODASHBOARD',
         'EDITAREMPAQUETADO',
         'ELIMINAREMPAQUETADO',
         'REACTIVAREMPAQUETADO',
@@ -98,6 +99,9 @@ function controladorEmpaquetado(string $accion): void
             break;
         case 'LISTARTODOSEMPAQUETADOS':
             listarTodosEmpaquetados();
+            break;
+        case 'REPORTEEMPAQUETADODASHBOARD':
+            reporteEmpaquetadoDashboard();
             break;
         case 'OBTENEREMPAQUETADO':
             obtenerEmpaquetado(intval($_POST['id'] ?? 0));
@@ -704,6 +708,7 @@ function listarTodosEmpaquetados()
         $params['fecha_hasta'] = $fechaHasta . ' 23:59:59';
     }
 
+    $limiteListado = esSesionTabletEmpaquetado() ? '' : ' LIMIT 300';
     $sql = "SELECT
             emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
             emp.unidad_medida,
@@ -756,13 +761,77 @@ function listarTodosEmpaquetados()
         LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
         LEFT JOIN unidad_medida ub ON ub.id = um.unidad_base_id
         WHERE " . implode(' AND ', $where) . "
-        ORDER BY emp.created_at DESC
-        LIMIT 300";
+        ORDER BY emp.created_at DESC" . $limiteListado;
 
     $result = executeQuery($conectar, $sql, $params);
     responder(true, 'OK', ['empaquetados' => decorarConDesgloseEmp(decodificarJsOperarios($result))]);
 
     }
+
+/** Reporte administrativo con filtros completos y resumen calculado sobre el
+ * mismo conjunto de registros que se devuelve en el detalle. */
+function reporteEmpaquetadoDashboard(): void
+{
+    if (esSesionTabletEmpaquetado()) {
+        responderAcceso(403, 'Este reporte está disponible para administración.');
+    }
+
+    $conectar = conectar_oll_BD();
+    $desde = trim($_POST['fecha_desde'] ?? '');
+    $hasta = trim($_POST['fecha_hasta'] ?? '');
+    $texto = trim($_POST['texto'] ?? '');
+    $estado = trim($_POST['estado'] ?? '');
+    $operarioId = (int)($_POST['operario_id'] ?? 0);
+    $where = ['emp.deleted_at IS NULL'];
+    $params = [];
+
+    foreach (['fecha_desde' => $desde, 'fecha_hasta' => $hasta] as $campo => $fecha) {
+        if ($fecha !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
+            responder(false, 'El rango de fechas no es válido.');
+        }
+    }
+    if ($desde !== '') { $where[] = 'emp.created_at >= :desde'; $params['desde'] = $desde . ' 00:00:00'; }
+    if ($hasta !== '') { $where[] = 'emp.created_at < :hasta'; $params['hasta'] = date('Y-m-d', strtotime($hasta . ' +1 day')) . ' 00:00:00'; }
+    if ($texto !== '') {
+        $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
+        $params['texto'] = '%' . $texto . '%';
+    }
+    if ($estado === 'disponible') $where[] = 'emp.pasado_venta IS NULL';
+    elseif ($estado === 'vendido') $where[] = 'emp.pasado_venta IS NOT NULL';
+    if ($operarioId > 0) {
+        $where[] = "(emp.operario_id = :operario_id OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(emp.js_operarios, '[]'::jsonb)) AS op_filtro
+            WHERE (op_filtro->>'operario_id')::bigint = :operario_id_js
+        ))";
+        $params['operario_id'] = $operarioId;
+        $params['operario_id_js'] = $operarioId;
+    }
+
+    $sql = "SELECT emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
+                   p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
+                   emp.cantidad_tota, emp.js_cantidades, emp.js_operarios,
+                   emp.operario_id, op.nombre_completo AS operario_nombre,
+                   su.nombre AS sucursal_nombre, emp.pasado_venta, emp.created_at,
+                   um.nombre_corto AS unidad_corto,
+                   CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
+                        WHEN emp.produccion_id IS NOT NULL THEN 'produccion' ELSE NULL END AS origen_tipo
+            FROM empaquetado emp
+            LEFT JOIN producto p ON p.id = emp.producto_id
+            LEFT JOIN operario op ON op.id = emp.operario_id
+            LEFT JOIN sucursal su ON su.id = emp.sucursal
+            LEFT JOIN unidad_medida um ON um.id = emp.unidad_medida
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY emp.created_at DESC, emp.id DESC";
+    $rows = decorarConDesgloseEmp(decodificarJsOperarios(executeQuery($conectar, $sql, $params)));
+    $resumen = ['registros' => count($rows), 'cantidad_por_unidad' => [], 'disponibles' => 0, 'vendidos' => 0];
+    foreach ($rows as $row) {
+        $unidad = trim((string)($row['unidad_corto'] ?? 'Unidad')) ?: 'Unidad';
+        $resumen['cantidad_por_unidad'][$unidad] = ($resumen['cantidad_por_unidad'][$unidad] ?? 0) + (float)($row['cantidad_tota'] ?? 0);
+        if (empty($row['pasado_venta'])) $resumen['disponibles']++;
+        else $resumen['vendidos']++;
+    }
+    responder(true, 'OK', ['resumen' => $resumen, 'empaquetados' => $rows]);
+}
 
 function obtenerEmpaquetado(int $id)
 {
