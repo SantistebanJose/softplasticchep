@@ -867,30 +867,31 @@ function buscarProduccionesDisponibles()
         FROM produccion t1
         LEFT JOIN molde t2 ON t2.id = t1.molde_id
         LEFT JOIN color t3 ON t3.id = t1.color_id
-        LEFT JOIN rel_ensamblaje_producto rep
-          ON rep.molde_produccion_id = t1.id AND rep.deleted_at IS NULL
-         AND EXISTS (
-             SELECT 1 FROM ensamblaje origen0
-             WHERE origen0.id = rep.ensamblaje_id AND origen0.deleted_at IS NULL
-               AND origen0.proveniente = 'prod2_pendiente'
-         )
-        LEFT JOIN ensamblaje ep ON ep.id = rep.ensamblaje_id AND ep.deleted_at IS NULL
         LEFT JOIN LATERAL (
             SELECT salida AS item
             FROM jsonb_array_elements(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) salida
-            WHERE rep.id IS NULL
-            UNION ALL
-            SELECT rep.js_query_consulta_produccion AS item
-            WHERE rep.id IS NOT NULL
             UNION ALL
             SELECT jsonb_build_object(
                 'cantidad', t1.cantidad_producida_kg,
                 'fecha', t1.fecha_hora_fin,
                 'pasada', NULL
             )
-            WHERE rep.id IS NULL
-              AND jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) = 0
+            WHERE jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) = 0
         ) pase ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT rep0.*
+            FROM rel_ensamblaje_producto rep0
+            JOIN ensamblaje origen0 ON origen0.id = rep0.ensamblaje_id
+            WHERE rep0.molde_produccion_id = t1.id
+              AND rep0.deleted_at IS NULL
+              AND origen0.deleted_at IS NULL
+              AND origen0.proveniente = 'prod2_pendiente'
+              AND rep0.js_query_consulta_produccion->>'pasada'
+                    IS NOT DISTINCT FROM pase.item->>'pasada'
+            ORDER BY rep0.id DESC
+            LIMIT 1
+        ) rep ON TRUE
+        LEFT JOIN ensamblaje ep ON ep.id = rep.ensamblaje_id AND ep.deleted_at IS NULL
         LEFT JOIN LATERAL (
             SELECT COALESCE(SUM(COALESCE(rep_usado.cantidad_entrada_produccion, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_usado.cantidad_producida_kg, 0)), 0) AS cantidad_usada
             FROM rel_ensamblaje_producto rep_usado
@@ -2416,14 +2417,38 @@ function cantidadRequeridaRecetaEnUnidad(array $componente, float $unidadesArmad
     return $requerido * $pesoGramos / $gramosPorUnidad;
 }
 
-/** Convierte la cantidad de salida del armado a unidades individuales para
- * aplicar una receta configurada por cada unidad del producto final. */
-function cantidadUnidadesParaReceta(float $cantidadSalida, string $unidadSalida): float
+/** Convierte la salida configurada del armado a unidades individuales para
+ * aplicar una receta expresada por cada unidad del producto final. Usa la
+ * equivalencia del catálogo cuando la unidad pertenece a la base UND. */
+function cantidadUnidadesParaReceta($conectar, float $cantidadSalida, ?int $unidadSalidaId, string $unidadSalida): float
 {
     $unidadSalida = strtoupper(trim($unidadSalida));
-    if (in_array($unidadSalida, ['DOC', 'DOCENA', 'DOCENAS'], true)) {
-        return $cantidadSalida * 12;
+    if (in_array($unidadSalida, ['UND', 'UNID', 'UNIDAD', 'UNIDADES', 'PZA', 'PIEZA'], true)) {
+        return $cantidadSalida;
     }
+
+    if ($unidadSalidaId) {
+        $unidad = executeQuery($conectar, "
+            SELECT u.equivalencia, u.unidad_base_id,
+                   UPPER(COALESCE(base.nombre_corto, '')) AS unidad_base_codigo,
+                   base.equivalencia AS equivalencia_base
+            FROM unidad_medida u
+            LEFT JOIN unidad_medida base ON base.id = u.unidad_base_id
+            WHERE u.id = :id AND u.deleted_at IS NULL
+        ", ['id' => $unidadSalidaId]);
+        if (!empty($unidad) && !empty($unidad[0]['unidad_base_id'])
+            && in_array($unidad[0]['unidad_base_codigo'], ['UND', 'UNID', 'UNIDAD', 'UNIDADES', 'PZA', 'PIEZA'], true)) {
+            $equivalencia = (float)($unidad[0]['equivalencia'] ?? 0);
+            $equivalenciaBase = (float)($unidad[0]['equivalencia_base'] ?? 1);
+            if ($equivalencia > 0 && $equivalenciaBase > 0) {
+                return $cantidadSalida * $equivalencia / $equivalenciaBase;
+            }
+        }
+    }
+
+    // Compatibilidad para catálogos antiguos que nombran la docena pero
+    // todavía no tienen equivalencia/base configurada.
+    if (in_array($unidadSalida, ['DOC', 'DOCENA', 'DOCENAS'], true)) return $cantidadSalida * 12;
     return $cantidadSalida;
 }
 
@@ -2571,6 +2596,17 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
                 $restante -= $usar;
                 continue;
             }
+            // Si este lote no hizo falta porque otro lote cubrió la receta,
+            // desvincúlalo del armado. Mantener una relación activa con 0
+            // podía hacer que otros flujos trataran la producción como usada.
+            if ($usar <= 0.000001) {
+                executeNonQuery($conectar, "
+                    UPDATE rel_ensamblaje_producto
+                    SET deleted_at = NOW(), update_at = NOW()
+                    WHERE id = :id AND deleted_at IS NULL
+                ", ['id' => $lote['linea']['id']]);
+                continue;
+            }
             $snapshot = json_decode($lote['linea']['js_query_consulta_produccion'] ?? '{}', true) ?: [];
             $snapshot['cantidad_kg'] = $usar;
             $snapshot['cantidad_consumida'] = $usar;
@@ -2662,7 +2698,7 @@ function finalizarEnsamblaje(int $id)
 
         $configArmado = json_decode($ensamblaje['js_configuracion_armado_json'] ?? '[]', true) ?: [];
         if (!empty($configArmado)) {
-            $unidadesParaReceta = cantidadUnidadesParaReceta($cantidadSalida, $unidadLabel);
+            $unidadesParaReceta = cantidadUnidadesParaReceta($conectar, $cantidadSalida, $unidadSalidaId, $unidadLabel);
             aplicarConsumoConfiguracionArmado($conectar, $id, $unidadesParaReceta, $configArmado);
         }
 
