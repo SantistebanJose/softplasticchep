@@ -279,7 +279,7 @@ function buscarDisponiblesVenta()
     }
 
     $sql = "
-        detalle AS (
+        WITH detalle AS (
             SELECT
                 emp.id AS empaquetado_id,
                 emp.producto_id,
