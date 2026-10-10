@@ -235,6 +235,14 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-ens-card-header .titulos{ flex:1; min-width:0; }
 .pc-ens-card-header .titulo{ font-weight:700; font-size:1.05em; color:#1f2430; }
 .pc-ens-card-header .sub{ font-size:.8em; color:#9a9585; margin-top:1px; }
+.pc-decision-choice{ display:flex; align-items:flex-start; gap:14px; width:100%; margin:0; padding:17px 18px; border:2px solid #d97706; border-radius:14px; background:#fff4dc; box-shadow:0 2px 8px rgba(120,72,0,.10); }
+.pc-decision-choice .form-check-input{ float:none; flex:0 0 auto; width:2.7em; height:1.5em; margin:3px 0 0; cursor:pointer; border:2px solid #8a5a10; }
+.pc-decision-choice .form-check-input:checked{ background-color:#166534; border-color:#166534; }
+.pc-decision-choice .decision-text{ display:flex; flex-direction:column; gap:5px; cursor:pointer; }
+.pc-decision-choice .form-check-label{ color:#152238; font-size:1.08em; font-weight:800; line-height:1.3; }
+.pc-decision-choice .form-text{ margin:0; color:#60420c; font-size:.92em; font-weight:600; }
+.pc-decision-choice-last{ border-color:#b45309; background:#ffedd0; }
+@media (max-width:560px){ .pc-decision-choice{ padding:16px 14px; gap:12px; } .pc-decision-choice .form-check-label{ font-size:1em; } }
 .pc-ens-badge-opcional{
     font-size:.7em; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
     color:#8a5a10; background:#FDF1E0; border:1px solid #f0dcae;
@@ -633,10 +641,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
 
                     <div class="px-3 pt-3">
-                        <div class="form-check form-switch mb-3">
+                        <div class="form-check form-switch pc-decision-choice mb-3">
                             <input class="form-check-input" type="checkbox" role="switch" id="produccion_completo">
-                            <label class="form-check-label" for="produccion_completo">La producción está completa</label>
-                            <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
+                            <div class="decision-text">
+                                <label class="form-check-label" for="produccion_completo">La producción está completa</label>
+                                <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
+                            </div>
                         </div>
                     </div>
 
@@ -743,9 +753,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         </div>
                     </div>
                     <div class="px-3 pb-3">
-                        <div class="form-check form-switch">
+                        <div class="form-check form-switch pc-decision-choice pc-decision-choice-last">
                             <input class="form-check-input" type="checkbox" role="switch" id="produccion_ultima_pasada">
-                            <label class="form-check-label" for="produccion_ultima_pasada">Sí, esta es la última pasada</label>
+                            <div class="decision-text">
+                                <label class="form-check-label" for="produccion_ultima_pasada">Sí, esta es la última pasada</label>
+                                <div class="form-text">Al marcarla se cerrarán las pasadas de esta producción.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1598,7 +1611,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
         <div class="pc-prod-card-foot">
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
-            ${puedeFinalizar ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})"><i class="fa-solid fa-flag-checkered"></i> Finalizar</button>` : ''}
+            ${puedeFinalizar ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})"><i class="fa-solid fa-flag-checkered"></i> Registrar avance</button>` : ''}
             ${mostrarBotonAvanzar ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})">Pasar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i></button>` : ''}
         </div>
     </div>`;
@@ -1965,8 +1978,8 @@ function iniciarProduccion(id) {
 
 function finalizarProduccion(id) {
     Swal.fire({
-        title: '¿Finalizar la corrida ahora?', icon: 'question',
-        showCancelButton: true, confirmButtonText: 'Sí, finalizar', cancelButtonText: 'Cancelar'
+        title: '¿Registrar avance de esta corrida?', icon: 'question',
+        showCancelButton: true, confirmButtonText: 'Sí, registrar avance', cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
         const json = await llamarProduccion('FINALIZARCORRIDA', { id });

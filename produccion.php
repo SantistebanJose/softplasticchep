@@ -260,6 +260,21 @@ include("header.php");
 }
 .pc-ens-step-num.alt{ background:#D97706; }
 .pc-ens-step-body{ flex:1; min-width:0; }
+.pc-decision-choice{
+    display:flex; align-items:flex-start; gap:14px; width:100%; margin:0;
+    padding:16px 18px; border:2px solid #d97706; border-radius:14px;
+    background:#fff4dc; box-shadow:0 2px 8px rgba(120,72,0,.10);
+}
+.pc-decision-choice .form-check-input{
+    float:none; flex:0 0 auto; width:2.4em; height:1.3em; margin:3px 0 0;
+    cursor:pointer; border:2px solid #8a5a10;
+}
+.pc-decision-choice .form-check-input:checked{ background-color:#166534; border-color:#166534; }
+.pc-decision-choice .decision-text{ display:flex; flex-direction:column; gap:4px; cursor:pointer; }
+.pc-decision-choice .form-check-label{ color:#152238; font-size:1.04em; font-weight:800; line-height:1.3; }
+.pc-decision-choice .form-text{ margin:0; color:#60420c; font-size:.9em; font-weight:600; }
+.pc-decision-choice-last{ border-color:#b45309; background:#ffedd0; }
+@media (max-width:560px){ .pc-decision-choice{ padding:15px 14px; gap:12px; } .pc-decision-choice .form-check-label{ font-size:1em; } }
 
 .pc-merma-lista{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
 .pc-merma-lista:empty{ display:none; }
@@ -504,10 +519,12 @@ include("header.php");
             <div class="pc-ens-step" id="pasoCantidadProducida">
                 <div class="pc-ens-step-num">1</div>
             <div class="pc-ens-step-body">
-                <div class="form-check form-switch mb-3">
+                <div class="form-check form-switch pc-decision-choice mb-3">
                     <input class="form-check-input" type="checkbox" role="switch" id="produccion_completo">
-                    <label class="form-check-label" for="produccion_completo">La producción está completa</label>
-                    <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
+                    <div class="decision-text">
+                        <label class="form-check-label" for="produccion_completo">La producción está completa</label>
+                        <div class="form-text">Si no lo marcas, podrás registrar más pasadas.</div>
+                    </div>
                 </div>
                 <div id="bloque_cantidad_individual">
                     <label class="form-label mb-1" id="lbl_cantidad_producida">Cantidad producida (kg) *</label>
@@ -569,14 +586,16 @@ include("header.php");
                 </div>
             </div>
 
-            <div class="pc-ens-step mt-3" id="bloque_ultima_pasada">
+            <div class="pc-ens-step pc-ens-step-decision mt-3" id="bloque_ultima_pasada">
                 <div class="pc-ens-step-num alt">4</div>
                 <div class="pc-ens-step-body w-100">
-                    <div class="form-check form-switch">
+                    <div class="form-check form-switch pc-decision-choice pc-decision-choice-last">
                         <input class="form-check-input" type="checkbox" role="switch" id="produccion_ultima_pasada">
-                        <label class="form-check-label" for="produccion_ultima_pasada">Última pasada</label>
+                        <div class="decision-text">
+                            <label class="form-check-label" for="produccion_ultima_pasada">Sí, esta es la última pasada</label>
+                            <div class="form-text">Al marcarla se cerrarán las pasadas de esta producción.</div>
+                        </div>
                     </div>
-                    <div class="form-text">Marca Sí para cerrar las pasadas y habilitar esta producción en Ensamblaje.</div>
                 </div>
             </div>
 
@@ -1196,8 +1215,8 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                 : ''
             }
             ${puedeFinalizar
-                ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})" title="Finalizar corrida">
-                    <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
+                ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})" title="Registrar avance">
+                    <i class="fa-solid fa-flag-checkered"></i> Registrar avance</button>`
                 : ''
             }
             ${puedeGestionar && !p.deleted_at
@@ -1690,11 +1709,11 @@ function iniciarProduccion(id) {
 
 function finalizarProduccion(id) {
     Swal.fire({
-        title: '¿Finalizar la corrida ahora?',
+        title: '¿Registrar avance de esta corrida?',
         text: 'Se registrará la hora actual del servidor como fin.',
         icon: 'question',
         showCancelButton: true,
-        confirmButtonText: 'Sí, finalizar',
+        confirmButtonText: 'Sí, registrar avance',
         cancelButtonText: 'Cancelar'
     }).then(async (result) => {
         if (!result.isConfirmed) return;
