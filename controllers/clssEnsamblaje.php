@@ -2416,6 +2416,17 @@ function cantidadRequeridaRecetaEnUnidad(array $componente, float $unidadesArmad
     return $requerido * $pesoGramos / $gramosPorUnidad;
 }
 
+/** Convierte la cantidad de salida del armado a unidades individuales para
+ * aplicar una receta configurada por cada unidad del producto final. */
+function cantidadUnidadesParaReceta(float $cantidadSalida, string $unidadSalida): float
+{
+    $unidadSalida = strtoupper(trim($unidadSalida));
+    if (in_array($unidadSalida, ['DOC', 'DOCENA', 'DOCENAS'], true)) {
+        return $cantidadSalida * 12;
+    }
+    return $cantidadSalida;
+}
+
 function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $unidadesArmadas, array $configuracion): void
 {
     $receta = [];
@@ -2651,7 +2662,8 @@ function finalizarEnsamblaje(int $id)
 
         $configArmado = json_decode($ensamblaje['js_configuracion_armado_json'] ?? '[]', true) ?: [];
         if (!empty($configArmado)) {
-            aplicarConsumoConfiguracionArmado($conectar, $id, $cantidadSalida, $configArmado);
+            $unidadesParaReceta = cantidadUnidadesParaReceta($cantidadSalida, $unidadLabel);
+            aplicarConsumoConfiguracionArmado($conectar, $id, $unidadesParaReceta, $configArmado);
         }
 
         executeNonQuery($conectar, "
