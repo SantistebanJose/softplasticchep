@@ -123,6 +123,42 @@ include("header.php");
         color: #9ca3af;
     }
 
+    /* El formulario de armado puede crecer con cada molde; desplaza su cuerpo,
+       manteniendo siempre visibles el encabezado y los botones. */
+    #modalConfigArmadoProducto .modal-dialog {
+        height: calc(100vh - 2rem);
+        height: calc(100dvh - 2rem);
+        max-height: calc(100vh - 2rem);
+        max-height: calc(100dvh - 2rem);
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+    }
+    #modalConfigArmadoProducto .modal-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: 100%;
+        min-height: 0;
+    }
+    #modalConfigArmadoProducto #formConfigArmadoProducto {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+    }
+    #modalConfigArmadoProducto .modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto !important;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    #modalConfigArmadoProducto .modal-header,
+    #modalConfigArmadoProducto .modal-footer {
+        flex: 0 0 auto;
+    }
+
     /* ── Miniatura de producto en el listado ── */
     .pc-thumb {
         width: 42px;
@@ -431,6 +467,31 @@ include("header.php");
   </div>
 </div>
 
+<!-- Receta de armado: moldes, cantidad por unidad armada y peso de cada pieza -->
+<div class="modal fade" id="modalConfigArmadoProducto" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form id="formConfigArmadoProducto">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="fa-solid fa-hammer"></i> <span id="configArmadoTitulo">Configurar armado</span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="config_armado_producto_id">
+          <p class="text-muted">Indica qué moldes componen una unidad del producto, cuántas piezas aporta cada molde y el peso de cada pieza.</p>
+          <div id="configArmadoFilas" class="d-flex flex-column gap-3"></div>
+          <button type="button" class="btn btn-outline-primary mt-3" onclick="agregarFilaConfiguracionArmado()"><i class="fa-solid fa-plus"></i> Añadir molde</button>
+          <div class="alert alert-primary mt-3 mb-0"><b>Peso teórico por unidad armada:</b> <span id="configArmadoPesoTotal">0 g</span></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar configuración</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <!-- SheetJS: librería para generar archivos Excel (.xlsx) 100% en el navegador -->
@@ -446,10 +507,14 @@ const llamarMoldes    = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, acci
 const modalProducto        = new bootstrap.Modal(document.getElementById('modalProducto'));
 const modalConfigProducto  = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
 const modalVerFotoProducto = new bootstrap.Modal(document.getElementById('modalVerFotoProducto'));
+const modalConfigArmadoProducto = new bootstrap.Modal(document.getElementById('modalConfigArmadoProducto'));
 
 let unidadesCache  = [];
 let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
 let productoPesoUnitarioActual = null; // NUEVO: peso_unitario_g del producto que se está configurando
+let moldesDisponiblesArmado = [];
+let productosDisponiblesArmado = [];
+let contadorFilaArmado = 0;
 document.addEventListener('DOMContentLoaded', () => {
     cargarUnidades()
         .then(cargarProductos)
@@ -639,6 +704,9 @@ async function cargarProductos() {
                 </button>
                 <button class="pc-icon-btn" onclick="abrirModalConfiguracion(${p.id}, '${escapeAttr(p.descripcion)}')" title="Configurar">
                     <i class="fa-solid fa-gear"></i>
+                </button>
+                <button class="pc-icon-btn" onclick="abrirModalConfiguracionArmado(${p.id}, '${escapeAttr(p.descripcion)}')" title="Configurar armado del producto">
+                    <i class="fa-solid fa-hammer"></i>
                 </button>
                 ${p.activo
                     ? `<button class="pc-icon-btn" onclick="eliminarProducto(${p.id})" title="Desactivar">
@@ -893,6 +961,130 @@ function llenarSelectUnidades(selectId, unidadIdSeleccionada) {
     sel.innerHTML = '<option value="">Seleccione...</option>' +
         unidadesCache.map(u => `<option value="${u.id}" ${String(u.id) === String(unidadIdSeleccionada) ? 'selected' : ''}>${u.codigo} - ${u.nombre}</option>`).join('');
 }
+
+function escapeHtmlArmado(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function abrirModalConfiguracionArmado(productoId, descripcion) {
+    const [jsonMoldes, jsonProducto] = await Promise.all([
+        llamarMoldes('LISTARMOLDESPRODUCTO'),
+        llamarProductos('OBTENERPRODUCTO', { id: productoId }),
+    ]);
+    if (!jsonMoldes.success) { Swal.fire('Error', jsonMoldes.message, 'error'); return; }
+    if (!jsonProducto.success) { Swal.fire('Error', jsonProducto.message, 'error'); return; }
+
+    moldesDisponiblesArmado = (jsonMoldes.moldes_producto || [])
+        .filter(m => String(m.producto_id) === String(productoId));
+    const jsonProductos = await llamarProductos('LISTARPRODUCTOS', { estado: 'activo' });
+    if (!jsonProductos.success) { Swal.fire('Error', jsonProductos.message, 'error'); return; }
+    productosDisponiblesArmado = jsonProductos.productos || [];
+    document.getElementById('config_armado_producto_id').value = productoId;
+    document.getElementById('configArmadoTitulo').textContent = `Armado — ${descripcion}`;
+    const contenedor = document.getElementById('configArmadoFilas');
+    contenedor.innerHTML = '';
+    contadorFilaArmado = 0;
+    const configuracion = jsonProducto.producto.js_configuracion_armado || [];
+    if (configuracion.length) configuracion.forEach(fila => agregarFilaConfiguracionArmado(fila));
+    actualizarPesoTotalArmado();
+    modalConfigArmadoProducto.show();
+}
+
+function agregarFilaConfiguracionArmado(config = {}) {
+    const id = ++contadorFilaArmado;
+    const tipo = config.tipo_componente || (config.producto_id ? 'producto' : 'molde');
+    const moldesSeleccion = moldesDisponiblesArmado.map(m =>
+        `<option value="${m.molde_id}" ${tipo === 'molde' && String(m.molde_id) === String(config.molde_id ?? '') ? 'selected' : ''}>${escapeHtmlArmado(m.nombre)}</option>`
+    ).join('');
+    const productosSeleccion = productosDisponiblesArmado.filter(p => String(p.id) !== String(document.getElementById('config_armado_producto_id').value)).map(p =>
+        `<option value="${p.id}" ${tipo === 'producto' && String(p.id) === String(config.producto_id ?? '') ? 'selected' : ''}>${escapeHtmlArmado(p.codigo)} - ${escapeHtmlArmado(p.descripcion)}</option>`
+    ).join('');
+    const unidadesSeleccion = unidadesCache.map(u =>
+        `<option value="${u.id}" ${String(u.id) === String(config.unidad_id ?? '') ? 'selected' : ''}>${escapeHtmlArmado(u.codigo)} - ${escapeHtmlArmado(u.nombre)}</option>`
+    ).join('');
+    const fila = document.createElement('div');
+    fila.className = 'config-venta-block';
+    fila.dataset.filaArmado = id;
+    fila.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <b>Componente ${id}</b>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('[data-fila-armado]').remove(); actualizarPesoTotalArmado();" title="Quitar componente"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <div class="row g-2">
+            <div class="col-md-4"><label class="form-label">Tipo</label><select class="form-select armado-tipo"><option value="molde" ${tipo === 'molde' ? 'selected' : ''}>Molde</option><option value="producto" ${tipo === 'producto' ? 'selected' : ''}>Producto</option></select></div>
+            <div class="col-md-8 armado-selector-molde" ${tipo !== 'molde' ? 'hidden' : ''}><label class="form-label">Molde</label><select class="form-select armado-molde"><option value="">Selecciona un molde...</option>${moldesSeleccion}</select></div>
+            <div class="col-md-8 armado-selector-producto" ${tipo !== 'producto' ? 'hidden' : ''}><label class="form-label">Producto</label><select class="form-select armado-producto"><option value="">Selecciona un producto...</option>${productosSeleccion}</select></div>
+            <div class="col-md-6"><label class="form-label">Unidad de cantidad</label><select class="form-select armado-unidad"><option value="">Selecciona unidad...</option>${unidadesSeleccion}</select></div>
+            <div class="col-md-6"><label class="form-label">Cantidad a utilizar</label><input class="form-control armado-cantidad" type="number" min="0.0001" step="0.0001" value="${escapeHtmlArmado(config.cantidad_a_utilizar ?? '')}" placeholder="Ej. 4"></div>
+            <div class="col-md-6"><label class="form-label">Peso de cada pieza</label><div class="input-group"><input class="form-control armado-peso" type="number" min="0.0001" step="0.0001" value="${escapeHtmlArmado(config.peso_molde ?? '')}" placeholder="Ej. 5"><select class="form-select armado-unidad-peso" style="max-width:145px"><option value="GRAMOS" ${String(config.unidad_peso_molde || 'GRAMOS').toUpperCase() === 'GRAMOS' ? 'selected' : ''}>Gramos (g)</option><option value="KILOGRAMOS" ${String(config.unidad_peso_molde || '').toUpperCase() === 'KILOGRAMOS' ? 'selected' : ''}>Kilogramos (kg)</option></select></div></div>
+            <div class="col-12 small text-muted armado-subtotal"></div>
+        </div>`;
+    document.getElementById('configArmadoFilas').appendChild(fila);
+    fila.querySelector('.armado-tipo').addEventListener('change', e => {
+        fila.querySelector('.armado-selector-molde').hidden = e.target.value !== 'molde';
+        fila.querySelector('.armado-selector-producto').hidden = e.target.value !== 'producto';
+        actualizarPesoTotalArmado();
+    });
+    fila.querySelectorAll('input,select').forEach(el => el.addEventListener('input', actualizarPesoTotalArmado));
+    fila.querySelectorAll('select').forEach(el => el.addEventListener('change', actualizarPesoTotalArmado));
+    actualizarPesoTotalArmado();
+}
+
+function actualizarPesoTotalArmado() {
+    let totalGramos = 0;
+    document.querySelectorAll('#configArmadoFilas [data-fila-armado]').forEach(fila => {
+        const cantidad = parseFloat(fila.querySelector('.armado-cantidad').value) || 0;
+        const peso = parseFloat(fila.querySelector('.armado-peso').value) || 0;
+        const enKg = fila.querySelector('.armado-unidad-peso').value === 'KILOGRAMOS';
+        const subtotal = cantidad * peso * (enKg ? 1000 : 1);
+        totalGramos += subtotal;
+        fila.querySelector('.armado-subtotal').textContent = cantidad && peso
+            ? `Peso utilizado por unidad armada: ${subtotal.toLocaleString('es-PE', {maximumFractionDigits: 4})} g`
+            : '';
+    });
+    document.getElementById('configArmadoPesoTotal').textContent = `${totalGramos.toLocaleString('es-PE', {maximumFractionDigits: 4})} g${totalGramos >= 1000 ? ` (${(totalGramos / 1000).toLocaleString('es-PE', {maximumFractionDigits: 4})} kg)` : ''}`;
+}
+
+document.getElementById('formConfigArmadoProducto').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const filas = [];
+    let error = '';
+    document.querySelectorAll('#configArmadoFilas [data-fila-armado]').forEach(fila => {
+        const tipo = fila.querySelector('.armado-tipo').value;
+        const moldeId = tipo === 'molde' ? fila.querySelector('.armado-molde').value : '';
+        const productoId = tipo === 'producto' ? fila.querySelector('.armado-producto').value : '';
+        const unidadId = fila.querySelector('.armado-unidad').value;
+        const cantidadTxt = fila.querySelector('.armado-cantidad').value.trim();
+        const pesoTxt = fila.querySelector('.armado-peso').value.trim();
+        if (!moldeId && !productoId && !unidadId && !cantidadTxt && !pesoTxt) return;
+        if ((!moldeId && !productoId) || !unidadId || !cantidadTxt || !pesoTxt || Number(cantidadTxt) <= 0 || Number(pesoTxt) <= 0) {
+            error = 'Completa el molde o producto, unidad, cantidad y peso en cada fila.';
+            return;
+        }
+        const molde = moldesDisponiblesArmado.find(m => String(m.molde_id) === String(moldeId));
+        const producto = productosDisponiblesArmado.find(p => String(p.id) === String(productoId));
+        const unidad = unidadesCache.find(u => String(u.id) === String(unidadId));
+        filas.push({
+            tipo_componente: tipo,
+            ...(tipo === 'molde' ? {molde_id: Number(moldeId), molde: molde?.nombre || ''} : {producto_id: Number(productoId), producto: producto?.descripcion || ''}),
+            unidad_me: unidad?.codigo || '', unidad_id: Number(unidadId),
+            cantidad_a_utilizar: Number(cantidadTxt),
+            unidad_peso_molde: fila.querySelector('.armado-unidad-peso').value,
+            peso_molde: Number(pesoTxt),
+        });
+    });
+    if (error) { Swal.fire('Falta información', error, 'warning'); return; }
+    const boton = this.querySelector('button[type="submit"]');
+    boton.disabled = true;
+    const json = await llamarProductos('GUARDARCONFIGARMADO', {
+        producto_id: document.getElementById('config_armado_producto_id').value,
+        configuracion_armado: JSON.stringify(filas),
+    });
+    boton.disabled = false;
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+    modalConfigArmadoProducto.hide();
+    Swal.fire('Guardado', json.message, 'success');
+});
 
 function toggleSalidaEnsamblajeProducto() {
     const algunSi = [...document.querySelectorAll('#configTabContent .tab-pane')]

@@ -43,6 +43,7 @@ function controladorProductos(string $accion): void
         'ELIMINARPRODUCTO',
         'REACTIVARPRODUCTO',
         'GUARDARCONFIGPRODUCTO',
+        'GUARDARCONFIGARMADO',
     ];
 
     if (in_array($accion, $accionesLectura, true)) {
@@ -82,6 +83,9 @@ function controladorProductos(string $accion): void
 
         case 'GUARDARCONFIGPRODUCTO':
             guardarConfigProducto();
+            break;
+        case 'GUARDARCONFIGARMADO':
+            guardarConfigArmadoProducto();
             break;
     }
 }
@@ -150,7 +154,7 @@ function obtenerProducto($id)
 
     $result = executeQuery(
         $conectar,
-        "SELECT p.*,
+        "SELECT p.*, to_json(p.js_configuracion_armado) AS js_configuracion_armado_json,
             uv.nombre_corto AS unidad_venta_codigo,
             uv.nombre AS unidad_venta_nombre,
             ue.nombre_corto AS unidad_equivale_codigo,
@@ -166,6 +170,8 @@ function obtenerProducto($id)
     $producto = $result[0];
     $producto['js_configuracion'] = json_decode($producto['js_configuracion'] ?? '[]', true) ?: [];
     $producto['js_configuracion_empaquetado'] = json_decode($producto['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
+    $producto['js_configuracion_armado'] = json_decode($producto['js_configuracion_armado_json'] ?? '[]', true) ?: [];
+    unset($producto['js_configuracion_armado_json']);
 
     // 1) Recolectar TODOS los ids de unidad usados, tanto por molde
     //    (js_configuracion) como a nivel producto (js_configuracion_empaquetado),
@@ -557,6 +563,83 @@ function guardarConfigProducto()
     ]);
 
     responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);
+}
+
+/** Guarda la receta de armado en producto.js_configuracion_armado (jsonb[]). */
+function guardarConfigArmadoProducto(): void
+{
+    $conectar = conectar_oll_BD();
+    $productoId = (int)($_POST['producto_id'] ?? 0);
+    $config = json_decode($_POST['configuracion_armado'] ?? '[]', true);
+    if ($productoId <= 0 || !is_array($config)) responder(false, 'Producto o configuración de armado inválidos.');
+
+    $producto = executeQuery($conectar, 'SELECT id FROM producto WHERE id = :id AND activo = TRUE', ['id' => $productoId]);
+    if (empty($producto)) responder(false, 'El producto no existe o está inactivo.');
+
+    $normalizada = [];
+    $componentesVistos = [];
+    foreach ($config as $fila) {
+        if (!is_array($fila)) responder(false, 'Hay una configuración de componente con formato incorrecto.');
+        $tipo = strtolower(trim((string)($fila['tipo_componente'] ?? (isset($fila['producto_id']) ? 'producto' : 'molde'))));
+        $moldeId = (int)($fila['molde_id'] ?? 0);
+        $componenteProductoId = (int)($fila['producto_id'] ?? 0);
+        $unidadId = (int)($fila['unidad_id'] ?? 0);
+        $cantidad = $fila['cantidad_a_utilizar'] ?? null;
+        $peso = $fila['peso_molde'] ?? null;
+        $unidadPeso = strtoupper(trim((string)($fila['unidad_peso_molde'] ?? '')));
+        if (!in_array($tipo, ['molde', 'producto'], true) || ($tipo === 'molde' && $moldeId <= 0) || ($tipo === 'producto' && ($componenteProductoId <= 0 || $componenteProductoId === $productoId)) || $unidadId <= 0 || !is_numeric($cantidad) || (float)$cantidad <= 0 || !is_numeric($peso) || (float)$peso <= 0) {
+            responder(false, 'Cada componente debe tener molde o producto, unidad, cantidad y peso mayores a cero.');
+        }
+        if (!in_array($unidadPeso, ['GRAMOS', 'KILOGRAMOS'], true)) responder(false, 'La unidad del peso del componente debe ser gramos o kilogramos.');
+        $componenteId = $tipo === 'molde' ? $moldeId : $componenteProductoId;
+        $claveComponente = $tipo . ':' . $componenteId;
+        if (isset($componentesVistos[$claveComponente])) responder(false, 'No repitas el mismo componente; agrega sus cantidades en una sola configuración.');
+        $componentesVistos[$claveComponente] = true;
+
+        if ($tipo === 'molde') {
+            $componente = executeQuery($conectar, "
+                SELECT m.id, m.nombre
+                FROM molde m
+                WHERE m.id = :molde_id AND m.deleted_at IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
+                    WHERE NULLIF(rel->>'producto_id','')::bigint = :producto_id
+                  )
+            ", ['molde_id' => $moldeId, 'producto_id' => $productoId]);
+            if (empty($componente)) responder(false, 'El molde seleccionado no está activo o no está asociado a este producto.');
+            $nombreComponente = $componente[0]['nombre'];
+        } else {
+            $componente = executeQuery($conectar, 'SELECT id, descripcion FROM producto WHERE id = :id AND activo = TRUE', ['id' => $componenteProductoId]);
+            if (empty($componente)) responder(false, 'El producto componente no existe o está inactivo.');
+            $nombreComponente = $componente[0]['descripcion'];
+        }
+
+        $unidad = executeQuery($conectar, 'SELECT id, nombre_corto FROM unidad_medida WHERE id = :id AND deleted_at IS NULL', ['id' => $unidadId]);
+        if (empty($unidad)) responder(false, 'La unidad de cantidad seleccionada no está activa.');
+        $normalizada[] = array_merge([
+            'tipo_componente' => $tipo,
+            'componente' => $nombreComponente,
+            'unidad_me' => $unidad[0]['nombre_corto'],
+            'unidad_id' => $unidadId,
+            'cantidad_a_utilizar' => (float)$cantidad,
+            'unidad_peso_molde' => $unidadPeso,
+            'peso_molde' => (float)$peso,
+        ], $tipo === 'molde'
+            ? ['molde' => $nombreComponente, 'molde_id' => $moldeId]
+            : ['producto' => $nombreComponente, 'producto_id' => $componenteProductoId]);
+    }
+
+    $json = json_encode($normalizada, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    executeQuery($conectar, "
+        UPDATE producto
+        SET js_configuracion_armado = ARRAY(
+                SELECT item FROM jsonb_array_elements(CAST(:config AS jsonb)) AS cfg(item)
+            ),
+            updated_at = NOW()
+        WHERE id = :id
+    ", ['config' => $json, 'id' => $productoId]);
+
+    responder(true, 'Configuración de armado guardada.', ['producto_id' => $productoId, 'configuracion_armado' => $normalizada]);
 }
 // Soft delete: no se borra físicamente, solo se marca activo = FALSE.
 function eliminarProducto()
