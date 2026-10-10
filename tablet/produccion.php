@@ -1553,12 +1553,10 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
 
     const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
     const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
-    const puedeFinalizar = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.fecha_hora_fin;
-    const corridaFinalizada = puedeGestionar && !p.deleted_at && !!p.fecha_hora_fin && !p.pases_finalizados;
+    const puedeRegistrarAvance = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.pases_finalizados && !p.enviado_ensamblaje;
 
     const requiereEnsamblaje = necesitaEnsamblaje(p);
     const etapaTexto = requiereEnsamblaje ? 'ensamblaje' : 'empaquetado';
-    const mostrarBotonAvanzar = corridaFinalizada;
 
     const textoEstadoMap = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: requiereEnsamblaje ? 'En ensamblaje' : 'En empaquetado' };
     const textoEstado = textoEstadoMap[estado];
@@ -1611,8 +1609,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
         <div class="pc-prod-card-foot">
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
-            ${puedeFinalizar ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="finalizarProduccion(${p.id})"><i class="fa-solid fa-flag-checkered"></i> Registrar avance</button>` : ''}
-            ${mostrarBotonAvanzar ? `<button type="button" class="pc-btn-ensamblaje" onclick="abrirModalCantidadParaEnsamblaje(${p.id})">Pasar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i></button>` : ''}
+            ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
         </div>
     </div>`;
 }
@@ -1977,15 +1974,7 @@ function iniciarProduccion(id) {
 }
 
 function finalizarProduccion(id) {
-    Swal.fire({
-        title: '¿Registrar avance de esta corrida?', icon: 'question',
-        showCancelButton: true, confirmButtonText: 'Sí, registrar avance', cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-        if (!result.isConfirmed) return;
-        const json = await llamarProduccion('FINALIZARCORRIDA', { id });
-        if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarProducciones(); }
-        else Swal.fire('Error', json.message, 'error');
-    });
+    abrirModalCantidadParaEnsamblaje(id);
 }
 
 const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
@@ -2015,8 +2004,8 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
     const numeroPasada = (Array.isArray(p?.js_cantidades_salientes) ? p.js_cantidades_salientes.length : 0) + 1;
 
-    document.getElementById('tituloModalCantidadEnsamblaje').innerHTML = `<i class="fa-solid fa-weight-hanging"></i> Cantidad producida — pasada ${numeroPasada}, antes de pasar a ${etapaTexto}`;
-    document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = `Enviar a ${etapaTexto} <i class="fa-solid fa-arrow-right"></i>`;
+    document.getElementById('tituloModalCantidadEnsamblaje').innerHTML = `<i class="fa-solid fa-weight-hanging"></i> Registrar avance ${numeroPasada}`;
+    document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = 'Registrar avance <i class="fa-solid fa-arrow-right"></i>';
 
     aplicarUnidadesEtapaModal(p);
     inicializarCantidadProducidaPorOperario(p);   // <-- NUEVO
@@ -2039,7 +2028,12 @@ function sincronizarUltimaPasadaCompletaTablet() {
     else if (estabaForzada) ultima.checked = false;
     ultima.disabled = completa;
     document.getElementById('bloque_ultima_pasada').style.display = completa ? 'none' : '';
+    document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = completa
+        ? 'Registrar producción completa <i class="fa-solid fa-check"></i>'
+        : (ultima.checked ? 'Registrar avance y finalizar <i class="fa-solid fa-flag-checkered"></i>' : 'Registrar avance <i class="fa-solid fa-arrow-right"></i>');
 }
+
+document.getElementById('produccion_ultima_pasada').addEventListener('change', sincronizarUltimaPasadaCompletaTablet);
 
 async function abrirCamaraPesaje() {
     if (archivosFotosPesaje.length >= 3) {

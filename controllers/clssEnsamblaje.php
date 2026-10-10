@@ -746,7 +746,9 @@ function buscarProduccionesDisponibles()
 
     $where  = [
         "t1.deleted_at IS NULL",
-        "t1.fecha_hora_fin IS NOT NULL",
+        "(t1.fecha_hora_fin IS NOT NULL
+          OR jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) > 0
+          OR ep.id IS NOT NULL)",
         "(t1.enviado_ensamblaje = TRUE OR t1.pases_finalizados = TRUE OR ep.id IS NOT NULL
           OR jsonb_array_length(COALESCE(t1.js_cantidades_salientes, '[]'::jsonb)) > 0)",
         "x.item IS NOT NULL",

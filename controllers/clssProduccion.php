@@ -1913,7 +1913,7 @@ function enviarAEnsamblaje()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto, js_operarios,
+        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto, js_operarios,
                 js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg
          FROM produccion WHERE id = :id",
         ['id' => $id]
@@ -1935,7 +1935,7 @@ function enviarAEnsamblaje()
     }
 
     if (!empty($existe[0]['deleted_at'])) responder(false, "No puedes enviar a $destino un registro inactivo.");
-    if (empty($existe[0]['fecha_hora_fin'])) responder(false, 'Primero debes finalizar la corrida.');
+    if (empty($existe[0]['fecha_hora_inicio'])) responder(false, 'Primero debes iniciar la producción.');
     $salidasPrevias = !empty($existe[0]['js_cantidades_salientes'])
         ? json_decode($existe[0]['js_cantidades_salientes'], true) : [];
     if (!is_array($salidasPrevias)) $salidasPrevias = [];
@@ -2089,6 +2089,7 @@ function enviarAEnsamblaje()
         executeNonQuery($conectar, "
             UPDATE produccion SET
                 cantidad_producida_kg   = :cantidad_producida,
+                fecha_hora_fin          = CASE WHEN :marcar_fin_corrida THEN COALESCE(fecha_hora_fin, NOW()) ELSE fecha_hora_fin END,
                 js_cantidades_salientes = :js_cantidades_salientes::jsonb,
                 completo                = :completo,
                 pases_finalizados       = :pases_finalizados,
@@ -2109,6 +2110,7 @@ function enviarAEnsamblaje()
         ", [
             'id'                 => $id,
             'cantidad_producida' => $cantidadSalidaAcumulada,
+            'marcar_fin_corrida' => $ultimaPasada,
             'js_cantidades_salientes' => json_encode($salidasActualizadas, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'completo' => $completo,
             'pases_finalizados' => $ultimaPasada,
@@ -2157,8 +2159,8 @@ function enviarAEnsamblaje()
 
         $conectar->commit();
         $mensajeEnvio = $ultimaPasada
-            ? "Pasada " . count($salidasActualizadas) . " registrada y pasadas finalizadas para $destino."
-            : "Pasada " . count($salidasActualizadas) . " registrada. Puedes continuar enviando pasadas a $destino.";
+            ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
+            : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.";
         responder(true, $mensajeEnvio, [
             'id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino,
             'pasada' => $salidaActual['pasada'], 'cantidad_acumulada' => $cantidadSalidaAcumulada,
