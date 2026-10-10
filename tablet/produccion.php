@@ -1951,7 +1951,9 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
     if (json.success) {
         const esNuevo = !produccionIdActual;
         modalProduccion.hide();
-        materialesProdCache = null; 
+        // El backend ya descontó los materiales; invalida el caché por producto
+        // para que el siguiente registro vuelva a consultar el stock actualizado.
+        materialesProdCachePorProducto = {};
         if (esNuevo) productoTabActivo = 'TODOS';
         await cargarProducciones();
         if (esNuevo && json.id) {
