@@ -414,42 +414,34 @@ function guardarConfigProducto()
 
     $configuraciones = json_decode($configJson, true);
     if (!is_array($configuraciones)) responder(false, 'Formato de configuración inválido.');
-    // Un mismo molde no puede aparecer dos veces en la config del producto:
-    // rompería obtenerItemConfigProductoMolde() (que asume unicidad) y
-    // dejaría ambigüedad de cuál fila es la "vigente" para ese molde.
+
+    // Un mismo molde no puede aparecer dos veces en la config del producto.
     $moldeIdsVistos = [];
     foreach ($configuraciones as $c) {
         $mid = $c['molde_id'] ?? null;
-        if ($mid === null) continue; // esto ya se valida más abajo como "falta el molde"
+        if ($mid === null) continue;
         if (in_array($mid, $moldeIdsVistos, true)) {
             responder(false, 'El molde "' . ($c['molde'] ?? $mid) . '" aparece más de una vez en la configuración.');
         }
         $moldeIdsVistos[] = $mid;
     }
+
     $configuracionEmpaquetado = json_decode($empaquetadoJson, true);
     if (!is_array($configuracionEmpaquetado)) responder(false, 'Formato de configuración de empaquetado inválido.');
-    // Preferencias de uso de máquina por etapa; la máquina efectivamente
-    // utilizada se registra después en el avance de ensamblaje/empaquetado.
-    $configuracionEmpaquetado['requiere_maquina_ensamblaje'] = !empty($configuracionEmpaquetado['requiere_maquina_ensamblaje']);
+    $configuracionEmpaquetado['requiere_maquina_ensamblaje']  = !empty($configuracionEmpaquetado['requiere_maquina_ensamblaje']);
     $configuracionEmpaquetado['requiere_maquina_empaquetado'] = !empty($configuracionEmpaquetado['requiere_maquina_empaquetado']);
 
     $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');
 
-    // "Se vende por" es a nivel producto (una sola vez, no por molde)
     if (empty($configuracionEmpaquetado['se_vende_por_unidad_medida_id'])) {
         responder(false, 'Falta "Se vende por" para el producto.');
     }
     if (empty($configuracionEmpaquetado['salida_empaquetado_unidad_medida_id'])) {
         responder(false, 'Falta "Salida en Empaquetado" para el producto.');
     }
-    if (empty($configuracionEmpaquetado['salida_empaquetado_unidad_medida_id'])) {
-        responder(false, 'Falta "Salida en Empaquetado" para el producto.');
-    }
 
-    // NUEVO: reglas de empaquetado por producto (distribución de colores,
-    // granularidad y conversión peso->unidad). Mismo patrón que el resto de
-    // configuracionEmpaquetado: vive en producto.js_configuracion_empaquetado.
+    // Reglas de empaquetado por producto
     $modoDistribucion = $configuracionEmpaquetado['modo_distribucion_color'] ?? 'libre';
     if (!in_array($modoDistribucion, ['libre', 'uniforme'], true)) {
         responder(false, 'Modo de distribución de colores inválido.');
@@ -466,13 +458,7 @@ function guardarConfigProducto()
         }
     }
 
-    // "Salida en Ensamblaje" también es a nivel producto (el ensamblaje
-    // arma el producto terminado a partir de varios moldes, así que la
-    // unidad de salida no depende de un molde puntual). Solo es
-    // obligatoria si al menos un molde del producto necesita ensamblaje;
-    // si ninguno lo necesita, ese producto nunca genera una fila en
-    // `ensamblaje` (ver clssProduccion::enviarAEnsamblaje), así que no
-    // tiene sentido exigir el dato.
+    // "Salida en Ensamblaje" solo es obligatoria si algún molde necesita ensamblaje.
     $algunMoldeNecesitaEnsamblaje = false;
     foreach ($configuraciones as $c) {
         if (($c['necesita_ensamblaje'] ?? 'no') === 'sí') {
@@ -484,8 +470,8 @@ function guardarConfigProducto()
         responder(false, 'Falta "Salida en Ensamblaje" para el producto.');
     }
 
-    // Validación mínima de cada fila (una por molde) — ya SIN se_vende_por
-    // y SIN salida_ensamblaje (ahora viven en configuracionEmpaquetado, no aquí).
+    // Validación de cada fila (una por molde)
+    $moldesCompartidos = []; // ids de moldes que comparten varios productos
     foreach ($configuraciones as $c) {
         if (empty($c['molde_id'])) responder(false, 'Falta el molde en una de las configuraciones.');
         if (empty($c['salida_produccion_unidad_medida_id'])) responder(false, 'Falta "Salida en Producción" para el molde "' . ($c['molde'] ?? '') . '".');
@@ -497,30 +483,12 @@ function guardarConfigProducto()
             WHERE m.id = :molde_id
         ", ['molde_id' => (int) $c['molde_id']]);
         $esMoldeCompartido = (int) ($relacionMolde[0]['productos'] ?? 0) > 1;
+
         if ($esMoldeCompartido && ($c['necesita_ensamblaje'] ?? 'no') !== 'sí') {
             responder(false, 'El molde compartido "' . ($c['molde'] ?? '') . '" debe pasar por Ensamblaje para que allí se determine el producto final.');
         }
         if ($esMoldeCompartido) {
-            $configOtroProducto = executeQuery($conectar, "
-                SELECT DISTINCT
-                    cfg.item->>'salida_produccion_unidad_medida_id' AS unidad_produccion_id,
-                    cfg.item->>'salida_merma_unidad_medida_id' AS unidad_merma_id
-                FROM molde m
-                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
-                JOIN producto pr ON pr.id = (rel->>'producto_id')::bigint
-                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) cfg(item)
-                WHERE m.id = :molde_id
-                  AND pr.id <> :producto_id
-                  AND (cfg.item->>'molde_id')::bigint = m.id
-            ", ['molde_id' => (int) $c['molde_id'], 'producto_id' => $producto_id]);
-            foreach ($configOtroProducto as $otraConfig) {
-                if (!empty($otraConfig['unidad_produccion_id']) && (string) $otraConfig['unidad_produccion_id'] !== (string) $c['salida_produccion_unidad_medida_id']) {
-                    responder(false, 'El molde compartido "' . ($c['molde'] ?? '') . '" debe tener la misma unidad de Salida en Producción en todos sus productos asociados.');
-                }
-                if (!empty($otraConfig['unidad_merma_id']) && (string) $otraConfig['unidad_merma_id'] !== (string) $c['salida_merma_unidad_medida_id']) {
-                    responder(false, 'El molde compartido "' . ($c['molde'] ?? '') . '" debe tener la misma unidad de Salida de Merma en todos sus productos asociados.');
-                }
-            }
+            $moldesCompartidos[] = (int) $c['molde_id'];
         }
     }
 
@@ -538,9 +506,6 @@ function guardarConfigProducto()
     foreach ($configuraciones as &$c) {
         $c['created_at'] = $creadosPorMolde[$c['molde_id']] ?? $ahora;
         $c['updated_at'] = $ahora;
-        // Normaliza complementa_a: array de {producto_id, codigo, descripcion}.
-        // Opcional — solo lo llenan los moldes cuyo armado puede complementar
-        // a otro producto (ej. MOLDE GANCHO PINZA).
         $c['complementa_a'] = is_array($c['complementa_a'] ?? null)
             ? array_values(array_filter($c['complementa_a'], fn($p) => !empty($p['producto_id'])))
             : [];
@@ -561,6 +526,44 @@ function guardarConfigProducto()
         'js_configuracion_empaquetado' => $jsEmpaquetadoJson,
         'id'                           => $producto_id,
     ]);
+
+    // Sincroniza Salida en Producción y Salida de Merma en los demás productos
+    // que comparten cada molde compartido de esta configuración.
+    foreach ($configuraciones as $c) {
+        if (!in_array((int) $c['molde_id'], $moldesCompartidos, true)) continue;
+
+        executeQuery($conectar, "
+            UPDATE producto pr
+            SET js_configuracion = (
+                    SELECT jsonb_agg(
+                        CASE WHEN (item->>'molde_id')::bigint = :molde_id
+                            THEN item || jsonb_build_object(
+                                'salida_produccion_unidad_medida_id', CAST(:prod_id AS integer),
+                                'salida_produccion',                  CAST(:prod_nom AS text),
+                                'salida_merma_unidad_medida_id',      CAST(:merma_id AS integer),
+                                'salida_merma',                       CAST(:merma_nom AS text),
+                                'updated_at',                         CAST(:ahora AS text)
+                            )
+                            ELSE item END
+                    )
+                    FROM jsonb_array_elements(pr.js_configuracion) AS item
+                ),
+                updated_at = NOW()
+            WHERE pr.id <> :producto_id
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) i
+                  WHERE (i->>'molde_id')::bigint = :molde_id
+              )
+        ", [
+            'molde_id'    => (int) $c['molde_id'],
+            'prod_id'     => (int) $c['salida_produccion_unidad_medida_id'],
+            'prod_nom'    => $c['salida_produccion'] ?? '',
+            'merma_id'    => (int) $c['salida_merma_unidad_medida_id'],
+            'merma_nom'   => $c['salida_merma'] ?? '',
+            'ahora'       => $ahora,
+            'producto_id' => $producto_id,
+        ]);
+    }
 
     responder(true, 'Configuración guardada correctamente.', ['producto_id' => $producto_id]);
 }
