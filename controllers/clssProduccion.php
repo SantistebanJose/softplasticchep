@@ -1243,6 +1243,41 @@ function resolverUnidadesEtapaLote($conectar, array $filas): array
     return $filas;
 }
 
+/**
+ * Busca la única variante de salida directa de un molde compartido que
+ * corresponde a la categoría de material seleccionada.
+ */
+function obtenerProductoDirectoMoldeCompartidoPorCategoria($conectar, int $moldeId, int $categoriaMaterialId): ?array
+{
+    if ($moldeId <= 0 || $categoriaMaterialId <= 0) return null;
+
+    $rows = executeQuery($conectar, "
+        SELECT DISTINCT pr.id AS producto_id, x.item AS configuracion
+        FROM molde m
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
+        JOIN producto pr ON pr.id = NULLIF(rel->>'producto_id', '')::bigint
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pr.js_configuracion, '[]'::jsonb)) x(item)
+        WHERE m.id = :molde_id
+          AND NULLIF(x.item->>'molde_id', '')::bigint = m.id
+          AND LOWER(TRIM(COALESCE(x.item->>'necesita_ensamblaje', ''))) = 'no'
+          AND NULLIF(x.item->>'categoria_material_id', '')::int = :categoria_material_id
+        ORDER BY pr.id
+    ", [
+        'molde_id' => $moldeId,
+        'categoria_material_id' => $categoriaMaterialId,
+    ]);
+
+    // Si la categoría apunta a más de un SKU, no elegir uno arbitrariamente.
+    if (count($rows) !== 1) return null;
+    $configuracion = json_decode($rows[0]['configuracion'] ?? '', true);
+    if (!is_array($configuracion)) return null;
+
+    return [
+        'producto_id' => (int)$rows[0]['producto_id'],
+        'configuracion' => $configuracion,
+    ];
+}
+
 function obtenerItemConfigProduccion($conectar, int $produccionId): ?array
 {
     $rows = executeQuery($conectar, "
@@ -1347,6 +1382,21 @@ function guardarProduccion()
             $configSolicitada = $productoSolicitadoId > 0
                 ? obtenerItemConfigProductoMolde($conectar, $productoSolicitadoId, $molde_id)
                 : null;
+
+            // Cuando un molde compartido tiene variantes directas (como
+            // Colgador Adulto de Primera y Segunda), la categoría elegida en
+            // Producción identifica cuál producto terminado corresponde.
+            if ($productoSolicitadoId <= 0 && $categoria_material_id) {
+                $variantePorCategoria = obtenerProductoDirectoMoldeCompartidoPorCategoria(
+                    $conectar,
+                    $molde_id,
+                    $categoria_material_id
+                );
+                if ($variantePorCategoria) {
+                    $productoSolicitadoId = (int)$variantePorCategoria['producto_id'];
+                    $configSolicitada = $variantePorCategoria['configuracion'];
+                }
+            }
             $esSalidaDirectaConfigurada = is_array($configSolicitada)
                 && strtolower(trim((string)($configSolicitada['necesita_ensamblaje'] ?? ''))) === 'no';
 
@@ -1935,7 +1985,7 @@ function enviarAEnsamblaje()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, unico_molde_producto, js_operarios,
+        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios,
                 js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg
          FROM produccion WHERE id = :id",
         ['id' => $id]
@@ -1943,11 +1993,29 @@ function enviarAEnsamblaje()
     if (empty($existe)) responder(false, 'Registro de producción no encontrado.');
 
     $item = obtenerItemConfigProduccion($conectar, $id);
-    $necesitaEnsamblaje = empty($item['necesita_ensamblaje']) || strtolower(trim($item['necesita_ensamblaje'])) !== 'no';
     $parteProductoProduccion = explode('-', (string) ($existe[0]['unico_molde_producto'] ?? ''));
-    if ((int) ($parteProductoProduccion[1] ?? 0) <= 0 && !$necesitaEnsamblaje) {
-        responder(false, 'Un molde compartido debe pasar por Ensamblaje para que allí se asigne el producto final.');
+    $productoIdProduccion = (int)($parteProductoProduccion[1] ?? 0);
+    $unicoMoldeProduccion = (string)($existe[0]['unico_molde_producto'] ?? '');
+
+    // Corrige avances compartidos antiguos que se guardaron sin SKU, usando
+    // su categoría para identificar la variante directa de empaquetado.
+    if ($productoIdProduccion <= 0) {
+        $variantePorCategoria = obtenerProductoDirectoMoldeCompartidoPorCategoria(
+            $conectar,
+            (int)$existe[0]['molde_id'],
+            (int)$existe[0]['categoria_material_id']
+        );
+        if ($variantePorCategoria) {
+            $productoIdProduccion = (int)$variantePorCategoria['producto_id'];
+            $unicoMoldeProduccion = (int)$existe[0]['molde_id'] . '-' . $productoIdProduccion;
+            $item = resolverUnidadesEtapaItem($conectar, $variantePorCategoria['configuracion']);
+        }
     }
+
+    // Sin una variante inequívoca, el molde compartido sigue hacia Ensamblaje.
+    $necesitaEnsamblaje = $productoIdProduccion <= 0
+        || empty($item['necesita_ensamblaje'])
+        || strtolower(trim((string)$item['necesita_ensamblaje'])) !== 'no';
     $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
 
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
@@ -2124,6 +2192,7 @@ function enviarAEnsamblaje()
                 fecha_envio_ensamblaje  = CASE WHEN :marcar_fecha_envio THEN NOW() ELSE fecha_envio_ensamblaje END,
                 enviado_ensamblaje      = :enviado_ensamblaje,
                 js_configuracion_moment = :js_config_final,
+                unico_molde_producto   = :unico_molde_producto,
                 js_operarios            = :js_operarios,
                 updated_at              = NOW(),
                 js_session              = :js_session,
@@ -2143,6 +2212,7 @@ function enviarAEnsamblaje()
             'foto_pesaje_array_append' => $jsonFotoPesaje,
             'foto_pesaje_array_wrap'   => $jsonFotoPesaje,
             'js_config_final'    => json_encode($item, JSON_UNESCAPED_UNICODE),
+            'unico_molde_producto' => $unicoMoldeProduccion,
             'js_operarios'       => $jsOperariosActualizado,
             'js_session'         => $js_session,
             'js_historial'       => $js_historial,
@@ -2150,8 +2220,7 @@ function enviarAEnsamblaje()
 
         $ensamblajeAutoId = null;
         if ($destino === 'empaquetado' && $ultimaPasada) {
-            $partes = explode('-', $existe[0]['unico_molde_producto'] ?? '');
-            $productoId = isset($partes[1]) ? intval($partes[1]) : 0;
+            $productoId = $productoIdProduccion;
             if ($productoId <= 0) {
                 throw new Exception('No se pudo determinar el producto de este avance para generar el ensamblaje automático.');
             }
