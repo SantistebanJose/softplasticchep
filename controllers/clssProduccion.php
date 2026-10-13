@@ -1338,8 +1338,30 @@ function guardarProduccion()
         if (empty($relacionesProducto)) responder(false, 'El molde seleccionado no está asociado a ningún producto. Configúralo primero en Moldes.');
         $molde_producto = $moldeFila[0]['nombre'];
         if (count($relacionesProducto) > 1) {
-            // Un molde compartido se produce sin asignarle todavía un producto.
-            $unico_molde = $molde_id . '-0';
+            // Para moldes compartidos, solo se asigna producto en Producción
+            // cuando su configuración directa a Empaquetado declara la
+            // categoría de material que identifica ese SKU. Los flujos
+            // compartidos que pasan por Ensamblaje mantienen producto 0.
+            $partesProductoSolicitado = explode('-', $unico_molde);
+            $productoSolicitadoId = (int)($partesProductoSolicitado[1] ?? 0);
+            $configSolicitada = $productoSolicitadoId > 0
+                ? obtenerItemConfigProductoMolde($conectar, $productoSolicitadoId, $molde_id)
+                : null;
+            $esSalidaDirectaConfigurada = is_array($configSolicitada)
+                && strtolower(trim((string)($configSolicitada['necesita_ensamblaje'] ?? ''))) === 'no';
+
+            if ($esSalidaDirectaConfigurada) {
+                $categoriaConfigurada = (int)($configSolicitada['categoria_material_id'] ?? 0);
+                if ($categoriaConfigurada <= 0 || !$categoria_material_id) {
+                    responder(false, 'Este producto comparte molde y requiere que selecciones su categoría de material configurada antes de registrarlo.');
+                }
+                if ($categoriaConfigurada !== $categoria_material_id) {
+                    responder(false, 'La categoría de material no corresponde al producto seleccionado para este molde compartido.');
+                }
+                $unico_molde = $molde_id . '-' . $productoSolicitadoId;
+            } else {
+                $unico_molde = $molde_id . '-0';
+            }
         } else {
             $unico_molde = $molde_id . '-' . (int) ($relacionesProducto[0]['producto_id'] ?? 0);
         }

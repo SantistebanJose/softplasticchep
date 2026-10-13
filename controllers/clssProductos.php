@@ -36,6 +36,7 @@ function controladorProductos(string $accion): void
         'LISTARUNIDADES',
         'LISTARPRODUCTOS',
         'OBTENERPRODUCTO',
+        'LISTARCATEGORIASMATERIAL',
     ];
 
     $accionesAdministracion = [
@@ -69,6 +70,10 @@ function controladorProductos(string $accion): void
             obtenerProducto((int) ($_POST['id'] ?? 0));
             break;
 
+        case 'LISTARCATEGORIASMATERIAL':
+            listarCategoriasMaterialConfiguracion();
+            break;
+
         case 'GUARDARPRODUCTO':
             guardarProducto();
             break;
@@ -88,6 +93,18 @@ function controladorProductos(string $accion): void
             guardarConfigArmadoProducto();
             break;
     }
+}
+
+function listarCategoriasMaterialConfiguracion(): void
+{
+    $conectar = conectar_oll_BD();
+    $result = executeQuery($conectar, "
+        SELECT id, nombre
+        FROM categoria_material
+        WHERE deleted_at IS NULL
+        ORDER BY nombre
+    ");
+    responder(true, 'OK', ['categorias' => $result]);
 }
 // =============================================================================
 // CATÁLOGOS
@@ -387,6 +404,7 @@ function guardarProducto()
  *     "molde_id": 2,
  *     "molde": "molde 1",
  *     "necesita_ensamblaje": "sí" | "no",
+ *     "categoria_material_id": 1, (requerido para un molde compartido que va directo a empaquetado)
  *     "salida_produccion_unidad_medida_id": 1,   "salida_produccion": "unidades",
  *     "salida_merma_unidad_medida_id": 1,        "salida_merma": "unidades"
  *   },
@@ -485,7 +503,17 @@ function guardarConfigProducto()
         $esMoldeCompartido = (int) ($relacionMolde[0]['productos'] ?? 0) > 1;
 
         if ($esMoldeCompartido && ($c['necesita_ensamblaje'] ?? 'no') !== 'sí') {
-            responder(false, 'El molde compartido "' . ($c['molde'] ?? '') . '" debe pasar por Ensamblaje para que allí se determine el producto final.');
+            $categoriaMapeoId = (int)($c['categoria_material_id'] ?? 0);
+            if ($categoriaMapeoId <= 0) {
+                responder(false, 'El molde compartido "' . ($c['molde'] ?? '') . '" necesita una categoría de material para identificar el producto final que irá directo a Empaquetado.');
+            }
+            $categoriaValida = executeQuery($conectar, "
+                SELECT id FROM categoria_material
+                WHERE id = :id AND deleted_at IS NULL
+            ", ['id' => $categoriaMapeoId]);
+            if (empty($categoriaValida)) {
+                responder(false, 'La categoría de material configurada para el molde compartido no existe o está inactiva.');
+            }
         }
         if ($esMoldeCompartido) {
             $moldesCompartidos[] = (int) $c['molde_id'];

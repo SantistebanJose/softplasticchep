@@ -140,6 +140,7 @@ function listarMoldesProducto()
             (elem->>'producto_id')::int AS producto_id,
             elem->>'codigo'       AS codigo_producto,
             elem->>'descripcion'  AS producto,
+            jsonb_array_length(COALESCE(m.js_producto, '[]'::jsonb)) AS cantidad_productos,
             CONCAT(m.id,'-',(elem->>'producto_id')) AS unico,
             CONCAT(m.nombre,' — ',elem->>'descripcion') AS etiqueta
         FROM molde m

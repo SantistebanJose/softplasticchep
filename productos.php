@@ -511,6 +511,7 @@ const modalConfigArmadoProducto = new bootstrap.Modal(document.getElementById('m
 
 let unidadesCache  = [];
 let productosCache = []; // guarda el último listado cargado, para exportar exactamente lo que se ve en pantalla
+let categoriasMaterialConfigCache = [];
 let productoPesoUnitarioActual = null; // NUEVO: peso_unitario_g del producto que se está configurando
 let moldesDisponiblesArmado = [];
 let productosDisponiblesArmado = [];
@@ -855,13 +856,16 @@ function reactivarProducto(id) {
  * (producto.js_configuracion_venta), y arma un tab por cada molde.
  */
 async function abrirModalConfiguracion(productoId, productoDescripcion) {
-    const [jsonMoldes, jsonProd] = await Promise.all([
+    const [jsonMoldes, jsonProd, jsonCategorias] = await Promise.all([
         llamarMoldes('LISTARMOLDESPRODUCTO'),
-        llamarProductos('OBTENERPRODUCTO', { id: productoId })
+        llamarProductos('OBTENERPRODUCTO', { id: productoId }),
+        llamarProductos('LISTARCATEGORIASMATERIAL')
     ]);
 
     if (!jsonMoldes.success) { Swal.fire('Error', jsonMoldes.message, 'error'); return; }
     if (!jsonProd.success)   { Swal.fire('Error', jsonProd.message, 'error'); return; }
+    if (!jsonCategorias.success) { Swal.fire('Error', jsonCategorias.message, 'error'); return; }
+    categoriasMaterialConfigCache = jsonCategorias.categorias || [];
 
     const moldesDelProducto = (jsonMoldes.moldes_producto || [])
         .filter(m => m.producto_id === productoId);
@@ -905,6 +909,10 @@ function construirTabsConfiguracion(moldes, configActual) {
         const activo = idx === 0;
         const cfg    = configActual.find(c => c.molde_id === m.molde_id) || {};
         const esSi   = cfg.necesita_ensamblaje === 'sí';
+        const moldeCompartido = Number(m.cantidad_productos) > 1;
+        const opcionesCategoria = categoriasMaterialConfigCache.map(c =>
+            `<option value="${c.id}" ${String(c.id) === String(cfg.categoria_material_id ?? '') ? 'selected' : ''}>${escapeHtmlArmado(c.nombre)}</option>`
+        ).join('');
 
         navTabs.insertAdjacentHTML('beforeend', `
             <li class="nav-item" role="presentation">
@@ -936,6 +944,15 @@ function construirTabsConfiguracion(moldes, configActual) {
                         <label class="form-check-label" for="ens_no_${m.molde_id}">No</label>
                     </div>
                 </div>
+
+                ${moldeCompartido ? `
+                <div class="mb-3 rounded border border-warning-subtle bg-warning-subtle p-3">
+                    <label class="form-label">Categoría de material para este producto</label>
+                    <select class="form-select" id="sel_categoria_molde_${m.molde_id}">
+                        <option value="">Seleccione...</option>${opcionesCategoria}
+                    </select>
+                    <small class="text-muted">Como este molde fabrica varios productos, la categoría seleccionada identifica cuál producto terminado corresponde. Para enviarlo directo a Empaquetado, cada producto debe tener una categoría distinta configurada.</small>
+                </div>` : ''}
 
                 <div class="mb-3">
                     <label class="form-label">Salida en Producción</label>
@@ -1161,6 +1178,7 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
         const ensamblaje     = pane.querySelector(`input[name="ensamblaje_${moldeId}"]:checked`)?.value ?? 'no';
         const salidaProdSel  = document.getElementById(`sel_salidaprod_${moldeId}`);
         const salidaMermaSel = document.getElementById(`sel_salidamerma_${moldeId}`);
+        const categoriaMoldeSel = document.getElementById(`sel_categoria_molde_${moldeId}`);
 
         if (!salidaProdSel.value || !salidaMermaSel.value) {
             Swal.fire('Falta información', `Completa todos los campos de configuración para "${moldeNombre}".`, 'warning');
@@ -1169,6 +1187,11 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
         }
 
         if (ensamblaje === 'si') algunMoldeNecesitaEnsamblaje = true;
+        if (categoriaMoldeSel && ensamblaje !== 'si' && !categoriaMoldeSel.value) {
+            Swal.fire('Falta información', `Selecciona la categoría de material que identifica a "${moldeNombre}" para este producto.`, 'warning');
+            valido = false;
+            return;
+        }
 
         const salidaProdOpt  = salidaProdSel.selectedOptions[0];
         const salidaMermaOpt = salidaMermaSel.selectedOptions[0];
@@ -1177,6 +1200,7 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
             molde_id: moldeId,
             molde: moldeNombre,
             necesita_ensamblaje: ensamblaje === 'si' ? 'sí' : 'no',
+            categoria_material_id: categoriaMoldeSel?.value ? parseInt(categoriaMoldeSel.value, 10) : null,
             salida_produccion_unidad_medida_id: parseInt(salidaProdSel.value, 10),
             salida_produccion: salidaProdOpt.textContent.split(' - ')[0].trim().toLowerCase(),
             salida_merma_unidad_medida_id: parseInt(salidaMermaSel.value, 10),
