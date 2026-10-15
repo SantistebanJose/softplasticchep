@@ -870,7 +870,8 @@ function listarProducciones()
             pd.color_id, pd.categoria_material_id, pd.sucursal, pd.cantidad,
             pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
             pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
-            pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados, pd.detenido,
+            pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados,
+            pd.detenido::text AS detenido_fecha,
             (SELECT evt->'operarios' FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'reanudacion' ORDER BY ord DESC LIMIT 1) AS operarios_ultimo_turno,
             pd.cantidad_producida_kg, pd.js_configuracion_moment, pd.js_images,
@@ -938,7 +939,7 @@ function listarProducciones()
                     static fn($op) => (int)($op['operario_id'] ?? 0),
                     is_array(json_decode($fila['js_operarios'] ?? '[]', true)) ? json_decode($fila['js_operarios'] ?? '[]', true) : []
                 ), true)
-                || (!empty($fila['detenido']) && !empty($_SESSION['operario_id']));
+                || (!empty($fila['detenido_fecha']) && !empty($_SESSION['operario_id']));
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
@@ -949,7 +950,9 @@ function listarProducciones()
             $fila['enviado_ensamblaje'] = in_array($fila['enviado_ensamblaje'], [true, 1, '1', 't', 'true'], true);
             $fila['pases_finalizados'] = in_array($fila['pases_finalizados'], [true, 1, '1', 't', 'true'], true)
                 || $fila['enviado_ensamblaje'];
-            $fila['detenido'] = !empty($fila['detenido']);
+            // Conserva la fecha para mostrarla en las tarjetas y usa `detenido`
+            // como indicador booleano en las reglas de interfaz.
+            $fila['detenido'] = !empty($fila['detenido_fecha']);
             $fila['js_operarios_activos'] = !empty($fila['operarios_ultimo_turno'])
                 ? (json_decode($fila['operarios_ultimo_turno'], true) ?: [])
                 : [];
@@ -2338,22 +2341,11 @@ function enviarAEnsamblaje()
         ]);
 
         $ensamblajeAutoId = null;
-        if ($destino === 'empaquetado' && $ultimaPasada) {
-            $productoId = $productoIdProduccion;
-            if ($productoId <= 0) {
-                throw new Exception('No se pudo determinar el producto de este avance para generar el ensamblaje automático.');
-            }
-            $unidadSalidaId = !empty($item['salida_produccion_unidad_medida_id'])
-                ? intval($item['salida_produccion_unidad_medida_id']) : null;
-            $ensamblajeAutoId = crearEnsamblajeAutomaticoParaProduccion(
-                $conectar,
-                $id,
-                $productoId,
-                $cantidadSalidaAcumulada,
-                $unidadSalidaId,
-                json_decode($jsOperariosActualizado ?? '[]', true) ?: [],
-                $unidadProduccion
-            );
+        if ($destino === 'empaquetado') {
+            // La pasada directa queda disponible desde la producción misma.
+            // Empaquetado descuenta lo consumido de cantidad_producida_kg,
+            // por lo que una pasada pausada puede empaquetarse y las
+            // siguientes se suman sin volver a contar las anteriores.
         } elseif ($destino === 'ensamblaje') {
             // Crear o actualizar el ensamblaje pendiente en cada pasada. La
             // relación apunta al acumulado y queda lista para continuar en
@@ -2370,8 +2362,8 @@ function enviarAEnsamblaje()
         $conectar->commit();
         $mensajeEnvio = $pausarDespues
             ? ($motivoPausa === 'cambio_turno'
-                ? 'Avance registrado y producción detenida por cambio de turno. Puede reanudarla el siguiente operario.'
-                : 'Avance registrado y producción detenida por emergencia. Se guardó el sobrante y su compatibilidad.')
+                ? "Avance registrado y disponible para $destino. La producción quedó detenida por cambio de turno y puede reanudarla el siguiente operario."
+                : "Avance registrado y disponible para $destino. La producción quedó detenida por emergencia; se guardó el sobrante y su compatibilidad.")
             : ($ultimaPasada
             ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
             : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.");

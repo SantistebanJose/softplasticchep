@@ -164,11 +164,13 @@ include("header.php");
 .pc-prod-card.estado-curso .pc-prod-dot{ background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite; }
 .pc-prod-card.estado-fin .pc-prod-dot{ background:#16A34A; }
 .pc-prod-card.estado-ensamblaje .pc-prod-dot{ background:#8a8578; }
+.pc-prod-card.estado-pausada .pc-prod-dot{ background:#D97706; }
 
 .pc-prod-id{ font-size:.72em; color:#a7a293; font-weight:600; }
 .pc-prod-estado-txt{ font-size:.72em; color:#8a8578; font-weight:600; }
 .pc-prod-card.estado-curso .pc-prod-estado-txt{ color:#0B4DA6; }
 .pc-prod-card.estado-fin .pc-prod-estado-txt{ color:#16A34A; }
+.pc-prod-card.estado-pausada .pc-prod-estado-txt{ color:#B45309; }
 .pc-prod-card-spacer{ flex:1; }
 .pc-prod-edit-btn{
     border:none; background:none; color:#c3beae; padding:3px 5px; font-size:.85em; cursor:pointer;
@@ -937,12 +939,20 @@ function aplicarUnidadesEtapaModal(p) {
 
 function formatearFechaHoraLocal(fechaIso) {
     // Convierte "2026-07-10 14:30:00" a formato válido para datetime-local
-    if (!fechaIso) return '';
-    return fechaIso.replace(' ', 'T').substring(0, 16);
+    fechaIso = normalizarFechaHora(fechaIso);
+    return fechaIso ? fechaIso.replace(' ', 'T').substring(0, 16) : '';
+}
+
+function normalizarFechaHora(fechaIso) {
+    if (typeof fechaIso === 'string') return fechaIso.replace('T', ' ');
+    if (fechaIso instanceof Date && !Number.isNaN(fechaIso.getTime())) return fechaIso.toISOString().replace('T', ' ');
+    if (fechaIso && typeof fechaIso === 'object') return normalizarFechaHora(fechaIso.date || fechaIso.fecha || fechaIso.value || '');
+    return '';
 }
 
 function formatearFechaHoraLegible(fechaIso) {
     // Convierte "2026-07-10 14:30:00" a "10/07/2026 14:30" para mostrar en tabla
+    fechaIso = normalizarFechaHora(fechaIso);
     if (!fechaIso) return '';
     const [fecha, hora] = fechaIso.split(' ');
     if (!fecha) return fechaIso;
@@ -952,6 +962,7 @@ function formatearFechaHoraLegible(fechaIso) {
 
 function formatearFechaCorta(fechaIso) {
     // Convierte "2026-07-10 14:30:00" a "10/07", para la línea de metadatos
+    fechaIso = normalizarFechaHora(fechaIso);
     if (!fechaIso) return '';
     const [fecha] = fechaIso.split(' ');
     if (!fecha) return fechaIso;
@@ -961,7 +972,7 @@ function formatearFechaCorta(fechaIso) {
 
 // ── Texto de una sola línea con el estado de la corrida (dentro de la card) ─
 function estadoCorridaTexto(p) {
-    if (p.detenido) return `Pausada · <b>${formatearFechaHoraLegible(p.detenido)}</b>`;
+    if (p.detenido) return `Pausada${p.detenido_fecha ? ` · <b>${formatearFechaHoraLegible(p.detenido_fecha)}</b>` : ''}`;
     if (p.enviado_ensamblaje) {
         const etapa = necesitaEnsamblaje(p) ? 'ensamblaje' : 'empaquetado';
         return `Enviado a ${etapa} · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
@@ -1180,6 +1191,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         sin: 'Sin iniciar',
         curso: 'En curso',
         fin: 'Finalizada',
+        pausada: 'Pausada',
         ensamblaje: requiereEnsamblaje ? 'En ensamblaje' : 'En empaquetado',
     };
     const textoEstado = textoEstadoMap[estado];

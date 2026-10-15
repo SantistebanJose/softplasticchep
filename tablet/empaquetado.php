@@ -736,10 +736,14 @@ function renderStatRowEmp() {
 }
 
 async function cargarPendientesEmpaquetado() {
-    const json = await llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', {});
+    const [jsonEns, jsonProd] = await Promise.all([
+        llamarEmpaquetado('LISTARENSAMBLAJESPARAEMPAQUETADO', {}),
+        llamarEmpaquetado('LISTARPRODUCCIONESPARAEMPAQUETADO', {})
+    ]);
 
-    if (!json.success) {
-        console.error('Error LISTARENSAMBLAJESPARAEMPAQUETADO:', json.message);
+    if (!jsonEns.success) console.error('Error LISTARENSAMBLAJESPARAEMPAQUETADO:', jsonEns.message);
+    if (!jsonProd.success) console.error('Error LISTARPRODUCCIONESPARAEMPAQUETADO:', jsonProd.message);
+    if (!jsonEns.success && !jsonProd.success) {
         cacheFilasEmpaquetado = [];
         renderTabsEmp();
         actualizarEstacionArmado();
@@ -747,7 +751,18 @@ async function cargarPendientesEmpaquetado() {
         return;
     }
 
-    cacheFilasEmpaquetado = json.ensamblajes || [];
+    const filasEns = (jsonEns.success ? jsonEns.ensamblajes : []).map(f => ({
+        ...f,
+        origen_tipo: 'ensamblaje',
+        origen_id: f.ensamblaje_id
+    }));
+    const filasProd = (jsonProd.success ? jsonProd.producciones : []).map(f => ({
+        ...f,
+        origen_tipo: 'produccion',
+        origen_id: f.produccion_id,
+        cantidad_disponible: f.cantidad_disponible
+    }));
+    cacheFilasEmpaquetado = [...filasEns, ...filasProd];
 
     if (tabActivoEmp !== null && !cacheFilasEmpaquetado.some(f => claveTabEmp(f) === tabActivoEmp)) {
         tabActivoEmp = null;

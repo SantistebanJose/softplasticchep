@@ -175,10 +175,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-card.estado-curso .pc-prod-dot{ background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite; }
 .pc-prod-card.estado-fin .pc-prod-dot{ background:#16A34A; }
 .pc-prod-card.estado-ensamblaje .pc-prod-dot{ background:#8a8578; }
+.pc-prod-card.estado-pausada .pc-prod-dot{ background:#D97706; }
 .pc-prod-id{ font-size:.78em; color:#a7a293; font-weight:600; }
 .pc-prod-estado-txt{ font-size:.78em; color:#8a8578; font-weight:600; }
 .pc-prod-card.estado-curso .pc-prod-estado-txt{ color:#0B4DA6; }
 .pc-prod-card.estado-fin .pc-prod-estado-txt{ color:#16A34A; }
+.pc-prod-card.estado-pausada .pc-prod-estado-txt{ color:#B45309; }
 .pc-prod-card-spacer{ flex:1; }
 .pc-prod-edit-btn{ border:none; background:none; color:#c3beae; padding:10px; font-size:1.05em; cursor:pointer; border-radius:9px; }
 .pc-prod-edit-btn:active{ color:#2F6FED; background:#EAF0FE; }
@@ -1183,10 +1185,17 @@ function ajustarCantidadMerma(delta) {
 }
 
 function formatearFechaHoraLocal(fechaIso) {
-    if (!fechaIso) return '';
-    return fechaIso.replace(' ', 'T').substring(0, 16);
+    fechaIso = normalizarFechaHora(fechaIso);
+    return fechaIso ? fechaIso.replace(' ', 'T').substring(0, 16) : '';
+}
+function normalizarFechaHora(fechaIso) {
+    if (typeof fechaIso === 'string') return fechaIso.replace('T', ' ');
+    if (fechaIso instanceof Date && !Number.isNaN(fechaIso.getTime())) return fechaIso.toISOString().replace('T', ' ');
+    if (fechaIso && typeof fechaIso === 'object') return normalizarFechaHora(fechaIso.date || fechaIso.fecha || fechaIso.value || '');
+    return '';
 }
 function formatearFechaHoraLegible(fechaIso) {
+    fechaIso = normalizarFechaHora(fechaIso);
     if (!fechaIso) return '';
     const [fecha, hora] = fechaIso.split(' ');
     if (!fecha) return fechaIso;
@@ -1194,6 +1203,7 @@ function formatearFechaHoraLegible(fechaIso) {
     return `${d}/${m}/${y}${hora ? ' ' + hora.substring(0, 5) : ''}`;
 }
 function formatearFechaCorta(fechaIso) {
+    fechaIso = normalizarFechaHora(fechaIso);
     if (!fechaIso) return '';
     const [fecha] = fechaIso.split(' ');
     if (!fecha) return fechaIso;
@@ -1202,7 +1212,7 @@ function formatearFechaCorta(fechaIso) {
 }
 
 function estadoCorridaTexto(p) {
-    if (p.detenido) return `Pausada · <b>${formatearFechaHoraLegible(p.detenido)}</b>`;
+    if (p.detenido) return `Pausada${p.detenido_fecha ? ` · <b>${formatearFechaHoraLegible(p.detenido_fecha)}</b>` : ''}`;
     if (p.enviado_ensamblaje) {
         const etapa = necesitaEnsamblaje(p) ? 'ensamblaje' : 'empaquetado';
         return `Enviado a ${etapa} · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
@@ -1588,7 +1598,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const requiereEnsamblaje = necesitaEnsamblaje(p);
     const etapaTexto = requiereEnsamblaje ? 'ensamblaje' : 'empaquetado';
 
-    const textoEstadoMap = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', ensamblaje: requiereEnsamblaje ? 'En ensamblaje' : 'En empaquetado' };
+    const textoEstadoMap = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizada', pausada: 'Pausada', ensamblaje: requiereEnsamblaje ? 'En ensamblaje' : 'En empaquetado' };
     const textoEstado = textoEstadoMap[estado];
 
     const metaPartes = [];

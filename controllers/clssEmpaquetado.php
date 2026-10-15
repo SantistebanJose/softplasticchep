@@ -302,8 +302,7 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
             WHERE split_part(pd.unico_molde_producto, '-', 2)::bigint = :producto_id3
               AND pd.deleted_at IS NULL
-              AND pd.enviado_ensamblaje = TRUE
-              AND pd.fecha_hora_fin IS NOT NULL
+              AND jsonb_array_length(COALESCE(pd.js_cantidades_salientes, '[]'::jsonb)) > 0
               AND COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'
               AND NOT EXISTS (
                   SELECT 1 FROM rel_ensamblaje_producto rep_chk
@@ -426,8 +425,7 @@ function listarProduccionesParaEmpaquetado()
 
     $where = [
         "pd.deleted_at IS NULL",
-        "pd.enviado_ensamblaje = TRUE",
-        "pd.fecha_hora_fin IS NOT NULL",
+        "jsonb_array_length(COALESCE(pd.js_cantidades_salientes, '[]'::jsonb)) > 0",
         "COALESCE(cfg.item->>'necesita_ensamblaje', 'no') = 'no'",
         "NOT EXISTS (
             SELECT 1 FROM rel_ensamblaje_producto rep_chk
@@ -494,7 +492,7 @@ function listarProduccionesParaEmpaquetado()
         LEFT JOIN LATERAL (SELECT NULLIF(cfg.item->>'salida_produccion_unidad_medida_id','')::bigint AS uid) cfgu ON true
         LEFT JOIN unidad_medida umx ON umx.id = cfgu.uid
         WHERE " . implode(' AND ', $where) . "
-        ORDER BY pd.fecha_hora_fin DESC
+        ORDER BY pd.updated_at DESC, pd.id DESC
     ";
 
     $result = executeQuery($conectar, $sql, $params);
