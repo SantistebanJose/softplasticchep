@@ -216,6 +216,10 @@ function controladorProduccion(string $accion): void
             enviarAEnsamblaje();
             break;
 
+        case 'REANUDARPRODUCCION':
+            reanudarProduccion();
+            break;
+
         case 'INICIARCORRIDA':
             iniciarCorrida((int) ($_POST['id'] ?? 0));
             break;
@@ -272,6 +276,9 @@ function controladorProduccionAntiguo($accion)
             break;
         case 'ENVIARAENSAMBLAJE':
             enviarAEnsamblaje();
+            break;
+        case 'REANUDARPRODUCCION':
+            reanudarProduccion();
             break;
         case 'INICIARCORRIDA':
             iniciarCorrida(intval($_POST['id'] ?? 0));
@@ -827,7 +834,7 @@ function listarProducciones()
         if ($operario_id !== '') {
         // Coincide si es el responsable principal (operario_id) O si aparece
         // como participante en js_operarios (avances con varios operarios).
-        $where[] = "(pd.operario_id = :operario_id OR COALESCE(pd.js_operarios, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('operario_id', CAST(:operario_id_js AS integer))))";
+        $where[] = "(pd.operario_id = :operario_id OR COALESCE(pd.js_operarios, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('operario_id', CAST(:operario_id_js AS integer))) OR pd.detenido IS NOT NULL)";
         $params['operario_id']    = $operario_id;
         $params['operario_id_js'] = $operario_id;
     }
@@ -863,7 +870,9 @@ function listarProducciones()
             pd.color_id, pd.categoria_material_id, pd.sucursal, pd.cantidad,
             pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
             pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
-            pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados,
+            pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados, pd.detenido,
+            (SELECT evt->'operarios' FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+             WHERE evt->>'tipo' = 'reanudacion' ORDER BY ord DESC LIMIT 1) AS operarios_ultimo_turno,
             pd.cantidad_producida_kg, pd.js_configuracion_moment, pd.js_images,
             pd.unico_molde_producto, pd.molde_producto,
             op.nombre_completo AS operario_nombre,
@@ -928,7 +937,8 @@ function listarProducciones()
                 || in_array((int)$_SESSION['operario_id'], array_map(
                     static fn($op) => (int)($op['operario_id'] ?? 0),
                     is_array(json_decode($fila['js_operarios'] ?? '[]', true)) ? json_decode($fila['js_operarios'] ?? '[]', true) : []
-                ), true);
+                ), true)
+                || (!empty($fila['detenido']) && !empty($_SESSION['operario_id']));
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
@@ -939,6 +949,11 @@ function listarProducciones()
             $fila['enviado_ensamblaje'] = in_array($fila['enviado_ensamblaje'], [true, 1, '1', 't', 'true'], true);
             $fila['pases_finalizados'] = in_array($fila['pases_finalizados'], [true, 1, '1', 't', 'true'], true)
                 || $fila['enviado_ensamblaje'];
+            $fila['detenido'] = !empty($fila['detenido']);
+            $fila['js_operarios_activos'] = !empty($fila['operarios_ultimo_turno'])
+                ? (json_decode($fila['operarios_ultimo_turno'], true) ?: [])
+                : [];
+            unset($fila['operarios_ultimo_turno']);
 
             $fila['js_operarios'] = !empty($fila['js_operarios'])   // <-- AGREGAR ESTO
                 ? json_decode($fila['js_operarios'], true)
@@ -1917,6 +1932,14 @@ function enviarAEnsamblaje()
     }
     $completo = in_array($completoRaw, ['true', '1'], true);
     $ultimaPasada = $completo || in_array($ultimaPasadaRaw, ['true', '1'], true);
+    $pausarDespues = in_array(strtolower(trim($_POST['pausar_despues'] ?? 'false')), ['true', '1'], true);
+    $pausaDetalleRaw = json_decode($_POST['pausa_materiales'] ?? '[]', true);
+    if ($pausarDespues && ($completo || $ultimaPasada)) {
+        responder(false, 'Una producción no puede pausarse y finalizarse en el mismo avance.');
+    }
+    if ($pausarDespues && !is_array($pausaDetalleRaw)) {
+        responder(false, 'El detalle de materiales sobrantes no tiene un formato válido.');
+    }
 
     // Desglose opcional: cuánto produjo cada operario cuando el avance
     // tiene varios participantes. Si viene vacío (avance de un solo
@@ -1985,8 +2008,10 @@ function enviarAEnsamblaje()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios,
-                js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg
+        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios, maquina_id,
+                js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg, js_casusticas, detenido,
+                (SELECT evt->'operarios_ids' FROM unnest(COALESCE(js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+                 WHERE evt->>'tipo' = 'reanudacion' ORDER BY ord DESC LIMIT 1) AS ultimo_turno_ids
          FROM produccion WHERE id = :id",
         ['id' => $id]
     );
@@ -2026,6 +2051,7 @@ function enviarAEnsamblaje()
 
     if (!empty($existe[0]['deleted_at'])) responder(false, "No puedes enviar a $destino un registro inactivo.");
     if (empty($existe[0]['fecha_hora_inicio'])) responder(false, 'Primero debes iniciar la producción.');
+    if (!empty($existe[0]['detenido'])) responder(false, 'Esta producción está pausada. Reanúdala antes de registrar otro avance.');
     $salidasPrevias = !empty($existe[0]['js_cantidades_salientes'])
         ? json_decode($existe[0]['js_cantidades_salientes'], true) : [];
     if (!is_array($salidasPrevias)) $salidasPrevias = [];
@@ -2038,16 +2064,96 @@ function enviarAEnsamblaje()
         responder(false, "Las pasadas de este avance ya fueron finalizadas para $destino.");
     }
 
+    $eventoPausa = null;
+    if ($pausarDespues) {
+        $lineasMaterial = executeQuery($conectar, "
+            SELECT rpm.material_id, rpm.cantidad, m.nombre AS material_nombre,
+                   m.unidad_medida_id, u.nombre_corto AS unidad
+            FROM rel_produccion_material rpm
+            JOIN material m ON m.id = rpm.material_id
+            LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
+            WHERE rpm.produccion_id = :id AND rpm.deleted_at IS NULL
+            ORDER BY rpm.id
+        ", ['id' => $id]);
+        $sobrantes = [];
+        foreach ($pausaDetalleRaw as $filaSobrante) {
+            if (!is_array($filaSobrante)) responder(false, 'Un material sobrante tiene un formato inválido.');
+            $mid = (int)($filaSobrante['material_id'] ?? 0);
+            $cantidad = $filaSobrante['cantidad_sobrante'] ?? null;
+            if ($mid <= 0 || !is_numeric($cantidad) || (float)$cantidad < 0 || isset($sobrantes[$mid])) {
+                responder(false, 'Revisa las cantidades sobrantes por material.');
+            }
+            $sobrantes[$mid] = (float)$cantidad;
+        }
+        $idsDetalle = array_map(static fn($l) => (int)$l['material_id'], $lineasMaterial);
+        sort($idsDetalle);
+        $idsSobrantes = array_keys($sobrantes); sort($idsSobrantes);
+        if ($idsDetalle !== $idsSobrantes) responder(false, 'Debes informar el sobrante de cada material utilizado, incluso si es 0.');
+        $destinoMolde = (int)($_POST['molde_destino_id'] ?? 0);
+        $productoDestinoId = (int)($_POST['producto_destino_id'] ?? 0);
+        $moldeDestino = null;
+        if ($destinoMolde > 0) {
+            $moldeDestino = executeQuery($conectar, "SELECT id, nombre FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $destinoMolde]);
+            if (empty($moldeDestino)) responder(false, 'El molde de emergencia no existe o está inactivo.');
+            $relacion = executeQuery($conectar, "SELECT 1 FROM molde m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) elem WHERE m.id = :molde_id AND (elem->>'producto_id')::int = :producto_id LIMIT 1", ['molde_id' => $destinoMolde, 'producto_id' => $productoDestinoId]);
+            if ($productoDestinoId <= 0 || empty($relacion)) responder(false, 'El producto no corresponde al molde de emergencia seleccionado.');
+        }
+        $materialesPausa = [];
+        foreach ($lineasMaterial as $lineaMaterial) {
+            $mid = (int)$lineaMaterial['material_id'];
+            $cantidadSobrante = $sobrantes[$mid];
+            if ($cantidadSobrante > (float)$lineaMaterial['cantidad'] + 0.0001) {
+                responder(false, 'El sobrante de ' . $lineaMaterial['material_nombre'] . ' supera lo asignado a esta producción.');
+            }
+            // Solo se marca reutilizable si el material está asociado al producto
+            // que fabrica el molde de emergencia; no se presume compatibilidad.
+            $compatible = false;
+            if ($productoDestinoId > 0) {
+                $compat = executeQuery($conectar, "SELECT 1 FROM material m
+                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) a
+                    WHERE m.id = :material_id AND (a->>'producto_id')::int = :producto_id LIMIT 1",
+                    ['material_id' => $mid, 'producto_id' => $productoDestinoId]);
+                $compatible = !empty($compat);
+            }
+            $reutilizable = $compatible ? $cantidadSobrante : 0.0;
+            $materialesPausa[] = [
+                'material_id' => $mid, 'material' => $lineaMaterial['material_nombre'],
+                'unidad_medida_id' => (int)($lineaMaterial['unidad_medida_id'] ?? 0) ?: null,
+                'unidad_medida' => $lineaMaterial['unidad'] ?? null,
+                'cantidad_sobrante' => $cantidadSobrante,
+                'cantidad_pase' => $reutilizable,
+                'cantidad_reservada' => round($cantidadSobrante - $reutilizable, 4),
+                'compatible_con_molde_destino' => $compatible,
+            ];
+        }
+        $eventoPausa = [
+            'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'pausa',
+            'fecha' => date('Y-m-d H:i:s'), 'detener' => true,
+            'pasa_otro_molde' => $destinoMolde > 0,
+            'molde_id' => $destinoMolde ?: null,
+            'molde' => $moldeDestino[0]['nombre'] ?? null,
+            // Los saldos se mantienen por material/unidad; no se suman aquí
+            // porque una misma corrida puede contener KG y unidades distintas.
+            'materiales' => $materialesPausa,
+            'comentario' => trim($_POST['comentario_pausa'] ?? ''),
+            'maquina_id' => (int)$existe[0]['maquina_id'],
+            'user_id' => (int)($_SESSION['user_id'] ?? 0),
+            'usuario' => (string)($_SESSION['nombre_completo'] ?? $_SESSION['usuario'] ?? ''),
+            'operarios' => json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [],
+        ];
+    }
+
     // Si vino desglose, se inyecta 'cantidad_producida' dentro de cada
     // entrada de js_operarios que ya existía (id, nombre, cargo).
     $listaOperarios = json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [];
 
-    if (count($listaOperarios) > 1) {
-        $idsParticipantes = array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $listaOperarios);
+    $ultimoTurnoIds = !empty($existe[0]['ultimo_turno_ids']) ? json_decode($existe[0]['ultimo_turno_ids'], true) : null;
+    $operariosQueProducenEstaPasada = is_array($ultimoTurnoIds)
+        ? array_values(array_filter(array_map('intval', $ultimoTurnoIds), static fn($oid) => $oid > 0))
+        : array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $listaOperarios);
+    if (count($operariosQueProducenEstaPasada) > 1) {
+        $idsParticipantes = $operariosQueProducenEstaPasada;
         $idsParticipantes = array_values(array_unique(array_filter($idsParticipantes, static fn($id) => $id > 0)));
-        if (count($idsParticipantes) !== count($listaOperarios)) {
-            responder(false, 'No se pudo validar la lista de operarios participantes.');
-        }
         $idsConCantidad = array_keys($desglosePorOperario);
         sort($idsParticipantes);
         sort($idsConCantidad);
@@ -2065,8 +2171,8 @@ function enviarAEnsamblaje()
         }
     }
 
-    if (empty($desglosePorOperario) && count($listaOperarios) === 1) {
-        $unicoId = intval($listaOperarios[0]['operario_id'] ?? 0);
+    if (empty($desglosePorOperario) && count($operariosQueProducenEstaPasada) === 1) {
+        $unicoId = (int)$operariosQueProducenEstaPasada[0];
         if ($unicoId > 0) {
             $desglosePorOperario[$unicoId] = $cantidadProducida;
         }
@@ -2179,6 +2285,8 @@ function enviarAEnsamblaje()
         executeNonQuery($conectar, "
             UPDATE produccion SET
                 cantidad_producida_kg   = :cantidad_producida,
+                detenido                = CASE WHEN :marcar_pausa THEN NOW() ELSE detenido END,
+                js_casusticas           = CASE WHEN :marcar_pausa THEN array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:evento_pausa AS jsonb)) ELSE js_casusticas END,
                 fecha_hora_fin          = CASE WHEN :marcar_fin_corrida THEN COALESCE(fecha_hora_fin, NOW()) ELSE fecha_hora_fin END,
                 js_cantidades_salientes = :js_cantidades_salientes::jsonb,
                 completo                = :completo,
@@ -2201,6 +2309,8 @@ function enviarAEnsamblaje()
         ", [
             'id'                 => $id,
             'cantidad_producida' => $cantidadSalidaAcumulada,
+            'marcar_pausa' => $pausarDespues,
+            'evento_pausa' => $eventoPausa === null ? null : json_encode($eventoPausa, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'marcar_fin_corrida' => $ultimaPasada,
             'js_cantidades_salientes' => json_encode($salidasActualizadas, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'completo' => $completo,
@@ -2249,9 +2359,11 @@ function enviarAEnsamblaje()
         }
 
         $conectar->commit();
-        $mensajeEnvio = $ultimaPasada
+        $mensajeEnvio = $pausarDespues
+            ? 'Avance registrado y producción pausada. El material reutilizable quedó identificado; el resto se conserva para reanudarla.'
+            : ($ultimaPasada
             ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
-            : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.";
+            : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.");
         responder(true, $mensajeEnvio, [
             'id' => $id, 'unidad' => $unidadProduccion, 'destino' => $destino,
             'pasada' => $salidaActual['pasada'], 'cantidad_acumulada' => $cantidadSalidaAcumulada,
@@ -2375,6 +2487,58 @@ function registrarMerma()
 }
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
+function reanudarProduccion(): void
+{
+    $conectar = conectar_oll_BD();
+    $id = (int)($_POST['id'] ?? 0);
+    $maquinaId = (int)($_POST['maquina_id'] ?? 0);
+    $operariosRaw = json_decode($_POST['operarios_ids'] ?? '[]', true);
+    if ($id <= 0 || $maquinaId <= 0 || !is_array($operariosRaw)) responder(false, 'Completa la máquina y los operarios para reanudar.');
+    $fila = executeQuery($conectar, "SELECT * FROM produccion WHERE id = :id", ['id' => $id]);
+    if (empty($fila) || !empty($fila[0]['deleted_at'])) responder(false, 'Producción inexistente o inactiva.');
+    if (empty($fila[0]['detenido'])) responder(false, 'La producción no está pausada.');
+    $maq = executeQuery($conectar, "SELECT id, nombre FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
+    if (empty($maq)) responder(false, 'Selecciona una máquina activa.');
+    $ids = array_values(array_unique(array_filter(array_map('intval', $operariosRaw), static fn($v) => $v > 0)));
+    if (!$ids) responder(false, 'Selecciona al menos un operario para continuar.');
+    if (!empty($_SESSION['operario_id']) && !in_array((int)$_SESSION['operario_id'], $ids, true)) {
+        responder(false, 'Incluye tu usuario entre los operarios que continuarán la producción.');
+    }
+    $params = [];
+    $marks = [];
+    foreach ($ids as $i => $oid) { $key = 'op' . $i; $marks[] = ':' . $key; $params[$key] = $oid; }
+    $ops = executeQuery($conectar, "SELECT o.id AS operario_id, o.nombre_completo, c.nombre AS cargo
+        FROM operario o LEFT JOIN cargo c ON c.id = o.cargo_id
+        WHERE o.activo = true AND o.id IN (" . implode(',', $marks) . ")", $params);
+    if (count($ops) !== count($ids)) responder(false, 'Uno o más operarios están inactivos o no existen.');
+    $participantesAntes = json_decode($fila[0]['js_operarios'] ?? '[]', true) ?: [];
+    $porId = [];
+    foreach ($participantesAntes as $op) { $opId = (int)($op['operario_id'] ?? 0); if ($opId > 0) $porId[$opId] = $op; }
+    foreach ($ops as $op) {
+        $opId = (int)$op['operario_id'];
+        if (!isset($porId[$opId])) $porId[$opId] = $op;
+    }
+    $eventoReanudacion = [
+        'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'reanudacion', 'fecha' => date('Y-m-d H:i:s'),
+        'maquina_anterior_id' => (int)$fila[0]['maquina_id'], 'maquina_id' => $maquinaId,
+        'maquina' => $maq[0]['nombre'], 'operarios_ids' => $ids, 'operarios' => $ops,
+        'user_id' => (int)($_SESSION['user_id'] ?? 0), 'usuario' => (string)($_SESSION['nombre_completo'] ?? $_SESSION['usuario'] ?? ''),
+    ];
+    $cambios = [['campo' => 'Reanudación', 'valor_antes' => 'Pausada', 'valor_despues' => 'Máquina ' . $maq[0]['nombre'] . ', ' . count($ids) . ' operario(s)']];
+    $mov = obtenerMovimientoSesion('reanudar_produccion', $cambios);
+    executeNonQuery($conectar, "UPDATE produccion SET detenido = NULL, maquina_id = :maquina_id,
+        js_operarios = :operarios::jsonb, js_casusticas = array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:casusticas AS jsonb)), updated_at = NOW(),
+        js_session = :sesion, js_historial = COALESCE(js_historial, '[]'::jsonb) || :historial::jsonb
+        WHERE id = :id", [
+        'id' => $id, 'maquina_id' => $maquinaId,
+        'operarios' => json_encode(array_values($porId), JSON_UNESCAPED_UNICODE),
+        'casusticas' => json_encode($eventoReanudacion, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        'sesion' => json_encode($mov, JSON_UNESCAPED_UNICODE),
+        'historial' => json_encode([$mov], JSON_UNESCAPED_UNICODE),
+    ]);
+    responder(true, 'Producción reanudada. El cambio de máquina y los operarios quedaron en el historial.');
+}
+
 function iniciarCorrida(int $id)
 {
     $conectar = conectar_oll_BD();

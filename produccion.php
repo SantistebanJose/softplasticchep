@@ -600,6 +600,18 @@ include("header.php");
                 </div>
             </div>
 
+            <div class="pc-ens-step mt-3">
+                <div class="pc-ens-step-num alt">5</div>
+                <div class="pc-ens-step-body w-100">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="produccion_pausar">
+                        <label class="form-check-label" for="produccion_pausar">Pausar después de este avance por cambio de molde</label>
+                    </div>
+                    <div class="form-text">Indica el sobrante por material. Si no se confirma compatibilidad, se conserva para esta producción.</div>
+                    <div id="pausa_materiales_contenido" class="mt-2" style="display:none"></div>
+                </div>
+            </div>
+
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -797,6 +809,7 @@ async function obtenerSucursalesProd() {
     return sucursalesProdCache;
 }
 function estadoCorto(p) {
+    if (p.detenido) return 'pausada';
     if (p.enviado_ensamblaje) return 'ensamblaje';
     if (!p.fecha_hora_inicio) return 'sin';
     if (!p.fecha_hora_fin) return 'curso';
@@ -939,6 +952,7 @@ function formatearFechaCorta(fechaIso) {
 
 // ── Texto de una sola línea con el estado de la corrida (dentro de la card) ─
 function estadoCorridaTexto(p) {
+    if (p.detenido) return `Pausada · <b>${formatearFechaHoraLegible(p.detenido)}</b>`;
     if (p.enviado_ensamblaje) {
         const etapa = necesitaEnsamblaje(p) ? 'ensamblaje' : 'empaquetado';
         return `Enviado a ${etapa} · <b>${formatearFechaHoraLegible(p.fecha_envio_ensamblaje)}</b>`;
@@ -1145,7 +1159,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
 
     const puedeGestionar = p.puede_gestionar !== false && p.puede_gestionar !== 0 && p.puede_gestionar !== '0';
     const puedeIniciar = puedeGestionar && !p.deleted_at && !p.fecha_hora_inicio;
-    const puedeRegistrarAvance = puedeGestionar && !p.deleted_at && p.fecha_hora_inicio && !p.pases_finalizados && !p.enviado_ensamblaje;
+    const puedeRegistrarAvance = puedeGestionar && !p.deleted_at && !p.detenido && p.fecha_hora_inicio && !p.pases_finalizados && !p.enviado_ensamblaje;
 
     // Ahora SIEMPRE que la corrida terminó se muestra el botón de avanzar:
     // el texto (y el destino real) depende de si el molde/producto
@@ -1227,6 +1241,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                     <i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>`
                 : ''
             }
+            ${puedeGestionar && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
             ${puedeGestionar && !p.deleted_at
                 ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`
@@ -1236,6 +1251,22 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             }
         </div>
     </div>`;
+}
+
+async function reanudarProduccion(id) {
+    const [maquinasJson, opsJson] = await Promise.all([
+        llamarProduccion('BUSCARMAQUINAS'), llamarProduccion('BUSCAROPERARIOS')
+    ]);
+    if (!maquinasJson.success || !opsJson.success) { Swal.fire('Error', 'No se pudieron cargar máquinas y operarios activos.', 'error'); return; }
+    const p = produccionesCache.find(x => Number(x.id) === Number(id));
+    const participantes = Array.isArray(p?.js_operarios) ? p.js_operarios : [];
+    const ops = opsJson.operario || [];
+    const html = `<label class="form-label">Máquina activa</label><select id="reanudar-maquina" class="form-select mb-3">${(maquinasJson.maquinas || []).map(m => `<option value="${m.id}" ${Number(m.id)===Number(p?.maquina_id)?'selected':''}>${m.nombre}</option>`).join('')}</select><div class="form-label">Operarios que continuarán</div><div class="text-start" style="max-height:220px;overflow:auto">${ops.map(o => `<label class="d-block py-1"><input type="checkbox" class="reanudar-op me-2" value="${o.id}" ${participantes.some(x=>Number(x.operario_id)===Number(o.id))?'checked':''}>${o.nombre_completo}</label>`).join('')}</div>`;
+    const result = await Swal.fire({ title: 'Reanudar producción', html, showCancelButton: true, confirmButtonText: 'Reanudar', cancelButtonText: 'Cancelar', preConfirm: () => ({ maquina: document.getElementById('reanudar-maquina')?.value, operarios: [...document.querySelectorAll('.reanudar-op:checked')].map(x => Number(x.value)) }) });
+    if (!result.isConfirmed) return;
+    if (!result.value.maquina || !result.value.operarios.length) { Swal.fire('Faltan datos', 'Elige una máquina y al menos un operario.', 'warning'); return; }
+    const r = await llamarProduccion('REANUDARPRODUCCION', { id, maquina_id: result.value.maquina, operarios_ids: JSON.stringify(result.value.operarios) });
+    if (r.success) { Swal.fire('Listo', r.message, 'success'); cargarProducciones(); } else Swal.fire('Error', r.message, 'error');
 }
 // Dibuja el tablero de cards según la pestaña de molde activa. Si es
 // "TODOS", se ve como antes (secciones agrupadas por producto); si es un
@@ -1751,6 +1782,9 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     renderInfoMermaModal(p);
     document.getElementById('produccion_completo').checked = false;
     document.getElementById('produccion_ultima_pasada').checked = false;
+    document.getElementById('produccion_pausar').checked = false;
+    document.getElementById('pausa_materiales_contenido').style.display = 'none';
+    document.getElementById('pausa_materiales_contenido').innerHTML = '';
     document.getElementById('produccion_completo').disabled = numeroPasada > 1;
     if (numeroPasada > 1) document.getElementById('produccion_completo').checked = false;
     sincronizarUltimaPasadaCompleta();
@@ -1773,6 +1807,22 @@ function sincronizarUltimaPasadaCompleta() {
 }
 
 document.getElementById('produccion_ultima_pasada').addEventListener('change', sincronizarUltimaPasadaCompleta);
+document.getElementById('produccion_pausar').addEventListener('change', async function () {
+    const panel = document.getElementById('pausa_materiales_contenido');
+    if (!this.checked) { panel.style.display = 'none'; return; }
+    const respuesta = await llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje });
+    if (!respuesta.success) { this.checked = false; Swal.fire('Error', respuesta.message, 'error'); return; }
+    const productosJson = await llamarProduccion('BUSCARPRODUCTOSMOLDE');
+    panel.style.display = '';
+    const escapar = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    panel.innerHTML = `<div class="alert alert-warning py-2">La pausa registra el avance y mantiene la corrida abierta.</div><label class="form-label">Producto de emergencia (opcional)</label><select class="form-select mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select mb-2" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-2">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
+    document.getElementById('pausa-producto-destino').addEventListener('change', async e => {
+        const sel = document.getElementById('pausa-molde-destino');
+        if (!e.target.value) { sel.innerHTML = '<option value="">Sin molde seleccionado</option>'; sel.disabled = true; return; }
+        const m = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: e.target.value });
+        sel.innerHTML = `<option value="">Selecciona molde</option>${(m.moldes || []).map(x => `<option value="${Number(x.molde_id)}">${escapar(x.molde_nombre)}</option>`).join('')}`; sel.disabled = false;
+    });
+});
 
 async function abrirCamaraPesaje() {
     if (archivosFotosPesaje.length >= 3) return;
@@ -1874,7 +1924,8 @@ function detenerCamaraPesaje() {
 document.getElementById('modalCantidadEnsamblaje').addEventListener('hidden.bs.modal', detenerCamaraPesaje);
 
 function inicializarCantidadProducidaPorOperario(p) {
-    const operarios = Array.isArray(p?.js_operarios) ? p.js_operarios : [];
+    const operarios = Array.isArray(p?.js_operarios_activos) && p.js_operarios_activos.length
+        ? p.js_operarios_activos : (Array.isArray(p?.js_operarios) ? p.js_operarios : []);
     const bloqueIndividual = document.getElementById('bloque_cantidad_individual');
     const bloqueMultiple = document.getElementById('bloque_cantidad_por_operario');
     const inputTotal = document.getElementById('cantidad_producida_ensamblaje');
@@ -2027,6 +2078,9 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
 
     const completaRaw = document.getElementById('produccion_completo').checked ? 'true' : 'false';
     const ultimaPasada = completaRaw === 'true' || document.getElementById('produccion_ultima_pasada').checked;
+    const pausarDespues = document.getElementById('produccion_pausar').checked;
+    if (pausarDespues && ultimaPasada) { Swal.fire('Revisa el avance', 'No puedes marcarlo como última pasada y pausarlo a la vez.', 'warning'); return; }
+    if (pausarDespues && document.getElementById('pausa-producto-destino')?.value && !document.getElementById('pausa-molde-destino')?.value) { Swal.fire('Selecciona el molde', 'Elige el molde que atenderá la emergencia o borra el producto seleccionado.', 'warning'); return; }
 
     if (archivosFotosPesaje.length < 1) {
         Swal.fire('Foto obligatoria', 'Toma al menos una foto de la balanza con la cámara antes de enviar la producción.', 'warning');
@@ -2047,7 +2101,8 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
-    const esMultiOperario = Array.isArray(p?.js_operarios) && p.js_operarios.length > 1;
+    const operariosActivos = Array.isArray(p?.js_operarios_activos) && p.js_operarios_activos.length ? p.js_operarios_activos : (Array.isArray(p?.js_operarios) ? p.js_operarios : []);
+    const esMultiOperario = operariosActivos.length > 1;
     let desglose = [];
     if (esMultiOperario) {
         const inputs = [...document.querySelectorAll('#lista_cantidad_operarios [data-operario-id]')];
@@ -2078,6 +2133,14 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('desglose_operarios', JSON.stringify(desglose));
     formData.append('completo', completaRaw);
     formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
+    formData.append('pausar_despues', pausarDespues ? 'true' : 'false');
+    if (pausarDespues) {
+        const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
+        if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante para cada material utilizado.', 'warning'); return; }
+        formData.append('pausa_materiales', JSON.stringify(sobrantes));
+        formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
+        formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
+    }
     archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
     const botonEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
     const textoBoton = botonEnviar.innerHTML;
