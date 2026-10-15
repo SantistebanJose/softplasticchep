@@ -1933,6 +1933,10 @@ function enviarAEnsamblaje()
     $completo = in_array($completoRaw, ['true', '1'], true);
     $ultimaPasada = $completo || in_array($ultimaPasadaRaw, ['true', '1'], true);
     $pausarDespues = in_array(strtolower(trim($_POST['pausar_despues'] ?? 'false')), ['true', '1'], true);
+    $motivoPausa = trim($_POST['motivo_pausa'] ?? 'cambio_turno');
+    if ($pausarDespues && !in_array($motivoPausa, ['cambio_turno', 'emergencia_molde'], true)) {
+        responder(false, 'Selecciona un motivo válido para detener la producción.');
+    }
     $pausaDetalleRaw = json_decode($_POST['pausa_materiales'] ?? '[]', true);
     if ($pausarDespues && ($completo || $ultimaPasada)) {
         responder(false, 'Una producción no puede pausarse y finalizarse en el mismo avance.');
@@ -2065,7 +2069,10 @@ function enviarAEnsamblaje()
     }
 
     $eventoPausa = null;
-    if ($pausarDespues) {
+    $materialesPausa = [];
+    $destinoMolde = 0;
+    $moldeDestino = null;
+    if ($pausarDespues && $motivoPausa === 'emergencia_molde') {
         $lineasMaterial = executeQuery($conectar, "
             SELECT rpm.material_id, rpm.cantidad, m.nombre AS material_nombre,
                    m.unidad_medida_id, u.nombre_corto AS unidad
@@ -2098,7 +2105,6 @@ function enviarAEnsamblaje()
             $relacion = executeQuery($conectar, "SELECT 1 FROM molde m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) elem WHERE m.id = :molde_id AND (elem->>'producto_id')::int = :producto_id LIMIT 1", ['molde_id' => $destinoMolde, 'producto_id' => $productoDestinoId]);
             if ($productoDestinoId <= 0 || empty($relacion)) responder(false, 'El producto no corresponde al molde de emergencia seleccionado.');
         }
-        $materialesPausa = [];
         foreach ($lineasMaterial as $lineaMaterial) {
             $mid = (int)$lineaMaterial['material_id'];
             $cantidadSobrante = $sobrantes[$mid];
@@ -2126,8 +2132,11 @@ function enviarAEnsamblaje()
                 'compatible_con_molde_destino' => $compatible,
             ];
         }
+    }
+    if ($pausarDespues) {
         $eventoPausa = [
             'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'pausa',
+            'motivo' => $motivoPausa,
             'fecha' => date('Y-m-d H:i:s'), 'detener' => true,
             'pasa_otro_molde' => $destinoMolde > 0,
             'molde_id' => $destinoMolde ?: null,
@@ -2360,7 +2369,9 @@ function enviarAEnsamblaje()
 
         $conectar->commit();
         $mensajeEnvio = $pausarDespues
-            ? 'Avance registrado y producción pausada. El material reutilizable quedó identificado; el resto se conserva para reanudarla.'
+            ? ($motivoPausa === 'cambio_turno'
+                ? 'Avance registrado y producción detenida por cambio de turno. Puede reanudarla el siguiente operario.'
+                : 'Avance registrado y producción detenida por emergencia. Se guardó el sobrante y su compatibilidad.')
             : ($ultimaPasada
             ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
             : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.");

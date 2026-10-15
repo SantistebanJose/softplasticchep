@@ -260,6 +260,11 @@ include("header.php");
 }
 .pc-ens-step-num.alt{ background:#D97706; }
 .pc-ens-step-body{ flex:1; min-width:0; }
+    .pc-modal-avance .modal-body{max-height:min(78vh,900px);overflow-y:auto;overscroll-behavior:contain}
+    .pc-modal-avance .modal-footer{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center}
+    .pc-wizard-controls{display:flex;gap:10px;justify-content:space-between;width:100%}
+    .pc-wizard-controls .btn{min-height:46px;flex:1}
+    @media(max-width:600px){.pc-modal-avance .modal-body{padding:12px}.pc-modal-avance .pc-ens-step{gap:8px;padding:10px 0}.pc-modal-avance .modal-footer{grid-template-columns:1fr;gap:8px}.pc-modal-avance .modal-footer>.btn{width:100%;min-height:46px}.pc-modal-avance .pc-wizard-controls{gap:8px}}
 .pc-decision-choice{
     display:flex; align-items:flex-start; gap:14px; width:100%; margin:0;
     padding:16px 18px; border:2px solid #d97706; border-radius:14px;
@@ -506,8 +511,8 @@ include("header.php");
   </div>
 </div>
 <!-- Modal previo: Cantidad producida (antes de pasar a ensamblaje) -->
-<div class="modal fade" id="modalCantidadEnsamblaje" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade pc-modal-avance" id="modalCantidadEnsamblaje" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <form id="formCantidadEnsamblaje">
         <div class="modal-header">
@@ -542,7 +547,7 @@ include("header.php");
                 </div>
             </div>
 
-            <div class="pc-ens-step">
+            <div class="pc-ens-step" id="tarjetaFotoPesaje">
                 <div class="pc-ens-step-num">2</div>
                 <div class="pc-ens-step-body w-100">
                     <label class="form-label mb-1">Foto de la balanza *</label>
@@ -564,7 +569,7 @@ include("header.php");
                 </div>
             </div>
 
-            <div class="pc-ens-step">
+            <div class="pc-ens-step" id="tarjetaMerma">
                 <div class="pc-ens-step-num alt">3</div>
                 <div class="pc-ens-step-body">
                     <label class="form-label mb-1">Merma <span class="text-muted fw-normal">(opcional)</span></label>
@@ -600,14 +605,14 @@ include("header.php");
                 </div>
             </div>
 
-            <div class="pc-ens-step mt-3">
+            <div class="pc-ens-step mt-3" id="bloquePausa">
                 <div class="pc-ens-step-num alt">5</div>
                 <div class="pc-ens-step-body w-100">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="produccion_pausar">
-                        <label class="form-check-label" for="produccion_pausar">Pausar después de este avance por cambio de molde</label>
+                        <label class="form-check-label" for="produccion_pausar">Detener después de este avance</label>
                     </div>
-                    <div class="form-text">Indica el sobrante por material. Si no se confirma compatibilidad, se conserva para esta producción.</div>
+                    <div class="form-text">Elige si es por cambio de turno o por una emergencia de molde.</div>
                     <div id="pausa_materiales_contenido" class="mt-2" style="display:none"></div>
                 </div>
             </div>
@@ -615,6 +620,10 @@ include("header.php");
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <div class="pc-wizard-controls">
+            <button type="button" class="btn btn-outline-secondary" id="btnPasoAnterior" onclick="moverPasoAvance(-1)">← Anterior</button>
+            <button type="button" class="btn btn-outline-primary" id="btnPasoSiguiente" onclick="moverPasoAvance(1)">Siguiente →</button>
+          </div>
           <button type="submit" class="btn btn-primary" id="btnSubmitCantidadEnsamblaje">Continuar <i class="fa-solid fa-arrow-right"></i></button>
         </div>
       </form>
@@ -1746,6 +1755,24 @@ function finalizarProduccion(id) {
 }
 
 const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
+const pasosAvance = ['pasoCantidadProducida', 'tarjetaFotoPesaje', 'tarjetaMerma', 'bloque_ultima_pasada', 'bloquePausa'];
+let indicePasoAvance = 0;
+function renderPasoAvance() {
+    const modal = document.getElementById('modalCantidadEnsamblaje');
+    const pasos = pasosAvance.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    indicePasoAvance = Math.max(0, Math.min(indicePasoAvance, pasos.length - 1));
+    pasosAvance.forEach(id => { document.getElementById(id).style.display = pasos[indicePasoAvance] === id ? '' : 'none'; });
+    modal.querySelector('.modal-body').scrollTop = 0;
+    document.getElementById('btnPasoAnterior').style.display = indicePasoAvance === 0 ? 'none' : '';
+    document.getElementById('btnPasoSiguiente').style.display = indicePasoAvance === pasos.length - 1 ? 'none' : '';
+    document.getElementById('btnSubmitCantidadEnsamblaje').style.display = indicePasoAvance === pasos.length - 1 ? '' : 'none';
+}
+function moverPasoAvance(direccion) { indicePasoAvance += direccion; renderPasoAvance(); }
+document.getElementById('modalCantidadEnsamblaje').addEventListener('shown.bs.modal', () => { indicePasoAvance = 0; renderPasoAvance(); });
+document.getElementById('formCantidadEnsamblaje').addEventListener('submit', e => {
+    const pasos = pasosAvance.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    if (pasos[indicePasoAvance] !== pasos[pasos.length - 1]) { e.preventDefault(); moverPasoAvance(1); }
+}, true);
 let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;       // cache de colores activos, para los chips de merma
 let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
@@ -1801,6 +1828,7 @@ function sincronizarUltimaPasadaCompleta() {
     else if (estabaForzada) ultima.checked = false;
     ultima.disabled = completa;
     document.getElementById('bloque_ultima_pasada').style.display = completa ? 'none' : '';
+    renderPasoAvance();
     document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = completa
         ? 'Registrar producción completa <i class="fa-solid fa-check"></i>'
         : (ultima.checked ? 'Registrar avance y finalizar <i class="fa-solid fa-flag-checkered"></i>' : 'Registrar avance <i class="fa-solid fa-arrow-right"></i>');
@@ -1810,19 +1838,32 @@ document.getElementById('produccion_ultima_pasada').addEventListener('change', s
 document.getElementById('produccion_pausar').addEventListener('change', async function () {
     const panel = document.getElementById('pausa_materiales_contenido');
     if (!this.checked) { panel.style.display = 'none'; return; }
-    const respuesta = await llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje });
-    if (!respuesta.success) { this.checked = false; Swal.fire('Error', respuesta.message, 'error'); return; }
-    const productosJson = await llamarProduccion('BUSCARPRODUCTOSMOLDE');
     panel.style.display = '';
+    panel.innerHTML = `<div class="alert alert-warning py-2">El avance actual quedará guardado antes de detener la producción.</div><label class="form-label">Motivo de la detención</label><select class="form-select" id="pausa-motivo"><option value="cambio_turno">Cambio de turno</option><option value="emergencia_molde">Emergencia: cambio de molde</option></select><div id="pausa-detalle-condicional" class="mt-3"></div>`;
+    document.getElementById('pausa-motivo').addEventListener('change', renderDetallePausaAdmin);
+    await renderDetallePausaAdmin();
+});
+
+async function renderDetallePausaAdmin() {
+    const panel = document.getElementById('pausa-detalle-condicional');
+    if (document.getElementById('pausa-motivo')?.value !== 'emergencia_molde') {
+        panel.innerHTML = '<div class="form-text">El material queda reservado para esta misma producción. Al reanudar, el operario entrante registrará sus propios avances.</div>';
+        return;
+    }
+    const [respuesta, productosJson] = await Promise.all([
+        llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje }),
+        llamarProduccion('BUSCARPRODUCTOSMOLDE')
+    ]);
+    if (!respuesta.success) { Swal.fire('Error', respuesta.message, 'error'); return; }
     const escapar = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    panel.innerHTML = `<div class="alert alert-warning py-2">La pausa registra el avance y mantiene la corrida abierta.</div><label class="form-label">Producto de emergencia (opcional)</label><select class="form-select mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select mb-2" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-2">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
+    panel.innerHTML = `<label class="form-label">Producto de emergencia (opcional)</label><select class="form-select mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select mb-3" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-2">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
     document.getElementById('pausa-producto-destino').addEventListener('change', async e => {
         const sel = document.getElementById('pausa-molde-destino');
         if (!e.target.value) { sel.innerHTML = '<option value="">Sin molde seleccionado</option>'; sel.disabled = true; return; }
         const m = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: e.target.value });
         sel.innerHTML = `<option value="">Selecciona molde</option>${(m.moldes || []).map(x => `<option value="${Number(x.molde_id)}">${escapar(x.molde_nombre)}</option>`).join('')}`; sel.disabled = false;
     });
-});
+}
 
 async function abrirCamaraPesaje() {
     if (archivosFotosPesaje.length >= 3) return;
@@ -2135,11 +2176,17 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     formData.append('pausar_despues', pausarDespues ? 'true' : 'false');
     if (pausarDespues) {
-        const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
-        if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante para cada material utilizado.', 'warning'); return; }
-        formData.append('pausa_materiales', JSON.stringify(sobrantes));
-        formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
-        formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
+        const motivo = document.getElementById('pausa-motivo')?.value || 'cambio_turno';
+        formData.append('motivo_pausa', motivo);
+        if (motivo === 'emergencia_molde') {
+            const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
+            if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante para cada material utilizado.', 'warning'); return; }
+            formData.append('pausa_materiales', JSON.stringify(sobrantes));
+            formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
+            formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
+        } else {
+            formData.append('pausa_materiales', '[]');
+        }
     }
     archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
     const botonEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');

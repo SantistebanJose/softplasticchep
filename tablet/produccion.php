@@ -219,6 +219,14 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     display:flex; flex-direction:column; gap:20px;
     max-width:640px; margin:0 auto; /* centra todo -> look simétrico en tablet */
 }
+.pc-wizard-controls{display:flex;gap:10px;justify-content:space-between;width:100%}
+.pc-wizard-controls .btn{min-height:48px;flex:1}
+.pc-modal-tablet#modalCantidadEnsamblaje .modal-content{height:100%;min-height:100%}
+.pc-modal-tablet#modalCantidadEnsamblaje .modal-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.pc-modal-tablet#modalCantidadEnsamblaje .modal-footer{margin-top:auto;width:100%}
+.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{width:100%;max-width:840px;margin:auto}
+.pc-avance-actions{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(220px,1.5fr) minmax(150px,1fr);align-items:center;gap:12px;padding:14px 22px;width:100%}
+@media(max-width:700px){.pc-modal-tablet#modalCantidadEnsamblaje .modal-body{padding:12px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{gap:12px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-card{padding:14px;border-radius:14px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-card-header{margin-bottom:12px}.pc-modal-tablet#modalCantidadEnsamblaje .modal-footer{gap:0}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-resumen{padding:10px}.pc-avance-actions{grid-template-columns:1fr;gap:8px;padding:10px 14px}.pc-avance-actions>[data-bs-dismiss],.pc-avance-actions>#btnSubmitCantidadEnsamblaje{width:100%;min-height:48px}.pc-avance-actions .pc-wizard-controls{gap:8px}.pc-avance-actions .pc-wizard-controls .btn{min-height:48px}}
 
 .pc-ens-card{
     border:1px solid #ece9e1; border-radius:18px; background:#fff;
@@ -705,7 +713,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
 
                 <!-- Paso 2: merma -->
-                <div class="pc-ens-card">
+                <div class="pc-ens-card" id="tarjetaMerma">
                     <div class="pc-ens-card-header opcional">
                         <span class="num">3</span>
                         <div class="titulos">
@@ -763,10 +771,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
                 </div>
 
-                <div class="pc-ens-card">
-                    <div class="pc-ens-card-header opcional"><span class="num">5</span><div class="titulos"><div class="titulo">Pausa por cambio de molde</div><div class="sub">Registra el sobrante y conserva la producción para continuarla.</div></div></div>
+                <div class="pc-ens-card" id="bloquePausa">
+                    <div class="pc-ens-card-header opcional"><span class="num">5</span><div class="titulos"><div class="titulo">Detener producción</div><div class="sub">Cambio de turno o emergencia por cambio de molde.</div></div></div>
                     <div class="px-3 py-3">
-                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="produccion_pausar"><label class="form-check-label" for="produccion_pausar">Pausar después de este avance</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="produccion_pausar"><label class="form-check-label" for="produccion_pausar">Detener después de este avance</label></div>
                         <div id="pausa_materiales_contenido" class="mt-3" style="display:none"></div>
                     </div>
                 </div>
@@ -779,9 +787,13 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 <div class="sep"></div>
                 <div class="item"><span class="n" id="resumen_merma">0</span><span class="l">Merma registrada</span></div>
             </div>
-            <div style="display:flex; gap:16px; padding:16px 22px;">
-                <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal" style="flex:0 1 260px;">Cancelar</button>
-                <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitCantidadEnsamblaje" style="flex:1 1 280px;">Continuar <i class="fa-solid fa-arrow-right"></i></button>
+            <div class="pc-avance-actions">
+                <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
+                <div class="pc-wizard-controls">
+                    <button type="button" class="btn btn-outline-secondary" id="btnPasoAnterior" onclick="moverPasoAvanceTablet(-1)">← Anterior</button>
+                    <button type="button" class="btn btn-outline-primary" id="btnPasoSiguiente" onclick="moverPasoAvanceTablet(1)">Siguiente →</button>
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitCantidadEnsamblaje">Registrar avance <i class="fa-solid fa-arrow-right"></i></button>
             </div>
         </div>
       </form>
@@ -2013,6 +2025,24 @@ function finalizarProduccion(id) {
 }
 
 const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
+const pasosAvanceTablet = ['pasoCantidadProducida', 'tarjetaFotoPesaje', 'tarjetaMerma', 'bloque_ultima_pasada', 'bloquePausa'];
+let indicePasoAvanceTablet = 0;
+function renderPasoAvanceTablet() {
+    const modal = document.getElementById('modalCantidadEnsamblaje');
+    const pasos = pasosAvanceTablet.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    indicePasoAvanceTablet = Math.max(0, Math.min(indicePasoAvanceTablet, pasos.length - 1));
+    pasosAvanceTablet.forEach(id => { document.getElementById(id).style.display = pasos[indicePasoAvanceTablet] === id ? '' : 'none'; });
+    modal.querySelector('.modal-body').scrollTop = 0;
+    document.getElementById('btnPasoAnterior').style.display = indicePasoAvanceTablet === 0 ? 'none' : '';
+    document.getElementById('btnPasoSiguiente').style.display = indicePasoAvanceTablet === pasos.length - 1 ? 'none' : '';
+    document.getElementById('btnSubmitCantidadEnsamblaje').style.display = indicePasoAvanceTablet === pasos.length - 1 ? '' : 'none';
+}
+function moverPasoAvanceTablet(direccion) { indicePasoAvanceTablet += direccion; renderPasoAvanceTablet(); }
+document.getElementById('modalCantidadEnsamblaje').addEventListener('shown.bs.modal', () => { indicePasoAvanceTablet = 0; renderPasoAvanceTablet(); });
+document.getElementById('formCantidadEnsamblaje').addEventListener('submit', e => {
+    const pasos = pasosAvanceTablet.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    if (pasos[indicePasoAvanceTablet] !== pasos[pasos.length - 1]) { e.preventDefault(); moverPasoAvanceTablet(1); }
+}, true);
 let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;
 let mermaColoresSeleccionados = [];
@@ -2066,6 +2096,7 @@ function sincronizarUltimaPasadaCompletaTablet() {
     else if (estabaForzada) ultima.checked = false;
     ultima.disabled = completa;
     document.getElementById('bloque_ultima_pasada').style.display = completa ? 'none' : '';
+    renderPasoAvanceTablet();
     document.getElementById('btnSubmitCantidadEnsamblaje').innerHTML = completa
         ? 'Registrar producción completa <i class="fa-solid fa-check"></i>'
         : (ultima.checked ? 'Registrar avance y finalizar <i class="fa-solid fa-flag-checkered"></i>' : 'Registrar avance <i class="fa-solid fa-arrow-right"></i>');
@@ -2075,19 +2106,32 @@ document.getElementById('produccion_ultima_pasada').addEventListener('change', s
 document.getElementById('produccion_pausar').addEventListener('change', async function () {
     const panel = document.getElementById('pausa_materiales_contenido');
     if (!this.checked) { panel.style.display = 'none'; return; }
-    const respuesta = await llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje });
-    if (!respuesta.success) { this.checked = false; Swal.fire('Error', respuesta.message, 'error'); return; }
-    const productosJson = await llamarProduccion('BUSCARPRODUCTOSMOLDE');
-    const escapar = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     panel.style.display = '';
-    panel.innerHTML = `<div class="alert alert-warning">Este avance quedará guardado y la producción se podrá reanudar luego.</div><label class="form-label">Producto de emergencia (opcional)</label><select class="form-select form-select-lg mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select form-select-lg mb-3" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-3">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control form-control-lg pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
+    panel.innerHTML = `<div class="alert alert-warning">El avance actual quedará guardado antes de detener la producción.</div><label class="form-label">Motivo de la detención</label><select class="form-select form-select-lg" id="pausa-motivo"><option value="cambio_turno">Cambio de turno</option><option value="emergencia_molde">Emergencia: cambio de molde</option></select><div id="pausa-detalle-condicional" class="mt-3"></div>`;
+    document.getElementById('pausa-motivo').addEventListener('change', renderDetallePausaTablet);
+    await renderDetallePausaTablet();
+});
+
+async function renderDetallePausaTablet() {
+    const panel = document.getElementById('pausa-detalle-condicional');
+    if (document.getElementById('pausa-motivo')?.value !== 'emergencia_molde') {
+        panel.innerHTML = '<div class="form-text">El material queda reservado para esta misma producción. Al reanudar, el operario entrante registrará sus propios avances.</div>';
+        return;
+    }
+    const [respuesta, productosJson] = await Promise.all([
+        llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje }),
+        llamarProduccion('BUSCARPRODUCTOSMOLDE')
+    ]);
+    if (!respuesta.success) { Swal.fire('Error', respuesta.message, 'error'); return; }
+    const escapar = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    panel.innerHTML = `<label class="form-label">Producto de emergencia (opcional)</label><select class="form-select form-select-lg mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select form-select-lg mb-3" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-3">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control form-control-lg pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
     document.getElementById('pausa-producto-destino').addEventListener('change', async e => {
         const sel = document.getElementById('pausa-molde-destino');
         if (!e.target.value) { sel.innerHTML = '<option value="">Sin molde seleccionado</option>'; sel.disabled = true; return; }
         const m = await llamarProduccion('BUSCARMOLDESPORPRODUCTO', { producto_id: e.target.value });
         sel.innerHTML = `<option value="">Selecciona molde</option>${(m.moldes || []).map(x => `<option value="${Number(x.molde_id)}">${escapar(x.molde_nombre)}</option>`).join('')}`; sel.disabled = false;
     });
-});
+}
 
 async function abrirCamaraPesaje() {
     if (archivosFotosPesaje.length >= 3) {
@@ -2397,11 +2441,17 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     formData.append('pausar_despues', pausarDespues ? 'true' : 'false');
     if (pausarDespues) {
-        const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
-        if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante para cada material utilizado.', 'warning'); return; }
-        formData.append('pausa_materiales', JSON.stringify(sobrantes));
-        formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
-        formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
+        const motivo = document.getElementById('pausa-motivo')?.value || 'cambio_turno';
+        formData.append('motivo_pausa', motivo);
+        if (motivo === 'emergencia_molde') {
+            const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
+            if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante de cada material utilizado.', 'warning'); return; }
+            formData.append('pausa_materiales', JSON.stringify(sobrantes));
+            formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
+            formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
+        } else {
+            formData.append('pausa_materiales', '[]');
+        }
     }
     archivosFotosPesaje.forEach(foto => formData.append('fotos_pesaje[]', foto.file, foto.file.name));
     const btnEnviar = document.getElementById('btnSubmitCantidadEnsamblaje');
