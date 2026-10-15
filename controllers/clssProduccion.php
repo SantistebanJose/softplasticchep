@@ -138,6 +138,7 @@ function controladorProduccion(string $accion): void
         'INICIARCORRIDA',
         'FINALIZARCORRIDA',
         'ENVIARAENSAMBLAJE',
+        'REANUDARPRODUCCION',
     ];
 
     $accionesSoloAdmin = [
