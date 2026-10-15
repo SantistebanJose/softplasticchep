@@ -1650,7 +1650,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         <div class="pc-prod-card-foot">
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
-            ${puedeGestionar && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
+            ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
         </div>
     </div>`;
 }

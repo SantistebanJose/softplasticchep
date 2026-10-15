@@ -1262,7 +1262,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                     <i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>`
                 : ''
             }
-            ${puedeGestionar && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
+            ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
             ${puedeGestionar && !p.deleted_at
                 ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
                        <i class="fa-solid fa-trash"></i></button>`

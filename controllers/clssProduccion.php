@@ -934,13 +934,30 @@ function listarProducciones()
                     }
                 }
             }
-            $fila['puede_gestionar'] = empty($_SESSION['operario_id'])
-                || (int)($fila['operario_id'] ?? 0) === (int)$_SESSION['operario_id']
-                || in_array((int)$_SESSION['operario_id'], array_map(
-                    static fn($op) => (int)($op['operario_id'] ?? 0),
-                    is_array(json_decode($fila['js_operarios'] ?? '[]', true)) ? json_decode($fila['js_operarios'] ?? '[]', true) : []
-                ), true)
-                || (!empty($fila['detenido_fecha']) && !empty($_SESSION['operario_id']));
+            $operariosUltimoTurno = !empty($fila['operarios_ultimo_turno'])
+                ? (json_decode($fila['operarios_ultimo_turno'], true) ?: [])
+                : [];
+            $fila['js_operarios_activos'] = $operariosUltimoTurno;
+            $idsTurnoActual = array_values(array_filter(array_map(
+                static fn($op) => (int)($op['operario_id'] ?? 0),
+                $operariosUltimoTurno
+            )));
+            $operariosHistoricos = !empty($fila['js_operarios'])
+                ? (json_decode($fila['js_operarios'], true) ?: [])
+                : [];
+            $idsHistoricos = array_map(
+                static fn($op) => (int)($op['operario_id'] ?? 0),
+                $operariosHistoricos
+            );
+            $idSesionOperario = (int)($_SESSION['operario_id'] ?? 0);
+            $puedeOperarTurno = $idsTurnoActual
+                ? in_array($idSesionOperario, $idsTurnoActual, true)
+                : ((int)($fila['operario_id'] ?? 0) === $idSesionOperario
+                    || in_array($idSesionOperario, $idsHistoricos, true));
+            $fila['puede_gestionar'] = empty($_SESSION['operario_id']) || $puedeOperarTurno;
+            // Una pausa queda disponible para que cualquier operario activo
+            // pueda asumirla; al reanudar, solo el turno nuevo podrá avanzar.
+            $fila['puede_reanudar'] = empty($_SESSION['operario_id']) || !empty($fila['detenido_fecha']);
             $fila['js_cantidades_merma'] = !empty($fila['js_cantidades_merma'])
                 ? json_decode($fila['js_cantidades_merma'], true)
                 : [];
@@ -954,9 +971,6 @@ function listarProducciones()
             // Conserva la fecha para mostrarla en las tarjetas y usa `detenido`
             // como indicador booleano en las reglas de interfaz.
             $fila['detenido'] = !empty($fila['detenido_fecha']);
-            $fila['js_operarios_activos'] = !empty($fila['operarios_ultimo_turno'])
-                ? (json_decode($fila['operarios_ultimo_turno'], true) ?: [])
-                : [];
             unset($fila['operarios_ultimo_turno']);
 
             $fila['js_operarios'] = !empty($fila['js_operarios'])   // <-- AGREGAR ESTO
@@ -2169,6 +2183,10 @@ function enviarAEnsamblaje()
     $operariosQueProducenEstaPasada = is_array($ultimoTurnoIds)
         ? array_values(array_filter(array_map('intval', $ultimoTurnoIds), static fn($oid) => $oid > 0))
         : array_map(static fn($op) => (int)($op['operario_id'] ?? 0), $listaOperarios);
+    if (!empty($_SESSION['operario_id']) && is_array($ultimoTurnoIds)
+        && !in_array((int)$_SESSION['operario_id'], $operariosQueProducenEstaPasada, true)) {
+        responder(false, 'Esta producción fue reasignada a otro turno. No puedes registrar avances.');
+    }
     if (count($operariosQueProducenEstaPasada) > 1) {
         $idsParticipantes = $operariosQueProducenEstaPasada;
         $idsParticipantes = array_values(array_unique(array_filter($idsParticipantes, static fn($id) => $id > 0)));
