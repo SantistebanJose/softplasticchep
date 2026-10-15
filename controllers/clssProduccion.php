@@ -2149,8 +2149,13 @@ function enviarAEnsamblaje()
             'materiales' => $materialesPausa,
             'comentario' => trim($_POST['comentario_pausa'] ?? ''),
             'maquina_id' => (int)$existe[0]['maquina_id'],
-            'user_id' => (int)($_SESSION['user_id'] ?? 0),
-            'usuario' => (string)($_SESSION['nombre_completo'] ?? $_SESSION['usuario'] ?? ''),
+            // La sesión rápida del operario no tiene user_id ni nombre_completo:
+            // su identidad válida es operario_id / operario_nombre.
+            'actor_tipo' => !empty($_SESSION['operario_id']) ? 'operario' : 'usuario',
+            'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
+            'operario_id' => !empty($_SESSION['operario_id']) ? (int)$_SESSION['operario_id'] : null,
+            'usuario_id' => !empty($_SESSION['usuario_id']) ? (int)$_SESSION['usuario_id'] : null,
+            'usuario' => (string)($_SESSION['operario_nombre'] ?? $_SESSION['nombre_usuario'] ?? $_SESSION['user_usuario'] ?? 'Sistema'),
             'operarios' => json_decode($existe[0]['js_operarios'] ?? '[]', true) ?: [],
         ];
     }
@@ -2525,7 +2530,11 @@ function reanudarProduccion(): void
         'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'reanudacion', 'fecha' => date('Y-m-d H:i:s'),
         'maquina_anterior_id' => (int)$fila[0]['maquina_id'], 'maquina_id' => $maquinaId,
         'maquina' => $maq[0]['nombre'], 'operarios_ids' => $ids, 'operarios' => $ops,
-        'user_id' => (int)($_SESSION['user_id'] ?? 0), 'usuario' => (string)($_SESSION['nombre_completo'] ?? $_SESSION['usuario'] ?? ''),
+        'actor_tipo' => !empty($_SESSION['operario_id']) ? 'operario' : 'usuario',
+        'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
+        'operario_id' => !empty($_SESSION['operario_id']) ? (int)$_SESSION['operario_id'] : null,
+        'usuario_id' => !empty($_SESSION['usuario_id']) ? (int)$_SESSION['usuario_id'] : null,
+        'usuario' => (string)($_SESSION['operario_nombre'] ?? $_SESSION['nombre_usuario'] ?? $_SESSION['user_usuario'] ?? 'Sistema'),
     ];
     $cambios = [['campo' => 'Reanudación', 'valor_antes' => 'Pausada', 'valor_despues' => 'Máquina ' . $maq[0]['nombre'] . ', ' . count($ids) . ' operario(s)']];
     $mov = obtenerMovimientoSesion('reanudar_produccion', $cambios);
