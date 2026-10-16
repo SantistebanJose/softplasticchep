@@ -447,7 +447,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-
+          <div id="bannerCambioMolde" class="alert alert-info d-none" role="status"></div>
           <div class="pc-form-layout">
 
             <!-- Columna izquierda: selectores tipo card (sin combos) -->
@@ -817,6 +817,10 @@ const CONTROLADOR_MOLDES     = '../controllers/clssMoldes.php';
 const CONTROLADOR_COLOR      = '../controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
 const modalProduccion = new bootstrap.Modal(document.getElementById('modalProduccion'));
+document.getElementById('modalProduccion').addEventListener('hidden.bs.modal', () => {
+    origenCambioMoldeProduccion = 0;
+    productoDestinoEmergenciaProduccion = 0;
+});
 
 const llamarProduccion = (accion, params = {}) => llamar(CONTROLADOR_PRODUCCION, accion, params);
 const llamarMoldes     = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
@@ -824,6 +828,8 @@ const llamarColor      = (accion, params = {}) => llamar(CONTROLADOR_COLOR, acci
 const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 let modoEdicionProduccion = false;
 let produccionIdActual = 0;
+let origenCambioMoldeProduccion = 0;
+let productoDestinoEmergenciaProduccion = 0;
 let materialesProdCachePorProducto = {}; // productoId -> materiales[]
 let productosMoldeProdCache = null;
 let categoriasMaterialProdCache = null;
@@ -1639,6 +1645,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
         ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
+        ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
@@ -1651,6 +1658,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
             ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
+            ${p.puede_registrar_emergencia && p.cierre_cambio_molde ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="crearProduccionEmergencia(${p.id})"><i class="fa-solid fa-plus"></i> Nueva producción de emergencia</button>` : ''}
         </div>
     </div>`;
 }
@@ -1887,6 +1895,9 @@ function limpiarFormularioProduccion() {
     renderTicket();
 }
 async function abrirModalCrearProduccion() {
+    origenCambioMoldeProduccion = 0;
+    productoDestinoEmergenciaProduccion = 0;
+    document.getElementById('bannerCambioMolde')?.classList.add('d-none');
     limpiarFormularioProduccion();
     modoEdicionProduccion = false;
     document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
@@ -1896,7 +1907,34 @@ async function abrirModalCrearProduccion() {
     modalProduccion.show();
 }
 
+async function crearProduccionEmergencia(id) {
+    const p = produccionesCache.find(x => Number(x.id) === Number(id));
+    const cierre = p?.cierre_cambio_molde;
+    if (!cierre || !p.puede_registrar_emergencia) return;
+    const confirmacion = await Swal.fire({
+        title: 'Nueva producción de emergencia',
+        text: `La producción #${id} se cerró por cambio de molde. El remanente no fue pesado; registra solo los materiales preparados e introducidos para la nueva corrida (${cierre.molde || 'molde seleccionado'}).`,
+        icon: 'info', showCancelButton: true, confirmButtonText: 'Continuar', cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+    limpiarFormularioProduccion();
+    modoEdicionProduccion = false;
+    origenCambioMoldeProduccion = Number(id);
+    productoDestinoEmergenciaProduccion = Number(cierre.producto_destino_id);
+    document.getElementById('modalProduccionTitulo').textContent = `Producción nueva · emergencia de #${id}`;
+    const bannerEmergencia = document.getElementById('bannerCambioMolde');
+    bannerEmergencia.textContent = `Origen: producción #${id}. El remanente no fue pesado; registra únicamente el material y tinte nuevos que se preparen e introduzcan en esta corrida.`;
+    bannerEmergencia.classList.remove('d-none');
+    await cargarSelectoresModal({ unico_molde: `${cierre.molde_destino_id}-${cierre.producto_destino_id}` });
+    document.getElementById('prod_fecha').value = fechaHoraLocalInput();
+    await renderGridMateriales();
+    modalProduccion.show();
+}
+
 async function abrirModalEditarProduccion(id) {
+    origenCambioMoldeProduccion = 0;
+    productoDestinoEmergenciaProduccion = 0;
+    document.getElementById('bannerCambioMolde')?.classList.add('d-none');
     const json = await llamarProduccion('OBTENERPRODUCCION', { id });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
     limpiarFormularioProduccion();
@@ -1991,12 +2029,16 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         fecha: document.getElementById('prod_fecha').value.replace('T', ' '),
         observaciones: document.getElementById('prod_observaciones').value.trim(),
         detalle: obtenerDetalleJsonProd(),
+        origen_cambio_molde_id: origenCambioMoldeProduccion,
+        producto_destino_emergencia_id: productoDestinoEmergenciaProduccion,
     };
 
     const json = await llamarProduccion('GUARDARPRODUCCION', params);
 
     if (json.success) {
         const esNuevo = !produccionIdActual;
+        origenCambioMoldeProduccion = 0;
+        productoDestinoEmergenciaProduccion = 0;
         modalProduccion.hide();
         // El backend ya descontó los materiales; invalida el caché por producto
         // para que el siguiente registro vuelva a consultar el stock actualizado.
@@ -2128,13 +2170,10 @@ async function renderDetallePausaTablet() {
         panel.innerHTML = '<div class="form-text">El material queda reservado para esta misma producción. Al reanudar, el operario entrante registrará sus propios avances.</div>';
         return;
     }
-    const [respuesta, productosJson] = await Promise.all([
-        llamarProduccion('OBTENERPRODUCCION', { id: produccionIdParaEnsamblaje }),
-        llamarProduccion('BUSCARPRODUCTOSMOLDE')
-    ]);
-    if (!respuesta.success) { Swal.fire('Error', respuesta.message, 'error'); return; }
+    const productosJson = await llamarProduccion('BUSCARPRODUCTOSMOLDE');
+    if (!productosJson.success) { Swal.fire('Error', productosJson.message, 'error'); return; }
     const escapar = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    panel.innerHTML = `<label class="form-label">Producto de emergencia (opcional)</label><select class="form-select form-select-lg mb-2" id="pausa-producto-destino"><option value="">Sin reutilización ahora</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select form-select-lg mb-3" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select><div class="form-text mb-2">Solo se marcará como reutilizable el material asociado al producto elegido.</div><div class="row g-3">${(respuesta.detalle || []).map(d => `<div class="col-12 col-md-6"><label class="form-label">Sobrante: ${escapar(d.material_nombre)} (${escapar(d.unidad_base_corto || 'unidad')})</label><input class="form-control form-control-lg pausa-sobrante" type="number" min="0" step="0.0001" value="0" data-material-id="${Number(d.material_id)}"></div>`).join('')}</div>`;
+    panel.innerHTML = `<div class="alert alert-info">Esta corrida se cerrará al registrar el avance. El material que quede dentro de la máquina no se pesa; queda anotado como remanente no medido. Luego registra una producción nueva e ingresa solo los materiales preparados para esa corrida.</div><label class="form-label">Producto de emergencia *</label><select class="form-select form-select-lg mb-2" id="pausa-producto-destino"><option value="">Selecciona producto...</option>${(productosJson.productos || []).map(x => `<option value="${Number(x.producto_id)}">${escapar(x.descripcion)}</option>`).join('')}</select><select class="form-select form-select-lg mb-3" id="pausa-molde-destino" disabled><option value="">Selecciona primero un producto</option></select>`;
     document.getElementById('pausa-producto-destino').addEventListener('change', async e => {
         const sel = document.getElementById('pausa-molde-destino');
         if (!e.target.value) { sel.innerHTML = '<option value="">Sin molde seleccionado</option>'; sel.disabled = true; return; }
@@ -2399,8 +2438,9 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const completaRaw = document.getElementById('produccion_completo').checked ? 'true' : 'false';
     const ultimaPasada = completaRaw === 'true' || document.getElementById('produccion_ultima_pasada').checked;
     const pausarDespues = document.getElementById('produccion_pausar').checked;
-    if (pausarDespues && ultimaPasada) { Swal.fire('Revisa el avance', 'No puedes marcarlo como última pasada y pausarlo a la vez.', 'warning'); return; }
-    if (pausarDespues && document.getElementById('pausa-producto-destino')?.value && !document.getElementById('pausa-molde-destino')?.value) { Swal.fire('Selecciona el molde', 'Elige el molde que atenderá la emergencia o borra el producto seleccionado.', 'warning'); return; }
+    const motivoDetencion = document.getElementById('pausa-motivo')?.value || 'cambio_turno';
+    if (pausarDespues && motivoDetencion === 'cambio_turno' && ultimaPasada) { Swal.fire('Revisa el avance', 'No puedes marcarlo como última pasada y detenerlo por cambio de turno a la vez.', 'warning'); return; }
+    if (pausarDespues && motivoDetencion === 'emergencia_molde' && (!document.getElementById('pausa-producto-destino')?.value || !document.getElementById('pausa-molde-destino')?.value)) { Swal.fire('Selecciona producto y molde', 'Para cerrar por emergencia, elige el producto y el molde de la nueva producción.', 'warning'); return; }
 
     if (archivosFotosPesaje.length < 1) {
         Swal.fire('Foto obligatoria', 'Abre la cámara de la tablet y toma al menos una foto de la balanza para continuar.', 'warning');
@@ -2451,12 +2491,10 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     formData.append('pausar_despues', pausarDespues ? 'true' : 'false');
     if (pausarDespues) {
-        const motivo = document.getElementById('pausa-motivo')?.value || 'cambio_turno';
+        const motivo = motivoDetencion;
         formData.append('motivo_pausa', motivo);
         if (motivo === 'emergencia_molde') {
-            const sobrantes = [...document.querySelectorAll('.pausa-sobrante')].map(input => ({ material_id: Number(input.dataset.materialId), cantidad_sobrante: Number(input.value) }));
-            if (!sobrantes.length || sobrantes.some(x => !Number.isFinite(x.cantidad_sobrante) || x.cantidad_sobrante < 0)) { Swal.fire('Falta el sobrante', 'Registra el sobrante de cada material utilizado.', 'warning'); return; }
-            formData.append('pausa_materiales', JSON.stringify(sobrantes));
+            formData.append('pausa_materiales', '[]');
             formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');
             formData.append('molde_destino_id', document.getElementById('pausa-molde-destino')?.value || '0');
         } else {

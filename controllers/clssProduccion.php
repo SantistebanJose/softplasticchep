@@ -873,6 +873,10 @@ function listarProducciones()
             pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
             pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados,
             pd.detenido::text AS detenido_fecha,
+            (SELECT evt FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+             WHERE evt->>'tipo' = 'cierre_cambio_molde' ORDER BY ord DESC LIMIT 1) AS cierre_cambio_molde,
+            (SELECT evt->>'produccion_destino_id' FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+             WHERE evt->>'tipo' = 'vinculo_cambio_molde' ORDER BY ord DESC LIMIT 1) AS produccion_destino_cambio_molde,
             (SELECT evt->'operarios' FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'reanudacion' ORDER BY ord DESC LIMIT 1) AS operarios_ultimo_turno,
             pd.cantidad_producida_kg, pd.js_configuracion_moment, pd.js_images,
@@ -922,6 +926,12 @@ function listarProducciones()
         $itemsCompartidosPorMolde = obtenerItemsConfigMoldesCompartidos($conectar, $moldesCompartidosIds);
 
         foreach ($result as &$fila) {
+            $fila['cierre_cambio_molde'] = !empty($fila['cierre_cambio_molde'])
+                ? (json_decode($fila['cierre_cambio_molde'], true) ?: null) : null;
+            $fila['produccion_destino_cambio_molde'] = !empty($fila['produccion_destino_cambio_molde'])
+                ? (int)$fila['produccion_destino_cambio_molde'] : null;
+            $fila['puede_registrar_emergencia'] = !empty($fila['cierre_cambio_molde'])
+                && empty($fila['produccion_destino_cambio_molde']);
             $imagenes = !empty($fila['js_images']) ? json_decode($fila['js_images'], true) : [];
             $fila['fotos_pesaje'] = [];
             if (is_array($imagenes)) {
@@ -1487,6 +1497,8 @@ function guardarProduccion()
 
     $orden_id     = null;
     $esEmergencia = false;
+    $origenCambioMoldeId = (int)($_POST['origen_cambio_molde_id'] ?? 0);
+    $productoDestinoEmergenciaId = (int)($_POST['producto_destino_emergencia_id'] ?? 0);
 
     // ── Validaciones básicas ─────────────────────────────────────────────────
     if ($cantidad <= 0) responder(false, 'La cantidad de kg insertados debe ser mayor a 0.');
@@ -1604,6 +1616,45 @@ function guardarProduccion()
             ]);
             $produccionId = $nuevaProduccion[0]['id'] ?? null;
             if (!$produccionId) throw new Exception('No se pudo crear el registro de producción.');
+
+            if ($origenCambioMoldeId > 0) {
+                $origen = executeQuery($conectar, "SELECT id,
+                    (SELECT evt FROM unnest(COALESCE(js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+                     WHERE evt->>'tipo' = 'cierre_cambio_molde' ORDER BY ord DESC LIMIT 1) AS cierre_cambio_molde,
+                    EXISTS (SELECT 1 FROM unnest(COALESCE(js_casusticas, ARRAY[]::jsonb[])) evt
+                            WHERE evt->>'tipo' = 'vinculo_cambio_molde') AS ya_vinculada
+                    FROM produccion WHERE id = :id FOR UPDATE", ['id' => $origenCambioMoldeId]);
+                if (empty($origen)) throw new Exception('No se encontró la producción que originó el cambio de molde.');
+                $cierreOrigen = is_array($origen[0]['cierre_cambio_molde'] ?? null)
+                    ? $origen[0]['cierre_cambio_molde'] : (json_decode($origen[0]['cierre_cambio_molde'] ?? '', true) ?: null);
+                $yaVinculada = in_array($origen[0]['ya_vinculada'] ?? false, [true, 1, '1', 't', 'true'], true);
+                if (!$cierreOrigen || $yaVinculada) throw new Exception('Esta producción ya no tiene un cambio de molde pendiente de registrar.');
+                if ((int)($cierreOrigen['molde_destino_id'] ?? 0) !== $molde_id
+                    || (int)($cierreOrigen['producto_destino_id'] ?? 0) !== $productoDestinoEmergenciaId
+                    || ($productoIdParaConfig > 0 && $productoDestinoEmergenciaId !== $productoIdParaConfig)) {
+                    throw new Exception('El producto y molde de la nueva producción no coinciden con la emergencia registrada.');
+                }
+                $eventoOrigen = [
+                    'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'vinculo_cambio_molde',
+                    'fecha' => date('Y-m-d H:i:s'), 'produccion_origen_id' => $origenCambioMoldeId,
+                    'produccion_destino_id' => (int)$produccionId,
+                    'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
+                    'usuario' => (string)($_SESSION['operario_nombre'] ?? $_SESSION['nombre_usuario'] ?? $_SESSION['user_usuario'] ?? 'Sistema'),
+                    'materiales_nuevos_registrados' => $detalle,
+                ];
+                executeNonQuery($conectar, "UPDATE produccion SET js_casusticas = array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:evento AS jsonb)), updated_at = NOW() WHERE id = :id", [
+                    'evento' => json_encode($eventoOrigen, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'id' => $origenCambioMoldeId,
+                ]);
+                $eventoDestino = [
+                    'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'produccion_por_cambio_molde',
+                    'fecha' => date('Y-m-d H:i:s'), 'produccion_origen_id' => $origenCambioMoldeId,
+                    'remanente_origen' => ['estado' => 'no_medido', 'cantidad' => null, 'unidad' => null],
+                    'nota' => 'El remanente de la corrida anterior no se pesó. Los materiales de esta producción son los registrados como nuevos.',
+                ];
+                executeNonQuery($conectar, "UPDATE produccion SET js_casusticas = array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:evento AS jsonb)) WHERE id = :id", [
+                    'evento' => json_encode($eventoDestino, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'id' => $produccionId,
+                ]);
+            }
 
             if (!empty($detalle)) {
                 insertarLineasYRestarStock($conectar, $produccionId, $detalle);
@@ -1956,9 +2007,17 @@ function enviarAEnsamblaje()
         responder(false, 'Selecciona un motivo válido para detener la producción.');
     }
     $pausaDetalleRaw = json_decode($_POST['pausa_materiales'] ?? '[]', true);
-    if ($pausarDespues && ($completo || $ultimaPasada)) {
+    if ($pausarDespues && $motivoPausa === 'cambio_turno' && ($completo || $ultimaPasada)) {
         responder(false, 'Una producción no puede pausarse y finalizarse en el mismo avance.');
     }
+    $cierrePorCambioMolde = $pausarDespues && $motivoPausa === 'emergencia_molde';
+    if ($cierrePorCambioMolde) {
+        // El cierre administrativo por cambio de molde no significa que se
+        // haya consumido toda la cantidad de la producción original.
+        $completo = false;
+        $ultimaPasada = in_array($ultimaPasadaRaw, ['true', '1'], true);
+    }
+    $finalizarCorrida = $ultimaPasada || $cierrePorCambioMolde;
     if ($pausarDespues && !is_array($pausaDetalleRaw)) {
         responder(false, 'El detalle de materiales sobrantes no tiene un formato válido.');
     }
@@ -2090,78 +2149,27 @@ function enviarAEnsamblaje()
     $materialesPausa = [];
     $destinoMolde = 0;
     $moldeDestino = null;
-    if ($pausarDespues && $motivoPausa === 'emergencia_molde') {
-        $lineasMaterial = executeQuery($conectar, "
-            SELECT rpm.material_id, rpm.cantidad, m.nombre AS material_nombre,
-                   m.unidad_medida_id, u.nombre_corto AS unidad
-            FROM rel_produccion_material rpm
-            JOIN material m ON m.id = rpm.material_id
-            LEFT JOIN unidad_medida u ON u.id = m.unidad_medida_id
-            WHERE rpm.produccion_id = :id AND rpm.deleted_at IS NULL
-            ORDER BY rpm.id
-        ", ['id' => $id]);
-        $sobrantes = [];
-        foreach ($pausaDetalleRaw as $filaSobrante) {
-            if (!is_array($filaSobrante)) responder(false, 'Un material sobrante tiene un formato inválido.');
-            $mid = (int)($filaSobrante['material_id'] ?? 0);
-            $cantidad = $filaSobrante['cantidad_sobrante'] ?? null;
-            if ($mid <= 0 || !is_numeric($cantidad) || (float)$cantidad < 0 || isset($sobrantes[$mid])) {
-                responder(false, 'Revisa las cantidades sobrantes por material.');
-            }
-            $sobrantes[$mid] = (float)$cantidad;
-        }
-        $idsDetalle = array_map(static fn($l) => (int)$l['material_id'], $lineasMaterial);
-        sort($idsDetalle);
-        $idsSobrantes = array_keys($sobrantes); sort($idsSobrantes);
-        if ($idsDetalle !== $idsSobrantes) responder(false, 'Debes informar el sobrante de cada material utilizado, incluso si es 0.');
+    if ($cierrePorCambioMolde) {
         $destinoMolde = (int)($_POST['molde_destino_id'] ?? 0);
         $productoDestinoId = (int)($_POST['producto_destino_id'] ?? 0);
-        $moldeDestino = null;
-        if ($destinoMolde > 0) {
-            $moldeDestino = executeQuery($conectar, "SELECT id, nombre FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $destinoMolde]);
-            if (empty($moldeDestino)) responder(false, 'El molde de emergencia no existe o está inactivo.');
-            $relacion = executeQuery($conectar, "SELECT 1 FROM molde m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) elem WHERE m.id = :molde_id AND (elem->>'producto_id')::int = :producto_id LIMIT 1", ['molde_id' => $destinoMolde, 'producto_id' => $productoDestinoId]);
-            if ($productoDestinoId <= 0 || empty($relacion)) responder(false, 'El producto no corresponde al molde de emergencia seleccionado.');
-        }
-        foreach ($lineasMaterial as $lineaMaterial) {
-            $mid = (int)$lineaMaterial['material_id'];
-            $cantidadSobrante = $sobrantes[$mid];
-            if ($cantidadSobrante > (float)$lineaMaterial['cantidad'] + 0.0001) {
-                responder(false, 'El sobrante de ' . $lineaMaterial['material_nombre'] . ' supera lo asignado a esta producción.');
-            }
-            // Solo se marca reutilizable si el material está asociado al producto
-            // que fabrica el molde de emergencia; no se presume compatibilidad.
-            $compatible = false;
-            if ($productoDestinoId > 0) {
-                $compat = executeQuery($conectar, "SELECT 1 FROM material m
-                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) a
-                    WHERE m.id = :material_id AND (a->>'producto_id')::int = :producto_id LIMIT 1",
-                    ['material_id' => $mid, 'producto_id' => $productoDestinoId]);
-                $compatible = !empty($compat);
-            }
-            $reutilizable = $compatible ? $cantidadSobrante : 0.0;
-            $materialesPausa[] = [
-                'material_id' => $mid, 'material' => $lineaMaterial['material_nombre'],
-                'unidad_medida_id' => (int)($lineaMaterial['unidad_medida_id'] ?? 0) ?: null,
-                'unidad_medida' => $lineaMaterial['unidad'] ?? null,
-                'cantidad_sobrante' => $cantidadSobrante,
-                'cantidad_pase' => $reutilizable,
-                'cantidad_reservada' => round($cantidadSobrante - $reutilizable, 4),
-                'compatible_con_molde_destino' => $compatible,
-            ];
-        }
+        if ($destinoMolde <= 0 || $productoDestinoId <= 0) responder(false, 'Selecciona el producto y molde que atenderán la emergencia.');
+        if ($destinoMolde === (int)$existe[0]['molde_id']) responder(false, 'El molde de emergencia debe ser distinto al molde de la producción que se cerrará.');
+        $moldeDestino = executeQuery($conectar, "SELECT id, nombre FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $destinoMolde]);
+        if (empty($moldeDestino)) responder(false, 'El molde de emergencia no existe o está inactivo.');
+        $relacion = executeQuery($conectar, "SELECT 1 FROM molde m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) elem WHERE m.id = :molde_id AND (elem->>'producto_id')::int = :producto_id LIMIT 1", ['molde_id' => $destinoMolde, 'producto_id' => $productoDestinoId]);
+        if (empty($relacion)) responder(false, 'El producto no corresponde al molde de emergencia seleccionado.');
     }
     if ($pausarDespues) {
         $eventoPausa = [
-            'evento_id' => bin2hex(random_bytes(12)), 'tipo' => 'pausa',
+            'evento_id' => bin2hex(random_bytes(12)), 'tipo' => $cierrePorCambioMolde ? 'cierre_cambio_molde' : 'pausa',
             'motivo' => $motivoPausa,
-            'fecha' => date('Y-m-d H:i:s'), 'detener' => true,
+            'fecha' => date('Y-m-d H:i:s'), 'detener' => !$cierrePorCambioMolde,
             'pasa_otro_molde' => $destinoMolde > 0,
             'molde_id' => $destinoMolde ?: null,
             'molde' => $moldeDestino[0]['nombre'] ?? null,
-            // Los saldos se mantienen por material/unidad; no se suman aquí
-            // porque una misma corrida puede contener KG y unidades distintas.
-            'materiales' => $materialesPausa,
+            'molde_destino_id' => $destinoMolde ?: null,
+            'producto_destino_id' => $productoDestinoId ?? null,
+            'remanente' => $cierrePorCambioMolde ? ['estado' => 'no_medido', 'cantidad' => null, 'unidad' => null] : null,
             'comentario' => trim($_POST['comentario_pausa'] ?? ''),
             'maquina_id' => (int)$existe[0]['maquina_id'],
             // La sesión rápida del operario no tiene user_id ni nombre_completo:
@@ -2262,7 +2270,7 @@ function enviarAEnsamblaje()
         'cantidad' => $cantidadProducida,
         'unidad' => strtoupper($unidadProduccion),
         'completo' => $completo,
-        'ultima_pasada' => $ultimaPasada,
+        'ultima_pasada' => $finalizarCorrida,
         'desglose_operarios' => array_values(array_map(
             static fn($operarioId, $cantidad) => [
                 'operario_id' => (int)$operarioId,
@@ -2321,8 +2329,8 @@ function enviarAEnsamblaje()
         executeNonQuery($conectar, "
             UPDATE produccion SET
                 cantidad_producida_kg   = :cantidad_producida,
-                detenido                = CASE WHEN :marcar_pausa THEN NOW() ELSE detenido END,
-                js_casusticas           = CASE WHEN :marcar_pausa THEN array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:evento_pausa AS jsonb)) ELSE js_casusticas END,
+                js_casusticas           = CASE WHEN :guardar_evento THEN array_append(COALESCE(js_casusticas, ARRAY[]::jsonb[]), CAST(:evento_pausa AS jsonb)) ELSE js_casusticas END,
+                detenido                = CASE WHEN :marcar_pausa THEN NOW() WHEN :cierre_cambio_molde THEN NULL ELSE detenido END,
                 fecha_hora_fin          = CASE WHEN :marcar_fin_corrida THEN COALESCE(fecha_hora_fin, NOW()) ELSE fecha_hora_fin END,
                 js_cantidades_salientes = :js_cantidades_salientes::jsonb,
                 completo                = :completo,
@@ -2345,14 +2353,16 @@ function enviarAEnsamblaje()
         ", [
             'id'                 => $id,
             'cantidad_producida' => $cantidadSalidaAcumulada,
-            'marcar_pausa' => $pausarDespues,
+            'marcar_pausa' => $pausarDespues && !$cierrePorCambioMolde,
+            'cierre_cambio_molde' => $cierrePorCambioMolde,
+            'guardar_evento' => $pausarDespues,
             'evento_pausa' => $eventoPausa === null ? null : json_encode($eventoPausa, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'marcar_fin_corrida' => $ultimaPasada,
+            'marcar_fin_corrida' => $finalizarCorrida,
             'js_cantidades_salientes' => json_encode($salidasActualizadas, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'completo' => $completo,
-            'pases_finalizados' => $ultimaPasada,
-            'marcar_fecha_envio' => $ultimaPasada,
-            'enviado_ensamblaje' => $ultimaPasada,
+            'pases_finalizados' => $finalizarCorrida,
+            'marcar_fecha_envio' => $finalizarCorrida,
+            'enviado_ensamblaje' => $finalizarCorrida,
             'guardar_fotos_pesaje'     => !empty($fotosCloudinary),
             'foto_pesaje_array_empty'  => $jsonFotoPesaje,
             'foto_pesaje_array_append' => $jsonFotoPesaje,
@@ -2387,7 +2397,7 @@ function enviarAEnsamblaje()
         $mensajeEnvio = $pausarDespues
             ? ($motivoPausa === 'cambio_turno'
                 ? "Avance registrado y disponible para $destino. La producción quedó detenida por cambio de turno y puede reanudarla el siguiente operario."
-                : "Avance registrado y disponible para $destino. La producción quedó detenida por emergencia; se guardó el sobrante y su compatibilidad.")
+                : "Avance registrado y enviado a $destino. La producción anterior quedó finalizada por cambio de molde; su remanente quedó registrado como no medido. Registra una producción nueva para el molde de emergencia.")
             : ($ultimaPasada
             ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
             : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.");
