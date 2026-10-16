@@ -197,6 +197,16 @@ include("header.php");
     display:flex; align-items:center; gap:2px; padding-top:10px; margin-top:2px;
     border-top:1px solid #f1efe8; flex-wrap:wrap;
 }
+.pc-prod-wizard-progress{display:flex;align-items:center;gap:14px;margin-bottom:18px;color:#64748b;font-size:.9rem;font-weight:600}
+.pc-prod-wizard-progress .progress{flex:1;height:7px;background:#e9edf5;border-radius:999px}
+.pc-prod-wizard-progress .progress-bar{background:#1769ff;border-radius:999px;transition:width .2s ease}
+.pc-prod-wizard-step{display:none;min-height:250px}
+.pc-prod-wizard-step.active{display:block}
+.pc-prod-summary{display:grid;gap:10px}
+.pc-prod-summary-row{display:grid;grid-template-columns:minmax(110px,.7fr) 2fr;gap:12px;padding:12px 14px;border:1px solid #e5e9f1;border-radius:12px;background:#fbfcfe}
+.pc-prod-summary-label{color:#64748b;font-weight:600}
+.pc-prod-summary-material{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #eef0f4}
+@media(max-width:575.98px){.pc-prod-summary-row{grid-template-columns:1fr;gap:4px}}
 .pc-prod-ghost-btn{
     border:none; background:none; color:#8a8578; font-size:.78em; font-weight:600;
     padding:6px 8px; border-radius:7px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;
@@ -395,6 +405,30 @@ include("header.php");
 
           <div id="bannerCambioMolde" class="alert alert-info d-none" role="status"></div>
 
+          <div class="pc-prod-wizard-progress"><span id="prodWizardPasoTexto">Paso 1 de 4</span><div class="progress"><div id="prodWizardBarra" class="progress-bar" style="width:25%"></div></div></div>
+          <section class="pc-prod-wizard-step active" data-prod-wizard-step="1">
+          <h6 class="mb-3">Molde y color</h6>
+          <div class="row">
+            <input type="hidden" id="prod_producto_id" value="">
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Molde *</label>
+                <select class="form-select" id="prod_molde_id" required disabled>
+                    <option value="">Cargando moldes...</option>
+                </select>
+                <div class="form-text">El producto terminado se asigna en Ensamblaje.</div>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Color final producido *</label>
+                <select class="form-select" id="prod_color_id" required>
+                    <option value="">Selecciona un color...</option>
+                </select>
+                <div class="form-text">Independiente de los tintes consumidos.</div>
+            </div>
+          </div>
+          </section>
+
+          <section class="pc-prod-wizard-step" data-prod-wizard-step="2">
+          <h6 class="mb-3">Operarios y datos de producción</h6>
           <div class="row">
             <div class="col-md-3 mb-2">
                 <label class="form-label">Operario(s) *</label>
@@ -422,26 +456,6 @@ include("header.php");
             </div>
         </div>
 
-          <!-- Se registra el molde usado. El producto final se determina
-               posteriormente en Ensamblaje, según la combinación armada. -->
-          <div class="row">
-            <input type="hidden" id="prod_producto_id" value="">
-            <div class="col-md-6 mb-2">
-                <label class="form-label">Molde *</label>
-                <select class="form-select" id="prod_molde_id" required disabled>
-                    <option value="">Cargando moldes...</option>
-                </select>
-                <div class="form-text">El producto terminado se asigna en Ensamblaje.</div>
-            </div>
-            <div class="col-md-6 mb-2">
-                <label class="form-label">Color final producido *</label>
-                <select class="form-select" id="prod_color_id" required>
-                    <option value="">Selecciona un color...</option>
-                </select>
-                <div class="form-text">Independiente de los tintes consumidos.</div>
-            </div>
-          </div>
-
           <div class="row">
             <div class="col-md-4 mb-2">
                 <label class="form-label">Fecha de registro</label>
@@ -452,7 +466,10 @@ include("header.php");
                 <input type="text" class="form-control" id="prod_observaciones" placeholder="Opcional">
             </div>
         </div>
+          </section>
 
+          <section class="pc-prod-wizard-step" data-prod-wizard-step="3">
+          <h6 class="mb-3">Materiales y tintes</h6>
           <hr>
 
           <!-- Materiales consumidos: menú de cards + ticket, al estilo de una
@@ -504,11 +521,19 @@ include("header.php");
             </div>
             </div>
           </div>
+          </section>
+
+          <section class="pc-prod-wizard-step" data-prod-wizard-step="4">
+            <h6 class="mb-3">Resumen antes de guardar</h6>
+            <div id="prod-resumen-previo" class="pc-prod-summary"></div>
+          </section>
 
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Guardar</button>
+          <button type="button" class="btn btn-outline-secondary" id="prodWizardAnterior" onclick="moverPasoProduccion(-1)" hidden>← Anterior</button>
+          <button type="button" class="btn btn-primary" id="prodWizardSiguiente" onclick="moverPasoProduccion(1)">Siguiente →</button>
+          <button type="submit" class="btn btn-success" id="prodWizardGuardar" hidden>Confirmar y guardar</button>
         </div>
       </form>
     </div>
@@ -1242,7 +1267,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         <div class="pc-prod-stats">
             <div class="pc-prod-stat">
                 <div class="num">${formatearCantidadProd(p.cantidad)}</div>
-                <div class="lbl">Kg insertados</div>
+                <div class="lbl">${p.origen_cambio_molde_evento ? 'Kg nuevos' : 'Kg insertados'}</div>
             </div>
             <div class="pc-prod-stat">
                 <div class="num">${p.items_count}</div>
@@ -1255,6 +1280,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
 
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
         ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
+        ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Remanente no medido de #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
 
@@ -1272,6 +1298,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                 : ''
             }
             ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
+            ${p.origen_cambio_molde_evento && puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}
             ${p.puede_registrar_emergencia && p.cierre_cambio_molde ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="crearProduccionEmergencia(${p.id})"><i class="fa-solid fa-plus"></i> Nueva producción de emergencia</button>` : ''}
             ${puedeGestionar && !p.deleted_at
                 ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
@@ -1306,23 +1333,108 @@ async function crearProduccionEmergencia(id) {
     if (!cierre || !p.puede_registrar_emergencia) return;
     const confirmacion = await Swal.fire({
         title: 'Nueva producción de emergencia',
-        text: `La producción #${id} se cerró por cambio de molde. El remanente no fue pesado; registra solo los materiales preparados e introducidos para la nueva corrida (${cierre.molde || 'molde seleccionado'}).`,
+        text: `Se creará una corrida para ${cierre.molde || 'el molde seleccionado'} con el remanente no medido.`,
         icon: 'info', showCancelButton: true, confirmButtonText: 'Continuar', cancelButtonText: 'Cancelar'
     });
     if (!confirmacion.isConfirmed) return;
-    limpiarFormularioProduccion();
-    modoEdicionProduccion = false;
-    origenCambioMoldeProduccion = Number(id);
-    productoDestinoEmergenciaProduccion = Number(cierre.producto_destino_id);
-    document.getElementById('modalProduccionTitulo').textContent = `Producción nueva · emergencia de #${id}`;
-    const bannerEmergencia = document.getElementById('bannerCambioMolde');
-    bannerEmergencia.textContent = `Origen: producción #${id}. El remanente no fue pesado; registra únicamente el material y tinte nuevos que se preparen e introduzcan en esta corrida.`;
-    bannerEmergencia.classList.remove('d-none');
-    await cargarSelectsModal({ unico_molde: `${cierre.molde_destino_id}-${cierre.producto_destino_id}` });
-    await cargarColoresProduccion();
-    document.getElementById('prod_fecha').value = fechaHoraLocalInput();
-    await renderGridMateriales();
-    modalProduccion.show();
+    const operarios = [...new Set([...(Array.isArray(p.js_operarios) ? p.js_operarios.map(op => Number(op.operario_id)) : []), Number(p.operario_id)].filter(Boolean))];
+    const creado = await llamarProduccion('GUARDARPRODUCCION', {
+        id: 0, operario_id: operarios[0] || '', operarios: JSON.stringify(operarios), maquina_id: p.maquina_id,
+        categoria_material_id: p.categoria_material_id, sucursal_id: p.sucursal_id ?? p.sucursal,
+        molde_id: cierre.molde_destino_id, unico_molde: `${cierre.molde_destino_id}-${cierre.producto_destino_id}`,
+        molde_producto: cierre.molde || '', color_id: p.color_id, cantidad: 0,
+        fecha: fechaHoraLocalInput().replace('T', ' '), observaciones: `Producción por cambio de molde de #${id}`,
+        detalle: '[]', origen_cambio_molde_id: id, producto_destino_emergencia_id: cierre.producto_destino_id,
+    });
+    if (!creado.success) { Swal.fire('No se pudo crear', creado.message, 'error'); return; }
+    const inicio = await llamarProduccion('INICIARCORRIDA', { id: creado.id });
+    if (!inicio.success) {
+        await cargarProducciones();
+        Swal.fire('Producción creada', `Se creó la producción #${creado.id}, pero no se pudo iniciar: ${inicio.message}`, 'warning');
+        return;
+    }
+    await cargarProducciones();
+    const tarjeta = document.getElementById(`fila-produccion-${creado.id}`);
+    tarjeta?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    tarjeta?.classList.add('pc-flash');
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Corrida creada. Añade material o registra un avance.', showConfirmButton: false, timer: 2400 });
+}
+
+async function agregarMaterialAProduccion(id) {
+    const p = produccionesCache.find(x => Number(x.id) === Number(id));
+    if (!p) return;
+    const productoId = Number(p.origen_cambio_molde_evento?.producto_destino_id || String(p.unico_molde_producto || '').split('-')[1] || 0);
+    const materiales = await obtenerOpcionesMaterialesProd(productoId);
+    const escapar = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const html = `<label class="form-label" for="emergencia-material">Material o tinte</label><select id="emergencia-material" class="form-select"><option value="">Seleccionar</option>${materiales.map(m => `<option value="${Number(m.id)}" data-stock="${Number(m.stock_actual)}">${escapar(m.nombre)} · stock ${formatearCantidadProd(m.stock_actual)} ${escapar(m.unidad_corto || '')}</option>`).join('')}</select><label class="form-label mt-3" for="emergencia-cantidad">Cantidad</label><input id="emergencia-cantidad" class="form-control" type="number" min="0.0001" step="0.0001" placeholder="0"><label class="form-label mt-3" for="emergencia-comentario">Nota (opcional)</label><input id="emergencia-comentario" class="form-control" maxlength="200">`;
+    const r = await Swal.fire({ title: 'Añadir material', html, showCancelButton: true, confirmButtonText: 'Agregar', cancelButtonText: 'Cancelar', preConfirm: () => {
+        const select = document.getElementById('emergencia-material');
+        const cantidad = Number(document.getElementById('emergencia-cantidad')?.value);
+        const stock = Number(select?.selectedOptions[0]?.dataset.stock || 0);
+        if (!select?.value || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > stock) { Swal.showValidationMessage('Selecciona material y una cantidad válida disponible en stock.'); return false; }
+        return { material_id: Number(select.value), cantidad, comentario: document.getElementById('emergencia-comentario')?.value.trim() || '' };
+    }});
+    if (!r.isConfirmed) return;
+    const guardado = await llamarProduccion('AGREGARMATERIALPRODUCCION', { id, detalle: JSON.stringify([r.value]) });
+    if (!guardado.success) { Swal.fire('No se pudo agregar', guardado.message, 'error'); return; }
+    materialesProdCachePorProducto = {};
+    await cargarProducciones();
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: guardado.message, showConfirmButton: false, timer: 1800 });
+}
+
+let pasoWizardProduccion = 1;
+function textoOpcionProd(id) {
+    const el = document.getElementById(id);
+    return el?.selectedOptions?.[0]?.textContent?.trim() || '—';
+}
+function escaparResumenProd(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function dibujarResumenProduccion() {
+    const operarios = Array.from(document.getElementById('prod_operario_id')?.selectedOptions || []).map(o => o.textContent.trim());
+    const materiales = ticketLineas.length
+        ? ticketLineas.map(l => `<div class="pc-prod-summary-material"><span>${escaparResumenProd(l.material_nombre)}</span><b>${formatearCantidadProd(l.cantidad)} ${escaparResumenProd(l.unidad_corto || '')}</b></div>`).join('')
+        : '<div>Sin materiales nuevos</div>';
+    document.getElementById('prod-resumen-previo').innerHTML = `
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Molde y producto</span><b>${escaparResumenProd(textoOpcionProd('prod_molde_id'))}</b></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Color</span><b>${escaparResumenProd(textoOpcionProd('prod_color_id'))}</b></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Operarios</span><b>${escaparResumenProd(operarios.join(', ') || '—')}</b></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Máquina · categoría · sucursal</span><b>${escaparResumenProd([textoOpcionProd('prod_maquina_id'), textoOpcionProd('prod_categoria_material_id'), textoOpcionProd('prod_sucursal_id')].join(' · '))}</b></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Kilos nuevos</span><b>${escaparResumenProd(document.getElementById('prod_cantidad').value || '0')} kg</b></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Materiales y tintes</span><div>${materiales}</div></div>
+        <div class="pc-prod-summary-row"><span class="pc-prod-summary-label">Fecha · observaciones</span><span>${escaparResumenProd(document.getElementById('prod_fecha').value || '—')} · ${escaparResumenProd(document.getElementById('prod_observaciones').value || 'Sin observaciones')}</span></div>`;
+}
+function validarPasoWizardProduccion() {
+    const operadorIds = tsOperario ? tsOperario.getValue() : [];
+    if (pasoWizardProduccion === 1 && (!document.getElementById('prod_molde_id').value || !document.getElementById('prod_color_id').value)) {
+        Swal.fire('Completa este paso', 'Selecciona el molde y el color final.', 'info'); return false;
+    }
+    if (pasoWizardProduccion === 2 && (!operadorIds.length || !document.getElementById('prod_maquina_id').value || !document.getElementById('prod_categoria_material_id').value || !document.getElementById('prod_sucursal_id').value)) {
+        Swal.fire('Completa este paso', 'Selecciona operario, máquina, categoría y sucursal.', 'info'); return false;
+    }
+    if (pasoWizardProduccion === 3 && (!ticketLineas.length || Number(document.getElementById('prod_cantidad').value) <= 0)) {
+        Swal.fire('Completa este paso', 'Agrega materiales o tintes y verifica los kilos nuevos.', 'info'); return false;
+    }
+    return true;
+}
+function actualizarPasoWizardProduccion() {
+    document.querySelectorAll('#modalProduccion [data-prod-wizard-step]').forEach(el => el.classList.toggle('active', Number(el.dataset.prodWizardStep) === pasoWizardProduccion));
+    document.getElementById('prodWizardPasoTexto').textContent = `Paso ${pasoWizardProduccion} de 4`;
+    document.getElementById('prodWizardBarra').style.width = `${pasoWizardProduccion * 25}%`;
+    document.getElementById('prodWizardAnterior').hidden = pasoWizardProduccion === 1;
+    document.getElementById('prodWizardSiguiente').hidden = pasoWizardProduccion === 4;
+    document.getElementById('prodWizardGuardar').hidden = pasoWizardProduccion !== 4;
+    if (pasoWizardProduccion === 4) dibujarResumenProduccion();
+}
+function moverPasoProduccion(delta) {
+    if (delta > 0 && !validarPasoWizardProduccion()) return;
+    pasoWizardProduccion = Math.max(1, Math.min(4, pasoWizardProduccion + delta));
+    actualizarPasoWizardProduccion();
+    document.querySelector('#modalProduccion .modal-body').scrollTop = 0;
+}
+function reiniciarWizardProduccion() {
+    pasoWizardProduccion = 1;
+    actualizarPasoWizardProduccion();
 }
 // Dibuja el tablero de cards según la pestaña de molde activa. Si es
 // "TODOS", se ve como antes (secciones agrupadas por producto); si es un
@@ -1504,8 +1616,11 @@ function renderTicket() {
 
     if (ticketLineas.length === 0) {
         list.innerHTML = `<li class="pc-tk-empty"><i class="fa-solid fa-basket-shopping"></i>Aún no agregas materiales.<br>Toca una card de la izquierda para empezar.</li>`;
-        totalInput.readOnly = false;
-        detalle.textContent = 'Sin materiales — ingresa los kg manualmente (ej. reproceso)';
+        totalInput.readOnly = origenCambioMoldeProduccion > 0;
+        if (origenCambioMoldeProduccion > 0) totalInput.value = '0';
+        detalle.textContent = origenCambioMoldeProduccion > 0
+            ? 'Puedes iniciar solo con el remanente no medido, o agregar materiales nuevos.'
+            : 'Sin materiales — ingresa los kg manualmente (ej. reproceso)';
         return;
     }
 
@@ -1584,6 +1699,8 @@ async function abrirModalCrearProduccion() {
     productoDestinoEmergenciaProduccion = 0;
     document.getElementById('bannerCambioMolde')?.classList.add('d-none');
     limpiarFormularioProduccion();
+    document.getElementById('prod_cantidad').min = '1';
+    document.getElementById('prod_cantidad').required = true;
     modoEdicionProduccion = false;
     document.getElementById('modalProduccionTitulo').textContent = 'Registrar producción';
     await cargarSelectsModal();
@@ -1591,6 +1708,7 @@ async function abrirModalCrearProduccion() {
     // Fecha/hora actual por defecto
     document.getElementById('prod_fecha').value = fechaHoraLocalInput();
     await renderGridMateriales();
+    reiniciarWizardProduccion();
     modalProduccion.show();
 }
 
@@ -1602,6 +1720,8 @@ async function abrirModalEditarProduccion(id) {
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
     console.log('json', json);
     limpiarFormularioProduccion();
+    document.getElementById('prod_cantidad').min = '1';
+    document.getElementById('prod_cantidad').required = true;
     modoEdicionProduccion = true;
     produccionIdActual = id;
 
@@ -1676,11 +1796,13 @@ async function abrirModalEditarProduccion(id) {
     renderTicket();
     renderGridMateriales();
 
+    reiniciarWizardProduccion();
     modalProduccion.show();
 }
 
 document.getElementById('formProduccion').addEventListener('submit', async function (e) {
     e.preventDefault();
+    if (pasoWizardProduccion < 4) { moverPasoProduccion(1); return; }
 
     if (!document.getElementById('prod_maquina_id').value) {
         Swal.fire('Falta un dato', 'Debes seleccionar la máquina.', 'warning');
@@ -1699,8 +1821,10 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         return;
     }
     if (ticketLineas.length === 0) {
-        Swal.fire('Falta un dato', 'Debes agregar al menos un material o tinte consumido.', 'warning');
-        return;
+        if (!origenCambioMoldeProduccion) {
+            Swal.fire('Falta un dato', 'Debes agregar al menos un material o tinte consumido.', 'warning');
+            return;
+        }
     }
     const moldeSelect = document.getElementById('prod_molde_id');
     const opcionMolde  = moldeSelect.selectedOptions[0];
@@ -1741,6 +1865,7 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
 
     if (json.success) {
         const esNuevo = !produccionIdActual;
+        const esEmergenciaNueva = esNuevo && origenCambioMoldeProduccion > 0;
         origenCambioMoldeProduccion = 0;
         productoDestinoEmergenciaProduccion = 0;
         modalProduccion.hide();
@@ -1748,6 +1873,18 @@ document.getElementById('formProduccion').addEventListener('submit', async funct
         if (esNuevo) productoTabActivo = 'TODOS';
         await cargarProducciones();
         if (esNuevo && json.id) {
+            if (esEmergenciaNueva) {
+                const inicio = await llamarProduccion('INICIARCORRIDA', { id: json.id });
+                if (!inicio.success) {
+                    await cargarProducciones();
+                    Swal.fire('Producción creada', `Se creó la producción #${json.id}, pero no se pudo iniciar automáticamente: ${inicio.message} Puedes iniciarla desde su tarjeta.`, 'warning');
+                    return;
+                }
+                await cargarProducciones();
+                abrirModalCantidadParaEnsamblaje(Number(json.id));
+                Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Producción de emergencia iniciada. Registra su primer avance.', showConfirmButton: false, timer: 2200 });
+                return;
+            }
             const tarjeta = document.getElementById(`fila-produccion-${json.id}`);
             tarjeta?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             tarjeta?.classList.add('pc-flash');
