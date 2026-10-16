@@ -151,8 +151,12 @@ function listarUnidadesCompatibles($unidadMedidaId)
         $conectar,
         "SELECT * FROM unidad_medida
          WHERE deleted_at IS NULL
-           AND (id = :id OR unidad_base_id = :id)
-         ORDER BY equivalencia",
+           AND COALESCE(unidad_base_id, id) = (
+               SELECT COALESCE(unidad_base_id, id)
+               FROM unidad_medida
+               WHERE id = :id AND deleted_at IS NULL
+           )
+         ORDER BY equivalencia, nombre",
         ['id' => $unidadMedidaId]
     );
     responder(true, 'OK', ['unidades' => $result]);

@@ -854,6 +854,8 @@ async function agregarFilaDetalleCompraTablet(material, datos = null) {
         material_id: Number(material.id),
         material_nombre: material.nombre,
         material_unidad_medida_id: unidadBase,
+        material_unidad_corto: material.unidad_corto || '',
+        material_unidad_equivalencia: Number(material.unidad_equivalencia) || 1,
         unidades,
         unidad_medida_id: Number(datos?.unidad_medida_id || unidadBase),
         cantidad: datos ? Number(datos.cantidad) : 0,
@@ -876,6 +878,24 @@ function actualizarTotalFilaCompraTablet(linea) {
     const totalInput = fila?.querySelector('.mat-total');
     if (totalInput) totalInput.value = linea.total ? linea.total.toFixed(2) : '';
     actualizarResumenCompraTablet();
+}
+
+function actualizarConversionFilaCompraTablet(linea, fila) {
+    const unidad = linea.unidades.find(item => Number(item.id) === Number(linea.unidad_medida_id));
+    const equivalenciaCompra = Number(unidad?.equivalencia) || 1;
+    const equivalenciaMaterial = Number(linea.material_unidad_equivalencia) || 1;
+    const cantidad = Number(linea.cantidad) || 0;
+    const conversion = equivalenciaCompra / equivalenciaMaterial;
+    const indicador = fila?.querySelector('.mat-conversion');
+    if (!indicador) return;
+
+    if (cantidad > 0 && Math.abs(conversion - 1) > 1e-9) {
+        indicador.textContent = `↔ = ${formatearCantidadCompra(cantidad * conversion)} ${linea.material_unidad_corto}`.trim();
+        indicador.hidden = false;
+    } else {
+        indicador.textContent = '';
+        indicador.hidden = true;
+    }
 }
 
 function actualizarResumenCompraTablet() {
@@ -908,7 +928,7 @@ function renderTicketCompra() {
             </option>`).join('');
         return `<tr class="fila-detalle-material" data-tempid="${linea.tempId}">
             <td data-label="Material"><div class="mat-material">${escapeHtmlCompraTablet(linea.material_nombre)}</div></td>
-            <td data-label="Unidad"><select class="form-select mat-unidad" required>${opcionesUnidad}</select></td>
+            <td data-label="Unidad"><select class="form-select mat-unidad" required>${opcionesUnidad}</select><small class="badge text-primary bg-primary-subtle mat-conversion" ${linea.cantidad > 0 ? '' : 'hidden'}></small></td>
             <td data-label="Cantidad"><input type="number" class="form-control mat-cantidad" min="0.0001" step="0.0001" value="${linea.cantidad || ''}" required></td>
             <td data-label="P.U."><input type="number" class="form-control mat-pu" min="0" step="0.01" value="${linea.sub_total || ''}" placeholder="0.00"></td>
             <td data-label="Total"><input type="number" class="form-control mat-total" min="0" step="0.01" value="${linea.total || ''}" placeholder="0.00"></td>
@@ -919,11 +939,16 @@ function renderTicketCompra() {
 
     tbody.querySelectorAll('tr[data-tempid]').forEach(fila => {
         const linea = ticketDetalleCompra.find(item => item.tempId === Number(fila.dataset.tempid));
-        fila.querySelector('.mat-unidad').addEventListener('change', event => { linea.unidad_medida_id = Number(event.target.value); });
+        fila.querySelector('.mat-unidad').addEventListener('change', event => {
+            linea.unidad_medida_id = Number(event.target.value);
+            actualizarConversionFilaCompraTablet(linea, fila);
+        });
         fila.querySelector('.mat-cantidad').addEventListener('input', event => {
             linea.cantidad = Number(event.target.value) || 0;
+            actualizarConversionFilaCompraTablet(linea, fila);
             if (!linea.total_tocado) actualizarTotalFilaCompraTablet(linea);
         });
+        actualizarConversionFilaCompraTablet(linea, fila);
         fila.querySelector('.mat-pu').addEventListener('input', event => {
             linea.sub_total = Number(event.target.value) || 0;
             actualizarTotalFilaCompraTablet(linea);

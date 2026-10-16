@@ -375,7 +375,9 @@ function guardarCompraTablet(int $operarioId)
     }
     $materialesInfo = executeQuery(
         $conectar,
-        "SELECT m.id, m.nombre, m.unidad_medida_id, um.equivalencia AS unidad_equivalencia
+        "SELECT m.id, m.nombre, m.unidad_medida_id,
+                um.equivalencia AS unidad_equivalencia,
+                COALESCE(um.unidad_base_id, um.id) AS unidad_familia_id
         FROM material m
         LEFT JOIN unidad_medida um ON um.id = m.unidad_medida_id
         WHERE m.id IN (" . implode(',', $placeholders) . ")",
@@ -394,7 +396,9 @@ function guardarCompraTablet(int $operarioId)
     }
     $unidadesInfo = executeQuery(
         $conectar,
-        "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
+        "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id,
+                COALESCE(unidad_base_id, id) AS unidad_familia_id
+         FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
         $paramsInU
     );
     $infoUnidad = [];
@@ -410,13 +414,12 @@ function guardarCompraTablet(int $operarioId)
 
         $materialActual = $infoMaterial[$linea['material_id']];
         $unidadElegida  = $infoUnidad[$linea['unidad_medida_id']];
-        $raizMaterialId = $materialActual['unidad_medida_id'];
+        $raizMaterialId = $materialActual['unidad_familia_id'] ?? null;
 
         if ($raizMaterialId !== null) {
-            $esLaMismaRaiz           = ((int)$linea['unidad_medida_id'] === (int)$raizMaterialId);
-            $esCompuestaDeEsaFamilia = ((int)($unidadElegida['unidad_base_id'] ?? 0) === (int)$raizMaterialId);
+            $mismaFamilia = (int)($unidadElegida['unidad_familia_id'] ?? 0) === (int)$raizMaterialId;
 
-            if (!$esLaMismaRaiz && !$esCompuestaDeEsaFamilia) {
+            if (!$mismaFamilia) {
                 responder(
                     false,
                     'La unidad "' . $unidadElegida['nombre'] . '" no es compatible con el material "'
@@ -777,7 +780,11 @@ function buscarUnidadesCompatibles(int $unidadMedidaId): void
         SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id
         FROM unidad_medida
         WHERE deleted_at IS NULL
-          AND (id = :id OR unidad_base_id = :id)
+          AND COALESCE(unidad_base_id, id) = (
+              SELECT COALESCE(unidad_base_id, id)
+              FROM unidad_medida
+              WHERE id = :id AND deleted_at IS NULL
+          )
         ORDER BY equivalencia, nombre
     ", ['id' => $unidadMedidaId]);
     responder(true, 'OK', ['unidades' => $result]);

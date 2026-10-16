@@ -497,7 +497,9 @@ function guardarCompra()
     }
     $materialesInfo = executeQuery(
         $conectar,
-        "SELECT m.id, m.nombre, m.unidad_medida_id, um.equivalencia AS unidad_equivalencia
+        "SELECT m.id, m.nombre, m.unidad_medida_id,
+                um.equivalencia AS unidad_equivalencia,
+                COALESCE(um.unidad_base_id, um.id) AS unidad_familia_id
         FROM material m
         LEFT JOIN unidad_medida um ON um.id = m.unidad_medida_id
         WHERE m.id IN (" . implode(',', $placeholders) . ")",
@@ -518,7 +520,9 @@ function guardarCompra()
     }
     $unidadesInfo = executeQuery(
         $conectar,
-        "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
+        "SELECT id, nombre, nombre_corto, equivalencia, unidad_base_id,
+                COALESCE(unidad_base_id, id) AS unidad_familia_id
+         FROM unidad_medida WHERE id IN (" . implode(',', $placeholdersU) . ")",
         $paramsInU
     );
     $infoUnidad = [];
@@ -534,7 +538,7 @@ function guardarCompra()
 
         $materialActual = $infoMaterial[$linea['material_id']];
         $unidadElegida  = $infoUnidad[$linea['unidad_medida_id']];
-        $raizMaterialId = $materialActual['unidad_medida_id']; // puede ser NULL
+        $raizMaterialId = $materialActual['unidad_familia_id'] ?? null; // puede ser NULL
 
         // ── Validación de familia ────────────────────────────────────────────
         // La unidad elegida en la línea debe pertenecer a la misma familia que
@@ -543,10 +547,9 @@ function guardarCompra()
         // unidad base asignada (caso legado/opcional), no hay forma de validar,
         // así que lo dejamos pasar tal cual estaba antes.
         if ($raizMaterialId !== null) {
-            $esLaMismaRaiz           = ((int)$linea['unidad_medida_id'] === (int)$raizMaterialId);
-            $esCompuestaDeEsaFamilia = ((int)($unidadElegida['unidad_base_id'] ?? 0) === (int)$raizMaterialId);
+            $mismaFamilia = (int)($unidadElegida['unidad_familia_id'] ?? 0) === (int)$raizMaterialId;
 
-            if (!$esLaMismaRaiz && !$esCompuestaDeEsaFamilia) {
+            if (!$mismaFamilia) {
                 responder(
                     false,
                     'La unidad "' . $unidadElegida['nombre'] . '" no es compatible con el material "'
