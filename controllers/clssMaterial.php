@@ -160,7 +160,30 @@ function obtenerMaterial($id)
         ['id' => $id]
     );
     if (empty($result)) responder(false, 'Material no encontrado.');
-    responder(true, 'OK', ['material' => $result[0]]);
+    $material = $result[0];
+
+    // Para tintes, Colores es la referencia visual principal. Algunos
+    // materiales antiguos tienen material.rgb vacío o desactualizado aunque
+    // su color correspondiente sí tenga el RGB correcto.
+    $esTinte = in_array($material['color'] ?? null, [true, 1, '1', 't', 'true'], true)
+        || preg_match('/^\s*TINTE(?:\s|$|-)/iu', (string)($material['nombre'] ?? '')) === 1;
+    if ($esTinte) {
+        $nombreColor = preg_replace('/^\s*TINTE\s*-?\s*/iu', '', (string)$material['nombre']);
+        $color = executeQuery(
+            $conectar,
+            "SELECT rgb FROM color
+             WHERE UPPER(TRIM(nombre)) = UPPER(:nombre) AND deleted_at IS NULL
+             ORDER BY id DESC LIMIT 1",
+            ['nombre' => trim($nombreColor)]
+        );
+        $material['color_rgb'] = !empty($color[0]['rgb'])
+            ? $color[0]['rgb']
+            : ($material['rgb'] ?? null);
+    } else {
+        $material['color_rgb'] = $material['rgb'] ?? null;
+    }
+
+    responder(true, 'OK', ['material' => $material]);
 }
 
 function buscarProductosMaterial()

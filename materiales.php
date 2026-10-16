@@ -373,8 +373,14 @@ async function abrirModalEditarMaterial(id) {
     document.getElementById('material_stock_actual').value = m.stock_actual ?? 0;
     document.getElementById('material_derivado').checked = (m.derivado === true || m.derivado === 't' || m.derivado === 'true');
     document.getElementById('material_color').checked = (m.color === true || m.color === 't' || m.color === 'true' || /^\s*TINTE(?:\s|$|-)/i.test(m.nombre || ''));
-    document.getElementById('material_rgb').value = m.rgb ?? '';
-    if (/^#[0-9a-f]{6}$/i.test(m.rgb || '')) document.getElementById('material_color_picker').value = m.rgb;
+    const rgbMaterial = String(m.color_rgb ?? m.rgb ?? '').trim();
+    document.getElementById('material_rgb').value = rgbMaterial;
+    // El input type=color no acepta rgb() ni HEX abreviado. Reseteamos antes
+    // para que nunca conserve el color del material editado anteriormente.
+    document.getElementById('material_color_picker').value = '#000000';
+    if (/^#[0-9a-f]{6}$/i.test(rgbMaterial)) {
+        document.getElementById('material_color_picker').value = rgbMaterial;
+    }
     actualizarCamposTinteMaterial();
     const idsSeleccionados = parseJsonColumnaMat(m.js_producto).map(x => x.producto_id);
     await cargarChecklistProductosMaterial(idsSeleccionados);
