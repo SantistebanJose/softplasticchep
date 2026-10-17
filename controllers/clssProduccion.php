@@ -409,9 +409,46 @@ function buscarMaterialesProduccion()
     $conectar = conectar_oll_BD();
     $texto      = trim($_POST['texto'] ?? '');
     $productoId = intval($_POST['producto_id'] ?? 0);
+    $moldeId = intval($_POST['molde_id'] ?? 0);
+    $categoriaMaterialId = intval($_POST['categoria_material_id'] ?? 0);
+    $params = [];
+
+    // En el registro de Producción, si aún no hay un SKU inequívoco (molde
+    // compartido), limita el menú a los productos asociados al molde. Cuando
+    // la categoría identifica una variante directa, se usa solo ese SKU.
+    if ($productoId <= 0 && $moldeId > 0) {
+        $variante = $categoriaMaterialId > 0
+            ? obtenerProductoDirectoMoldeCompartidoPorCategoria($conectar, $moldeId, $categoriaMaterialId)
+            : null;
+        if ($variante) {
+            $productoId = (int)$variante['producto_id'];
+        } else {
+            $relaciones = executeQuery($conectar, "
+                SELECT DISTINCT NULLIF(rel->>'producto_id', '')::int AS producto_id
+                FROM molde m
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) rel
+                WHERE m.id = :molde_id AND m.deleted_at IS NULL
+                  AND NULLIF(rel->>'producto_id', '') IS NOT NULL
+            ", ['molde_id' => $moldeId]);
+            $idsPermitidos = array_values(array_unique(array_filter(array_map(
+                static fn($fila) => (int)($fila['producto_id'] ?? 0),
+                $relaciones
+            ))));
+            if (!$idsPermitidos) responder(true, 'OK', ['materiales' => []]);
+            $placeholders = [];
+            foreach ($idsPermitidos as $i => $idPermitido) {
+                $key = 'producto_molde_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = $idPermitido;
+            }
+            $whereProducto = "EXISTS (
+                SELECT 1 FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) AS jp
+                WHERE (jp->>'producto_id')::int IN (" . implode(',', $placeholders) . ")
+            )";
+        }
+    }
 
     $where  = ["m.deleted_at IS NULL"];
-    $params = [];
     if ($texto !== '') {
         $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
         $params['texto'] = "%$texto%";
@@ -424,6 +461,11 @@ function buscarMaterialesProduccion()
             WHERE (jp->>'producto_id')::int = :producto_id
         )";
         $params['producto_id'] = $productoId;
+    } elseif (!empty($whereProducto)) {
+        $where[] = $whereProducto;
+    } elseif ($moldeId > 0) {
+        // El molde no existe, está inactivo o no tiene productos asociados.
+        responder(true, 'OK', ['materiales' => []]);
     }
 
     $sql = "SELECT m.id, m.nombre, m.stock_actual, m.unidad_medida_id, m.color,
@@ -1432,6 +1474,7 @@ function guardarProduccion()
     $molde_id           = intval($_POST['molde_id'] ?? 0);
     $unico_molde        = trim($_POST['unico_molde'] ?? '');    // "{molde_id}-{producto_id}"
     $molde_producto     = trim($_POST['molde_producto'] ?? ''); // "MOLDE — PRODUCTO"
+    $relacionesProducto = [];
 
     if ($molde_id > 0) {
         $moldeFila = executeQuery($conectar, "SELECT nombre, js_producto FROM molde WHERE id = :id AND deleted_at IS NULL", ['id' => $molde_id]);
@@ -1596,6 +1639,48 @@ function guardarProduccion()
     // NUEVO: ya no se permite un avance sin materiales/tintes consumidos.
     if (empty($detalle) && !$esAltaPorEmergencia) {
         responder(false, 'Debes agregar al menos un material o tinte consumido en este avance.');
+    }
+
+    // El cliente filtra el menú por el molde/producto, pero también se valida
+    // aquí para impedir que una petición manipulada descuente insumos ajenos.
+    if (!empty($detalle)) {
+        $productosPermitidos = $productoIdParaConfig > 0
+            ? [$productoIdParaConfig]
+            : array_values(array_unique(array_filter(array_map(
+                static fn($relacion) => (int)($relacion['producto_id'] ?? 0),
+                $relacionesProducto
+            ))));
+        if (!$productosPermitidos) {
+            responder(false, 'No se pudieron determinar los productos asociados al molde para validar los materiales.');
+        }
+
+        $idsMaterial = array_values(array_unique(array_map(static fn($linea) => (int)$linea['material_id'], $detalle)));
+        $phMateriales = [];
+        $phProductos = [];
+        $paramsValidacion = [];
+        foreach ($idsMaterial as $i => $materialId) {
+            $key = 'material_' . $i;
+            $phMateriales[] = ':' . $key;
+            $paramsValidacion[$key] = $materialId;
+        }
+        foreach ($productosPermitidos as $i => $productoPermitido) {
+            $key = 'producto_' . $i;
+            $phProductos[] = ':' . $key;
+            $paramsValidacion[$key] = $productoPermitido;
+        }
+        $materialesValidos = executeQuery($conectar, "
+            SELECT DISTINCT m.id
+            FROM material m
+            WHERE m.id IN (" . implode(',', $phMateriales) . ")
+              AND m.deleted_at IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) jp
+                  WHERE (jp->>'producto_id')::int IN (" . implode(',', $phProductos) . ")
+              )
+        ", $paramsValidacion);
+        if (count($materialesValidos) !== count($idsMaterial)) {
+            responder(false, 'Uno o más materiales no están configurados para el producto o molde seleccionado. Actualiza la lista y vuelve a intentarlo.');
+        }
     }
 
     // El color final puede obtenerse mezclando varios tintes, por lo que se

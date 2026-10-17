@@ -228,8 +228,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-emergency-materials .item{display:flex;justify-content:space-between;gap:8px}
 .pc-prod-emergency-materials .item span:first-child{min-width:0;overflow-wrap:anywhere}
 .pc-prod-emergency-materials .item b{flex:0 0 auto;color:#3d4655}
-.pc-addmat-popup{width:min(680px,calc(100vw - 24px))!important;padding:22px!important;border-radius:20px!important}
-.pc-addmat-popup .swal2-html-container{margin:10px 0 0!important;overflow:visible!important}
+.pc-addmat-popup{width:min(680px,calc(100vw - 24px))!important;max-height:calc(100dvh - 20px)!important;padding:22px!important;border-radius:20px!important}
+.pc-addmat-popup .swal2-html-container{margin:10px 0 0!important;overflow-y:auto!important;max-height:calc(100dvh - 220px)!important}
 .pc-addmat{display:grid;gap:12px;text-align:left;color:#253047}
 .pc-addmat-intro{margin:0;color:#718096;font-size:.9rem}
 .pc-addmat-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -250,7 +250,14 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-addmat-field{display:grid;gap:5px;color:#657187;font-size:.76rem;font-weight:700;text-align:left}
 .pc-addmat-field input{height:44px;min-width:0;border:1px solid #dce3ed;border-radius:10px;padding:0 11px;font:inherit;font-size:.95rem;color:#253047}
 .pc-addmat-empty{grid-column:1/-1;padding:18px 8px;text-align:center;color:#8791a0;font-size:.88rem}
-@media(max-width:390px){.pc-addmat-popup{padding:16px!important}.pc-addmat-grid{gap:6px}.pc-addmat-card{gap:6px;padding:7px}.pc-addmat-card .icono{width:28px;height:28px;flex-basis:28px}.pc-addmat-card .nombre{font-size:.72rem}}
+.pc-addmat-add{width:100%;min-height:42px;border:1px dashed #b8c8e2;border-radius:10px;background:#f5f8ff;color:#2563c9;font-weight:700}
+.pc-addmat-add:disabled{opacity:.45}
+.pc-addmat-list{display:grid;gap:6px;max-height:15vh;overflow:auto}
+.pc-addmat-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto 34px;align-items:center;gap:8px;padding:7px 9px;border:1px solid #e8edf4;border-radius:10px;background:white;font-size:.78rem}
+.pc-addmat-list-row .nombre{min-width:0;overflow-wrap:anywhere;font-weight:600}
+.pc-addmat-list-row .cantidad{font-weight:700;color:#34445e;white-space:nowrap}
+.pc-addmat-remove{width:30px;height:30px;border:0;border-radius:8px;background:#fff0f0;color:#d14343}
+@media(max-width:390px){.pc-addmat-popup{padding:16px!important}.pc-addmat-grid{gap:6px;max-height:24vh}.pc-addmat-card{gap:6px;padding:7px}.pc-addmat-card .icono{width:28px;height:28px;flex-basis:28px}.pc-addmat-card .nombre{font-size:.72rem}.pc-addmat-list{max-height:12vh}}
 .pc-prod-tags{ display:flex; flex-wrap:wrap; gap:6px; }
 .pc-prod-tag{ font-size:.75em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:4px 9px; font-weight:600; }
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
@@ -1450,7 +1457,8 @@ async function cargarMoldesDeProducto(productoId, seleccion) {
         if (encontrado) {
             selEstado.molde_id = encontrado.molde_id; selEstado.unico_molde = encontrado.unico_molde;
             selEstado.molde_etiqueta = encontrado.etiqueta; selEstado.molde_nombre = encontrado.molde_nombre;
-            selEstado.producto_id = Number(encontrado.producto_id) || '';
+            const productoSeleccionado = Number(String(seleccion).split('-')[1]) || Number(encontrado.producto_id) || 0;
+            selEstado.producto_id = productoSeleccionado || '';
         }
     }
 
@@ -1469,6 +1477,7 @@ function seleccionarMolde(uniqueVal) {
         getId: mm => mm.unico_molde, getLabel: mm => mm.molde_nombre, getIcon: () => 'fa-shapes',
         seleccionadoId: selEstado.unico_molde, onSeleccionar: 'seleccionarMolde',
     });
+    renderGridMateriales();
 }
 
 
@@ -1544,6 +1553,7 @@ function seleccionarCategoria(id) {
     selEstado.categoria_material_id = id;
     const c = (categoriasMaterialProdCache || []).find(x => String(x.id) === String(id));
     selEstado.categoria_nombre = c ? c.nombre : '';
+    renderGridMateriales();
 }
 
 // ---- Sucursal (opcional) ----
@@ -1639,6 +1649,24 @@ async function obtenerOpcionesMaterialesProd(productoId) {
     return materialesProdCachePorProducto[key];
 }
 
+async function obtenerMaterialesConfiguradosProd() {
+    const productoEnUnico = Number(String(selEstado.unico_molde || '').split('-')[1]) || 0;
+    const productoId = Number(selEstado.producto_id) || productoEnUnico;
+    if (productoId > 0) return obtenerOpcionesMaterialesProd(productoId);
+    const moldeId = Number(selEstado.molde_id) || 0;
+    if (!moldeId) return [];
+
+    const categoriaId = Number(selEstado.categoria_material_id) || 0;
+    const key = `molde_${moldeId}_categoria_${categoriaId}`;
+    if (materialesProdCachePorProducto[key]) return materialesProdCachePorProducto[key];
+    const json = await llamarProduccion('BUSCARMATERIALESPRODUCCION', {
+        molde_id: moldeId,
+        categoria_material_id: categoriaId,
+    });
+    materialesProdCachePorProducto[key] = json.success ? json.materiales : [];
+    return materialesProdCachePorProducto[key];
+}
+
 // 👉 AQUÍ, nuevas funciones:
 let pollMaterialesTimer = null;
 
@@ -1656,7 +1684,9 @@ function detenerAutoRefreshMaterialesModal() {
 }
 
 async function refrescarMaterialesEnVivo() {
-    const materiales = await obtenerOpcionesMaterialesProd('');
+    // El ticket necesita disponibilidad actual, no el stock del primer render.
+    materialesProdCachePorProducto = {};
+    const materiales = await obtenerMaterialesConfiguradosProd();
 
     ticketLineas.forEach(l => {
         const actualizado = materiales.find(m => m.id == l.material_id);
@@ -1857,7 +1887,11 @@ async function cargarProducciones(silencioso = false) {
 
 async function renderGridMateriales() {
     const grid = document.getElementById('prod_materiales_grid');
-    const materiales = await obtenerOpcionesMaterialesProd('');
+    if (!Number(selEstado.molde_id)) {
+        grid.innerHTML = '<div class="pc-mat-empty">Selecciona primero el molde para ver sus materiales configurados.</div>';
+        return;
+    }
+    const materiales = await obtenerMaterialesConfiguradosProd();
     const filtro = document.getElementById('prod_mat_buscar').value.trim().toLowerCase();
 
     let visibles = materiales.filter(m => esTinte(m) === (tipoMaterialActivo === 'tinte'));
@@ -1882,7 +1916,7 @@ async function renderGridMateriales() {
 }
 
 async function seleccionarMaterial(materialId) {
-    const materiales = await obtenerOpcionesMaterialesProd('');
+    const materiales = await obtenerMaterialesConfiguradosProd();
     const material = materiales.find(m => m.id == materialId);
     if (!material) return;
 
@@ -2077,26 +2111,58 @@ async function agregarMaterialAProduccion(id) {
             <label class="pc-addmat-field">Cantidad<input id="emergencia-cantidad" type="number" min="0.0001" step="0.0001" placeholder="0.00" inputmode="decimal"></label>
             <label class="pc-addmat-field">Nota (opcional)<input id="emergencia-comentario" type="text" maxlength="200" placeholder="Comentario"></label>
         </div>
+        <button id="emergencia-agregar-lista" type="button" class="pc-addmat-add" disabled>+ Añadir a la lista</button>
+        <div id="emergencia-lista" class="pc-addmat-list"></div>
     </div>`;
+    let detalleSeleccionado = [];
     const r = await Swal.fire({
-        title: 'Añadir material', html, customClass: { popup: 'pc-addmat-popup' },
-        showCancelButton: true, confirmButtonText: 'Agregar insumo', cancelButtonText: 'Cancelar',
+        title: 'Añadir materiales', html, customClass: { popup: 'pc-addmat-popup' },
+        showCancelButton: true, confirmButtonText: 'Guardar materiales', cancelButtonText: 'Cancelar',
         focusConfirm: false,
         didOpen: () => {
             const grid = document.getElementById('emergencia-grid');
             const buscar = document.getElementById('emergencia-buscar');
+            const inputCantidad = document.getElementById('emergencia-cantidad');
+            const btnAgregar = document.getElementById('emergencia-agregar-lista');
+            const btnConfirmar = Swal.getConfirmButton();
+            const unidadesDetalle = material => material?.unidad_corto ? ` ${escapar(material.unidad_corto)}` : '';
+            const cantidadEnLista = materialId => detalleSeleccionado
+                .filter(item => Number(item.material_id) === Number(materialId))
+                .reduce((total, item) => total + Number(item.cantidad || 0), 0);
+            const actualizarLista = () => {
+                const lista = document.getElementById('emergencia-lista');
+                lista.innerHTML = detalleSeleccionado.map((item, index) => `
+                    <div class="pc-addmat-list-row">
+                        <span class="nombre">${escapar(item.material_nombre)}</span>
+                        <span class="cantidad">${formatearCantidadProd(item.cantidad)}${unidadesDetalle(item.material)}</span>
+                        <button type="button" class="pc-addmat-remove" data-quitar="${index}" aria-label="Quitar ${escapar(item.material_nombre)}"><i class="fa-solid fa-xmark"></i></button>
+                    </div>`).join('');
+                btnConfirmar.textContent = detalleSeleccionado.length
+                    ? `Guardar ${detalleSeleccionado.length} insumo${detalleSeleccionado.length === 1 ? '' : 's'}`
+                    : 'Guardar materiales';
+                btnConfirmar.disabled = detalleSeleccionado.length === 0;
+            };
+            const actualizarBotonAgregar = () => {
+                const cantidad = Number(inputCantidad.value);
+                const reservado = materialSeleccionado ? cantidadEnLista(materialSeleccionado.id) : 0;
+                const disponible = materialSeleccionado ? Number(materialSeleccionado.stock_actual || 0) - reservado : 0;
+                btnAgregar.disabled = !materialSeleccionado || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > disponible + 0.0001;
+            };
             const pintar = () => {
                 const filtro = buscar.value.trim().toLocaleLowerCase();
                 const visibles = materiales.filter(m => esTinte(m) === (tipoActivo === 'tinte') && (!filtro || m.nombre.toLocaleLowerCase().includes(filtro)));
                 grid.innerHTML = visibles.length ? visibles.map(m => {
                     const est = estiloMaterial(m);
                     const stock = Number(m.stock_actual) || 0;
+                    const disponible = Math.max(0, stock - cantidadEnLista(m.id));
                     const activo = Number(materialSeleccionado?.id) === Number(m.id);
-                    return `<button type="button" class="pc-addmat-card ${activo ? 'activo' : ''}" data-id="${Number(m.id)}" style="--add-color:${est.color};--add-bg:${est.bg}" ${stock <= 0 ? 'disabled' : ''}>
+                    return `<button type="button" class="pc-addmat-card ${activo ? 'activo' : ''}" data-id="${Number(m.id)}" style="--add-color:${est.color};--add-bg:${est.bg}" ${disponible <= 0 ? 'disabled' : ''}>
                         <span class="icono"><i class="fa-solid ${est.icono}"></i></span>
-                        <span class="datos"><span class="nombre">${escapar(m.nombre)}</span><span class="stock">Stock: ${formatearCantidadProd(stock)} ${escapar(m.unidad_corto || '')}</span></span>
+                        <span class="datos"><span class="nombre">${escapar(m.nombre)}</span><span class="stock">Disponible: ${formatearCantidadProd(disponible)} ${escapar(m.unidad_corto || '')}</span></span>
                     </button>`;
                 }).join('') : '<div class="pc-addmat-empty">No hay opciones disponibles en esta categoría.</div>';
+                actualizarLista();
+                actualizarBotonAgregar();
             };
             const tabs = [...document.querySelectorAll('.pc-addmat-tab')];
             tabs.forEach(tab => tab.addEventListener('click', () => {
@@ -2105,29 +2171,61 @@ async function agregarMaterialAProduccion(id) {
                 pintar();
             }));
             buscar.addEventListener('input', pintar);
+            inputCantidad.addEventListener('input', actualizarBotonAgregar);
+            btnAgregar.addEventListener('click', () => {
+                if (!materialSeleccionado) return;
+                const cantidad = Number(inputCantidad.value);
+                const disponible = Number(materialSeleccionado.stock_actual || 0) - cantidadEnLista(materialSeleccionado.id);
+                if (!Number.isFinite(cantidad) || cantidad <= 0 || cantidad > disponible + 0.0001) return;
+                const comentario = document.getElementById('emergencia-comentario').value.trim();
+                const existente = detalleSeleccionado.find(item => Number(item.material_id) === Number(materialSeleccionado.id));
+                if (existente) {
+                    existente.cantidad = Math.round((Number(existente.cantidad) + cantidad) * 10000) / 10000;
+                    if (comentario) existente.comentario = [existente.comentario, comentario].filter(Boolean).join(' · ');
+                } else {
+                    detalleSeleccionado.push({
+                        material_id: Number(materialSeleccionado.id), material_nombre: materialSeleccionado.nombre,
+                        material: materialSeleccionado, cantidad, comentario,
+                    });
+                }
+                materialSeleccionado = null;
+                inputCantidad.value = '';
+                document.getElementById('emergencia-comentario').value = '';
+                document.getElementById('emergencia-seleccion').innerHTML = '<span>Selecciona otro insumo</span><b>—</b>';
+                pintar();
+            });
+            document.getElementById('emergencia-lista').addEventListener('click', event => {
+                const boton = event.target.closest('[data-quitar]');
+                if (!boton) return;
+                detalleSeleccionado.splice(Number(boton.dataset.quitar), 1);
+                pintar();
+            });
             grid.addEventListener('click', event => {
                 const card = event.target.closest('.pc-addmat-card');
                 if (!card) return;
                 materialSeleccionado = materiales.find(m => Number(m.id) === Number(card.dataset.id)) || null;
-                const unidad = materialSeleccionado?.unidad_corto ? ` ${escapar(materialSeleccionado.unidad_corto)}` : '';
-                document.getElementById('emergencia-seleccion').innerHTML = `<span>Insumo seleccionado</span><b>${escapar(materialSeleccionado?.nombre)} · ${formatearCantidadProd(materialSeleccionado?.stock_actual)}${unidad} disponibles</b>`;
+                const reservado = cantidadEnLista(materialSeleccionado?.id);
+                const disponible = Number(materialSeleccionado?.stock_actual || 0) - reservado;
+                document.getElementById('emergencia-seleccion').innerHTML = `<span>Insumo seleccionado</span><b>${escapar(materialSeleccionado?.nombre)} · ${formatearCantidadProd(disponible)}${unidadesDetalle(materialSeleccionado)} disponibles</b>`;
                 pintar();
-                document.getElementById('emergencia-cantidad').focus();
+                inputCantidad.focus();
             });
             pintar();
         },
         preConfirm: () => {
-            const cantidad = Number(document.getElementById('emergencia-cantidad')?.value);
-            const stock = Number(materialSeleccionado?.stock_actual || 0);
-            if (!materialSeleccionado || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > stock) {
-                Swal.showValidationMessage('Elige un insumo e ingresa una cantidad válida dentro del stock disponible.');
+            if (materialSeleccionado) {
+                Swal.showValidationMessage('Añade el insumo seleccionado a la lista antes de guardar.');
                 return false;
             }
-            return { material_id: Number(materialSeleccionado.id), cantidad, comentario: document.getElementById('emergencia-comentario')?.value.trim() || '' };
+            if (!detalleSeleccionado.length) {
+                Swal.showValidationMessage('Añade al menos un material o tinte a la lista.');
+                return false;
+            }
+            return detalleSeleccionado.map(({ material_id, cantidad, comentario }) => ({ material_id, cantidad, comentario }));
         }
     });
     if (!r.isConfirmed) return;
-    const guardado = await llamarProduccion('AGREGARMATERIALPRODUCCION', { id, detalle: JSON.stringify([r.value]) });
+    const guardado = await llamarProduccion('AGREGARMATERIALPRODUCCION', { id, detalle: JSON.stringify(r.value) });
     if (!guardado.success) { Swal.fire('No se pudo agregar', guardado.message, 'error'); return; }
     materialesProdCachePorProducto = {};
     await cargarProducciones();
@@ -2227,7 +2325,7 @@ async function abrirModalEditarProduccion(id) {
         agregadoPorMaterial[d.material_id].cantidad += parseFloat(d.cantidad);
     });
 
-    const materiales = await obtenerOpcionesMaterialesProd('');
+    const materiales = await obtenerMaterialesConfiguradosProd();
     ticketLineas = Object.values(agregadoPorMaterial).map(d => {
         const materialActual = materiales.find(m => m.id == d.material_id);
         const est = estiloMaterial(materialActual || { nombre: d.material_nombre });
