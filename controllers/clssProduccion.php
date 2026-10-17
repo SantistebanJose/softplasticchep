@@ -901,6 +901,7 @@ function listarProducciones()
             pr.descripcion AS producto_descripcion,
             pr.js_configuracion_empaquetado,
             COALESCE(rpm_count.items_count, 0) AS items_count,
+            COALESCE(rpm_count.materiales_detalle, '[]'::jsonb) AS materiales_detalle,
             cfg.item,
             cfg.item->>'salida_produccion' AS unidad_salida_produccion,
             cfg.item->>'salida_merma'      AS unidad_salida_merma,
@@ -917,10 +918,18 @@ function listarProducciones()
         LEFT JOIN LATERAL jsonb_array_elements(pr.js_configuracion) AS x(item) ON (x.item->>'molde_id')::bigint = mo.id
         LEFT JOIN LATERAL (SELECT COALESCE(pd.js_configuracion_moment, x.item) AS item) cfg ON true
         LEFT JOIN (
-            SELECT produccion_id, COUNT(*) AS items_count
-            FROM rel_produccion_material
-            WHERE deleted_at IS NULL
-            GROUP BY produccion_id
+            SELECT rpm.produccion_id,
+                   COUNT(*) AS items_count,
+                   jsonb_agg(jsonb_build_object(
+                       'nombre', m.nombre,
+                       'cantidad', rpm.cantidad,
+                       'unidad', um.nombre_corto
+                   ) ORDER BY m.nombre) AS materiales_detalle
+            FROM rel_produccion_material rpm
+            JOIN material m ON m.id = rpm.material_id
+            LEFT JOIN unidad_medida um ON um.id = m.unidad_medida_id
+            WHERE rpm.deleted_at IS NULL
+            GROUP BY rpm.produccion_id
         ) rpm_count ON rpm_count.produccion_id = pd.id
         WHERE " . implode(' AND ', $where) . "
         ORDER BY pd.enviado_ensamblaje ASC, pd.id DESC
@@ -936,6 +945,9 @@ function listarProducciones()
         $itemsCompartidosPorMolde = obtenerItemsConfigMoldesCompartidos($conectar, $moldesCompartidosIds);
 
         foreach ($result as &$fila) {
+            $fila['materiales_detalle'] = !empty($fila['materiales_detalle'])
+                ? (json_decode($fila['materiales_detalle'], true) ?: [])
+                : [];
             $fila['cierre_cambio_molde'] = !empty($fila['cierre_cambio_molde'])
                 ? (json_decode($fila['cierre_cambio_molde'], true) ?: null) : null;
             $fila['origen_cambio_molde_evento'] = !empty($fila['origen_cambio_molde_evento'])

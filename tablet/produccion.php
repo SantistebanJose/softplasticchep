@@ -224,6 +224,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-stats{ display:flex; gap:26px; }
 .pc-prod-stat .num{ font-size:1.35em; font-weight:700; color:#1f2430; line-height:1; }
 .pc-prod-stat .lbl{ font-size:.7em; color:#9a9585; margin-top:3px; text-transform:uppercase; letter-spacing:.03em; }
+.pc-prod-emergency-materials{display:grid;gap:4px;margin:8px 0 2px;padding:8px 10px;border-radius:10px;background:#fbf8ef;color:#756b55;font-size:.78em;line-height:1.3}
+.pc-prod-emergency-materials .item{display:flex;justify-content:space-between;gap:8px}
+.pc-prod-emergency-materials .item span:first-child{min-width:0;overflow-wrap:anywhere}
+.pc-prod-emergency-materials .item b{flex:0 0 auto;color:#3d4655}
 .pc-prod-tags{ display:flex; flex-wrap:wrap; gap:6px; }
 .pc-prod-tag{ font-size:.75em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:4px 9px; font-weight:600; }
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
@@ -1717,14 +1721,17 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         <div class="pc-prod-title">${p.molde_nombre ?? '-'}</div>
         <div class="pc-prod-meta">${metaPartes.map(t => `<span>${t}</span>`).join('')}</div>
         <div class="pc-prod-stats">
-            <div class="pc-prod-stat"><div class="num">${formatearCantidadProd(p.cantidad)}</div><div class="lbl">${p.origen_cambio_molde_evento ? 'Kg nuevos' : 'Kg insertados'}</div></div>
+            <div class="pc-prod-stat"><div class="num">${p.origen_cambio_molde_evento ? 'No medido' : formatearCantidadProd(p.cantidad)}</div><div class="lbl">${p.origen_cambio_molde_evento ? 'Remanente' : 'Kg insertados'}</div></div>
             <div class="pc-prod-stat"><div class="num">${p.items_count}</div><div class="lbl">Material${p.items_count == 1 ? '' : 'es'}</div></div>
         </div>
+        ${p.origen_cambio_molde_evento ? `<div class="pc-prod-emergency-materials"><b>Materiales agregados</b>${(Array.isArray(p.materiales_detalle) ? p.materiales_detalle : []).length
+            ? p.materiales_detalle.map(m => `<div class="item"><span>${escaparResumenProd(m.nombre || 'Material')}</span><b>${formatearCantidadProd(m.cantidad)} ${escaparResumenProd(m.unidad || '')}</b></div>`).join('')
+            : '<span>Sin materiales agregados</span>'}</div>` : ''}
         ${tags.length ? `<div class="pc-prod-tags">${tags.map(t => typeof t === 'string' ? `<span class="pc-prod-tag">${t}</span>` : `<span class="pc-prod-tag ${t.clase}">${t.texto}</span>`).join('')}</div>` : ''}
         ${!puedeGestionar ? '<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-eye"></i> Solo seguimiento · registrado por otro operario</div>' : ''}
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
         ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
-        ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Remanente no medido de #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
+        ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Origen: producción #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
