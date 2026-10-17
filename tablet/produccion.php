@@ -228,6 +228,29 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-emergency-materials .item{display:flex;justify-content:space-between;gap:8px}
 .pc-prod-emergency-materials .item span:first-child{min-width:0;overflow-wrap:anywhere}
 .pc-prod-emergency-materials .item b{flex:0 0 auto;color:#3d4655}
+.pc-addmat-popup{width:min(680px,calc(100vw - 24px))!important;padding:22px!important;border-radius:20px!important}
+.pc-addmat-popup .swal2-html-container{margin:10px 0 0!important;overflow:visible!important}
+.pc-addmat{display:grid;gap:12px;text-align:left;color:#253047}
+.pc-addmat-intro{margin:0;color:#718096;font-size:.9rem}
+.pc-addmat-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pc-addmat-tab{border:1px solid #e4e9f1;background:#f7f9fc;color:#64748b;border-radius:11px;padding:10px 8px;font-weight:700}
+.pc-addmat-tab.activo{background:#17243b;border-color:#17243b;color:white}
+.pc-addmat-search{height:44px;border:1px solid #dce3ed;border-radius:11px;padding:0 12px;font:inherit}
+.pc-addmat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:32vh;overflow:auto;padding:2px}
+.pc-addmat-card{display:flex;align-items:center;gap:9px;min-width:0;min-height:64px;padding:9px;border:1px solid #e7e4dd;border-radius:12px;background:white;color:#30394a;text-align:left}
+.pc-addmat-card.activo{border-color:#2872f5;box-shadow:0 0 0 2px #2872f533;background:#f6f9ff}
+.pc-addmat-card:disabled{opacity:.5}
+.pc-addmat-card .icono{width:32px;height:32px;flex:0 0 32px;display:grid;place-items:center;border-radius:9px;background:var(--add-bg);color:var(--add-color)}
+.pc-addmat-card .datos{display:grid;gap:3px;min-width:0}
+.pc-addmat-card .nombre{font-size:.78rem;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
+.pc-addmat-card .stock{color:#8791a0;font-size:.67rem}
+.pc-addmat-selected{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:11px;background:#f3f6fb;color:#566174;font-size:.84rem}
+.pc-addmat-selected b{color:#17243b;text-align:right}
+.pc-addmat-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pc-addmat-field{display:grid;gap:5px;color:#657187;font-size:.76rem;font-weight:700;text-align:left}
+.pc-addmat-field input{height:44px;min-width:0;border:1px solid #dce3ed;border-radius:10px;padding:0 11px;font:inherit;font-size:.95rem;color:#253047}
+.pc-addmat-empty{grid-column:1/-1;padding:18px 8px;text-align:center;color:#8791a0;font-size:.88rem}
+@media(max-width:390px){.pc-addmat-popup{padding:16px!important}.pc-addmat-grid{gap:6px}.pc-addmat-card{gap:6px;padding:7px}.pc-addmat-card .icono{width:28px;height:28px;flex-basis:28px}.pc-addmat-card .nombre{font-size:.72rem}}
 .pc-prod-tags{ display:flex; flex-wrap:wrap; gap:6px; }
 .pc-prod-tag{ font-size:.75em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:4px 9px; font-weight:600; }
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
@@ -2039,14 +2062,70 @@ async function agregarMaterialAProduccion(id) {
     const productoId = Number(p.origen_cambio_molde_evento?.producto_destino_id || String(p.unico_molde_producto || '').split('-')[1] || 0);
     const materiales = await obtenerOpcionesMaterialesProd(productoId);
     const escapar = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const html = `<label class="form-label" for="emergencia-material">Material o tinte</label><select id="emergencia-material" class="form-select"><option value="">Seleccionar</option>${materiales.map(m => `<option value="${Number(m.id)}" data-stock="${Number(m.stock_actual)}">${escapar(m.nombre)} · stock ${formatearCantidadProd(m.stock_actual)} ${escapar(m.unidad_corto || '')}</option>`).join('')}</select><label class="form-label mt-3" for="emergencia-cantidad">Cantidad</label><input id="emergencia-cantidad" class="form-control" type="number" min="0.0001" step="0.0001" placeholder="0"><label class="form-label mt-3" for="emergencia-comentario">Nota (opcional)</label><input id="emergencia-comentario" class="form-control" maxlength="200">`;
-    const r = await Swal.fire({ title: 'Añadir material', html, showCancelButton: true, confirmButtonText: 'Agregar', cancelButtonText: 'Cancelar', preConfirm: () => {
-        const select = document.getElementById('emergencia-material');
-        const cantidad = Number(document.getElementById('emergencia-cantidad')?.value);
-        const stock = Number(select?.selectedOptions[0]?.dataset.stock || 0);
-        if (!select?.value || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > stock) { Swal.showValidationMessage('Selecciona material y una cantidad válida disponible en stock.'); return false; }
-        return { material_id: Number(select.value), cantidad, comentario: document.getElementById('emergencia-comentario')?.value.trim() || '' };
-    }});
+    let tipoActivo = 'material';
+    let materialSeleccionado = null;
+    const html = `<div class="pc-addmat">
+        <p class="pc-addmat-intro">Busca y elige un insumo. Los tintes muestran su color.</p>
+        <div class="pc-addmat-tabs">
+            <button type="button" class="pc-addmat-tab activo" data-tipo="material">Materiales</button>
+            <button type="button" class="pc-addmat-tab" data-tipo="tinte">Tintes</button>
+        </div>
+        <input id="emergencia-buscar" class="pc-addmat-search" type="search" placeholder="Buscar material o tinte..." autocomplete="off">
+        <div id="emergencia-grid" class="pc-addmat-grid"></div>
+        <div id="emergencia-seleccion" class="pc-addmat-selected"><span>Selecciona un insumo</span><b>—</b></div>
+        <div class="pc-addmat-fields">
+            <label class="pc-addmat-field">Cantidad<input id="emergencia-cantidad" type="number" min="0.0001" step="0.0001" placeholder="0.00" inputmode="decimal"></label>
+            <label class="pc-addmat-field">Nota (opcional)<input id="emergencia-comentario" type="text" maxlength="200" placeholder="Comentario"></label>
+        </div>
+    </div>`;
+    const r = await Swal.fire({
+        title: 'Añadir material', html, customClass: { popup: 'pc-addmat-popup' },
+        showCancelButton: true, confirmButtonText: 'Agregar insumo', cancelButtonText: 'Cancelar',
+        focusConfirm: false,
+        didOpen: () => {
+            const grid = document.getElementById('emergencia-grid');
+            const buscar = document.getElementById('emergencia-buscar');
+            const pintar = () => {
+                const filtro = buscar.value.trim().toLocaleLowerCase();
+                const visibles = materiales.filter(m => esTinte(m) === (tipoActivo === 'tinte') && (!filtro || m.nombre.toLocaleLowerCase().includes(filtro)));
+                grid.innerHTML = visibles.length ? visibles.map(m => {
+                    const est = estiloMaterial(m);
+                    const stock = Number(m.stock_actual) || 0;
+                    const activo = Number(materialSeleccionado?.id) === Number(m.id);
+                    return `<button type="button" class="pc-addmat-card ${activo ? 'activo' : ''}" data-id="${Number(m.id)}" style="--add-color:${est.color};--add-bg:${est.bg}" ${stock <= 0 ? 'disabled' : ''}>
+                        <span class="icono"><i class="fa-solid ${est.icono}"></i></span>
+                        <span class="datos"><span class="nombre">${escapar(m.nombre)}</span><span class="stock">Stock: ${formatearCantidadProd(stock)} ${escapar(m.unidad_corto || '')}</span></span>
+                    </button>`;
+                }).join('') : '<div class="pc-addmat-empty">No hay opciones disponibles en esta categoría.</div>';
+            };
+            const tabs = [...document.querySelectorAll('.pc-addmat-tab')];
+            tabs.forEach(tab => tab.addEventListener('click', () => {
+                tipoActivo = tab.dataset.tipo;
+                tabs.forEach(item => item.classList.toggle('activo', item === tab));
+                pintar();
+            }));
+            buscar.addEventListener('input', pintar);
+            grid.addEventListener('click', event => {
+                const card = event.target.closest('.pc-addmat-card');
+                if (!card) return;
+                materialSeleccionado = materiales.find(m => Number(m.id) === Number(card.dataset.id)) || null;
+                const unidad = materialSeleccionado?.unidad_corto ? ` ${escapar(materialSeleccionado.unidad_corto)}` : '';
+                document.getElementById('emergencia-seleccion').innerHTML = `<span>Insumo seleccionado</span><b>${escapar(materialSeleccionado?.nombre)} · ${formatearCantidadProd(materialSeleccionado?.stock_actual)}${unidad} disponibles</b>`;
+                pintar();
+                document.getElementById('emergencia-cantidad').focus();
+            });
+            pintar();
+        },
+        preConfirm: () => {
+            const cantidad = Number(document.getElementById('emergencia-cantidad')?.value);
+            const stock = Number(materialSeleccionado?.stock_actual || 0);
+            if (!materialSeleccionado || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > stock) {
+                Swal.showValidationMessage('Elige un insumo e ingresa una cantidad válida dentro del stock disponible.');
+                return false;
+            }
+            return { material_id: Number(materialSeleccionado.id), cantidad, comentario: document.getElementById('emergencia-comentario')?.value.trim() || '' };
+        }
+    });
     if (!r.isConfirmed) return;
     const guardado = await llamarProduccion('AGREGARMATERIALPRODUCCION', { id, detalle: JSON.stringify([r.value]) });
     if (!guardado.success) { Swal.fire('No se pudo agregar', guardado.message, 'error'); return; }
