@@ -62,9 +62,12 @@ function verificarDniOperario(string $dni): array
 
     $result = executeQuery(
         $conectar,
-        "SELECT id, user_, nombre_completo, rol_y_perfiles, deleted_at
-         FROM usuario
-         WHERE user_ = :user_",
+        "SELECT u.id, u.operario_id, u.user_, u.nombre_completo, u.rol_y_perfiles, u.deleted_at,
+                o.marcacion, o.js_marcacion, o.activo AS operario_activo,
+                o.deleted_at AS operario_deleted_at
+         FROM usuario u
+         LEFT JOIN operario o ON o.id = u.operario_id
+         WHERE u.user_ = :user_",
         ['user_' => $dni]
     );
 
@@ -89,7 +92,52 @@ function verificarDniOperario(string $dni): array
         return ['success' => false, 'error' => 'Este DNI no tiene acceso a la tablet.'];
     }
 
+    if (!empty($usuario['operario_id'])) {
+        if ($usuario['operario_deleted_at'] !== null || in_array($usuario['operario_activo'], [false, 0, '0', 'f'], true)) {
+            return ['success' => false, 'error' => 'Este operario está desactivado. Contacta a un administrador.'];
+        }
+        $errorMarcacion = validarDiaMarcacionOperario($usuario['marcacion'] ?? null, $usuario['js_marcacion'] ?? null);
+        if ($errorMarcacion !== null) {
+            return ['success' => false, 'error' => $errorMarcacion];
+        }
+    }
+
     return ['success' => true, 'error' => null, 'nombre' => $usuario['nombre_completo']];
+}
+
+/** Bloquea el inicio de sesión temporal fuera de los días habilitados. */
+function validarDiaMarcacionOperario($marcacion, $jsMarcacion): ?string
+{
+    if (strtoupper(trim((string) $marcacion)) !== 'T') return null;
+
+    $detalle = decodificarJsonArray($jsMarcacion);
+    $zona = new DateTimeZone('America/Lima');
+    $hoy = new DateTimeImmutable('today', $zona);
+    $parsearFecha = static function ($fecha) use ($zona): ?DateTimeImmutable {
+        if (!is_string($fecha) || $fecha === '') return null;
+        $valor = DateTimeImmutable::createFromFormat('!d-m-Y', $fecha, $zona);
+        $errores = DateTimeImmutable::getLastErrors();
+        return $valor && ($errores === false || ($errores['warning_count'] === 0 && $errores['error_count'] === 0))
+            ? $valor
+            : null;
+    };
+    $inicio = $parsearFecha($detalle['dia_inicio'] ?? null);
+    $fin = $parsearFecha($detalle['dia_fin'] ?? null);
+
+    if (!$inicio || !$fin || $hoy < $inicio || $hoy > $fin) {
+        return 'Tu periodo de trabajo temporal no está vigente hoy. Contacta a un administrador.';
+    }
+
+    $diasSemana = $detalle['dias_semana'] ?? [];
+    $domingoPermitido = is_array($diasSemana) && in_array('domingo', $diasSemana, true) && $hoy->format('N') === '7';
+    $hoyDmy = $hoy->format('d-m-Y');
+    $fechasHabilitadas = $detalle['fechas_habilitadas'] ?? [];
+    $fechaPuntualPermitida = is_array($fechasHabilitadas) && in_array($hoyDmy, $fechasHabilitadas, true);
+
+    if (!$domingoPermitido && !$fechaPuntualPermitida) {
+        return 'Tu inicio de sesión no está habilitado para hoy. Solicita al administrador que autorice este domingo o fecha.';
+    }
+    return null;
 }
 
 /**

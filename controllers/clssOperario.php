@@ -414,6 +414,9 @@ function guardarOperario()
     $diaInicioInput  = trim($_POST['dia_inicio'] ?? '');
     $diaFinInput     = trim($_POST['dia_fin'] ?? '');
     $descripcion     = trim($_POST['descripcion_marcacion'] ?? '');
+    $domingoHabilitado = ($_POST['domingo'] ?? '0') === '1';
+    $fechasHabilitadasInput = json_decode($_POST['fechas_habilitadas'] ?? '[]', true);
+    if (!is_array($fechasHabilitadasInput)) $fechasHabilitadasInput = [];
 
     // sucursales/etapas llegan como JSON: "[1,3]" (ids seleccionados en el multi-select)
     $sucursalesInput = json_decode($_POST['sucursales'] ?? '[]', true);
@@ -439,12 +442,30 @@ function guardarOperario()
     if ($diaFin !== null && fechaMarcacionComparable($diaFin) < fechaMarcacionComparable($diaInicio)) responder(false, 'La fecha de fin no puede ser anterior al inicio.');
     if ($marcacion === 'S') $diaFin = null;
 
+    $fechasHabilitadas = [];
+    foreach ($fechasHabilitadasInput as $fechaInput) {
+        $fecha = normalizarFechaMarcacion(trim((string) $fechaInput));
+        if ($fecha === null) responder(false, 'Una de las fechas autorizadas no es válida.');
+        if (fechaMarcacionComparable($fecha) < fechaMarcacionComparable($diaInicio) ||
+            ($diaFin !== null && fechaMarcacionComparable($fecha) > fechaMarcacionComparable($diaFin))) {
+            responder(false, 'Las fechas autorizadas deben estar dentro del periodo temporal.');
+        }
+        $fechasHabilitadas[] = $fecha;
+    }
+    $fechasHabilitadas = array_values(array_unique($fechasHabilitadas));
+    usort($fechasHabilitadas, fn($a, $b) => fechaMarcacionComparable($a) <=> fechaMarcacionComparable($b));
+    if ($marcacion === 'T' && !$domingoHabilitado && empty($fechasHabilitadas)) {
+        responder(false, 'Habilita los domingos o agrega al menos una fecha autorizada para el personal temporal.');
+    }
+
     $jsMarcacionArray = [
         'marcacion' => $marcacion,
         'marcacion_' => $marcacion === 'S' ? 'Siempre' : 'Temporal',
         'dia_inicio' => $diaInicio,
         'dia_fin' => $diaFin,
         'descripción' => $descripcion !== '' ? $descripcion : '-',
+        'dias_semana' => $marcacion === 'T' && $domingoHabilitado ? ['domingo'] : [],
+        'fechas_habilitadas' => $marcacion === 'T' ? $fechasHabilitadas : [],
     ];
     $js_marcacion_json = json_encode($jsMarcacionArray, JSON_UNESCAPED_UNICODE);
 
@@ -547,7 +568,9 @@ function guardarOperario()
             : ($registroAnterior['js_marcacion'] ?? []);
         if (($marcacionAnterior['dia_inicio'] ?? null) !== $diaInicio ||
             ($marcacionAnterior['dia_fin'] ?? null) !== $diaFin ||
-            ($marcacionAnterior['descripción'] ?? '-') !== ($descripcion !== '' ? $descripcion : '-')) {
+            ($marcacionAnterior['descripción'] ?? '-') !== ($descripcion !== '' ? $descripcion : '-') ||
+            ($marcacionAnterior['dias_semana'] ?? []) !== $jsMarcacionArray['dias_semana'] ||
+            ($marcacionAnterior['fechas_habilitadas'] ?? []) !== $jsMarcacionArray['fechas_habilitadas']) {
             $cambios[] = [
                 'campo' => 'Detalle de marcación',
                 'valor_antes' => json_encode($marcacionAnterior, JSON_UNESCAPED_UNICODE) ?: '(vacío)',

@@ -110,6 +110,19 @@ include("header.php");
             <label class="form-label">Descripción</label>
             <textarea class="form-control" id="op_descripcion_marcacion" rows="2" maxlength="500" placeholder="Motivo o detalle del trabajo temporal"></textarea>
           </div>
+          <div class="border rounded p-3 mb-2 d-none" id="op_calendario_temporal">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="op_habilitar_domingo">
+              <label class="form-check-label" for="op_habilitar_domingo">Permitir inicio de sesión todos los domingos</label>
+            </div>
+            <label class="form-label" for="op_fecha_excepcion">Fechas autorizadas (feriados o días puntuales)</label>
+            <div class="input-group mb-2">
+              <input type="date" class="form-control" id="op_fecha_excepcion">
+              <button type="button" class="btn btn-outline-primary" id="op_agregar_fecha">Agregar fecha</button>
+            </div>
+            <div id="op_fechas_habilitadas" class="d-flex flex-wrap gap-2"></div>
+            <small class="text-muted d-block mt-2">El ingreso a la tablet se permitirá solo los domingos marcados o en las fechas de esta lista, dentro del periodo temporal.</small>
+          </div>
           <div class="mb-2">
             <label class="form-label">Sucursales</label>
             <select id="op_sucursales" multiple placeholder="Selecciona una o más sucursales..."></select>
@@ -148,6 +161,7 @@ let tomSelectEtapas = null;
 let sucursalesActivas = [];
 let etapasActivas = [];
 let cargosActivos = [];
+let fechasHabilitadas = [];
 
 function fechaISODesdeMarcacion(fecha) {
     if (!fecha) return '';
@@ -167,8 +181,34 @@ function fechaLocalISO() {
 function actualizarCamposMarcacion() {
     const temporal = document.getElementById('op_marcacion').value === 'T';
     document.getElementById('op_dia_fin_wrap').classList.toggle('d-none', !temporal);
+    document.getElementById('op_calendario_temporal').classList.toggle('d-none', !temporal);
     document.getElementById('op_dia_fin').required = temporal;
     document.getElementById('op_dia_inicio').required = temporal || !modoEdicionOperario;
+}
+
+function mostrarFechasHabilitadas() {
+    const contenedor = document.getElementById('op_fechas_habilitadas');
+    contenedor.innerHTML = fechasHabilitadas.map((fecha, indice) => `
+        <span class="badge bg-light text-dark border d-inline-flex align-items-center gap-2">
+            ${fechaISODesdeMarcacion(fecha)}
+            <button type="button" class="btn-close" aria-label="Quitar fecha" onclick="quitarFechaHabilitada(${indice})"></button>
+        </span>
+    `).join('');
+}
+
+function quitarFechaHabilitada(indice) {
+    fechasHabilitadas.splice(indice, 1);
+    mostrarFechasHabilitadas();
+}
+
+function agregarFechaHabilitada() {
+    const fecha = document.getElementById('op_fecha_excepcion').value;
+    if (!fecha) return;
+    const fechaMarcacion = `${fecha.slice(8, 10)}-${fecha.slice(5, 7)}-${fecha.slice(0, 4)}`;
+    if (!fechasHabilitadas.includes(fechaMarcacion)) fechasHabilitadas.push(fechaMarcacion);
+    fechasHabilitadas.sort((a, b) => fechaISODesdeMarcacion(a).localeCompare(fechaISODesdeMarcacion(b)));
+    document.getElementById('op_fecha_excepcion').value = '';
+    mostrarFechasHabilitadas();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -195,6 +235,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('fop_sucursal').addEventListener('change', cargarOperarios);
     document.getElementById('fop_etapa').addEventListener('change', cargarOperarios);
     document.getElementById('op_marcacion').addEventListener('change', actualizarCamposMarcacion);
+    document.getElementById('op_agregar_fecha').addEventListener('click', agregarFechaHabilitada);
 
     document.getElementById('btnBuscarDNI').addEventListener('click', buscarDNIOperario);
     document.getElementById('op_dni').addEventListener('keydown', (e) => {
@@ -350,6 +391,10 @@ function limpiarFormularioOperario() {
     document.getElementById('op_dia_inicio').value = fechaLocalISO();
     document.getElementById('op_dia_fin').value = '';
     document.getElementById('op_descripcion_marcacion').value = '';
+    document.getElementById('op_habilitar_domingo').checked = false;
+    document.getElementById('op_fecha_excepcion').value = '';
+    fechasHabilitadas = [];
+    mostrarFechasHabilitadas();
     actualizarCamposMarcacion();
 }
 
@@ -378,6 +423,9 @@ async function abrirModalEditarOperario(id) {
     document.getElementById('op_dia_inicio').value = fechaISODesdeMarcacion(detalleMarcacion.dia_inicio);
     document.getElementById('op_dia_fin').value = fechaISODesdeMarcacion(detalleMarcacion.dia_fin);
     document.getElementById('op_descripcion_marcacion').value = detalleMarcacion['descripción'] || detalleMarcacion.descripcion || '';
+    document.getElementById('op_habilitar_domingo').checked = (detalleMarcacion.dias_semana || []).includes('domingo');
+    fechasHabilitadas = Array.isArray(detalleMarcacion.fechas_habilitadas) ? [...detalleMarcacion.fechas_habilitadas] : [];
+    mostrarFechasHabilitadas();
     actualizarCamposMarcacion();
 
     let sucursalesAsignadas = o.js_sucursales || [];
@@ -460,6 +508,8 @@ document.getElementById('formOperario').addEventListener('submit', async functio
         dia_inicio: document.getElementById('op_dia_inicio').value,
         dia_fin: document.getElementById('op_dia_fin').value,
         descripcion_marcacion: document.getElementById('op_descripcion_marcacion').value.trim(),
+        domingo: document.getElementById('op_habilitar_domingo').checked ? '1' : '0',
+        fechas_habilitadas: JSON.stringify(fechasHabilitadas),
         sucursales: JSON.stringify(tomSelectSucursales.getValue()),
         etapas: JSON.stringify(tomSelectEtapas.getValue()),
     };
