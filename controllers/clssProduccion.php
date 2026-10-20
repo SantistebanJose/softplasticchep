@@ -1938,21 +1938,7 @@ function insertarLineasYRestarStock($conectar, int $produccionId, array $detalle
         $cantidad   = round((float) $linea['cantidad'], 4);
         $comentario = $linea['comentario'];
 
-        $mat = executeQuery(
-            $conectar,
-            "SELECT nombre, stock_actual FROM material WHERE id = :id",
-            ['id' => $materialId]
-        );
-        if (empty($mat)) throw new Exception("Material #$materialId no encontrado.");
-
-        $stockActual = (float) $mat[0]['stock_actual'];
-        if ($cantidad > $stockActual + 0.0001) {
-            throw new Exception(
-                'No hay stock suficiente de "' . $mat[0]['nombre'] . '". '
-                . 'Disponible: ' . number_format($stockActual, 4)
-                . ', solicitado: ' . number_format($cantidad, 4) . '.'
-            );
-        }
+        descontarStockMaterial($conectar, (int)$materialId, $cantidad);
 
         $movimiento   = obtenerMovimientoSesion('crear_linea');
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
@@ -1975,11 +1961,6 @@ function insertarLineasYRestarStock($conectar, int $produccionId, array $detalle
             'js_historial'  => $js_historial,
         ]);
 
-        executeNonQuery(
-            $conectar,
-            "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-            ['cantidad' => $cantidad, 'mid' => $materialId]
-        );
     }
 }
 function agregarMaterialProduccion(): void
@@ -2140,11 +2121,7 @@ function reactivarProduccion()
         );
 
         foreach ($lineas as $linea) {
-            executeNonQuery(
-                $conectar,
-                "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                ['cantidad' => $linea['cantidad'], 'mid' => $linea['material_id']]
-            );
+            descontarStockMaterial($conectar, (int)$linea['material_id'], (float)$linea['cantidad']);
         }
 
         executeNonQuery(

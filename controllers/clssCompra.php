@@ -706,11 +706,7 @@ function guardarCompra()
                 // la borramos físicamente (igual que el comportamiento anterior).
                 $lineaVieja       = $lineasAnterioresPorId[$lineaIdEliminar];
                 $cantidadRevertir = $lineaVieja['cantidad_base'] ?? $lineaVieja['cantidad'];
-                executeNonQuery(
-                    $conectar,
-                    "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                    ['cantidad' => $cantidadRevertir, 'mid' => $lineaVieja['material_id']]
-                );
+                descontarStockMaterial($conectar, (int)$lineaVieja['material_id'], (float)$cantidadRevertir);
                 executeNonQuery(
                     $conectar,
                     "DELETE FROM rel_compra_material WHERE id = :id",
@@ -729,19 +725,25 @@ function guardarCompra()
                     $anterior         = $lineasAnterioresPorId[$lineaId];
                     $cantidadRevertir = $anterior['cantidad_base'] ?? $anterior['cantidad'];
 
-                    // Ajuste de stock por delta: revierte lo que esta línea
-                    // aportaba antes y aplica lo que aporta ahora. Si no cambió
-                    // nada, el neto es cero (resta y luego suma lo mismo).
-                    executeNonQuery(
-                        $conectar,
-                        "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                        ['cantidad' => $cantidadRevertir, 'mid' => $anterior['material_id']]
-                    );
-                    executeNonQuery(
-                        $conectar,
-                        "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
-                        ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
-                    );
+                    if ((int)$anterior['material_id'] === (int)$linea['material_id']) {
+                        // Solo mover el delta: editar precio/comentario o mantener
+                        // la misma cantidad no debe exigir recuperar stock ya usado.
+                        $deltaStock = round((float)$linea['cantidad_base'] - (float)$cantidadRevertir, 4);
+                        if ($deltaStock < 0) {
+                            descontarStockMaterial($conectar, (int)$linea['material_id'], abs($deltaStock));
+                        } elseif ($deltaStock > 0) {
+                            executeNonQuery($conectar,
+                                "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                                ['cantidad' => $deltaStock, 'mid' => $linea['material_id']]
+                            );
+                        }
+                    } else {
+                        descontarStockMaterial($conectar, (int)$anterior['material_id'], (float)$cantidadRevertir);
+                        executeNonQuery($conectar,
+                            "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                            ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
+                        );
+                    }
 
                     executeNonQuery($conectar, "
                         UPDATE rel_compra_material SET
@@ -902,11 +904,7 @@ function eliminarCompra()
 
         foreach ($lineas as $linea) {
             $cantidadRevertir = $linea['cantidad_base'] ?? $linea['cantidad'];
-            executeNonQuery(
-                $conectar,
-                "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                ['cantidad' => $cantidadRevertir, 'mid' => $linea['material_id']]
-            );
+            descontarStockMaterial($conectar, (int)$linea['material_id'], (float)$cantidadRevertir);
         }
 
         executeNonQuery(

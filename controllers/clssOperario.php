@@ -5,7 +5,7 @@
  * Controlador del módulo de Operarios
  * Tabla real: operario (id, nombre_completo, cargo_id, dni, activo, created_at,
  *             updated_at, deleted_at, js_session, js_historial, js_sucursales,
- *             js_etapas_relacionadas)
+ *             js_etapas_relacionadas, marcacion, js_marcacion)
  *
  * cargo_id (int, FK -> cargo.id): reemplaza a la antigua columna de texto
  * libre 'cargo'. La tabla 'cargo' sigue el mismo patrón de 'etapa'
@@ -34,7 +34,8 @@
  * password_hash), vinculada por 'usuario.operario_id' (FK, UNIQUE).
  * Si ya existe un usuario con ese DNI como login, no se duplica: el
  * operario se crea igual y la respuesta trae un aviso ('usuario_creado'
- * => false). Editar el operario NO toca la cuenta de acceso existente.
+ * => false). Al editar el operario se sincroniza el nombre visible de la
+ * cuenta vinculada; el login y la contraseña existentes no se modifican.
  *
  * bd.php y executeQuery.php viven en esta misma carpeta (controllers/).
  */
@@ -367,7 +368,7 @@ function obtenerOperario($id)
  */
 function decodificarJsonFilas(array $filas): array
 {
-    $columnasJson = ['js_sucursales', 'js_etapas_relacionadas'];
+    $columnasJson = ['js_sucursales', 'js_etapas_relacionadas', 'js_marcacion'];
     foreach ($filas as &$fila) {
         foreach ($columnasJson as $col) {
             if (isset($fila[$col]) && is_string($fila[$col])) {
@@ -381,6 +382,26 @@ function decodificarJsonFilas(array $filas): array
     return $filas;
 }
 
+function normalizarFechaMarcacion(string $fecha): ?string
+{
+    if ($fecha === '') return null;
+    foreach (['!Y-m-d', '!d-m-Y'] as $formato) {
+        $valor = DateTime::createFromFormat($formato, $fecha);
+        $errores = DateTime::getLastErrors();
+        if ($valor && ($errores === false || ($errores['warning_count'] === 0 && $errores['error_count'] === 0))) {
+            return $valor->format('d-m-Y');
+        }
+    }
+    return null;
+}
+
+function fechaMarcacionComparable(?string $fecha): ?string
+{
+    if (!$fecha) return null;
+    $valor = DateTime::createFromFormat('!d-m-Y', $fecha);
+    return $valor ? $valor->format('Y-m-d') : null;
+}
+
 function guardarOperario()
 {
     $conectar = conectar_oll_BD();
@@ -389,6 +410,10 @@ function guardarOperario()
     $nombre_completo = mb_strtoupper(trim($_POST['nombre_completo'] ?? ''), 'UTF-8');
     $cargo_id        = intval($_POST['cargo_id'] ?? 0) ?: null;
     $dni             = trim($_POST['dni'] ?? '');
+    $marcacion       = strtoupper(trim($_POST['marcacion'] ?? 'S'));
+    $diaInicioInput  = trim($_POST['dia_inicio'] ?? '');
+    $diaFinInput     = trim($_POST['dia_fin'] ?? '');
+    $descripcion     = trim($_POST['descripcion_marcacion'] ?? '');
 
     // sucursales/etapas llegan como JSON: "[1,3]" (ids seleccionados en el multi-select)
     $sucursalesInput = json_decode($_POST['sucursales'] ?? '[]', true);
@@ -404,6 +429,24 @@ function guardarOperario()
     if (!preg_match('/^\d{8}$/', $dni)) {
         responder(false, 'El DNI debe tener 8 dígitos.');
     }
+    if (!in_array($marcacion, ['S', 'T'], true)) responder(false, 'Selecciona una marcación válida.');
+    $diaInicio = normalizarFechaMarcacion($diaInicioInput);
+    $diaFin = $diaFinInput !== '' ? normalizarFechaMarcacion($diaFinInput) : null;
+    if ($diaInicioInput !== '' && $diaInicio === null) responder(false, 'La fecha de inicio no es válida.');
+    if (($id === 0 || $marcacion === 'T') && $diaInicio === null) responder(false, 'La fecha de inicio es obligatoria.');
+    if ($diaFinInput !== '' && $diaFin === null) responder(false, 'La fecha de fin no es válida.');
+    if ($marcacion === 'T' && $diaFin === null) responder(false, 'La marcación temporal necesita una fecha de fin.');
+    if ($diaFin !== null && fechaMarcacionComparable($diaFin) < fechaMarcacionComparable($diaInicio)) responder(false, 'La fecha de fin no puede ser anterior al inicio.');
+    if ($marcacion === 'S') $diaFin = null;
+
+    $jsMarcacionArray = [
+        'marcacion' => $marcacion,
+        'marcacion_' => $marcacion === 'S' ? 'Siempre' : 'Temporal',
+        'dia_inicio' => $diaInicio,
+        'dia_fin' => $diaFin,
+        'descripción' => $descripcion !== '' ? $descripcion : '-',
+    ];
+    $js_marcacion_json = json_encode($jsMarcacionArray, JSON_UNESCAPED_UNICODE);
 
     // Validar unicidad del DNI (excluyendo al propio registro en edición)
     $existe = executeQuery($conectar, "
@@ -423,12 +466,15 @@ function guardarOperario()
         'nombre_completo' => 'Nombre completo',
         'cargo_id'        => 'Cargo',
         'dni'             => 'DNI',
+        'marcacion'       => 'Tipo de marcación',
     ];
 
     $datosNuevos = [
         'nombre_completo' => $nombre_completo,
         'cargo_id'        => $cargo_id,
         'dni'             => $dni !== '' ? $dni : null,
+        'marcacion'       => $marcacion,
+        'js_marcacion'    => $js_marcacion_json,
     ];
 
     if ($id === 0) {
@@ -454,14 +500,16 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo_id, dni, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
+                (nombre_completo, cargo_id, dni, marcacion, js_marcacion, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
             VALUES
-                (:nombre_completo, :cargo_id, :dni, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
+                (:nombre_completo, :cargo_id, :dni, :marcacion, :js_marcacion, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
             RETURNING id
         ", [
             'nombre_completo'         => $datosNuevos['nombre_completo'],
             'cargo_id'                => $datosNuevos['cargo_id'],
             'dni'                     => $datosNuevos['dni'],
+            'marcacion'               => $marcacion,
+            'js_marcacion'            => $js_marcacion_json,
             'js_session'              => $js_session,
             'js_historial'            => $js_historial_nuevo,
             'js_sucursales'           => $js_sucursales_json,
@@ -494,6 +542,18 @@ function guardarOperario()
         }
 
         $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+        $marcacionAnterior = is_string($registroAnterior['js_marcacion'] ?? null)
+            ? (json_decode($registroAnterior['js_marcacion'], true) ?: [])
+            : ($registroAnterior['js_marcacion'] ?? []);
+        if (($marcacionAnterior['dia_inicio'] ?? null) !== $diaInicio ||
+            ($marcacionAnterior['dia_fin'] ?? null) !== $diaFin ||
+            ($marcacionAnterior['descripción'] ?? '-') !== ($descripcion !== '' ? $descripcion : '-')) {
+            $cambios[] = [
+                'campo' => 'Detalle de marcación',
+                'valor_antes' => json_encode($marcacionAnterior, JSON_UNESCAPED_UNICODE) ?: '(vacío)',
+                'valor_despues' => json_encode($jsMarcacionArray, JSON_UNESCAPED_UNICODE),
+            ];
+        }
 
         $cambioSucursales = compararSucursales($registroAnterior['js_sucursales'] ?? null, $sucursalesResueltas);
         if ($cambioSucursales !== null) {
@@ -514,6 +574,8 @@ function guardarOperario()
                 nombre_completo         = :nombre_completo,
                 cargo_id                = :cargo_id,
                 dni                     = :dni,
+                marcacion               = :marcacion,
+                js_marcacion            = :js_marcacion,
                 js_sucursales           = :js_sucursales,
                 js_etapas_relacionadas  = :js_etapas_relacionadas,
                 updated_at              = NOW(),
@@ -524,11 +586,27 @@ function guardarOperario()
             'nombre_completo'        => $datosNuevos['nombre_completo'],
             'cargo_id'               => $datosNuevos['cargo_id'],
             'dni'                    => $datosNuevos['dni'],
+            'marcacion'              => $marcacion,
+            'js_marcacion'           => $js_marcacion_json,
             'js_sucursales'          => $js_sucursales_json,
             'js_etapas_relacionadas' => $js_etapas_json,
             'id'                     => $id,
             'js_session'             => $js_session,
             'js_historial'           => $js_historial_nuevo,
+        ]);
+
+        // El nombre mostrado en la cuenta vinculada debe seguir al operario.
+        // El login (user_) y la contraseña se conservan, aunque cambie el DNI.
+        executeNonQuery($conectar, "
+            UPDATE usuario
+            SET nombre_completo = :nombre_completo,
+                updated_at = NOW()
+            WHERE operario_id = :operario_id
+              AND nombre_completo IS DISTINCT FROM :nombre_completo_actual
+        ", [
+            'nombre_completo' => $datosNuevos['nombre_completo'],
+            'operario_id' => $id,
+            'nombre_completo_actual' => $datosNuevos['nombre_completo'],
         ]);
         responder(true, 'Operario actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }

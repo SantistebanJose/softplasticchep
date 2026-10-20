@@ -385,9 +385,8 @@ function guardarMaterial()
         'derivado_texto' => $derivado ? 'DERIVADO' : 'COMPUESTO',
         'color_texto'    => $color ? 'Sí' : 'No',
     ];
-    asegurarColorParaTinte($conectar, $color, $colorNombre, $rgb);
-
     if ($id === 0) {
+        asegurarColorParaTinte($conectar, $color, $colorNombre, $rgb);
         $cambios = compararCambios([], $datosNuevos, $mapaCampos);
 
         $movimiento          = obtenerMovimientoSesion('crear', $cambios);
@@ -414,47 +413,72 @@ function guardarMaterial()
         $nuevo_id = $result[0]['id'] ?? null;
         responder(true, 'Material creado correctamente.', ['id' => $nuevo_id, 'modo' => 'crear']);
     } else {
-        $actual = executeQuery($conectar, "SELECT * FROM material WHERE id = :id", ['id' => $id]);
-        if (empty($actual)) responder(false, 'Material no encontrado.');
-        $registroAnterior = $actual[0];
-        $registroAnterior['nombre_unidad']  = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
-        $registroAnterior['derivado_texto'] = filter_var($registroAnterior['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'DERIVADO' : 'COMPUESTO';
-        $registroAnterior['color_texto']    = filter_var($registroAnterior['color'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'Sí' : 'No';
+        $stockActualOriginal = $_POST['stock_actual_original'] ?? null;
+        if (!is_numeric($stockActualOriginal) || (float)$stockActualOriginal < 0) {
+            responder(false, 'No se recibió el stock inicial del formulario. Cierra y vuelve a abrir el material antes de guardarlo.');
+        }
 
-        $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+        $conectar->beginTransaction();
+        try {
+            // Serializa el ajuste manual con compras/consumos que modifican la
+            // misma fila. Si el saldo cambió desde que se abrió el modal, no
+            // se sobrescribe con un valor que ya quedó desactualizado.
+            $actual = executeQuery($conectar, "SELECT * FROM material WHERE id = :id FOR UPDATE", ['id' => $id]);
+            if (empty($actual)) {
+                $conectar->rollBack();
+                responder(false, 'Material no encontrado.');
+            }
+            $stockEnBase = (float)($actual[0]['stock_actual'] ?? 0);
+            if (abs($stockEnBase - (float)$stockActualOriginal) > 0.00005) {
+                $conectar->rollBack();
+                responder(false, 'El stock cambió mientras editabas este material. Recarga la lista, vuelve a abrirlo y confirma el ajuste con el saldo actualizado.');
+            }
 
-        $movimiento          = obtenerMovimientoSesion('editar', $cambios);
-        $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
-        $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+            $registroAnterior = $actual[0];
+            $registroAnterior['nombre_unidad']  = obtenerNombreUnidad($conectar, $registroAnterior['unidad_medida_id']);
+            $registroAnterior['derivado_texto'] = filter_var($registroAnterior['derivado'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'DERIVADO' : 'COMPUESTO';
+            $registroAnterior['color_texto']    = filter_var($registroAnterior['color'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'Sí' : 'No';
 
-        executeQuery($conectar, "
-            
-            UPDATE material SET
-                nombre           = :nombre,
-                unidad_medida_id = :unidad_medida_id,
-                stock_minimo     = :stock_minimo,
-                stock_actual     = :stock_actual,
-                derivado         = :derivado,
-                color            = :color,
-                rgb              = COALESCE(:rgb, rgb),
-                js_producto      = :js_producto,
-                update_at        = NOW(),
-                js_session       = :js_session,
-                js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
-            WHERE id = :id
-        ", [
-            'nombre'           => $nombre,
-            'unidad_medida_id' => $unidadMedidaId,
-            'stock_minimo'     => $stockMinimo,
-            'stock_actual'     => $stockActual,
-            'derivado'         => $derivado ? 'true' : 'false',
-            'color'            => $color ? 'true' : 'false',
-            'rgb'              => $rgb !== '' ? $rgb : null,
-            'id'               => $id,
-            'js_session'       => $js_session,
-            'js_historial'     => $js_historial_nuevo,
-            'js_producto'      => $jsProductoJson,
-        ]);
+            $datosNuevos['stock_actual'] = $stockActual;
+            $cambios = compararCambios($registroAnterior, $datosNuevos, $mapaCampos);
+
+            $movimiento          = obtenerMovimientoSesion('editar', $cambios);
+            $js_session          = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
+            $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
+
+            asegurarColorParaTinte($conectar, $color, $colorNombre, $rgb);
+            executeQuery($conectar, "
+                UPDATE material SET
+                    nombre           = :nombre,
+                    unidad_medida_id = :unidad_medida_id,
+                    stock_minimo     = :stock_minimo,
+                    stock_actual     = :stock_actual,
+                    derivado         = :derivado,
+                    color            = :color,
+                    rgb              = COALESCE(:rgb, rgb),
+                    js_producto      = :js_producto,
+                    update_at        = NOW(),
+                    js_session       = :js_session,
+                    js_historial     = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb
+                WHERE id = :id
+            ", [
+                'nombre'           => $nombre,
+                'unidad_medida_id' => $unidadMedidaId,
+                'stock_minimo'     => $stockMinimo,
+                'stock_actual'     => $stockActual,
+                'derivado'         => $derivado ? 'true' : 'false',
+                'color'            => $color ? 'true' : 'false',
+                'rgb'              => $rgb !== '' ? $rgb : null,
+                'id'               => $id,
+                'js_session'       => $js_session,
+                'js_historial'     => $js_historial_nuevo,
+                'js_producto'      => $jsProductoJson,
+            ]);
+            $conectar->commit();
+        } catch (Throwable $e) {
+            if ($conectar->inTransaction()) $conectar->rollBack();
+            throw $e;
+        }
         responder(true, 'Material actualizado correctamente.', ['id' => $id, 'modo' => 'editar']);
     }
 }

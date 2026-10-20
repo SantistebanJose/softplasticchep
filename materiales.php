@@ -126,6 +126,7 @@ include("header.php");
             <div class="col-6 mb-2">
                 <label class="form-label">Stock actual</label>
                 <input type="number" step="0.01" min="0" class="form-control" name="stock_actual" id="material_stock_actual" value="0">
+                <input type="hidden" name="stock_actual_original" id="material_stock_actual_original" value="">
             </div>
           </div>
         </div>
@@ -351,6 +352,7 @@ async function cargarMateriales() {
 async function abrirModalCrearMaterial() {
     document.getElementById('formMaterial').reset();
     document.getElementById('material_id').value = '';
+    document.getElementById('material_stock_actual_original').value = '';
     document.getElementById('material_derivado').checked = false;
     document.getElementById('material_color').checked = false;
     document.getElementById('material_rgb').value = '';
@@ -371,6 +373,7 @@ async function abrirModalEditarMaterial(id) {
     document.getElementById('material_unidad_medida_id').value = m.unidad_medida_id ?? '';
     document.getElementById('material_stock_minimo').value = m.stock_minimo ?? 0;
     document.getElementById('material_stock_actual').value = m.stock_actual ?? 0;
+    document.getElementById('material_stock_actual_original').value = m.stock_actual ?? 0;
     document.getElementById('material_derivado').checked = (m.derivado === true || m.derivado === 't' || m.derivado === 'true');
     document.getElementById('material_color').checked = (m.color === true || m.color === 't' || m.color === 'true' || /^\s*TINTE(?:\s|$|-)/i.test(m.nombre || ''));
     const rgbMaterial = String(m.color_rgb ?? m.rgb ?? '').trim();

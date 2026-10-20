@@ -41,6 +41,7 @@ include("header.php");
                 <th>Nombre completo</th>
                 <th>DNI</th>
                 <th>Cargo</th>
+                <th>Marcación</th>
                 <th>Área</th>
                 <th>Sucursales</th>
                 <th>Etapas</th>
@@ -49,7 +50,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyOperarios">
-            <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -86,6 +87,28 @@ include("header.php");
             <select id="op_cargo" class="form-select">
                 <option value="">Selecciona un cargo</option>
             </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Tipo de marcación *</label>
+            <select id="op_marcacion" class="form-select" required>
+              <option value="S">Siempre (personal regular)</option>
+              <option value="T">Temporal (personal externo)</option>
+            </select>
+            <small class="text-muted">Usa Temporal para personal que viene domingos o feriados.</small>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Día de inicio</label>
+              <input type="date" class="form-control" id="op_dia_inicio">
+            </div>
+            <div class="col-md-6 mb-2" id="op_dia_fin_wrap">
+              <label class="form-label">Día de fin *</label>
+              <input type="date" class="form-control" id="op_dia_fin">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Descripción</label>
+            <textarea class="form-control" id="op_descripcion_marcacion" rows="2" maxlength="500" placeholder="Motivo o detalle del trabajo temporal"></textarea>
           </div>
           <div class="mb-2">
             <label class="form-label">Sucursales</label>
@@ -126,6 +149,28 @@ let sucursalesActivas = [];
 let etapasActivas = [];
 let cargosActivos = [];
 
+function fechaISODesdeMarcacion(fecha) {
+    if (!fecha) return '';
+    const partes = fecha.split('-');
+    return partes.length === 3 && partes[0].length === 2
+        ? `${partes[2]}-${partes[1]}-${partes[0]}`
+        : fecha;
+}
+
+function fechaLocalISO() {
+    const hoy = new Date();
+    const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dd = String(hoy.getDate()).padStart(2, '0');
+    return `${hoy.getFullYear()}-${mm}-${dd}`;
+}
+
+function actualizarCamposMarcacion() {
+    const temporal = document.getElementById('op_marcacion').value === 'T';
+    document.getElementById('op_dia_fin_wrap').classList.toggle('d-none', !temporal);
+    document.getElementById('op_dia_fin').required = temporal;
+    document.getElementById('op_dia_inicio').required = temporal || !modoEdicionOperario;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     inicializarTomSelectSucursales();
     inicializarTomSelectEtapas();
@@ -138,7 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
         console.error('Error cargando operarios:', err);
         document.getElementById('tbodyOperarios').innerHTML =
-            `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="10" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     }
 
     let debounceTimer = null;
@@ -149,6 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('fop_estado').addEventListener('change', cargarOperarios);
     document.getElementById('fop_sucursal').addEventListener('change', cargarOperarios);
     document.getElementById('fop_etapa').addEventListener('change', cargarOperarios);
+    document.getElementById('op_marcacion').addEventListener('change', actualizarCamposMarcacion);
 
     document.getElementById('btnBuscarDNI').addEventListener('click', buscarDNIOperario);
     document.getElementById('op_dni').addEventListener('keydown', (e) => {
@@ -256,13 +302,13 @@ async function cargarOperarios() {
     const tbody = document.getElementById('tbodyOperarios');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const operarios = json.operarios || [];
     if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay operarios registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No hay operarios registrados.</td></tr>';
         return;
     }
 
@@ -272,6 +318,7 @@ async function cargarOperarios() {
             <td data-label="Nombre completo">${o.nombre_completo}</td>
             <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo_nombre ?? '-'}</td>
+            <td data-label="Marcación"><span class="badge ${o.marcacion === 'T' ? 'bg-warning text-dark' : 'bg-primary'}">${o.marcacion === 'T' ? 'Temporal' : 'Siempre'}</span></td>
             <td data-label="Área">${o.area_nombre ?? '<span class="text-muted">-</span>'}</td>
             <td data-label="Sucursales">${badgesSucursales(o.js_sucursales)}</td>
             <td data-label="Etapas">${badgesEtapas(o.js_etapas_relacionadas)}</td>
@@ -299,6 +346,11 @@ function limpiarFormularioOperario() {
     const infoUsuario = document.getElementById('op_usuario_info');
     infoUsuario.classList.add('d-none');
     infoUsuario.innerHTML = '';
+    document.getElementById('op_marcacion').value = 'S';
+    document.getElementById('op_dia_inicio').value = fechaLocalISO();
+    document.getElementById('op_dia_fin').value = '';
+    document.getElementById('op_descripcion_marcacion').value = '';
+    actualizarCamposMarcacion();
 }
 
 function abrirModalCrearOperario() {
@@ -321,6 +373,12 @@ async function abrirModalEditarOperario(id) {
     document.getElementById('op_nombre_completo').value = o.nombre_completo;
     document.getElementById('op_cargo').value = o.cargo_id ?? '';
     document.getElementById('op_dni').value = o.dni ?? '';
+    const detalleMarcacion = o.js_marcacion || {};
+    document.getElementById('op_marcacion').value = o.marcacion || detalleMarcacion.marcacion || 'S';
+    document.getElementById('op_dia_inicio').value = fechaISODesdeMarcacion(detalleMarcacion.dia_inicio);
+    document.getElementById('op_dia_fin').value = fechaISODesdeMarcacion(detalleMarcacion.dia_fin);
+    document.getElementById('op_descripcion_marcacion').value = detalleMarcacion['descripción'] || detalleMarcacion.descripcion || '';
+    actualizarCamposMarcacion();
 
     let sucursalesAsignadas = o.js_sucursales || [];
     if (typeof sucursalesAsignadas === 'string') {
@@ -344,7 +402,7 @@ function mostrarInfoUsuarioOperario(o) {
     if (o.usuario_id) {
         infoUsuario.className = 'alert alert-info py-2 px-3 mb-2';
         infoUsuario.innerHTML = `Cuenta de acceso vinculada: <strong>${o.usuario_login}</strong>. ` +
-            `Editar el DNI aquí no cambia el usuario ni la contraseña ya existentes.`;
+            `El nombre se sincroniza al guardar. Editar el DNI no cambia el usuario ni la contraseña existentes.`;
     } else {
         infoUsuario.className = 'alert alert-warning py-2 px-3 mb-2';
         infoUsuario.innerHTML = `Este operario no tiene cuenta de acceso vinculada. ` +
@@ -398,6 +456,10 @@ document.getElementById('formOperario').addEventListener('submit', async functio
         nombre_completo: document.getElementById('op_nombre_completo').value.trim(),
         cargo_id: document.getElementById('op_cargo').value,
         dni: document.getElementById('op_dni').value.trim(),
+        marcacion: document.getElementById('op_marcacion').value,
+        dia_inicio: document.getElementById('op_dia_inicio').value,
+        dia_fin: document.getElementById('op_dia_fin').value,
+        descripcion_marcacion: document.getElementById('op_descripcion_marcacion').value.trim(),
         sucursales: JSON.stringify(tomSelectSucursales.getValue()),
         etapas: JSON.stringify(tomSelectEtapas.getValue()),
     };

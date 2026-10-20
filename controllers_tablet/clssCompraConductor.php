@@ -554,11 +554,7 @@ function guardarCompraTablet(int $operarioId)
 
                 $lineaVieja       = $lineasAnterioresPorId[$lineaIdEliminar];
                 $cantidadRevertir = $lineaVieja['cantidad_base'] ?? $lineaVieja['cantidad'];
-                executeNonQuery(
-                    $conectar,
-                    "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                    ['cantidad' => $cantidadRevertir, 'mid' => $lineaVieja['material_id']]
-                );
+                descontarStockMaterial($conectar, (int)$lineaVieja['material_id'], (float)$cantidadRevertir);
                 executeNonQuery($conectar, "DELETE FROM rel_compra_material WHERE id = :id", ['id' => $lineaIdEliminar]);
             }
 
@@ -570,16 +566,23 @@ function guardarCompraTablet(int $operarioId)
                     $anterior         = $lineasAnterioresPorId[$lineaId];
                     $cantidadRevertir = $anterior['cantidad_base'] ?? $anterior['cantidad'];
 
-                    executeNonQuery(
-                        $conectar,
-                        "UPDATE material SET stock_actual = stock_actual - :cantidad WHERE id = :mid",
-                        ['cantidad' => $cantidadRevertir, 'mid' => $anterior['material_id']]
-                    );
-                    executeNonQuery(
-                        $conectar,
-                        "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
-                        ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
-                    );
+                    if ((int)$anterior['material_id'] === (int)$linea['material_id']) {
+                        $deltaStock = round((float)$linea['cantidad_base'] - (float)$cantidadRevertir, 4);
+                        if ($deltaStock < 0) {
+                            descontarStockMaterial($conectar, (int)$linea['material_id'], abs($deltaStock));
+                        } elseif ($deltaStock > 0) {
+                            executeNonQuery($conectar,
+                                "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                                ['cantidad' => $deltaStock, 'mid' => $linea['material_id']]
+                            );
+                        }
+                    } else {
+                        descontarStockMaterial($conectar, (int)$anterior['material_id'], (float)$cantidadRevertir);
+                        executeNonQuery($conectar,
+                            "UPDATE material SET stock_actual = stock_actual + :cantidad WHERE id = :mid",
+                            ['cantidad' => $linea['cantidad_base'], 'mid' => $linea['material_id']]
+                        );
+                    }
 
                     executeNonQuery($conectar, "
                         UPDATE rel_compra_material SET

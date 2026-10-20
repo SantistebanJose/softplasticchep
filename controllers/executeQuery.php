@@ -69,3 +69,48 @@ function executeNonQuery(PDO $conexion, string $query, array $params = []): int
 
     return $filas;
 }
+
+/**
+ * Descuenta stock de forma atómica dentro de la transacción del llamador.
+ * PostgreSQL bloquea la fila mientras evalúa y aplica el UPDATE; si otra
+ * petición consumió antes, la condición stock_actual >= cantidad se vuelve
+ * a evaluar con el saldo actualizado y el descuento no se realiza.
+ *
+ * @return array{nombre:string, stock_actual:string} material y saldo restante
+ */
+function descontarStockMaterial(PDO $conexion, int $materialId, float $cantidad): array
+{
+    $cantidad = round($cantidad, 4);
+    if ($materialId <= 0 || $cantidad <= 0) {
+        throw new InvalidArgumentException('El material y la cantidad para descontar deben ser válidos.');
+    }
+
+    $actualizado = executeQuery($conexion, "
+        UPDATE material
+        SET stock_actual = stock_actual - :cantidad
+        WHERE id = :id
+          AND stock_actual >= :cantidad
+        RETURNING nombre, stock_actual
+    ", ['cantidad' => $cantidad, 'id' => $materialId]);
+
+    if (!empty($actualizado)) {
+        return $actualizado[0];
+    }
+
+    $material = executeQuery($conexion, "
+        SELECT nombre, stock_actual
+        FROM material
+        WHERE id = :id
+    ", ['id' => $materialId]);
+
+    if (empty($material)) {
+        throw new RuntimeException("Material #$materialId no encontrado.");
+    }
+
+    $disponible = (float)($material[0]['stock_actual'] ?? 0);
+    throw new RuntimeException(
+        'Stock insuficiente de "' . $material[0]['nombre'] . '". Disponible: '
+        . number_format($disponible, 4, '.', '') . ', solicitado: '
+        . number_format($cantidad, 4, '.', '') . '.'
+    );
+}
