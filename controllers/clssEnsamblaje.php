@@ -314,6 +314,32 @@ function esOperarioSesion(): bool
     return !empty($_SESSION['operario_id']);
 }
 
+function esAdministradorSesionEnsamblaje(): bool
+{
+    return !esOperarioSesion()
+        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
+}
+
+/** Busca el registro de envío externo correspondiente a una pasada. */
+function obtenerEnvioExternoProduccion($conectar, int $produccionId, ?int $pasada): ?array
+{
+    if ($produccionId <= 0 || !$pasada) return null;
+    $filas = executeQuery($conectar,
+        "SELECT js_realizado_por_fuera FROM produccion WHERE id = :id",
+        ['id' => $produccionId]
+    );
+    $envios = json_decode($filas[0]['js_realizado_por_fuera'] ?? '[]', true);
+    if (!is_array($envios)) return null;
+    foreach ($envios as $envio) {
+        if ((int)($envio['pasada'] ?? 0) === $pasada && strtolower((string)($envio['destino'] ?? '')) === 'externo') {
+            // Después del retorno, un sobrante vuelve a ser material local.
+            if (!empty($envio['recepcion'])) return null;
+            return $envio;
+        }
+    }
+    return null;
+}
+
 function verificarPropiedadEnsamblaje($conectar, int $ensamblajeId): array
 {
     if (!esOperarioSesion()) return [];
@@ -795,6 +821,12 @@ function buscarProduccionesDisponibles()
               )
         )",
     ];
+    $esAdminExterno = !esOperarioSesion()
+        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
+    if (!$esAdminExterno) {
+        // No se muestran pases externos a operarios ni a otros roles de panel.
+        $where[] = "LOWER(COALESCE(pase.item->>'destino_ensamblaje', 'local')) <> 'externo'";
+    }
     $params = [];
     $joinProducto = "INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint";
 
@@ -860,6 +892,8 @@ function buscarProduccionesDisponibles()
             ) - COALESCE(consumo.cantidad_usada, 0)) AS cantidad_kg,
             COALESCE(rep.created_at, NULLIF(pase.item->>'fecha', '')::timestamp, t1.fecha_hora_fin) AS fecha_hora_fin,
             NULLIF(pase.item->>'pasada', '')::integer AS pasada,
+            COALESCE(pase.item->>'destino_ensamblaje', 'local') AS destino_ensamblaje,
+            pase.item->>'enviado_a' AS enviado_a,
             t4.id AS producto_id,
             COALESCE(psrc.producto_id, t4.id) AS producto_fuente_id,
             receta.item AS componente_configuracion,
@@ -1234,6 +1268,7 @@ function listarEnsamblajes()
         upe.nombre_corto AS producto_unidad_ensamblaje_codigo,
         upe.nombre AS producto_unidad_ensamblaje_nombre,
         e.deleted_at,
+        e.proveniente,
         e.js_moldes_utilizados,
         e.js_derivados_utilizados,
         e.categoria_material_id,
@@ -1366,14 +1401,9 @@ function guardarEnsamblaje()
     $productoConfig = json_decode($producto[0]['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
     $requiereMaquina = !empty($productoConfig['requiere_maquina_ensamblaje']);
     $maquinaId = intval($_POST['maquina_id'] ?? 0) ?: null;
-    if ($requiereMaquina && !$maquinaId) responder(false, 'Este producto requiere seleccionar la máquina utilizada en Ensamblaje.');
     if ($maquinaId) {
         $maquina = executeQuery($conectar, "SELECT id FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
         if (empty($maquina)) responder(false, 'La máquina seleccionada no existe o está inactiva.');
-    }
-
-    if (empty($operariosInput)) {
-        responder(false, 'Debes indicar al menos un operario que participó en este armado.');
     }
 
     if ($sucursal_id <= 0) {
@@ -1429,10 +1459,54 @@ function guardarEnsamblaje()
         responder(false, 'Debes vincular al menos una producción finalizada, un derivado o un complemento a este ensamblaje.');
     }
 
-    try {
-        $operariosResueltos = resolverOperariosEnsamblaje($conectar, $operariosInput);
-    } catch (Throwable $e) {
-        responder(false, $e->getMessage());
+    $detalleTieneExterno = false;
+    $detalleTieneLocal = false;
+    foreach ($detalle as $linea) {
+        if ($linea['tipo'] !== 'produccion') {
+            if ($linea['tipo'] === 'derivado' || $linea['tipo'] === 'complemento') $detalleTieneLocal = true;
+            continue;
+        }
+        $envioExterno = obtenerEnvioExternoProduccion(
+            $conectar,
+            (int)$linea['molde_produccion_id'],
+            isset($linea['pasada']) ? (int)$linea['pasada'] : null
+        );
+        if ($envioExterno !== null) $detalleTieneExterno = true;
+        else $detalleTieneLocal = true;
+    }
+    if ($detalleTieneExterno && $detalleTieneLocal) {
+        responder(false, 'Registra por separado los armados externos y los armados locales; no mezcles sus componentes.');
+    }
+    if ($detalleTieneExterno && !esAdministradorSesionEnsamblaje()) {
+        responder(false, 'Solo un administrador puede recibir producciones enviadas a un servicio externo.');
+    }
+    if ($detalleTieneExterno) {
+        $recetaExterna = executeQuery($conectar, "
+            SELECT cardinality(COALESCE(js_configuracion_armado, ARRAY[]::jsonb[])) AS componentes
+            FROM producto WHERE id = :id
+        ", ['id' => $producto_id]);
+        if ((int)($recetaExterna[0]['componentes'] ?? 0) <= 0) {
+            responder(false, 'Configura la receta de componentes del producto antes de registrar un retorno externo.');
+        }
+    }
+    if ($detalleTieneExterno && count(array_filter($detalle, static fn($linea) => $linea['tipo'] !== 'produccion')) > 0) {
+        responder(false, 'Un retorno externo solo puede vincular producciones incluidas en la receta del producto.');
+    }
+    if ($requiereMaquina && !$maquinaId && !$detalleTieneExterno) {
+        responder(false, 'Este producto requiere seleccionar la máquina utilizada en Ensamblaje.');
+    }
+
+    if ($detalleTieneExterno) {
+        // La mano de obra fue realizada fuera. El admin solo registra el
+        // retorno; no se atribuye el ensamblaje a operarios de fábrica.
+        $operariosResueltos = [];
+    } else {
+        try {
+            $operariosResueltos = resolverOperariosEnsamblaje($conectar, $operariosInput);
+        } catch (Throwable $e) {
+            responder(false, $e->getMessage());
+        }
+        if (empty($operariosResueltos)) responder(false, 'Debes indicar al menos un operario que participó en este armado.');
     }
     if (esOperarioSesion() && !in_array((int)$_SESSION['operario_id'], array_column($operariosResueltos, 'operario_id'), true)) {
         responder(false, 'El ensamblaje debe quedar asociado al operario que inició sesión.');
@@ -1451,7 +1525,7 @@ function guardarEnsamblaje()
             $movimiento   = obtenerMovimientoSesion('crear', $cambios);
             $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
             $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
-            $proveniente = "produccion";
+            $proveniente = $detalleTieneExterno ? 'externo' : 'produccion';
 
             $nuevoEnsamblaje = executeQuery($conectar, " 
                 INSERT INTO ensamblaje (
@@ -1742,9 +1816,18 @@ function guardarEnsamblaje()
  */
 function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle): void
 {
-    $ensamblaje = executeQuery($conectar, "SELECT producto_id, color_id FROM ensamblaje WHERE id = :id", ['id' => $ensamblajeId]);
+    $ensamblaje = executeQuery($conectar, "SELECT producto_id, color_id, proveniente FROM ensamblaje WHERE id = :id", ['id' => $ensamblajeId]);
     $productoObjetivoId = intval($ensamblaje[0]['producto_id'] ?? 0);
     $colorObjetivoId = intval($ensamblaje[0]['color_id'] ?? 0);
+    $contieneExterno = ($ensamblaje[0]['proveniente'] ?? '') === 'externo';
+    $contieneLocal = false;
+    if (!$contieneExterno) {
+        $lineasExistentes = executeQuery($conectar, "
+            SELECT 1 FROM rel_ensamblaje_producto
+            WHERE ensamblaje_id = :id AND deleted_at IS NULL LIMIT 1
+        ", ['id' => $ensamblajeId]);
+        $contieneLocal = !empty($lineasExistentes);
+    }
     foreach ($detalle as $linea) {
         if ($linea['tipo'] === 'produccion') {
             $produccionId = $linea['molde_produccion_id'];
@@ -1784,6 +1867,17 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 if (empty($produccionBloqueada)) throw new Exception("La producción #$produccionId ya no existe.");
                 $snapshotOrigen = json_decode($relacionPendiente[0]['js_query_consulta_produccion'] ?? '{}', true) ?: [];
                 $pasadaOrigen = $snapshotOrigen['pasada'] ?? null;
+                $envioExterno = obtenerEnvioExternoProduccion($conectar, $produccionId, $pasadaOrigen === null ? null : (int)$pasadaOrigen);
+                if ($envioExterno !== null) {
+                    if (!esAdministradorSesionEnsamblaje()) throw new Exception('Solo un administrador puede recibir producciones enviadas a un servicio externo.');
+                    if (!empty($envioExterno['recepcion'])) throw new Exception("La pasada externa de la producción #$produccionId ya fue recibida.");
+                    $contieneExterno = true;
+                } else {
+                    $contieneLocal = true;
+                }
+                if ($contieneExterno && $contieneLocal) {
+                    throw new Exception('No se pueden mezclar componentes de ensamblaje local y externo en el mismo armado.');
+                }
                 $baseDisponible = (float)($relacionPendiente[0]['cantidad_entrada_produccion']
                     ?? $snapshotOrigen['cantidad_kg'] ?? $snapshotOrigen['cantidad'] ?? $snapshotOrigen['cantidad_kg'] ?? 0);
                 $consumido = executeQuery($conectar, "
@@ -1862,7 +1956,7 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 
             $prod = executeQuery(
                 $conectar,
-                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje, pases_finalizados, js_cantidades_salientes, cantidad_producida_kg FROM produccion WHERE id = :id FOR UPDATE",
+                "SELECT id, fecha_hora_fin, deleted_at, enviado_ensamblaje, pases_finalizados, js_cantidades_salientes, js_realizado_por_fuera, cantidad_producida_kg FROM produccion WHERE id = :id FOR UPDATE",
                 ['id' => $produccionId]
             );
             if (empty($prod)) {
@@ -1916,6 +2010,25 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 if ($salidaSolicitada === null) {
                     throw new Exception("La pasada $pasadaSolicitada de la producción #$produccionId ya no existe.");
                 }
+            }
+            $enviosExternos = json_decode($prod[0]['js_realizado_por_fuera'] ?? '[]', true) ?: [];
+            $envioExterno = null;
+            foreach ($enviosExternos as $registroEnvio) {
+                if ((int)($registroEnvio['pasada'] ?? 0) === $pasadaSolicitada
+                    && strtolower((string)($registroEnvio['destino'] ?? '')) === 'externo') {
+                    $envioExterno = $registroEnvio;
+                    break;
+                }
+            }
+            if ($envioExterno !== null) {
+                if (!esAdministradorSesionEnsamblaje()) throw new Exception('Solo un administrador puede recibir producciones enviadas a un servicio externo.');
+                if (!empty($envioExterno['recepcion'])) throw new Exception("La pasada externa de la producción #$produccionId ya fue recibida.");
+                $contieneExterno = true;
+            } else {
+                $contieneLocal = true;
+            }
+            if ($contieneExterno && $contieneLocal) {
+                throw new Exception('No se pueden mezclar componentes de ensamblaje local y externo en el mismo armado.');
             }
             if (empty($prod[0]['enviado_ensamblaje']) && empty($prod[0]['pases_finalizados']) && $salidaSolicitada === null) {
                 throw new Exception("La producción #$produccionId aún no fue pasada a ensamblaje desde Producción.");
@@ -2110,6 +2223,10 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 throw new Exception("El ensamblaje complemento #$complementoId ya fue tomado por otro armado justo ahora. Vuelve a intentarlo.");
             }
         }
+    }
+    if ($contieneExterno) {
+        if (!esAdministradorSesionEnsamblaje()) throw new Exception('Solo un administrador puede registrar la recepción de un ensamblaje externo.');
+        executeNonQuery($conectar, "UPDATE ensamblaje SET proveniente = 'externo', update_at = NOW() WHERE id = :id", ['id' => $ensamblajeId]);
     }
 }
 /**
@@ -2379,8 +2496,11 @@ function iniciarEnsamblaje(int $id)
     $conectar = conectar_oll_BD();
     if (!$id) responder(false, 'ID inválido.');
 
-    $existe = executeQuery($conectar, "SELECT id, deleted_at, inicio FROM ensamblaje WHERE id = :id", ['id' => $id]);
+    $existe = executeQuery($conectar, "SELECT id, deleted_at, inicio, proveniente FROM ensamblaje WHERE id = :id", ['id' => $id]);
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
+    if (($existe[0]['proveniente'] ?? '') === 'externo' && !esAdministradorSesionEnsamblaje()) {
+        responder(false, 'Solo un administrador puede registrar la recepción de un ensamblaje externo.');
+    }
     verificarPropiedadEnsamblaje($conectar, $id);
     if (!empty($existe[0]['deleted_at'])) responder(false, 'No puedes iniciar un ensamblaje inactivo.');
     if (!empty($existe[0]['inicio'])) responder(false, 'Este ensamblaje ya fue iniciado.');
@@ -2486,7 +2606,7 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
                rep.unidad_entrada_id, rep.js_query_consulta_produccion,
                pd.molde_id, pd.unico_molde_producto, pd.js_configuracion_moment,
                pd.cantidad_producida_kg, up.nombre_corto AS unidad_codigo,
-               mo.nombre AS molde_nombre, mo.js_producto
+               mo.nombre AS molde_nombre, mo.js_producto, e.proveniente
         FROM rel_ensamblaje_producto rep
         JOIN produccion pd ON pd.id = rep.molde_produccion_id
         LEFT JOIN unidad_medida up ON up.id = rep.unidad_entrada_id
@@ -2607,6 +2727,21 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
             // desvincúlalo del armado. Mantener una relación activa con 0
             // podía hacer que otros flujos trataran la producción como usada.
             if ($usar <= 0.000001) {
+                if (($lote['linea']['proveniente'] ?? '') === 'externo') {
+                    $snapshot = json_decode($lote['linea']['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+                    $snapshot['cantidad_kg'] = 0;
+                    $snapshot['cantidad_consumida'] = 0;
+                    $snapshot['cantidad_requerida_receta'] = $requerido;
+                    $snapshot['componente_receta'] = $componente['nombre'];
+                    executeNonQuery($conectar, "
+                        UPDATE rel_ensamblaje_producto
+                        SET cantidad_entrada_produccion = 0,
+                            js_query_consulta_produccion = :snapshot::jsonb,
+                            update_at = NOW()
+                        WHERE id = :id AND deleted_at IS NULL
+                    ", ['snapshot' => json_encode($snapshot, JSON_UNESCAPED_UNICODE), 'id' => $lote['linea']['id']]);
+                    continue;
+                }
                 executeNonQuery($conectar, "
                     UPDATE rel_ensamblaje_producto
                     SET deleted_at = NOW(), update_at = NOW()
@@ -2632,6 +2767,187 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
     recalcularResumenesEnsamblaje($conectar, $ensamblajeId);
 }
 
+/** Registra en cada pasada externa el producto recibido y el sobrante real
+ * del componente, calculado después de aplicar la receta del armado. */
+function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, float $cantidadFinal, ?int $unidadFinalId, string $unidadFinalCodigo): void
+{
+    $lineas = executeQuery($conectar, "
+        SELECT rep.molde_produccion_id AS produccion_id,
+               rep.cantidad_entrada_produccion AS cantidad_usada,
+               rep.unidad_entrada_id,
+               rep.js_query_consulta_produccion,
+               pd.js_realizado_por_fuera, pd.js_cantidades_salientes,
+               pd.operario_id, pd.js_operarios, pd.color_id, pd.categoria_material_id,
+               pd.molde_id, pd.unico_molde_producto,
+               up.nombre_corto AS unidad_codigo
+        FROM rel_ensamblaje_producto rep
+        JOIN produccion pd ON pd.id = rep.molde_produccion_id
+        LEFT JOIN unidad_medida up ON up.id = rep.unidad_entrada_id
+        WHERE rep.ensamblaje_id = :id AND rep.deleted_at IS NULL
+          AND rep.molde_produccion_id IS NOT NULL
+        FOR UPDATE OF pd, rep
+    ", ['id' => $ensamblajeId]);
+
+    $detallesPorProduccion = [];
+    $salidasPorProduccion = [];
+    $sobrantesPendientes = [];
+    $productoFinal = executeQuery($conectar, "SELECT producto_id FROM ensamblaje WHERE id = :id", ['id' => $ensamblajeId]);
+    $productoFinalId = (int)($productoFinal[0]['producto_id'] ?? 0);
+    foreach ($lineas as $linea) {
+        $snapshot = json_decode($linea['js_query_consulta_produccion'] ?? '{}', true) ?: [];
+        $pasada = (int)($snapshot['pasada'] ?? 0);
+        if ($pasada <= 0) continue;
+        $produccionId = (int)$linea['produccion_id'];
+        if (!isset($detallesPorProduccion[$produccionId])) {
+            $detallesPorProduccion[$produccionId] = json_decode($linea['js_realizado_por_fuera'] ?? '[]', true) ?: [];
+            $salidasPorProduccion[$produccionId] = json_decode($linea['js_cantidades_salientes'] ?? '[]', true) ?: [];
+        }
+        $envios = &$detallesPorProduccion[$produccionId];
+        if (!is_array($envios)) { unset($envios); continue; }
+        foreach ($envios as &$envio) {
+            if ((int)($envio['pasada'] ?? 0) !== $pasada || strtolower((string)($envio['destino'] ?? '')) !== 'externo') continue;
+            $cantidadEnviada = (float)($envio['cantidad_enviada'] ?? 0);
+            $cantidadUsada = (float)($linea['cantidad_usada'] ?? 0);
+            if ($cantidadUsada > $cantidadEnviada + 0.000001) {
+                throw new Exception("La receta requiere más de lo enviado para la producción #{$linea['produccion_id']} (pasada $pasada).");
+            }
+            $envio['recepcion'] = [
+                'ensamblaje_id' => $ensamblajeId,
+                'fecha_recepcion' => date('Y-m-d H:i:s'),
+                'cantidad_producto_armado' => $cantidadFinal,
+                'unidad_producto_id' => $unidadFinalId,
+                'unidad_producto' => $unidadFinalCodigo,
+                'cantidad_componente_utilizada' => $cantidadUsada,
+                'cantidad_sobrante' => max(0, $cantidadEnviada - $cantidadUsada),
+                'unidad_componente' => $linea['unidad_codigo'] ?: ($envio['unidad'] ?? 'UND'),
+            ];
+            $leftover = max(0, $cantidadEnviada - $cantidadUsada);
+            if ($leftover > 0.000001) {
+                $sobrantesPendientes[] = [
+                    'produccion_id' => $produccionId,
+                    'pasada' => $pasada,
+                    'cantidad_enviada' => $cantidadEnviada,
+                    'unidad_id' => $linea['unidad_entrada_id'] ? (int)$linea['unidad_entrada_id'] : null,
+                    'unidad_codigo' => $linea['unidad_codigo'] ?: ($envio['unidad'] ?? 'UND'),
+                    'producto_id' => $productoFinalId,
+                    'operario_id' => (int)($linea['operario_id'] ?? 0) ?: null,
+                    'js_operarios' => $linea['js_operarios'] ?? '[]',
+                    'color_id' => (int)($linea['color_id'] ?? 0) ?: null,
+                    'categoria_material_id' => (int)($linea['categoria_material_id'] ?? 0) ?: null,
+                    'molde_id' => (int)($linea['molde_id'] ?? 0),
+                    'molde_nombre' => $snapshot['molde_nombre'] ?? ('Producción #' . $produccionId),
+                    'fecha' => $snapshot['fecha'] ?? null,
+                    'retorno_externo_id' => $ensamblajeId,
+                ];
+            }
+            foreach ($salidasPorProduccion[$produccionId] as &$salida) {
+                if ((int)($salida['pasada'] ?? 0) === $pasada) {
+                    // El sobrante ya regresó a fábrica y vuelve a estar
+                    // disponible para la ruta local, sin perder la trazabilidad
+                    // original guardada en js_realizado_por_fuera.
+                    $salida['destino_ensamblaje'] = 'local';
+                    $salida['retorno_externo_id'] = $ensamblajeId;
+                    break;
+                }
+            }
+            unset($salida);
+            break;
+        }
+        unset($envio);
+        unset($envios);
+    }
+    foreach ($detallesPorProduccion as $produccionId => $envios) {
+        executeNonQuery($conectar, "
+            UPDATE produccion SET js_realizado_por_fuera = :detalle::jsonb,
+                js_cantidades_salientes = :salidas::jsonb, updated_at = NOW()
+            WHERE id = :id
+        ", [
+            'detalle' => json_encode($envios, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'salidas' => json_encode($salidasPorProduccion[$produccionId] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'id' => (int)$produccionId,
+        ]);
+    }
+    foreach ($sobrantesPendientes as $sobrante) {
+        registrarSobranteExternoDisponible($conectar, $sobrante);
+    }
+}
+
+function registrarSobranteExternoDisponible($conectar, array $sobrante): void
+{
+    $produccionId = (int)$sobrante['produccion_id'];
+    $pasada = (int)$sobrante['pasada'];
+    $existente = executeQuery($conectar, "
+        SELECT rep.id
+        FROM rel_ensamblaje_producto rep
+        JOIN ensamblaje e ON e.id = rep.ensamblaje_id
+        WHERE rep.molde_produccion_id = :produccion_id
+          AND rep.deleted_at IS NULL AND e.deleted_at IS NULL
+          AND e.proveniente = 'prod2_pendiente'
+          AND rep.js_query_consulta_produccion->>'pasada' = :pasada
+        LIMIT 1
+    ", ['produccion_id' => $produccionId, 'pasada' => (string)$pasada]);
+    if (!empty($existente)) return;
+
+    $operarios = json_decode($sobrante['js_operarios'] ?? '[]', true);
+    if (!is_array($operarios)) $operarios = [];
+    $jsOperarios = json_encode($operarios, JSON_UNESCAPED_UNICODE);
+    $evento = obtenerMovimientoSesion('retorno_externo_sobrante', [[
+        'campo' => 'Sobrante externo devuelto a ensamblaje local',
+        'valor_antes' => '(no disponible)',
+        'valor_despues' => "Producción #$produccionId · pasada $pasada",
+    ]]);
+    $jsEvento = json_encode($evento, JSON_UNESCAPED_UNICODE);
+    $ensamblaje = executeQuery($conectar, "
+        INSERT INTO ensamblaje (
+            producto_id, color_id, categoria_material_id, operario_ortorgado,
+            js_derivados_utilizados, js_moldes_utilizados, js_operarios,
+            created_at, js_usuario, js_historial, proveniente
+        ) VALUES (
+            :producto_id, :color_id, :categoria_material_id, :operario_id,
+            '[]'::jsonb, '[]'::jsonb, :js_operarios,
+            NOW(), :js_usuario, jsonb_build_array(CAST(:js_evento AS jsonb)), 'prod2_pendiente'
+        ) RETURNING id
+    ", [
+        'producto_id' => (int)$sobrante['producto_id'],
+        'color_id' => $sobrante['color_id'],
+        'categoria_material_id' => $sobrante['categoria_material_id'],
+        'operario_id' => $sobrante['operario_id'],
+        'js_operarios' => $jsOperarios,
+        'js_usuario' => $jsEvento,
+        'js_evento' => $jsEvento,
+    ]);
+    $pendienteId = (int)($ensamblaje[0]['id'] ?? 0);
+    if ($pendienteId <= 0) throw new Exception("No se pudo dejar disponible el sobrante de la producción #$produccionId.");
+
+    $snapshot = json_encode([
+        'produccion_id' => $produccionId,
+        'molde_nombre' => $sobrante['molde_nombre'],
+        'producto_id' => (int)$sobrante['producto_id'],
+        'pasada' => $pasada,
+        'cantidad' => (float)$sobrante['cantidad_enviada'],
+        'cantidad_kg' => (float)$sobrante['cantidad_enviada'],
+        'cantidad_producida_original' => (float)$sobrante['cantidad_enviada'],
+        'unidad_produccion_codigo' => strtoupper((string)$sobrante['unidad_codigo']),
+        'fecha' => $sobrante['fecha'],
+        'retorno_externo_id' => (int)$sobrante['retorno_externo_id'],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    executeNonQuery($conectar, "
+        INSERT INTO rel_ensamblaje_producto (
+            ensamblaje_id, molde_produccion_id, js_query_consulta_produccion,
+            cantidad_entrada_produccion, unidad_entrada_id, created_at
+        ) VALUES (
+            :ensamblaje_id, :produccion_id, :snapshot::jsonb,
+            :cantidad, :unidad_id, NOW()
+        )
+    ", [
+        'ensamblaje_id' => $pendienteId,
+        'produccion_id' => $produccionId,
+        'snapshot' => $snapshot,
+        'cantidad' => (float)$sobrante['cantidad_enviada'],
+        'unidad_id' => $sobrante['unidad_id'],
+    ]);
+}
+
 // Marca el fin real del armado con la hora del servidor. Exige el peso
 // (kg) de salida del armado ('peso_kg'), que se guarda en
 // ensamblaje.cantidad_peso_kg.
@@ -2654,7 +2970,7 @@ function finalizarEnsamblaje(int $id)
 
     $existe = executeQuery(
         $conectar,
-        "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id, e.js_producto_emsamblado,
+        "SELECT e.id, e.deleted_at, e.inicio, e.fin, e.producto_id, e.js_producto_emsamblado, e.proveniente,
                 " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
                 p.js_configuracion_empaquetado,
                 to_json(p.js_configuracion_armado) AS js_configuracion_armado_json
@@ -2665,8 +2981,13 @@ function finalizarEnsamblaje(int $id)
     );
     if (empty($existe)) responder(false, 'Registro de ensamblaje no encontrado.');
     $ensamblaje = $existe[0];
+    $esRecepcionExterna = ($ensamblaje['proveniente'] ?? '') === 'externo';
+    if ($esRecepcionExterna && !esAdministradorSesionEnsamblaje()) {
+        responder(false, 'Solo un administrador puede confirmar el retorno de un ensamblaje externo.');
+    }
     verificarPropiedadEnsamblaje($conectar, $id);
-    $enviarAutomaticamenteEmpaquetado = valorBooleanoEnsamblaje($ensamblaje['es_multi_molde_completo'] ?? false);
+    $enviarAutomaticamenteEmpaquetado = $esRecepcionExterna
+        || valorBooleanoEnsamblaje($ensamblaje['es_multi_molde_completo'] ?? false);
 
     $configEmpaquetado = json_decode($ensamblaje['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
     $unidadSalidaId = !empty($configEmpaquetado['salida_ensamblaje_unidad_medida_id'])
@@ -2707,6 +3028,10 @@ function finalizarEnsamblaje(int $id)
         if (!empty($configArmado)) {
             $unidadesParaReceta = cantidadUnidadesParaReceta($conectar, $cantidadSalida, $unidadSalidaId, $unidadLabel);
             aplicarConsumoConfiguracionArmado($conectar, $id, $unidadesParaReceta, $configArmado);
+        }
+        if ($esRecepcionExterna) {
+            if (empty($configArmado)) throw new Exception('El producto no tiene receta de armado configurada; no se pueden calcular los sobrantes externos.');
+            guardarRecepcionExternaEnProducciones($conectar, $id, $cantidadSalida, $unidadSalidaId, $unidadLabel);
         }
 
         executeNonQuery($conectar, "

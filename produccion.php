@@ -362,6 +362,7 @@ include("header.php");
 
 /* ---------- Badge "no requiere ensamblaje" ---------- */
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
+.pc-prod-tag.externo-pendiente{ background:#FFF4D6; color:#9A5B00; }
 </style>
 
 <div class="pc-card">
@@ -573,6 +574,21 @@ include("header.php");
                     </div>
                     <div class="form-text">Reparte la cantidad entre todas las personas que participaron.</div>
                 </div>
+                </div>
+            </div>
+
+            <div class="pc-ens-step" id="bloqueDestinoExterno" style="display:none;">
+                <div class="pc-ens-step-num">2</div>
+                <div class="pc-ens-step-body w-100">
+                    <label class="form-label">Destino del ensamblaje *</label>
+                    <select id="produccion_destino_ensamblaje" class="form-select">
+                        <option value="local">Local · continúa la ruta actual</option>
+                        <option value="externo">Externo · se registra su retorno armado</option>
+                    </select>
+                    <div id="bloqueDestinatarioExterno" class="mt-3" style="display:none;">
+                        <label for="produccion_enviado_a" class="form-label">¿A quién se envía? *</label>
+                        <input id="produccion_enviado_a" class="form-control" maxlength="160" placeholder="Nombre de la persona o taller">
+                    </div>
                 </div>
             </div>
 
@@ -1246,6 +1262,17 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     if (resumenMerma) tags.push(`Merma: ${resumenMerma}`);
     const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
     if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
+    if (p.realizado_por_fuera && Array.isArray(p.js_realizado_por_fuera)) {
+        p.js_realizado_por_fuera.forEach(envio => {
+            const retorno = envio.recepcion;
+            tags.push({
+                texto: retorno
+                    ? `Externo · ${envio.enviado_a || 'sin destinatario'} · regresaron ${formatearCantidadProd(retorno.cantidad_producto_armado)} ${retorno.unidad_producto || ''}`
+                    : `Externo pendiente · enviado a ${envio.enviado_a || 'sin destinatario'}`,
+                clase: retorno ? 'no-ensamblaje' : 'externo-pendiente'
+            });
+        });
+    }
     if (!requiereEnsamblaje && !p.enviado_ensamblaje) tags.push({ texto: 'Va directo a empaquetado', clase: 'no-ensamblaje' });
 
     return `
@@ -1949,11 +1976,19 @@ function finalizarProduccion(id) {
 }
 
 const modalCantidadEnsamblaje = new bootstrap.Modal(document.getElementById('modalCantidadEnsamblaje'));
-const pasosAvance = ['pasoCantidadProducida', 'tarjetaFotoPesaje', 'tarjetaMerma', 'bloque_ultima_pasada', 'bloquePausa'];
+const pasosAvance = ['pasoCantidadProducida', 'bloqueDestinoExterno', 'tarjetaFotoPesaje', 'tarjetaMerma', 'bloque_ultima_pasada', 'bloquePausa'];
 let indicePasoAvance = 0;
+function obtenerPasosAvance() {
+    const p = produccionesCache.find(x => Number(x.id) === Number(produccionIdParaEnsamblaje));
+    return pasosAvance.filter(id => {
+        if (id === 'bloque_ultima_pasada' && document.getElementById('produccion_completo').checked) return false;
+        if (id === 'bloqueDestinoExterno' && !necesitaEnsamblaje(p)) return false;
+        return true;
+    });
+}
 function renderPasoAvance() {
     const modal = document.getElementById('modalCantidadEnsamblaje');
-    const pasos = pasosAvance.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    const pasos = obtenerPasosAvance();
     indicePasoAvance = Math.max(0, Math.min(indicePasoAvance, pasos.length - 1));
     pasosAvance.forEach(id => { document.getElementById(id).style.display = pasos[indicePasoAvance] === id ? '' : 'none'; });
     modal.querySelector('.modal-body').scrollTop = 0;
@@ -1964,7 +1999,7 @@ function renderPasoAvance() {
 function moverPasoAvance(direccion) { indicePasoAvance += direccion; renderPasoAvance(); }
 document.getElementById('modalCantidadEnsamblaje').addEventListener('shown.bs.modal', () => { indicePasoAvance = 0; renderPasoAvance(); });
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', e => {
-    const pasos = pasosAvance.filter(id => id !== 'bloque_ultima_pasada' || !document.getElementById('produccion_completo').checked);
+    const pasos = obtenerPasosAvance();
     if (pasos[indicePasoAvance] !== pasos[pasos.length - 1]) { e.preventDefault(); moverPasoAvance(1); }
 }, true);
 let produccionIdParaEnsamblaje = null;
@@ -1984,6 +2019,9 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     capturaPendienteFotoPesaje = false;
     produccionIdParaEnsamblaje = produccionId;
     document.getElementById('formCantidadEnsamblaje').reset();
+    document.getElementById('produccion_destino_ensamblaje').value = 'local';
+    document.getElementById('bloqueDestinatarioExterno').style.display = 'none';
+    document.getElementById('produccion_enviado_a').required = false;
     renderFotosPesajeCapturadas();
     document.getElementById('panelCamaraPesaje').style.display = 'none';
     document.getElementById('errorCamaraPesaje').style.display = 'none';
@@ -1991,6 +2029,7 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     document.getElementById('capturaCamaraPesaje').style.display = 'none';
 
     const p = produccionesCache.find(x => x.id == produccionId);
+    document.getElementById('bloqueDestinoExterno').style.display = necesitaEnsamblaje(p) ? '' : 'none';
     const etapaTexto = necesitaEnsamblaje(p) ? 'Ensamblaje' : 'Empaquetado';
     const numeroPasada = (Array.isArray(p?.js_cantidades_salientes) ? p.js_cantidades_salientes.length : 0) + 1;
 
@@ -2012,6 +2051,12 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
 
     modalCantidadEnsamblaje.show();
 }
+
+document.getElementById('produccion_destino_ensamblaje').addEventListener('change', function () {
+    const externo = this.value === 'externo';
+    document.getElementById('bloqueDestinatarioExterno').style.display = externo ? '' : 'none';
+    document.getElementById('produccion_enviado_a').required = externo;
+});
 
 document.getElementById('produccion_completo').addEventListener('change', sincronizarUltimaPasadaCompleta);
 function sincronizarUltimaPasadaCompleta() {
@@ -2334,6 +2379,12 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
+    const destinoEnsamblaje = necesitaEnsamblaje(p) ? document.getElementById('produccion_destino_ensamblaje').value : 'local';
+    const enviadoA = destinoEnsamblaje === 'externo' ? document.getElementById('produccion_enviado_a').value.trim() : '';
+    if (destinoEnsamblaje === 'externo' && !enviadoA) {
+        Swal.fire('Falta el destinatario', 'Indica a quién se enviará esta pasada externa.', 'warning');
+        return;
+    }
     const operariosActivos = Array.isArray(p?.js_operarios_activos) && p.js_operarios_activos.length ? p.js_operarios_activos : (Array.isArray(p?.js_operarios) ? p.js_operarios : []);
     const esMultiOperario = operariosActivos.length > 1;
     let desglose = [];
@@ -2364,6 +2415,8 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('cantidad_producida', valor);
     formData.append('unidad', unidadProducida);
     formData.append('desglose_operarios', JSON.stringify(desglose));
+    formData.append('realizado_por_fuera', destinoEnsamblaje === 'externo' ? 'true' : 'false');
+    formData.append('enviado_a', enviadoA);
     formData.append('completo', completaRaw);
     formData.append('ultima_pasada', ultimaPasada ? 'true' : 'false');
     formData.append('pausar_despues', pausarDespues ? 'true' : 'false');

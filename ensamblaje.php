@@ -338,8 +338,8 @@ include("header.php");
                     <option value="">Selecciona una máquina...</option>
                 </select>
             </div>
-            <div class="col-md-2 mb-2">
-                <label class="form-label">Operarios que participaron *</label>
+            <div class="col-md-2 mb-2" id="ens_operarios_wrap">
+                <label class="form-label" id="ens_operarios_label">Operarios que participaron *</label>
                 <select class="form-select" id="ens_operarios_ids" multiple></select>
             </div>
             <div class="col-md-2 mb-2">
@@ -740,6 +740,7 @@ function tarjetaEnsamblajeHtml(e) {
                 <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'} (${e.color_nombre_actual ?? 'Sin color'})</span>
             </div>
             <div class="badges">
+                ${e.proveniente === 'externo' ? '<span class="badge text-bg-warning">Retorno externo</span>' : ''}
                 ${badgeRegistroEns(e.deleted_at)}
             </div>
         </div>
@@ -1156,6 +1157,8 @@ async function renderGridDetalle() {
                         color_rgb: colorRgb,
                         color_id: p.color_id,
                         cantidad_kg: p.cantidad_kg ?? p.cantidad,
+                        destino_ensamblaje: p.destino_ensamblaje || 'local',
+                        enviado_a: p.enviado_a || null,
                         ensamblaje_pendiente_id: p.ensamblaje_pendiente_id,
                 fecha_hora_fin: p.fecha_hora_fin,
                 categoria_material_id: p.categoria_material_id,
@@ -1169,6 +1172,7 @@ async function renderGridDetalle() {
                 <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
+                ${p.destino_ensamblaje === 'externo' ? `<span class="meta text-warning-emphasis"><b>Externo · enviado a ${p.enviado_a || 'destinatario sin dato'}</b></span>` : ''}
                 ${p.cantidad_por_unidad_armada ? `<span class="meta">Receta: <b>${formatearCantidadEns(p.cantidad_por_unidad_armada)} ${p.unidad_componente_configurada || ''}</b> por unidad armada</span>` : ''}
                 <span class="meta">${formatearFechaHoraLegibleEns(p.fecha_hora_fin)}</span>
             </button>`;
@@ -1276,7 +1280,7 @@ async function agregarLineaDetalle(tipo, datos) {
             return;
         }
         let cantidadRecibidaNum = cantidadProducida;
-        if (datos.componente_configuracion) {
+        if (datos.componente_configuracion && datos.destino_ensamblaje !== 'externo') {
             const { value: cantidadRecibida } = await Swal.fire({
                 title: 'Cantidad que usarás',
                 html: `Disponible: <b>${formatearCantidadEns(cantidadProducida)} ${unidad}</b><br>Indica cuánto <b>${unidad}</b> usarás en este armado. El saldo quedará disponible para otros armados.`,
@@ -1321,6 +1325,7 @@ async function agregarLineaDetalle(tipo, datos) {
             + ` · Color: ${datos.color_nombre || '-'} · Disponible: ${formatearCantidadEns(cantidadProducida)} ${unidad} · Se usará: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}`
             + (coincide ? ' <span style="color:#16A34A;">✓ se usa todo</span>' : ' <span style="color:#D97706;">↳ quedará saldo</span>')
             + recetaMeta
+                + (datos.destino_ensamblaje === 'externo' ? ` · <b style="color:#a16207;">Externo · enviado a ${datos.enviado_a || 'sin destinatario'}</b>` : '')
                 + ` · ${formatearFechaHoraLegibleEns(datos.fecha_hora_fin)}`,
             icono: 'fa-industry',
             color: est.color, bg: est.bg,
@@ -1329,6 +1334,8 @@ async function agregarLineaDetalle(tipo, datos) {
             cantidad_entrada_produccion: cantidadRecibidaNum,
             categoria_material_id: datos.categoria_material_id,
             categoria_material_nombre: datos.categoria_material_nombre,
+            destino_ensamblaje: datos.destino_ensamblaje || 'local',
+            enviado_a: datos.enviado_a || null,
         });
     } else if (tipo === 'derivado') {
         ticketDetalleEns.push({
@@ -1480,6 +1487,7 @@ function renderTicketDetalle() {
     const nProd = ticketDetalleEns.filter(l => l.tipo === 'produccion').length;
     const nDer  = ticketDetalleEns.filter(l => l.tipo === 'derivado').length;
     const nComp = ticketDetalleEns.filter(l => l.tipo === 'complemento').length;
+    actualizarFormularioRecepcionExternaEns();
     total.textContent = ticketDetalleEns.length;
     detalle.textContent = `${nProd} producción(es) · ${nDer} derivado(s) · ${nComp} complemento(s)`;
 
@@ -1492,6 +1500,17 @@ function renderTicketDetalle() {
         .map(([u, v]) => `${formatearCantidadEns(v)} ${u}`)
         .join(' + ') || '0';
     pesoEl.textContent = textoCantidad;
+}
+
+function actualizarFormularioRecepcionExternaEns() {
+    const esExterno = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.destino_ensamblaje === 'externo');
+    const operariosWrap = document.getElementById('ens_operarios_wrap');
+    const label = document.getElementById('ens_operarios_label');
+    if (operariosWrap) operariosWrap.style.display = esExterno ? 'none' : '';
+    if (label) label.textContent = esExterno ? 'Mano de obra externa' : 'Operarios que participaron *';
+    const maquinaWrap = document.getElementById('ens_maquina_wrap');
+    if (esExterno && maquinaWrap) maquinaWrap.style.display = 'none';
+    else actualizarCampoMaquinaEnsamblaje();
 }
 
 function obtenerDetalleJsonEns() {

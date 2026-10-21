@@ -922,6 +922,7 @@ function listarProducciones()
             pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
             pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
             pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados,
+            pd.realizado_por_fuera, pd.js_realizado_por_fuera,
             pd.detenido::text AS detenido_fecha,
             (SELECT evt FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'cierre_cambio_molde' ORDER BY ord DESC LIMIT 1) AS cierre_cambio_molde,
@@ -1040,6 +1041,10 @@ function listarProducciones()
             $fila['js_cantidades_salientes'] = !empty($fila['js_cantidades_salientes'])
                 ? json_decode($fila['js_cantidades_salientes'], true)
                 : [];
+            $fila['js_realizado_por_fuera'] = !empty($fila['js_realizado_por_fuera'])
+                ? json_decode($fila['js_realizado_por_fuera'], true)
+                : [];
+            $fila['realizado_por_fuera'] = in_array($fila['realizado_por_fuera'] ?? null, [true, 1, '1', 't', 'true'], true);
             $fila['completo'] = in_array($fila['completo'], [true, 1, '1', 't', 'true'], true);
             $fila['enviado_ensamblaje'] = in_array($fila['enviado_ensamblaje'], [true, 1, '1', 't', 'true'], true);
             $fila['pases_finalizados'] = in_array($fila['pases_finalizados'], [true, 1, '1', 't', 'true'], true)
@@ -2162,6 +2167,16 @@ function enviarAEnsamblaje()
     $conectar = conectar_oll_BD();
     $id = intval($_POST['id'] ?? 0);
     $cantidadProducida = floatval($_POST['cantidad_producida'] ?? 0);
+    $realizadoPorFueraRaw = strtolower(trim((string)($_POST['realizado_por_fuera'] ?? 'false')));
+    if (!in_array($realizadoPorFueraRaw, ['true', 'false', '1', '0'], true)) {
+        responder(false, 'Indica si esta pasada se enviará a un servicio externo.');
+    }
+    $realizadoPorFuera = in_array($realizadoPorFueraRaw, ['true', '1'], true);
+    $enviadoA = trim((string)($_POST['enviado_a'] ?? ''));
+    if ($realizadoPorFuera && $enviadoA === '') {
+        responder(false, 'Indica a quién se enviará esta pasada externa.');
+    }
+    if (mb_strlen($enviadoA) > 160) responder(false, 'El destinatario no puede superar 160 caracteres.');
     $completoRaw = strtolower(trim($_POST['completo'] ?? ''));
     $ultimaPasadaRaw = strtolower(trim($_POST['ultima_pasada'] ?? 'false'));
     if (!in_array($completoRaw, ['true', 'false', '1', '0'], true)) {
@@ -2262,6 +2277,7 @@ function enviarAEnsamblaje()
         $conectar,
         "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios, maquina_id,
                 js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg, js_casusticas, detenido,
+                realizado_por_fuera, js_realizado_por_fuera,
                 (SELECT evt->'operarios_ids' FROM unnest(COALESCE(js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
                  WHERE evt->>'tipo' = 'reanudacion' ORDER BY ord DESC LIMIT 1) AS ultimo_turno_ids
          FROM produccion WHERE id = :id",
@@ -2293,6 +2309,12 @@ function enviarAEnsamblaje()
     $necesitaEnsamblaje = $productoIdProduccion <= 0
         || empty($item['necesita_ensamblaje'])
         || strtolower(trim((string)$item['necesita_ensamblaje'])) !== 'no';
+    if ($realizadoPorFuera && !$necesitaEnsamblaje) {
+        responder(false, 'Solo se puede enviar a un servicio externo una producción que requiere ensamblaje.');
+    }
+    if (!$necesitaEnsamblaje && $enviadoA !== '') {
+        responder(false, 'El destinatario externo solo aplica a producciones que requieren ensamblaje.');
+    }
     $destino = $necesitaEnsamblaje ? 'ensamblaje' : 'empaquetado';
 
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
@@ -2451,6 +2473,8 @@ function enviarAEnsamblaje()
             array_values($desglosePorOperario)
         )),
         'fotos_pesaje' => $fotosCloudinary,
+        'destino_ensamblaje' => $necesitaEnsamblaje ? ($realizadoPorFuera ? 'externo' : 'local') : 'empaquetado',
+        'enviado_a' => $realizadoPorFuera ? $enviadoA : null,
     ];
     $salidasActualizadas = $salidasPrevias;
     $mermasPreviasIds = [];
@@ -2470,6 +2494,21 @@ function enviarAEnsamblaje()
     ));
     $salidaActual['mermas'] = $mermasDeEstaPasada;
     $salidasActualizadas[] = $salidaActual;
+    $enviosExternosPrevios = json_decode($existe[0]['js_realizado_por_fuera'] ?? '[]', true);
+    if (!is_array($enviosExternosPrevios)) $enviosExternosPrevios = [];
+    if ($realizadoPorFuera) {
+        $enviosExternosPrevios[] = [
+            'envio_id' => $id . ':' . $salidaActual['pasada'],
+            'pasada' => (int)$salidaActual['pasada'],
+            'destino' => 'externo',
+            'enviado_a' => $enviadoA,
+            'fecha_envio' => $salidaActual['fecha'],
+            'cantidad_enviada' => (float)$cantidadProducida,
+            'unidad' => strtoupper($unidadProduccion),
+            'recepcion' => null,
+        ];
+    }
+    $teniaPaseExterno = in_array($existe[0]['realizado_por_fuera'] ?? null, [true, 1, '1', 't', 'true'], true);
     $cantidadSalidaAcumulada = array_sum(array_map(
         static fn($salida) => (float)($salida['cantidad'] ?? 0),
         $salidasActualizadas
@@ -2503,6 +2542,8 @@ function enviarAEnsamblaje()
                 detenido                = CASE WHEN :marcar_pausa THEN NOW() WHEN :cierre_cambio_molde THEN NULL ELSE detenido END,
                 fecha_hora_fin          = CASE WHEN :marcar_fin_corrida THEN COALESCE(fecha_hora_fin, NOW()) ELSE fecha_hora_fin END,
                 js_cantidades_salientes = :js_cantidades_salientes::jsonb,
+                realizado_por_fuera     = :realizado_por_fuera,
+                js_realizado_por_fuera  = :js_realizado_por_fuera::jsonb,
                 completo                = :completo,
                 pases_finalizados       = :pases_finalizados,
                 js_images               = CASE
@@ -2529,6 +2570,8 @@ function enviarAEnsamblaje()
             'evento_pausa' => $eventoPausa === null ? null : json_encode($eventoPausa, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'marcar_fin_corrida' => $finalizarCorrida,
             'js_cantidades_salientes' => json_encode($salidasActualizadas, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'realizado_por_fuera' => $teniaPaseExterno || $realizadoPorFuera,
+            'js_realizado_por_fuera' => json_encode($enviosExternosPrevios, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'completo' => $completo,
             'pases_finalizados' => $finalizarCorrida,
             'marcar_fecha_envio' => $finalizarCorrida,
