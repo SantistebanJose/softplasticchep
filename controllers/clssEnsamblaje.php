@@ -367,8 +367,15 @@ function buscarProductosConfiguradosEnsamblaje(): void
         LEFT JOIN molde m ON m.id = NULLIF(cfg.item->>'molde_id', '')::bigint
         WHERE p.activo = TRUE AND (
             (m.id IS NOT NULL AND m.deleted_at IS NULL
-             AND COALESCE(cfg.item->>'necesita_ensamblaje', 'sí') <> 'no')
-            OR cardinality(COALESCE(p.js_configuracion_armado, ARRAY[]::jsonb[])) > 0
+             AND LOWER(TRIM(COALESCE(cfg.item->>'necesita_ensamblaje', 'sí'))) <> 'no')
+            OR (
+                cardinality(COALESCE(p.js_configuracion_armado, ARRAY[]::jsonb[])) > 0
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(p.js_configuracion, '[]'::jsonb)) cfg_directo(item)
+                    WHERE LOWER(TRIM(COALESCE(cfg_directo.item->>'necesita_ensamblaje', ''))) = 'no'
+                )
+            )
         )
         ORDER BY p.descripcion
     ");

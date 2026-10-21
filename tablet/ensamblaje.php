@@ -49,6 +49,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     --resina-5:#7C3AED; --resina-5-bg:#F1EAFD;
     --resina-6:#0E9488; --resina-6-bg:#E2F5F3;
     --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
     --safe-l: env(safe-area-inset-left, 0px);
     --safe-r: env(safe-area-inset-right, 0px);
 }
@@ -86,6 +87,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 .pc-ens-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:16px; margin-top:4px; }
 .pc-ens-card{ border:1px solid #ece9e1; border-radius:16px; background:#fff; padding:18px; display:flex; flex-direction:column; gap:10px; }
+.pc-ens-page-card{margin:20px}
 .pc-ens-card-top{ display:flex; align-items:center; gap:8px; }
 .pc-ens-dot{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:#c8c3b4; }
 .pc-ens-card.estado-curso .pc-ens-dot{ background:#0B4DA6; animation:pc-pulse-blue 1.6s infinite; }
@@ -140,10 +142,11 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 @media (max-width:560px){ .pc-btn-registrar{ width:100%; justify-content:center; } }
 
 /* =========================================================================
-   FORMULARIO DE ENSAMBLAJE — rediseño: flujo guiado en 2 pasos + ticket
-   siempre visible. Nada de <select>: todo son cards ya abiertas.
+   FORMULARIO DE ENSAMBLAJE — flujo guiado por pasos, con resumen final.
+   Nada de <select> para producto: todo son cards ya abiertas.
    ========================================================================= */
 .pc-modal-tablet .modal-content{ background:#fbfaf7; }
+#modalEnsamblaje .modal-header{padding:calc(10px + var(--safe-t)) calc(14px + var(--safe-r)) 10px calc(14px + var(--safe-l))}
 .pc-ens-form-body{ display:flex; flex-direction:column; gap:14px; padding-bottom:6px; height:100%; overflow-y:auto; }
 
 /* Barra superior compacta: sucursal + operarios, simétrica en dos mitades */
@@ -173,10 +176,22 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-ens-requisito i{ flex:0 0 auto; }
 
-/* Layout principal: contenido (Producto + Vincular) a la izquierda, Ticket
-   siempre visible a la derecha en tablets apaisadas; apilado en vertical
-   en pantallas angostas / portrait, con el ticket como último bloque pero
-   con su propio scroll interno para no perder de vista el resumen. */
+.pc-ens-wizard-progress{display:flex;align-items:center;gap:14px;flex:0 0 auto;color:#64748b;font-size:.9rem;font-weight:700}
+.pc-ens-wizard-progress .progress{flex:1;height:7px;background:#e9edf5;border-radius:999px}
+.pc-ens-wizard-progress .progress-bar{background:#1769ff;border-radius:999px;transition:width .2s ease}
+.pc-ens-wizard-progress>span{white-space:nowrap}
+.pc-ens-summary{border:1px solid #e7e4dd;border-radius:14px;background:#fff;padding:16px;}
+.pc-ens-summary h6{font-weight:800;color:#152238;margin:0 0 14px}
+.pc-ens-summary-row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid #f0eee8}
+.pc-ens-summary-row:last-child{border-bottom:0}
+.pc-ens-summary-label{color:#8a8578;font-size:.84em;font-weight:700;flex:0 0 34%}
+.pc-ens-summary-value{color:#1f2430;text-align:right;min-width:0;overflow-wrap:anywhere;font-weight:600}
+.pc-ens-summary-items{margin:6px 0 0;padding-left:18px;text-align:left;font-weight:500}
+.pc-ens-summary-items li{margin:4px 0}
+[hidden]{display:none!important}
+
+/* Layout por paso: producto y luego vinculación/ticket. En tablets apaisadas
+   se aprovecha el ancho; en móviles y portrait el contenido se apila. */
 .pc-ens-layout{ flex:1; min-height:0; display:flex; flex-direction:column; gap:14px; }
 .pc-ens-content{ display:flex; flex-direction:column; gap:14px; }
 @media (min-width:880px) and (orientation:landscape){
@@ -262,8 +277,14 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-op-picker-card.activo .check{ opacity:1; }
 
 /* Pie del formulario: dos zonas simétricas, una para cada pulgar */
-.pc-ens-footer{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px calc(14px + var(--safe-l)) calc(14px + var(--safe-b)) 14px !important; }
+.pc-ens-footer{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px calc(14px + var(--safe-r)) calc(14px + var(--safe-b)) calc(14px + var(--safe-l)) !important; }
+.pc-ens-footer.paso-2,.pc-ens-footer.paso-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.pc-ens-footer.solo-lectura-final{grid-template-columns:1fr 1fr}
 .pc-ens-footer .btn{ min-height:54px; font-size:1.02em; font-weight:700; border-radius:12px; }
+
+@supports (height:100dvh){
+    #modalEnsamblaje .modal-dialog,#modalEnsamblaje .modal-content{height:100dvh;min-height:0}
+}
 
 /* Selector de color con muestra visual y nombre legible */
 .pc-color-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px;margin-top:7px}
@@ -275,32 +296,44 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-color-option .check{margin-left:auto;color:#2F6FED;display:none}
 .pc-color-option.activo .check{display:block}
 @media(max-width:767.98px){
-    #modalEnsamblaje .modal-header{padding:10px 14px}
+    #modalEnsamblaje .modal-header{padding:calc(10px + var(--safe-t)) calc(14px + var(--safe-r)) 10px calc(14px + var(--safe-l))}
     #modalEnsamblaje .modal-title{font-size:1.05rem}
-    .pc-ens-form-body{height:auto;min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding:10px 10px calc(12px + var(--safe-b))}
+    .pc-ens-form-body{height:auto;min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:10px calc(10px + var(--safe-r)) calc(12px + var(--safe-b)) calc(10px + var(--safe-l))}
     .pc-ens-topbar{grid-template-columns:1fr;gap:8px}
     .pc-ens-topbar-group{padding:10px 12px}
     .pc-ens-layout{flex:0 0 auto;min-height:auto;gap:10px}
     .pc-ens-content{gap:10px;max-height:none}
     .pc-ens-ticket-col{position:static;max-height:none}
-    .pc-panel-body-scroll{min-height:120px;max-height:34vh;overscroll-behavior:contain}
+    .pc-panel-body-scroll{min-height:120px;max-height:clamp(160px,34dvh,300px);overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
     .pc-prod-grid,.pc-mat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .pc-prod-card{padding:10px;min-height:60px;gap:8px}
     .pc-prod-card .pellet{width:32px;height:32px}
     .pc-mat-card{min-height:0;padding:10px 9px}
     .pc-mat-tabs{gap:5px;padding-left:8px;padding-right:8px}
     .pc-mat-tab{min-height:46px;padding:9px 4px;font-size:.78em;gap:4px}
-    .pc-ens-footer{position:sticky;bottom:0;z-index:2;gap:8px;padding:8px 10px calc(8px + var(--safe-b) + var(--safe-l)) 10px!important;background:#fbfaf7;border-top:1px solid #e7e4dd}
+    .pc-ens-footer{position:sticky;bottom:0;z-index:2;gap:8px;padding:8px calc(10px + var(--safe-r)) calc(8px + var(--safe-b)) calc(10px + var(--safe-l))!important;background:#fbfaf7;border-top:1px solid #e7e4dd}
     .pc-ens-footer .btn{min-height:48px;padding:8px;font-size:.95em}
+    .pc-ens-summary{padding:12px}
+    .pc-ens-summary-row{gap:8px}
+}
+@media(max-width:560px){
+    .pc-ens-page-card{margin:12px!important}
+    .pc-ens-grid{grid-template-columns:minmax(0,1fr);gap:12px}
+    .pc-ens-card{padding:14px}
+    .pc-ens-summary-label{flex-basis:38%}
 }
 @media(max-width:380px){
     .pc-prod-grid,.pc-mat-grid{grid-template-columns:1fr}
     .pc-mat-tab{font-size:.72em}
     .pc-color-picker{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .pc-ens-wizard-progress{gap:8px;font-size:.82rem}
+    .pc-ens-footer.paso-2,.pc-ens-footer.paso-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .pc-ens-footer.paso-2 #ensWizardSiguiente,.pc-ens-footer.paso-3 #ensWizardGuardar{grid-column:1 / -1}
+    .pc-ens-footer .btn{font-size:.88em}
 }
 </style>
 
-<div class="pc-card" style="margin:20px;">
+<div class="pc-card pc-ens-page-card">
     <div class="pc-card-header pc-card-header-ens">
         <div>
             <h2>Ensamblaje</h2>
@@ -327,7 +360,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <div class="modal fade pc-modal-tablet" id="modalEnsamblaje" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
-      <form id="formEnsamblaje" class="d-flex flex-column" style="height:100%;">
+      <form id="formEnsamblaje" class="d-flex flex-column" style="height:100%;" novalidate>
         <div class="modal-header">
           <h5 class="modal-title" id="modalEnsamblajeTitulo">Registrar ensamblaje</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -354,13 +387,18 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 Vincula al menos una producción finalizada, un derivado o un complemento.
             </div>
 
-            <!-- Layout: contenido (Producto + Vincular) | Ticket siempre visible -->
+            <div class="pc-ens-wizard-progress">
+                <span id="ensWizardPasoTexto">Paso 1 de 3</span>
+                <div class="progress"><div id="ensWizardBarra" class="progress-bar" style="width:33.33%"></div></div>
+            </div>
+
+            <!-- Layout: Paso 1 producto; Paso 2 vinculaciones y ticket -->
             <div class="pc-ens-layout">
 
                 <div class="pc-ens-content">
 
                     <!-- Paso 1: Producto -->
-                    <div class="pc-panel accent-blue">
+                    <div class="pc-panel accent-blue" data-ens-wizard-step="1">
                         <div class="pc-panel-head">
                             <h6><span class="pc-step-badge">1</span> <i class="fa-solid fa-box"></i> Producto a ensamblar</h6>
                         </div>
@@ -382,7 +420,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
 
                     <!-- Paso 2: Vincular producciones / derivados / complementos -->
-                    <div class="pc-panel accent-violet" id="pc_panel_vincular">
+                    <div class="pc-panel accent-violet" id="pc_panel_vincular" data-ens-wizard-step="2">
                         <div class="pc-panel-head">
                             <h6><span class="pc-step-badge">2</span> <i class="fa-solid fa-link"></i> Vincular al armado</h6>
                         </div>
@@ -410,7 +448,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                 </div>
 
                 <!-- Ticket: columna fija en tablet apaisada, bloque final en vertical -->
-                <div class="pc-ens-ticket-col">
+                <div class="pc-ens-ticket-col" data-ens-wizard-step="2">
                     <div class="pc-panel accent-teal">
                         <div class="pc-panel-head"><h6><i class="fa-solid fa-receipt"></i> Ticket de este armado</h6></div>
                         <div class="pc-panel-body-scroll" style="padding:0;">
@@ -430,12 +468,19 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
             </div>
 
+            <section class="pc-ens-summary" data-ens-wizard-step="3" id="ens_resumen_previo" hidden>
+                <h6><i class="fa-solid fa-clipboard-check"></i> Revisa el armado antes de guardar</h6>
+                <div id="ens_resumen_contenido"></div>
+            </section>
+
         </div>
 
         <!-- Pie: dos zonas simétricas, una por pulgar, al sostener la tablet con ambas manos -->
         <div class="modal-footer pc-ens-footer">
           <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary btn-lg">Guardar</button>
+          <button type="button" class="btn btn-outline-secondary btn-lg" id="ensWizardAnterior" onclick="moverPasoEnsamblaje(-1)" hidden>← Anterior</button>
+          <button type="button" class="btn btn-primary btn-lg" id="ensWizardSiguiente" onclick="moverPasoEnsamblaje(1)">Siguiente →</button>
+          <button type="submit" class="btn btn-primary btn-lg" id="ensWizardGuardar" hidden>Guardar ensamblaje</button>
         </div>
       </form>
     </div>
@@ -502,6 +547,7 @@ let productosGridDataEns = [];   // productos ya cargados para el picker
 let sucursalSeleccionadaEns = ''; // id de sucursal o ''
 let operariosCatalogoEns = [];    // catálogo completo de operarios
 let operariosSeleccionadosEns = []; // [{id, nombre_completo, cargo}]
+let pasoWizardEnsamblaje = 1;
 
 document.addEventListener('DOMContentLoaded', () => {
    // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO: pide nombre del dispositivo si aún no lo tiene
@@ -1431,6 +1477,72 @@ function obtenerDetalleJsonEns() {
     })));
 }
 
+function escaparResumenEnsamblaje(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function dibujarResumenEnsamblaje() {
+    const producto = productosGridDataEns.find(p => String(p.producto_id) === String(obtenerProductoIdSeleccionadoEns()));
+    const sucursal = (sucursalesEnsCache || []).find(s => String(s.id) === String(sucursalSeleccionadaEns));
+    const maquinaSelect = document.getElementById('ens_maquina_id');
+    const maquina = maquinaSelect?.value ? maquinaSelect.selectedOptions[0].textContent.trim() : 'No aplica';
+    const operarios = operariosSeleccionadosEns.map(o => escaparResumenEnsamblaje(o.nombre_completo)).join(', ') || '—';
+    const detalle = ticketDetalleEns.length
+        ? `<ul class="pc-ens-summary-items">${ticketDetalleEns.map(item => `<li><b>${escaparResumenEnsamblaje(item.nombre)}</b>${item.meta ? ` · ${escaparResumenEnsamblaje(item.meta)}` : ''}</li>`).join('')}</ul>`
+        : 'Sin elementos vinculados';
+    const color = ticketDetalleEns.find(item => item.color_nombre)?.color_nombre || 'Pendiente';
+
+    document.getElementById('ens_resumen_contenido').innerHTML = `
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Sucursal</span><span class="pc-ens-summary-value">${escaparResumenEnsamblaje(sucursal?.nombre || '—')}</span></div>
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Operarios</span><span class="pc-ens-summary-value">${operarios}</span></div>
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Producto</span><span class="pc-ens-summary-value">${escaparResumenEnsamblaje(producto ? `${producto.codigo} - ${producto.descripcion}` : '—')}</span></div>
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Máquina</span><span class="pc-ens-summary-value">${escaparResumenEnsamblaje(maquina)}</span></div>
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Color final</span><span class="pc-ens-summary-value">${escaparResumenEnsamblaje(color)}</span></div>
+        <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Elementos vinculados</span><span class="pc-ens-summary-value">${detalle}</span></div>`;
+}
+
+function validarPasoEnsamblaje(paso) {
+    if (paso === 1) {
+        if (!sucursalSeleccionadaEns) { Swal.fire('Falta la sucursal', 'Toca la sucursal donde se realizó este armado.', 'warning'); return false; }
+        if (!obtenerProductoIdSeleccionadoEns()) { Swal.fire('Falta el producto', 'Toca una card de producto para seleccionarlo.', 'warning'); return false; }
+        if (operariosSeleccionadosEns.length === 0) { Swal.fire('Faltan operarios', 'Agrega al menos un operario que haya participado.', 'warning'); return false; }
+        const producto = productosGridDataEns.find(p => String(p.producto_id) === String(obtenerProductoIdSeleccionadoEns()));
+        const requiereMaquina = ['t', 'true', '1'].includes(String(producto?.requiere_maquina_ensamblaje).toLowerCase());
+        if (requiereMaquina && !document.getElementById('ens_maquina_id').value) {
+            Swal.fire('Falta la máquina', 'Selecciona la máquina que se usó para este producto.', 'warning'); return false;
+        }
+    }
+    if (paso === 2) {
+        if (ticketDetalleEns.length === 0) { Swal.fire('Falta vincular', 'Debes vincular al menos una producción finalizada, un derivado o un complemento.', 'warning'); return false; }
+        if (!document.getElementById('ens_color_id').value) { Swal.fire('Falta vincular un color', 'El color final se determina al vincular una producción con color o un complemento.', 'warning'); return false; }
+    }
+    return true;
+}
+
+function actualizarPasoWizardEnsamblaje() {
+    document.querySelectorAll('#modalEnsamblaje [data-ens-wizard-step]').forEach(el => {
+        el.hidden = Number(el.dataset.ensWizardStep) !== pasoWizardEnsamblaje;
+    });
+    document.querySelector('.pc-ens-layout').hidden = pasoWizardEnsamblaje === 3;
+    document.getElementById('ensWizardPasoTexto').textContent = `Paso ${pasoWizardEnsamblaje} de 3`;
+    document.getElementById('ensWizardBarra').style.width = `${(pasoWizardEnsamblaje / 3) * 100}%`;
+    document.getElementById('ensWizardAnterior').hidden = pasoWizardEnsamblaje === 1;
+    document.getElementById('ensWizardSiguiente').hidden = pasoWizardEnsamblaje === 3;
+    document.getElementById('ensWizardGuardar').hidden = pasoWizardEnsamblaje !== 3 || soloLecturaEns;
+    const footer = document.querySelector('#modalEnsamblaje .pc-ens-footer');
+    footer.classList.toggle('paso-2', pasoWizardEnsamblaje === 2);
+    footer.classList.toggle('paso-3', pasoWizardEnsamblaje === 3);
+    footer.classList.toggle('solo-lectura-final', soloLecturaEns && pasoWizardEnsamblaje === 3);
+    if (pasoWizardEnsamblaje === 3) dibujarResumenEnsamblaje();
+}
+
+function moverPasoEnsamblaje(delta) {
+    if (delta > 0 && !validarPasoEnsamblaje(pasoWizardEnsamblaje)) return;
+    pasoWizardEnsamblaje = Math.max(1, Math.min(3, pasoWizardEnsamblaje + delta));
+    actualizarPasoWizardEnsamblaje();
+    document.querySelector('#modalEnsamblaje .modal-body').scrollTop = 0;
+}
+
 // ── Crear / Editar ───────────────────────────────────────────────────────
 function limpiarFormularioEnsamblaje() {
     document.getElementById('ens_buscar_detalle').value = '';
@@ -1444,6 +1556,7 @@ function limpiarFormularioEnsamblaje() {
     document.getElementById('ens_maquina_wrap').style.display = 'none';
     sucursalSeleccionadaEns = '';
     operariosSeleccionadosEns = [];
+    pasoWizardEnsamblaje = 1;
     tabDetalleActiva = 'produccion';
     document.getElementById('tab_producciones').classList.add('activo');
     document.getElementById('tab_derivados').classList.remove('activo');
@@ -1462,6 +1575,7 @@ function limpiarFormularioEnsamblaje() {
     footer.querySelector('button[data-bs-dismiss]').textContent = 'Cancelar';
     document.getElementById('ens_requisito_banner').innerHTML =
         `<i class="fa-solid fa-circle-info"></i> Vincula al menos una producción finalizada, un derivado o un complemento.`;
+    actualizarPasoWizardEnsamblaje();
 }
 
 async function abrirModalCrearEnsamblaje() {
@@ -1569,6 +1683,8 @@ async function abrirModalEditarEnsamblaje(id) {
     renderTicketDetalle();
     await renderGridDetalle();
     aplicarModoSoloLecturaEns(); // <-- nuevo, al final
+    pasoWizardEnsamblaje = soloLecturaEns ? 3 : 1;
+    actualizarPasoWizardEnsamblaje();
     modalEnsamblaje.show();
 }
 
@@ -1597,6 +1713,14 @@ function aplicarModoSoloLecturaEns() {
 
 document.getElementById('formEnsamblaje').addEventListener('submit', async function (e) {
     e.preventDefault();
+
+    if (pasoWizardEnsamblaje !== 3) {
+        moverPasoEnsamblaje(1);
+        return;
+    }
+    if (!validarPasoEnsamblaje(1)) { pasoWizardEnsamblaje = 1; actualizarPasoWizardEnsamblaje(); return; }
+    if (!validarPasoEnsamblaje(2)) { pasoWizardEnsamblaje = 2; actualizarPasoWizardEnsamblaje(); return; }
+    dibujarResumenEnsamblaje();
 
     if (!sucursalSeleccionadaEns) {
         Swal.fire('Falta la sucursal', 'Toca la sucursal donde se realizó este armado.', 'warning');
