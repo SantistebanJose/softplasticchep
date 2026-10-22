@@ -783,6 +783,13 @@ function buscarProduccionesDisponibles()
     $categoriaMaterialId = intval($_POST['categoria_material_id'] ?? 0);
     $produccionId  = intval($_POST['produccion_id'] ?? 0);
     $texto         = trim($_POST['texto'] ?? '');
+    $destinoFiltro = strtolower(trim((string)($_POST['destino_ensamblaje'] ?? 'local')));
+    if (!in_array($destinoFiltro, ['local', 'externo'], true)) $destinoFiltro = 'local';
+    $esAdminExterno = !esOperarioSesion()
+        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
+    if ($destinoFiltro === 'externo' && !$esAdminExterno) {
+        responder(false, 'Solo un administrador puede consultar producciones enviadas a externo.');
+    }
 
     $where  = [
         "t1.deleted_at IS NULL",
@@ -821,13 +828,10 @@ function buscarProduccionesDisponibles()
               )
         )",
     ];
-    $esAdminExterno = !esOperarioSesion()
-        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
-    if (!$esAdminExterno) {
-        // No se muestran pases externos a operarios ni a otros roles de panel.
-        $where[] = "LOWER(COALESCE(pase.item->>'destino_ensamblaje', 'local')) <> 'externo'";
-    }
-    $params = [];
+    // El formulario filtra exactamente las producciones del destino elegido.
+    // Operarios y otros roles quedan limitados a producciones locales.
+    $where[] = "LOWER(COALESCE(pase.item->>'destino_ensamblaje', 'local')) = :destino_ensamblaje";
+    $params = ['destino_ensamblaje' => $destinoFiltro];
     $joinProducto = "INNER JOIN producto t4 ON t4.id = split_part(t1.unico_molde_producto, '-', 2)::bigint";
 
     if ($produccionId > 0) {
@@ -1317,6 +1321,7 @@ function obtenerEnsamblaje($id)
             e.fin,
             e.cantidad_peso_kg,
             e.deleted_at,
+            e.proveniente,
             e.js_moldes_utilizados,
             e.js_derivados_utilizados,
             e.enviado_empaquetado, 
@@ -1385,6 +1390,13 @@ function guardarEnsamblaje()
     $sucursal_id = intval($_POST['sucursal_id'] ?? 0);
     $producto_id         = intval($_POST['producto_id'] ?? 0);
     $color_id            = intval($_POST['color_id'] ?? 0);
+    $destinoSeleccionado = strtolower(trim((string)($_POST['destino_ensamblaje'] ?? 'local')));
+    if (!in_array($destinoSeleccionado, ['local', 'externo'], true)) {
+        responder(false, 'El destino del ensamblaje no es válido.');
+    }
+    if ($destinoSeleccionado === 'externo' && !esAdministradorSesionEnsamblaje()) {
+        responder(false, 'Solo un administrador puede registrar un retorno externo.');
+    }
     $operariosInput = json_decode($_POST['operarios'] ?? '[]', true);
     if (!is_array($operariosInput)) $operariosInput = [];
     $detalleJson         = trim($_POST['detalle'] ?? '[]');
@@ -1401,6 +1413,7 @@ function guardarEnsamblaje()
     $productoConfig = json_decode($producto[0]['js_configuracion_empaquetado'] ?? '{}', true) ?: [];
     $requiereMaquina = !empty($productoConfig['requiere_maquina_ensamblaje']);
     $maquinaId = intval($_POST['maquina_id'] ?? 0) ?: null;
+    if ($destinoSeleccionado === 'externo') $maquinaId = null;
     if ($maquinaId) {
         $maquina = executeQuery($conectar, "SELECT id FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
         if (empty($maquina)) responder(false, 'La máquina seleccionada no existe o está inactiva.');
@@ -1476,6 +1489,12 @@ function guardarEnsamblaje()
     }
     if ($detalleTieneExterno && $detalleTieneLocal) {
         responder(false, 'Registra por separado los armados externos y los armados locales; no mezcles sus componentes.');
+    }
+    if ($destinoSeleccionado === 'externo' && !$detalleTieneExterno) {
+        responder(false, 'Para registrar un retorno externo, vincula solo producciones enviadas a externo.');
+    }
+    if ($destinoSeleccionado === 'local' && $detalleTieneExterno) {
+        responder(false, 'El destino seleccionado es Local; quita las producciones enviadas a externo o cambia el destino.');
     }
     if ($detalleTieneExterno && !esAdministradorSesionEnsamblaje()) {
         responder(false, 'Solo un administrador puede recibir producciones enviadas a un servicio externo.');

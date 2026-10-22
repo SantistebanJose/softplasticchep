@@ -4,6 +4,9 @@ $pageSubtitle = 'Armado de productos finales';
 $activePage = 'ensamblaje';
 
 include("header.php");
+$puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
+    && strtolower(trim((string)$_SESSION['rol_usuario'])) === 'administrador'
+    && empty($_SESSION['operario_id']);
 ?>
 
 <style>
@@ -327,6 +330,17 @@ include("header.php");
                     <option value="">Selecciona un producto...</option>
                 </select>
             </div>
+            <?php if ($puedeRegistrarExternoEns): ?>
+            <div class="col-md-2 mb-2" id="ens_destino_wrap">
+                <label class="form-label">Destino del ensamblaje *</label>
+                <select class="form-select" id="ens_destino" onchange="cambiarDestinoEnsamblaje()">
+                    <option value="local">Local</option>
+                    <option value="externo">Externo</option>
+                </select>
+            </div>
+            <?php else: ?>
+            <input type="hidden" id="ens_destino" value="local">
+            <?php endif; ?>
             <input type="hidden" id="ens_color_id" value="">
             <div class="col-md-2 mb-2">
                 <label class="form-label">Color final</label>
@@ -424,6 +438,7 @@ const modalEnsamblaje = new bootstrap.Modal(document.getElementById('modalEnsamb
 
 const llamarEnsamblaje = (accion, params = {}) => llamar(CONTROLADOR_ENSAMBLAJE, accion, params);
 const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
+const puedeRegistrarExternoEns = <?= $puedeRegistrarExternoEns ? 'true' : 'false' ?>;
 let modoEdicionEnsamblaje = false;
 let ensamblajeIdActual = 0;
 let productosEnsCache = null;   // cache de productos para selects/filtro
@@ -1118,6 +1133,7 @@ async function renderGridDetalle() {
     const sel = document.getElementById('ens_producto_id');
     const productoId = sel.value;
     const colorId = document.getElementById('ens_color_id').value;
+    const destinoEnsamblaje = document.getElementById('ens_destino')?.value || 'local';
 
     // El color se infiere de la primera producción o complemento vinculado.
     // Antes de eso se muestran candidatos de todos los colores.
@@ -1128,11 +1144,11 @@ async function renderGridDetalle() {
     if (tabDetalleActiva === 'produccion') {
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const categoriaFiltro = categoriaMaterialTicketActual();
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId || '', categoria_material_id: categoriaFiltro || '', texto });
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId || '', categoria_material_id: categoriaFiltro || '', texto, destino_ensamblaje: destinoEnsamblaje });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
-            grid.innerHTML = '<div class="pc-mat-empty">No hay producciones finalizadas y libres para este producto.</div>';
+            grid.innerHTML = `<div class="pc-mat-empty">No hay producciones ${destinoEnsamblaje === 'externo' ? 'enviadas a externo' : 'locales'} finalizadas y libres para este producto.</div>`;
             return;
         }
 
@@ -1257,6 +1273,15 @@ async function renderGridDetalle() {
 }
 
 async function agregarLineaDetalle(tipo, datos) {
+    const destinoSeleccionado = document.getElementById('ens_destino')?.value || 'local';
+    if (destinoSeleccionado === 'externo' && tipo !== 'produccion') {
+        Swal.fire('Retorno externo', 'Vincula únicamente producciones que se enviaron a externo.', 'info');
+        return;
+    }
+    if (tipo === 'produccion' && (datos.destino_ensamblaje || 'local') !== destinoSeleccionado) {
+        Swal.fire('Destino diferente', `Esta producción fue enviada a ${datos.destino_ensamblaje === 'externo' ? 'Externo' : 'Local'}. Cambia el destino del formulario para vincularla.`, 'warning');
+        return;
+    }
     const nombreParaEstilo = tipo === 'produccion' ? (datos.molde_nombre || '')
         : tipo === 'derivado' ? (datos.nombre || '')
         : (datos.nombre_mostrar || datos.producto_codigo || '');
@@ -1503,14 +1528,59 @@ function renderTicketDetalle() {
 }
 
 function actualizarFormularioRecepcionExternaEns() {
-    const esExterno = ticketDetalleEns.some(l => l.tipo === 'produccion' && l.destino_ensamblaje === 'externo');
+    const esExterno = (document.getElementById('ens_destino')?.value || 'local') === 'externo';
     const operariosWrap = document.getElementById('ens_operarios_wrap');
-    const label = document.getElementById('ens_operarios_label');
     if (operariosWrap) operariosWrap.style.display = esExterno ? 'none' : '';
-    if (label) label.textContent = esExterno ? 'Mano de obra externa' : 'Operarios que participaron *';
+    if (esExterno && tsOperariosEns) tsOperariosEns.clear();
     const maquinaWrap = document.getElementById('ens_maquina_wrap');
-    if (esExterno && maquinaWrap) maquinaWrap.style.display = 'none';
+    if (esExterno && maquinaWrap) {
+        maquinaWrap.style.display = 'none';
+        document.getElementById('ens_maquina_id').value = '';
+    }
     else actualizarCampoMaquinaEnsamblaje();
+    ['tab_derivados', 'tab_complementos'].forEach(id => {
+        const tab = document.getElementById(id);
+        if (tab) tab.style.display = esExterno ? 'none' : '';
+    });
+    if (esExterno && tabDetalleActiva !== 'produccion') {
+        tabDetalleActiva = 'produccion';
+        document.getElementById('tab_producciones').classList.add('activa');
+        document.getElementById('tab_derivados').classList.remove('activa');
+        document.getElementById('tab_complementos').classList.remove('activa');
+        document.getElementById('ens_buscar_detalle').value = '';
+    }
+}
+
+async function cambiarDestinoEnsamblaje() {
+    const selector = document.getElementById('ens_destino');
+    if (!selector) return;
+    const nuevoDestino = selector.value;
+    if (nuevoDestino === 'externo' && !puedeRegistrarExternoEns) {
+        selector.value = 'local';
+        Swal.fire('Acceso restringido', 'Solo un administrador puede registrar retornos externos.', 'warning');
+        return;
+    }
+    if (ticketDetalleEns.length > 0) {
+        const confirmar = await Swal.fire({
+            title: 'Cambiar destino',
+            text: 'Se quitarán los componentes vinculados para evitar mezclar producciones locales y externas.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Cambiar y limpiar',
+            cancelButtonText: 'Mantener destino actual'
+        });
+        if (!confirmar.isConfirmed) {
+            selector.value = nuevoDestino === 'externo' ? 'local' : 'externo';
+            actualizarFormularioRecepcionExternaEns();
+            return;
+        }
+        ticketDetalleEns = [];
+        document.getElementById('ens_color_id').value = '';
+        actualizarEtiquetaColorEnsamblaje();
+    }
+    actualizarFormularioRecepcionExternaEns();
+    renderTicketDetalle();
+    await renderGridDetalle();
 }
 
 function obtenerDetalleJsonEns() {
@@ -1581,6 +1651,7 @@ async function abrirModalCrearEnsamblajeDesdeProduccion(produccionId, cantidadPr
 
     limpiarFormularioEnsamblaje();
     modoEdicionEnsamblaje = false;
+    if (document.getElementById('ens_destino')) document.getElementById('ens_destino').value = 'local';
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Registrar ensamblaje';
     await cargarSelectsModalEns({ producto_id: p.producto_id, color_id: p.color_id, color_nombre: p.color_nombre_verif });
 
@@ -1606,6 +1677,8 @@ async function abrirModalEditarEnsamblaje(id) {
     ensamblajeIdActual = id;
 
     const e = json.ensamblaje;
+    if (document.getElementById('ens_destino')) document.getElementById('ens_destino').value = e.proveniente === 'externo' ? 'externo' : 'local';
+    actualizarFormularioRecepcionExternaEns();
     document.getElementById('modalEnsamblajeTitulo').textContent = 'Editar ensamblaje #' + id;
     const operariosVinculados = parseJsonColumna(e.js_operarios).map(o => o.operario_id);
 
@@ -1704,11 +1777,18 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         return;
     }
 
+    const destinoSeleccionado = document.getElementById('ens_destino')?.value || 'local';
+    if (destinoSeleccionado === 'local' && (!tsOperariosEns || tsOperariosEns.getValue().length === 0)) {
+        Swal.fire('Falta asignar operario', 'Para un ensamblaje local, el administrador debe asignar al menos un operario.', 'warning');
+        return;
+    }
+
     const params = {
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
         color_id: document.getElementById('ens_color_id').value,
         maquina_id: document.getElementById('ens_maquina_id').value,
+        destino_ensamblaje: document.getElementById('ens_destino')?.value || 'local',
         operarios: JSON.stringify(tsOperariosEns ? tsOperariosEns.getValue() : []),
         sucursal_id: document.getElementById('ens_sucursal_id').value,
         detalle: obtenerDetalleJsonEns(),
