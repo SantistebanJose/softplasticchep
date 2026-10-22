@@ -2769,7 +2769,7 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
 
 /** Registra en cada pasada externa el producto recibido y el sobrante real
  * del componente, calculado después de aplicar la receta del armado. */
-function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, float $cantidadFinal, ?int $unidadFinalId, string $unidadFinalCodigo): void
+function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, float $cantidadFinal, ?int $unidadFinalId, string $unidadFinalCodigo, array $mermas): void
 {
     $lineas = executeQuery($conectar, "
         SELECT rep.molde_produccion_id AS produccion_id,
@@ -2808,9 +2808,17 @@ function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, flo
             if ((int)($envio['pasada'] ?? 0) !== $pasada || strtolower((string)($envio['destino'] ?? '')) !== 'externo') continue;
             $cantidadEnviada = (float)($envio['cantidad_enviada'] ?? 0);
             $cantidadUsada = (float)($linea['cantidad_usada'] ?? 0);
+            $claveMerma = $produccionId . ':' . $pasada;
+            $mermaInfo = $mermas[$claveMerma] ?? [];
+            $cantidadMerma = max(0, (float)($mermaInfo['cantidad'] ?? 0));
+            $motivoMerma = trim((string)($mermaInfo['motivo'] ?? ''));
             if ($cantidadUsada > $cantidadEnviada + 0.000001) {
                 throw new Exception("La receta requiere más de lo enviado para la producción #{$linea['produccion_id']} (pasada $pasada).");
             }
+            if ($cantidadMerma > $cantidadEnviada - $cantidadUsada + 0.000001) {
+                throw new Exception("La merma de la producción #{$produccionId} (pasada $pasada) supera la cantidad no consumida.");
+            }
+            $leftover = max(0, $cantidadEnviada - $cantidadUsada - $cantidadMerma);
             $envio['recepcion'] = [
                 'ensamblaje_id' => $ensamblajeId,
                 'fecha_recepcion' => date('Y-m-d H:i:s'),
@@ -2818,10 +2826,11 @@ function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, flo
                 'unidad_producto_id' => $unidadFinalId,
                 'unidad_producto' => $unidadFinalCodigo,
                 'cantidad_componente_utilizada' => $cantidadUsada,
-                'cantidad_sobrante' => max(0, $cantidadEnviada - $cantidadUsada),
+                'cantidad_merma' => $cantidadMerma,
+                'motivo_merma' => $motivoMerma,
+                'cantidad_sobrante' => $leftover,
                 'unidad_componente' => $linea['unidad_codigo'] ?: ($envio['unidad'] ?? 'UND'),
             ];
-            $leftover = max(0, $cantidadEnviada - $cantidadUsada);
             if ($leftover > 0.000001) {
                 $sobrantesPendientes[] = [
                     'produccion_id' => $produccionId,
@@ -2967,6 +2976,8 @@ function finalizarEnsamblaje(int $id)
     if (!$id) responder(false, 'ID inválido.');
 
     $cantidadSalida = isset($_POST['peso_kg']) && $_POST['peso_kg'] !== '' ? floatval($_POST['peso_kg']) : null;
+    $mermasExterno = json_decode((string)($_POST['mermas'] ?? '{}'), true);
+    if (!is_array($mermasExterno)) $mermasExterno = [];
 
     $existe = executeQuery(
         $conectar,
@@ -3031,7 +3042,7 @@ function finalizarEnsamblaje(int $id)
         }
         if ($esRecepcionExterna) {
             if (empty($configArmado)) throw new Exception('El producto no tiene receta de armado configurada; no se pueden calcular los sobrantes externos.');
-            guardarRecepcionExternaEnProducciones($conectar, $id, $cantidadSalida, $unidadSalidaId, $unidadLabel);
+            guardarRecepcionExternaEnProducciones($conectar, $id, $cantidadSalida, $unidadSalidaId, $unidadLabel, $mermasExterno);
         }
 
         executeNonQuery($conectar, "

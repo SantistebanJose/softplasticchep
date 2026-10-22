@@ -1004,8 +1004,11 @@ function listarProducciones()
             if (is_array($imagenes)) {
                 foreach ($imagenes as $imagen) {
                     if (is_array($imagen) && ($imagen['tipo'] ?? '') === 'pesaje_produccion' && !empty($imagen['url'])) {
+                        $rutaFoto = $imagen['ruta'] ?? $imagen['url'];
+                        // Compatibilidad con las fotos ya guardadas como URL absoluta.
+                        $rutaFoto = preg_replace('#^https?://res\.cloudinary\.com/#i', '', (string)$rutaFoto);
                         $fila['fotos_pesaje'][] = [
-                            'url' => $imagen['url'],
+                            'url' => ltrim($rutaFoto, '/'),
                             'nombre' => $imagen['nombre'] ?? 'Foto del pesaje',
                         ];
                     }
@@ -2440,11 +2443,13 @@ function enviarAEnsamblaje()
     $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
     $fotosCloudinary = [];
+    $urlsFotosSubidas = [];
     foreach ($fotosPesaje as $i => $foto) {
         $subida = subirImagenACloudinary($foto['tmp_name'], 'pesaje_produccion_' . $id . '_' . ($i + 1) . '.jpg', 'produccion/pesajes');
+        $urlsFotosSubidas[] = $subida['url'];
         $fotosCloudinary[] = [
             'tipo' => 'pesaje_produccion',
-            'url' => $subida['url'],
+            'ruta' => preg_replace('#^https?://res\.cloudinary\.com/#i', '', $subida['url']),
             'nombre' => 'Foto del pesaje ' . ($i + 1),
             'public_id' => $subida['public_id'] ?? null,
         ];
@@ -2454,8 +2459,8 @@ function enviarAEnsamblaje()
         : null;
 
     // Cada envío es un registro inmutable de una pasada. Además de la
-    // cantidad, se guarda quién produjo cuánto y toda la metadata de las
-    // fotos (URL y public_id incluidos) para mantener la trazabilidad.
+    // cantidad, se guarda quién produjo cuánto y la ruta de Cloudinary de
+    // las fotos (sin repetir el dominio) para mantener la trazabilidad.
     $salidaActual = [
         'pasada' => count($salidasPrevias) + 1,
         'fecha' => date('Y-m-d H:i:s'),
@@ -2623,8 +2628,8 @@ function enviarAEnsamblaje()
         ]);
     } catch (Throwable $e) {
         $conectar->rollBack();
-        foreach ($fotosCloudinary as $fotoCloudinary) {
-            if (!empty($fotoCloudinary['url'])) borrarImagenCloudinary($fotoCloudinary['url']);
+        foreach ($urlsFotosSubidas as $urlFotoSubida) {
+            borrarImagenCloudinary($urlFotoSubida);
         }
         error_log("Error enviando a $destino: " . $e->getMessage());
         responder(false, "No se pudo enviar a $destino: " . $e->getMessage());

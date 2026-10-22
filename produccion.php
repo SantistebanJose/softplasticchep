@@ -923,6 +923,29 @@ function renderListaMermas(p) {
 function formatearCantidadProd(n) {
     return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
+
+function abrirFotoPesaje(rutaCodificada) {
+    const ruta = decodeURIComponent(String(rutaCodificada || '')).replace(/^\/+/, '');
+    const url = /^https:\/\/res\.cloudinary\.com\//i.test(ruta)
+        ? ruta
+        : `https://res.cloudinary.com/${ruta}`;
+    Swal.fire({
+        title: 'Foto del pesaje',
+        imageUrl: url,
+        imageAlt: 'Evidencia fotográfica del pesaje',
+        showCloseButton: true,
+        showConfirmButton: false,
+        didOpen: () => {
+            const imagen = document.querySelector('.swal2-image');
+            if (imagen) {
+                imagen.style.maxWidth = '100%';
+                imagen.style.maxHeight = '72vh';
+                imagen.style.width = 'auto';
+                imagen.style.objectFit = 'contain';
+            }
+        }
+    });
+}
 function resumenMermasPorUnidad(mermas) {
     const totales = new Map();
     (mermas || []).forEach(m => {
@@ -1309,7 +1332,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
         ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Remanente no medido de #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
-        ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="${String(foto.url).replace(/&/g, '&amp;').replace(/\"/g, '&quot;')}" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
+        ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="#" onclick="event.preventDefault(); abrirFotoPesaje('${encodeURIComponent(String(foto.url || ''))}')">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
 
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
 

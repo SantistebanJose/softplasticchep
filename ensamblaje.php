@@ -1791,10 +1791,26 @@ function finalizarEnsamblajeAccion(id) {
     const e = ensamblajesCache.find(x => x.ensamblaje_id === id);
     const unidadCodigo = e?.producto_unidad_ensamblaje_codigo || 'kg';
     const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
+    const esRetornoExterno = e?.proveniente === 'externo';
+    const componentes = esRetornoExterno ? parseJsonColumna(e?.js_moldes_utilizados) : [];
+    const filasMerma = componentes.map((m, i) => {
+        const enviada = Math.max(0, parseFloat(m.cantidad_kg || 0));
+        const usada = Math.max(0, parseFloat(m.cantidad_entrada_produccion || 0));
+        const maxMerma = Math.max(0, enviada - usada);
+        const key = `${m.produccion_id}:${m.pasada}`;
+        const nombre = m.molde_nombre || `Producción #${m.produccion_id}`;
+        const unidad = m.unidad_entrada_codigo || m.unidad_produccion_codigo || 'UND';
+        return `<div class="text-start border rounded p-2 mb-2">
+            <strong>${nombre}</strong><small class="d-block text-muted">Enviado: ${formatearCantidadEns(enviada)} ${unidad} · Usado por receta: ${formatearCantidadEns(usada)} ${unidad} · Máx. merma: ${formatearCantidadEns(maxMerma)} ${unidad}</small>
+            <label class="form-label mt-2 mb-1">Merma (${unidad})</label>
+            <input class="form-control ens-merma-cantidad" type="number" min="0" max="${maxMerma}" step="0.001" value="0" data-key="${key}" data-i="${i}">
+            <input class="form-control form-control-sm mt-2 ens-merma-motivo" maxlength="180" placeholder="Motivo (opcional)" data-i="${i}">
+        </div>`;
+    }).join('');
 
     Swal.fire({
         title: '¿Finalizar el armado?',
-        html: `Indica la cantidad de salida (<b>${unidadCodigo}</b> · ${unidadNombre}) de este armado.`,
+        html: `Indica la cantidad de salida (<b>${unidadCodigo}</b> · ${unidadNombre}) de este armado.${esRetornoExterno ? `<hr><p class="text-start mb-2"><b>Merma por componente</b><br><small>Indica lo dañado o quebrado. El sobrante restante volverá disponible.</small></p>${filasMerma || '<p>No hay componentes vinculados para registrar merma.</p>'}` : ''}`,
         icon: 'question',
         input: 'number',
         inputAttributes: { min: 0, step: '0.01' },
@@ -1806,10 +1822,34 @@ function finalizarEnsamblajeAccion(id) {
             if (!value || parseFloat(value) <= 0) {
                 return 'Ingresa una cantidad válida mayor a 0.';
             }
+        },
+        didOpen: () => {
+            document.querySelectorAll('.ens-merma-cantidad').forEach(input => input.addEventListener('input', () => {
+                const max = parseFloat(input.max || '0');
+                if (parseFloat(input.value || '0') > max) input.value = String(max);
+            }));
+        },
+        preConfirm: (cantidad) => {
+            if (!cantidad || parseFloat(cantidad) <= 0) {
+                Swal.showValidationMessage('Ingresa una cantidad válida mayor a 0.');
+                return false;
+            }
+            const mermas = {};
+            document.querySelectorAll('.ens-merma-cantidad').forEach(input => {
+                const index = input.dataset.i;
+                const motivo = document.querySelector(`.ens-merma-motivo[data-i="${index}"]`)?.value || '';
+                mermas[input.dataset.key] = { cantidad: parseFloat(input.value || '0'), motivo };
+            });
+            return { cantidad, mermas };
         }
     }).then(async (result) => {
         if (!result.isConfirmed) return;
-        const json = await llamarEnsamblaje('FINALIZARENSAMBLAJE', { id, peso_kg: result.value });
+        const valor = result.value;
+        const json = await llamarEnsamblaje('FINALIZARENSAMBLAJE', {
+            id,
+            peso_kg: typeof valor === 'object' ? valor.cantidad : valor,
+            mermas: typeof valor === 'object' ? JSON.stringify(valor.mermas) : '{}'
+        });
         if (json.success) {
             Swal.fire('Listo', json.message, 'success');
             cargarEnsamblajes();
