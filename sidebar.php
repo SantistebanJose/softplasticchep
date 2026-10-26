@@ -47,7 +47,7 @@ $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
 $administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'inventario_inicial'];
-$reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_empaquetado', 'reporte_servicios_externos'];
+$reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
 $ventasOpen         = in_array($activePage, $ventasPages);
@@ -205,6 +205,9 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             </a>
             <a href="reporte_pase_ensamblaje.php" class="<?= pc_sub_class('reporte_pase_ensamblaje', $activePage) ?>">
                 <span class="dot"></span> Pase a Ensamblaje
+            </a>
+            <a href="reporte_ventas_productos.php" class="<?= pc_sub_class('reporte_ventas_productos', $activePage) ?>">
+                <span class="dot"></span> Reporte de Ventas
             </a>
             <?php if (strtoupper(trim($_SESSION['rol_usuario'] ?? '')) === 'ADMINISTRADOR'): ?>
                 <a href="reporte_servicios_externos.php" class="<?= pc_sub_class('reporte_servicios_externos', $activePage) ?>">

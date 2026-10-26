@@ -1,6 +1,10 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) session_start();
-if (empty($_SESSION['usuario_id']) || strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) !== 'ADMINISTRADOR') {
+if (empty($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
+if (strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) !== 'ADMINISTRADOR') {
     http_response_code(403);
     exit('No tienes permiso para registrar inventario inicial.');
 }

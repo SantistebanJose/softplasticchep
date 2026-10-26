@@ -2,8 +2,8 @@
 $pageTitle    = 'Venta Rápida';
 $pageSubtitle = 'Registra una venta de stock disponible';
 $activePage   = 'punto_venta';
-
 include("header.php");
+$esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADMINISTRADOR';
 ?>
 
 <style>
@@ -29,9 +29,33 @@ include("header.php");
 .pc-venta-card-add{ position:absolute; top:8px; right:8px; width:30px; height:30px; border-radius:50%; border:none; background:#2FB170; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,.15); }
 .pc-venta-card-add:hover{ background:#26965d; }
 
-.pc-venta-carrito-sticky{ position:sticky; top:16px; }
+.pc-venta-carrito-sticky{ position:sticky; top:16px;container-type:inline-size }
 #pv_total{ font-weight:700; font-size:1.2em; color:#2F6FED; }
 .pc-venta-carrito-fila-color{ font-size:.75em; color:#8a8578; }
+.pv-pagos{border:1px solid #e5eaf2;border-radius:12px;padding:12px;background:#fbfcff;margin-top:16px}
+.pv-pagos{container-type:inline-size}
+.pv-pago-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,.8fr) 40px;grid-template-areas:"medio cuenta monto eliminar" "referencia referencia referencia referencia";gap:8px;align-items:center;margin-top:8px}
+.pv-pago-row.sin-cuenta{grid-template-columns:minmax(0,1fr) minmax(0,.8fr) 40px;grid-template-areas:"medio monto eliminar"}
+.pv-pago-row .pv-medio{grid-area:medio}.pv-pago-row .pv-cuenta-select{grid-area:cuenta}.pv-pago-row .pv-monto{grid-area:monto}.pv-pago-row .pv-referencia{grid-area:referencia}.pv-pago-row>button{grid-area:eliminar;width:40px;padding:.375rem}
+.pv-pago-row input,.pv-pago-row select{min-width:0;min-height:42px}
+.pv-pago-row .pv-receptor-note{grid-column:1/-1;line-height:1.3}
+.pv-pagos-total{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid #e5eaf2;margin-top:12px;padding-top:10px;font-size:.9rem}
+.pv-pagos-total .saldo{font-weight:800;color:#178448}.pv-pagos-total .saldo.invalido{color:#c0392b}
+@container (max-width:520px){
+    .pv-pagos{padding:10px}
+    .pv-pago-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px;grid-template-areas:"medio monto eliminar" "cuenta cuenta cuenta" "referencia referencia referencia"}
+    .pv-pago-row.sin-cuenta{grid-template-areas:"medio monto eliminar"}
+    .pc-venta-carrito-sticky .pc-table-wrap{overflow:visible}
+    .pc-venta-carrito-sticky .pc-table{width:100%;min-width:0}
+    .pc-venta-carrito-sticky .pc-table thead{display:none}
+    .pc-venta-carrito-sticky .pc-table tbody tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:10px 0;border-bottom:1px solid #e5eaf2}
+    .pc-venta-carrito-sticky .pc-table tbody td{display:block;min-width:0;padding:4px 2px;border:0;overflow-wrap:anywhere}
+    .pc-venta-carrito-sticky .pc-table tbody td:first-child{grid-column:1/-1}
+    .pc-venta-carrito-sticky .pc-table tbody td:nth-child(2)::before{content:'Cantidad';display:block;font-size:.68rem;color:#788397;text-transform:uppercase}
+    .pc-venta-carrito-sticky .pc-table tbody td:nth-child(3)::before{content:'P. unitario';display:block;font-size:.68rem;color:#788397;text-transform:uppercase}
+    .pc-venta-carrito-sticky .pc-table tbody td:nth-child(4)::before{content:'Subtotal';display:block;font-size:.68rem;color:#788397;text-transform:uppercase}
+    .pc-venta-carrito-sticky .pc-table tbody td:last-child{grid-column:1/-1;text-align:right}
+}
 </style>
 
 <div class="pc-card mb-3">
@@ -89,6 +113,37 @@ include("header.php");
   </div>
 </div>
 
+<?php if ($esAdminPV): ?>
+<div class="modal fade" id="modalCuentasReceptorasPV" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Administrar cuentas receptoras</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Estas cuentas se usan para depósitos y transferencias. Puedes cambiar el nombre sin afectar los pagos registrados.</p>
+        <form id="formCuentaReceptoraPV" class="border rounded p-3 mb-3">
+          <input type="hidden" id="pv_cuenta_id">
+          <label class="form-label fw-semibold" for="pv_cuenta_nombre">Nombre de la cuenta</label>
+          <div class="input-group">
+            <input type="text" class="form-control" id="pv_cuenta_nombre" maxlength="100" placeholder="Ej. Cuenta empresa - BCP" required>
+            <button type="submit" class="btn btn-primary" id="pv_cuenta_guardar">Agregar</button>
+          </div>
+          <button type="button" class="btn btn-sm btn-link px-0 d-none" id="pv_cuenta_cancelar" onclick="cancelarEdicionCuentaPV()">Cancelar edición</button>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Cuenta</th><th class="text-end">Acción</th></tr></thead>
+            <tbody id="pv_cuentas_tbody"><tr><td colspan="2" class="text-muted">Cargando cuentas...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="pc-card">
@@ -120,6 +175,25 @@ include("header.php");
                 <div class="text-end mt-3">
                     Total: <span id="pv_total">S/ 0.00</span>
                 </div>
+                <div class="pv-pagos">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="pv_vendedor">Vendedor *</label>
+                        <select id="pv_vendedor" class="form-select"><option value="">Cargando vendedores...</option></select>
+                        <small class="text-muted">Se selecciona inicialmente el usuario que inició sesión.</small>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                        <strong>Forma de pago *</strong>
+                        <?php if ($esAdminPV): ?>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="gestionarCuentasReceptorasPV()"><i class="fa-solid fa-wallet"></i> Administrar cuentas</button>
+                        <?php endif; ?>
+                    </div>
+                    <div id="pv_pagos_lista"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="agregarPagoPV()"><i class="fa-solid fa-plus"></i> Agregar otro pago</button>
+                    <div class="pv-pagos-total">
+                        <span>Pagado: <b id="pv_pago_total">S/ 0.00</b></span>
+                        <span class="saldo" id="pv_pago_saldo">Pendiente: S/ 0.00</span>
+                    </div>
+                </div>
                 <button type="button" class="pc-btn pc-btn-primary w-100 mt-2" id="pv_btn_registrar" onclick="registrarVentaRapida()">
                     <i class="fa-solid fa-cart-check"></i> Registrar venta
                 </button>
@@ -135,7 +209,10 @@ const CONTROLADOR_VENTA = 'controllers/clssVenta.php';
 const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
 const TICKET_PDF_URL = 'controllers/ticketPdf.php';
 const CLIENTE_VARIOS_RUC = '99999999';
+const USUARIO_ID_ACTUAL_PV = <?= json_encode((int)($_SESSION['usuario_id'] ?? 0)) ?>;
 const modalClientePV = new bootstrap.Modal(document.getElementById('modalClientePV'));
+const elementoModalCuentasPV = document.getElementById('modalCuentasReceptorasPV');
+const modalCuentasPV = elementoModalCuentasPV ? new bootstrap.Modal(elementoModalCuentasPV) : null;
 
 async function llamarVenta(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -193,6 +270,7 @@ function resolverImagenVenta(ruta) {
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarGridProductos('');
+    cargarCatalogosPagoPV();
     seleccionarClienteVariosPV();
 
     let debounceProducto = null;
@@ -343,6 +421,206 @@ async function cargarGridProductos(texto) {
 // ── Carrito ──────────────────────────────────────────────────────────────────
 let carritoVenta = [];
 let contadorCarrito = 0;
+let vendedoresPV = [];
+let cuentasPV = [];
+let pagosPV = [{ uid: 1, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: 0, referencia: '', automatico: true }];
+let contadorPagoPV = 1;
+
+const MEDIOS_PAGO_PV = {
+    efectivo: 'Efectivo', deposito: 'Depósito', transferencia: 'Transferencia', yape: 'Yape', plin: 'Plin'
+};
+
+async function cargarCatalogosPagoPV() {
+    const vendedorSelect = document.getElementById('pv_vendedor');
+    try {
+        const [jsonVendedores, jsonCuentas] = await Promise.all([
+            llamarVenta('LISTARVENDEDORESVENTA'),
+            llamarVenta('LISTARCUENTASRECEPTORAS')
+        ]);
+        if (!jsonVendedores.success) throw new Error(jsonVendedores.message || 'No se pudieron cargar los vendedores.');
+        if (!jsonCuentas.success) throw new Error(jsonCuentas.message || 'No se pudieron cargar las cuentas receptoras.');
+        vendedoresPV = jsonVendedores.vendedores || [];
+        cuentasPV = jsonCuentas.cuentas || [];
+        vendedorSelect.innerHTML = '<option value="">Selecciona un vendedor</option>' + vendedoresPV.map(v =>
+            `<option value="${Number(v.id)}">${escaparHtmlPV(v.nombre_completo)}</option>`
+        ).join('');
+        if (vendedoresPV.some(v => Number(v.id) === USUARIO_ID_ACTUAL_PV)) vendedorSelect.value = String(USUARIO_ID_ACTUAL_PV);
+        if (!vendedoresPV.length) vendedorSelect.innerHTML = '<option value="">No hay usuarios habilitados como vendedores</option>';
+        renderPagosPV();
+        actualizarResumenPagosPV();
+    } catch (error) {
+        vendedorSelect.innerHTML = '<option value="">No se pudieron cargar los vendedores</option>';
+        document.getElementById('pv_pagos_lista').innerHTML = `<div class="text-danger small mt-2">${escaparHtmlPV(error.message)}</div>`;
+    }
+}
+
+function totalCarritoPV() {
+    return carritoVenta.reduce((suma, item) => suma + Number(item.cantidad) * Number(item.precio), 0);
+}
+
+function renderPagosPV() {
+    const contenedor = document.getElementById('pv_pagos_lista');
+    if (!contenedor) return;
+    const opcionesCuentas = '<option value="">Selecciona cuenta receptora</option>' + cuentasPV.map(c =>
+        `<option value="${Number(c.id)}">${escaparHtmlPV(c.nombre)}</option>`
+    ).join('');
+    contenedor.innerHTML = pagosPV.map(pago => {
+        const requiereCuenta = ['deposito', 'transferencia'].includes(pago.medio_pago);
+        const esDigital = ['yape', 'plin'].includes(pago.medio_pago);
+        const vendedorSeleccionado = vendedoresPV.find(v => Number(v.id) === Number(document.getElementById('pv_vendedor').value));
+        const opcionesMedios = Object.entries(MEDIOS_PAGO_PV).map(([valor, texto]) =>
+            `<option value="${valor}" ${pago.medio_pago === valor ? 'selected' : ''}>${texto}</option>`
+        ).join('');
+        return `<div class="pv-pago-row ${requiereCuenta ? '' : 'sin-cuenta'}" data-pago="${pago.uid}">
+            <select class="form-select pv-medio" aria-label="Medio de pago">${opcionesMedios}</select>
+            ${requiereCuenta ? `<select class="form-select pv-cuenta-select" aria-label="Cuenta receptora">${opcionesCuentas}</select>` : ''}
+            <input class="form-control pv-monto" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Monto S/" value="${pago.monto ? Number(pago.monto).toFixed(2) : ''}" aria-label="Monto">
+            <button type="button" class="btn btn-outline-danger" onclick="quitarPagoPV(${pago.uid})" title="Quitar pago" ${pagosPV.length === 1 ? 'disabled' : ''}><i class="fa-solid fa-trash"></i></button>
+            ${requiereCuenta ? `<input class="form-control pv-referencia" maxlength="100" placeholder="Referencia (opcional)" value="${escaparHtmlPV(pago.referencia)}" aria-label="Referencia">` : ''}
+            ${esDigital ? `<small class="pv-receptor-note text-muted">Se abonará al vendedor: ${escaparHtmlPV(vendedorSeleccionado?.nombre_completo || 'selecciona un vendedor')}</small>` : ''}
+        </div>`;
+    }).join('');
+    pagosPV.forEach(pago => {
+        const fila = contenedor.querySelector(`[data-pago="${pago.uid}"]`);
+        const cuentaSelect = fila?.querySelector('.pv-cuenta-select');
+        if (cuentaSelect && pago.cuenta_receptora_id) cuentaSelect.value = String(pago.cuenta_receptora_id);
+    });
+    actualizarResumenPagosPV();
+}
+
+function actualizarResumenPagosPV() {
+    const total = totalCarritoPV();
+    const pagado = pagosPV.reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
+    const diferencia = Math.round((pagado - total) * 100) / 100;
+    const pagoTotal = document.getElementById('pv_pago_total');
+    const saldo = document.getElementById('pv_pago_saldo');
+    if (!pagoTotal || !saldo) return;
+    pagoTotal.textContent = formatearMoneda(pagado);
+    saldo.classList.toggle('invalido', Math.abs(diferencia) > 0.009);
+    saldo.textContent = Math.abs(diferencia) <= 0.009 ? 'Pago completo' : diferencia < 0
+        ? `Pendiente: ${formatearMoneda(-diferencia)}` : `Exceso: ${formatearMoneda(diferencia)}`;
+}
+
+function ajustarPagoAutomaticoPV(excluirUid = null) {
+    const automatico = pagosPV.find(pago => pago.automatico && pago.uid !== excluirUid);
+    if (!automatico) return;
+    const otros = pagosPV.filter(pago => pago !== automatico).reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
+    automatico.monto = Math.max(0, Math.round((totalCarritoPV() - otros) * 100) / 100);
+    const fila = document.querySelector(`#pv_pagos_lista [data-pago="${automatico.uid}"]`);
+    const input = fila?.querySelector('.pv-monto');
+    if (input && document.activeElement !== input) input.value = automatico.monto ? automatico.monto.toFixed(2) : '';
+}
+
+function agregarPagoPV() {
+    const pagado = pagosPV.reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
+    pagosPV.push({ uid: ++contadorPagoPV, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: Math.max(0, Math.round((totalCarritoPV() - pagado) * 100) / 100), referencia: '', automatico: false });
+    renderPagosPV();
+}
+
+function quitarPagoPV(uid) {
+    if (pagosPV.length <= 1) return;
+    pagosPV = pagosPV.filter(pago => pago.uid !== uid);
+    renderPagosPV();
+}
+
+document.getElementById('pv_pagos_lista').addEventListener('change', event => {
+    const fila = event.target.closest('[data-pago]');
+    if (!fila) return;
+    const pago = pagosPV.find(p => p.uid === Number(fila.dataset.pago));
+    if (!pago) return;
+    if (event.target.classList.contains('pv-medio')) {
+        pago.medio_pago = event.target.value;
+        if (!['deposito', 'transferencia'].includes(pago.medio_pago)) pago.cuenta_receptora_id = '';
+        renderPagosPV();
+        return;
+    }
+    if (event.target.classList.contains('pv-cuenta-select')) pago.cuenta_receptora_id = event.target.value;
+    if (event.target.classList.contains('pv-monto')) { pago.monto = Number(event.target.value) || 0; pago.automatico = false; }
+    if (event.target.classList.contains('pv-referencia')) pago.referencia = event.target.value;
+    ajustarPagoAutomaticoPV(pago.uid);
+    actualizarResumenPagosPV();
+});
+document.getElementById('pv_vendedor').addEventListener('change', renderPagosPV);
+document.getElementById('pv_pagos_lista').addEventListener('input', event => {
+    if (event.target.classList.contains('pv-monto') || event.target.classList.contains('pv-referencia')) {
+        const fila = event.target.closest('[data-pago]');
+        const pago = pagosPV.find(p => p.uid === Number(fila?.dataset.pago));
+        if (!pago) return;
+        if (event.target.classList.contains('pv-monto')) { pago.monto = Number(event.target.value) || 0; pago.automatico = false; }
+        else pago.referencia = event.target.value;
+        ajustarPagoAutomaticoPV(pago.uid);
+        actualizarResumenPagosPV();
+    }
+});
+
+async function gestionarCuentasReceptorasPV() {
+    if (!modalCuentasPV) return;
+    cancelarEdicionCuentaPV();
+    await actualizarListaCuentasGestionPV();
+    modalCuentasPV.show();
+}
+
+async function actualizarListaCuentasGestionPV() {
+    const tbody = document.getElementById('pv_cuentas_tbody');
+    const json = await llamarVenta('LISTARCUENTASRECEPTORAS');
+    if (!json.success) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-danger">${escaparHtmlPV(json.message)}</td></tr>`;
+        return;
+    }
+    cuentasPV = json.cuentas || [];
+    tbody.innerHTML = cuentasPV.length ? cuentasPV.map(cuenta => `
+        <tr>
+            <td>${escaparHtmlPV(cuenta.nombre)}</td>
+            <td class="text-end"><button type="button" class="btn btn-sm btn-outline-primary" onclick="editarCuentaReceptoraPV(${Number(cuenta.id)})"><i class="fa-solid fa-pen"></i> Editar</button></td>
+        </tr>`).join('') : '<tr><td colspan="2" class="text-muted">Aún no hay cuentas registradas.</td></tr>';
+    renderPagosPV();
+}
+
+function editarCuentaReceptoraPV(id) {
+    const cuenta = cuentasPV.find(item => Number(item.id) === Number(id));
+    if (!cuenta) return;
+    document.getElementById('pv_cuenta_id').value = String(cuenta.id);
+    document.getElementById('pv_cuenta_nombre').value = cuenta.nombre;
+    document.getElementById('pv_cuenta_guardar').textContent = 'Guardar cambios';
+    document.getElementById('pv_cuenta_cancelar').classList.remove('d-none');
+    document.getElementById('pv_cuenta_nombre').focus();
+}
+
+function cancelarEdicionCuentaPV() {
+    const formulario = document.getElementById('formCuentaReceptoraPV');
+    if (!formulario) return;
+    formulario.reset();
+    document.getElementById('pv_cuenta_id').value = '';
+    document.getElementById('pv_cuenta_guardar').textContent = 'Agregar';
+    document.getElementById('pv_cuenta_cancelar').classList.add('d-none');
+}
+
+document.getElementById('formCuentaReceptoraPV')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const id = document.getElementById('pv_cuenta_id').value;
+    const nombre = document.getElementById('pv_cuenta_nombre').value.trim();
+    const accion = id ? 'EDITARCUENTARECEPTORA' : 'CREARCUENTARECEPTORA';
+    const json = await llamarVenta(accion, { id, nombre });
+    if (!json.success) { Swal.fire('No se pudo guardar', json.message, 'error'); return; }
+    cancelarEdicionCuentaPV();
+    await actualizarListaCuentasGestionPV();
+    Swal.fire('Listo', id ? 'Nombre de cuenta actualizado.' : 'Cuenta agregada.', 'success');
+});
+
+function validarDatosVentaPV() {
+    if (!document.getElementById('pv_vendedor').value) throw new Error('Selecciona al vendedor de esta venta.');
+    if (!pagosPV.length) throw new Error('Agrega al menos una forma de pago.');
+    const pagos = pagosPV.map(pago => ({
+        medio_pago: pago.medio_pago,
+        cuenta_receptora_id: ['deposito', 'transferencia'].includes(pago.medio_pago) ? (Number(pago.cuenta_receptora_id) || null) : null,
+        monto: Math.round((Number(pago.monto) || 0) * 100) / 100,
+        referencia: pago.referencia.trim()
+    }));
+    if (pagos.some(p => p.monto <= 0)) throw new Error('Cada forma de pago debe tener un monto mayor que cero.');
+    if (pagos.some(p => ['deposito', 'transferencia'].includes(p.medio_pago) && !p.cuenta_receptora_id)) throw new Error('Selecciona la cuenta receptora de cada depósito o transferencia.');
+    if (Math.abs(pagos.reduce((s, p) => s + p.monto, 0) - totalCarritoPV()) > 0.009) throw new Error('Los montos de pago deben sumar exactamente el total de la venta.');
+    return { vendedor_usuario_id: document.getElementById('pv_vendedor').value, pagos };
+}
 
 function abrirAgregarCarrito(datos, filaExistente = null) {
     const disp = Number(datos.paquetes_disponibles) || 0;
@@ -422,6 +700,8 @@ function renderCarrito() {
         vacio.style.display = '';
         wrap.style.display = 'none';
         document.getElementById('pv_total').textContent = formatearMoneda(0);
+        pagosPV.forEach(pago => { if (pago.automatico) pago.monto = 0; });
+        renderPagosPV();
         return;
     }
 
@@ -453,6 +733,9 @@ function renderCarrito() {
     }).join('');
 
     document.getElementById('pv_total').textContent = formatearMoneda(total);
+    const pagoAutomatico = pagosPV.find(pago => pago.automatico);
+    if (pagoAutomatico) pagoAutomatico.monto = Math.max(0, Math.round((total - pagosPV.filter(p => p !== pagoAutomatico).reduce((s, p) => s + (Number(p.monto) || 0), 0)) * 100) / 100);
+    renderPagosPV();
 }
 
 // ── Registrar venta ──────────────────────────────────────────────────────────
@@ -471,6 +754,13 @@ async function confirmarVentaRapida(clienteRuc) {
         ? 'Clientes Varios'
         : (document.getElementById('pv_cliente_texto').value.trim() || 'Cliente seleccionado');
     const total = carritoVenta.reduce((acumulado, item) => acumulado + (item.cantidad * item.precio), 0);
+    const datosPago = validarDatosVentaPV();
+    const vendedor = vendedoresPV.find(v => Number(v.id) === Number(datosPago.vendedor_usuario_id));
+    const resumenPagos = datosPago.pagos.map(p => {
+        const cuenta = cuentasPV.find(c => Number(c.id) === Number(p.cuenta_receptora_id));
+        const destino = cuenta ? ` · ${escaparHtmlPV(cuenta.nombre)}` : (['yape', 'plin'].includes(p.medio_pago) ? ` · vendedor ${escaparHtmlPV(vendedor?.nombre_completo || '')}` : '');
+        return `<li>${escaparHtmlPV(MEDIOS_PAGO_PV[p.medio_pago])}${destino}: <b>${formatearMoneda(p.monto)}</b>${p.referencia ? ` <small>(${escaparHtmlPV(p.referencia)})</small>` : ''}</li>`;
+    }).join('');
     const filas = carritoVenta.map(item => `
         <tr>
             <td class="text-start">
@@ -487,13 +777,14 @@ async function confirmarVentaRapida(clienteRuc) {
         title: '¿Confirmar venta?',
         icon: 'question',
         html: `
-            <div class="text-start mb-2"><b>Cliente:</b> ${escaparHtmlPV(clienteNombre)}<br><b>RUC/DNI:</b> ${escaparHtmlPV(clienteRuc)}</div>
+            <div class="text-start mb-2"><b>Cliente:</b> ${escaparHtmlPV(clienteNombre)}<br><b>RUC/DNI:</b> ${escaparHtmlPV(clienteRuc)}<br><b>Vendedor:</b> ${escaparHtmlPV(vendedor?.nombre_completo || '')}</div>
             <div class="table-responsive">
                 <table class="table table-sm mb-2" style="font-size:.8rem;">
                     <thead><tr><th>Artículo</th><th class="text-end">Cant.</th><th class="text-end">P. Unit.</th><th class="text-end">Subtotal</th></tr></thead>
                     <tbody>${filas}</tbody>
                 </table>
             </div>
+            <div class="text-start"><b>Pagos:</b><ul class="mb-2">${resumenPagos}</ul></div>
             <div class="text-end fs-5"><b>Total: ${formatearMoneda(total)}</b></div>
         `,
         showCancelButton: true,
@@ -512,6 +803,13 @@ async function registrarVentaRapida() {
         return;
     }
 
+    let datosVenta;
+    try {
+        datosVenta = validarDatosVentaPV();
+    } catch (error) {
+        Swal.fire('Revisa la venta', error.message, 'warning');
+        return;
+    }
     if (!await confirmarVentaRapida(clienteRuc)) return;
 
     const items = carritoVenta.map(item => ({
@@ -523,17 +821,25 @@ async function registrarVentaRapida() {
 
     const btn = document.getElementById('pv_btn_registrar');
     btn.disabled = true;
-
-    const json = await llamarVenta('GUARDARVENTA', {
-        cliente_ruc: clienteRuc,
-        items: JSON.stringify(items),
-    });
-
+    let json;
+    try {
+        json = await llamarVenta('GUARDARVENTA', {
+            cliente_ruc: clienteRuc,
+            items: JSON.stringify(items),
+            vendedor_usuario_id: datosVenta.vendedor_usuario_id,
+            pagos: JSON.stringify(datosVenta.pagos),
+        });
+    } catch (error) {
+        btn.disabled = false;
+        Swal.fire('Error', error.message || 'No se pudo registrar la venta.', 'error');
+        return;
+    }
     btn.disabled = false;
 
     if (json.success) {
         Swal.fire('Listo', `Venta ${json.codigo} registrada correctamente.`, 'success');
         carritoVenta = [];
+        pagosPV = [{ uid: ++contadorPagoPV, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: 0, referencia: '', automatico: true }];
         renderCarrito();
         seleccionarClienteVariosPV();
         cargarGridProductos(document.getElementById('pv_producto_texto').value.trim());

@@ -72,6 +72,11 @@ function controladorVenta(string $accion): void
 
     $accionesLectura = [
         'LISTARVENTAS',
+        'REPORTEVENTASPORPRODUCTO',
+        'REPORTEVENTASPORVENDEDORCLIENTE',
+        'BUSCARPRODUCTOSREPORTEVENTAS',
+        'LISTARVENDEDORESVENTA',
+        'LISTARCUENTASRECEPTORAS',
         'OBTENERVENTA',
         'BUSCARCLIENTES',
         'BUSCARDISPONIBLESVENTA',
@@ -84,6 +89,8 @@ function controladorVenta(string $accion): void
     // Anular repone stock de empaquetado y altera una operación ya registrada.
     $accionesSoloAdmin = [
         'ANULARVENTA',
+        'CREARCUENTARECEPTORA',
+        'EDITARCUENTARECEPTORA',
     ];
 
     if (in_array($accion, $accionesLectura, true)) {
@@ -102,6 +109,34 @@ function controladorVenta(string $accion): void
     switch ($accion) {
         case 'LISTARVENTAS':
             listarVentas();
+            break;
+
+        case 'REPORTEVENTASPORPRODUCTO':
+            reporteVentasPorProducto();
+            break;
+
+        case 'REPORTEVENTASPORVENDEDORCLIENTE':
+            reporteVentasPorVendedorCliente();
+            break;
+
+        case 'BUSCARPRODUCTOSREPORTEVENTAS':
+            buscarProductosReporteVentas();
+            break;
+
+        case 'LISTARVENDEDORESVENTA':
+            listarVendedoresVenta();
+            break;
+
+        case 'LISTARCUENTASRECEPTORAS':
+            listarCuentasReceptorasVenta();
+            break;
+
+        case 'CREARCUENTARECEPTORA':
+            crearCuentaReceptoraVenta();
+            break;
+
+        case 'EDITARCUENTARECEPTORA':
+            editarCuentaReceptoraVenta();
             break;
 
         case 'OBTENERVENTA':
@@ -482,6 +517,303 @@ function listarVentas()
     responderVenta(true, 'OK', ['ventas' => $result]);
 }
 
+/** Reporte agregado de ventas por producto, sin desglose por sucursal. */
+function reporteVentasPorProducto(): void
+{
+    $conectar = conectar_oll_BD();
+    $fechaInicio = trim($_POST['fecha_inicio'] ?? '');
+    $fechaFin = trim($_POST['fecha_fin'] ?? '');
+    $texto = trim($_POST['texto'] ?? '');
+
+    $todasLasVentas = $fechaInicio === '' && $fechaFin === '';
+    $fechaValida = static function (string $fecha): bool {
+        $obj = DateTimeImmutable::createFromFormat('!Y-m-d', $fecha);
+        return $obj !== false && $obj->format('Y-m-d') === $fecha;
+    };
+    if (!$todasLasVentas && (!$fechaValida($fechaInicio) || !$fechaValida($fechaFin))) {
+        responderVenta(false, 'Selecciona un rango de fechas válido.');
+    }
+    if (!$todasLasVentas && $fechaInicio > $fechaFin) {
+        responderVenta(false, 'La fecha inicial no puede ser posterior a la fecha final.');
+    }
+
+    $where = ["v.estado = 'completada'"];
+    $params = [];
+    if (!$todasLasVentas) {
+        $where[] = 'v.fecha_venta >= CAST(:fecha_inicio AS date)';
+        $where[] = "v.fecha_venta < CAST(:fecha_fin AS date) + INTERVAL '1 day'";
+        $params['fecha_inicio'] = $fechaInicio;
+        $params['fecha_fin'] = $fechaFin;
+    }
+    if ($texto !== '') {
+        $where[] = "(LOWER(COALESCE(p.codigo, item->>'producto_codigo', '')) LIKE LOWER(:texto)
+                     OR LOWER(COALESCE(p.descripcion, item->>'producto', '')) LIKE LOWER(:texto))";
+        $params['texto'] = '%' . $texto . '%';
+    }
+
+    $cte = "WITH lineas AS (
+        SELECT v.id AS venta_id,
+               v.fecha_venta::date AS fecha,
+               item->>'producto_id' AS producto_id,
+               COALESCE(p.codigo, item->>'producto_codigo', '—') AS codigo,
+               COALESCE(p.descripcion, item->>'producto', 'Producto eliminado') AS producto,
+               COALESCE(NULLIF(item->>'unidad_venta_corto', ''), 'PAQ') AS unidad,
+               COALESCE(NULLIF(item->>'cantidad', '')::numeric, 0) AS cantidad,
+               COALESCE(NULLIF(item->>'precio_unitario', '')::numeric, 0) AS precio_unitario,
+               COALESCE(NULLIF(item->>'subtotal', '')::numeric,
+                   COALESCE(NULLIF(item->>'cantidad', '')::numeric, 0) *
+                   COALESCE(NULLIF(item->>'precio_unitario', '')::numeric, 0)) AS importe
+        FROM venta v
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(v.js_items) = 'array' THEN v.js_items ELSE '[]'::jsonb END
+        ) AS detalle(item)
+        LEFT JOIN producto p ON p.id = NULLIF(item->>'producto_id', '')::integer
+        WHERE " . implode(' AND ', $where) . "
+    )";
+
+    $productos = executeQuery($conectar, $cte . "
+        SELECT producto_id, codigo, producto, unidad,
+               SUM(cantidad) AS cantidad_vendida,
+               ROUND(SUM(importe), 2) AS importe_total,
+               ROUND(SUM(importe) / NULLIF(SUM(cantidad), 0), 2) AS precio_promedio,
+               COUNT(DISTINCT venta_id) AS ventas
+        FROM lineas
+        GROUP BY producto_id, codigo, producto, unidad
+        ORDER BY SUM(importe) DESC, SUM(cantidad) DESC, producto
+    ", $params);
+
+    $resumenFilas = executeQuery($conectar, $cte . "
+        SELECT COUNT(DISTINCT venta_id) AS ventas,
+               COUNT(DISTINCT producto_id) AS productos,
+               ROUND(COALESCE(SUM(importe), 0), 2) AS importe_total
+        FROM lineas
+    ", $params);
+    $resumen = $resumenFilas[0] ?? ['ventas' => 0, 'productos' => 0, 'importe_total' => 0];
+    $resumen['promedio_venta'] = (int)$resumen['ventas'] > 0
+        ? round((float)$resumen['importe_total'] / (int)$resumen['ventas'], 2)
+        : 0;
+
+    if ($todasLasVentas) {
+        $dias = executeQuery($conectar, $cte . "
+            SELECT TO_CHAR(DATE_TRUNC('month', fecha), 'YYYY-MM') AS fecha,
+                   ROUND(SUM(importe), 2) AS importe_total,
+                   COUNT(DISTINCT venta_id) AS ventas
+            FROM lineas
+            GROUP BY DATE_TRUNC('month', fecha)
+            ORDER BY DATE_TRUNC('month', fecha)
+        ", $params);
+    } else {
+        $paramsDias = $params + ['serie_inicio' => $fechaInicio, 'serie_fin' => $fechaFin];
+        $dias = executeQuery($conectar, $cte . "
+            SELECT TO_CHAR(calendario.fecha::date, 'YYYY-MM-DD') AS fecha,
+                   ROUND(COALESCE(SUM(lineas.importe), 0), 2) AS importe_total,
+                   COUNT(DISTINCT lineas.venta_id) AS ventas
+            FROM generate_series(
+                CAST(:serie_inicio AS date), CAST(:serie_fin AS date), INTERVAL '1 day'
+            ) AS calendario(fecha)
+            LEFT JOIN lineas ON lineas.fecha = calendario.fecha::date
+            GROUP BY calendario.fecha
+            ORDER BY calendario.fecha
+        ", $paramsDias);
+    }
+
+    responderVenta(true, 'OK', [
+        'productos' => $productos,
+        'resumen' => $resumen,
+        'dias' => $dias,
+        'fecha_inicio' => $todasLasVentas ? null : $fechaInicio,
+        'fecha_fin' => $todasLasVentas ? null : $fechaFin,
+        'todas_las_ventas' => $todasLasVentas,
+    ]);
+}
+
+/** Resúmenes del mismo periodo agrupados por vendedor, cliente y destino de pago. */
+function reporteVentasPorVendedorCliente(): void
+{
+    $conectar = conectar_oll_BD();
+    $fechaInicio = trim($_POST['fecha_inicio'] ?? '');
+    $fechaFin = trim($_POST['fecha_fin'] ?? '');
+    $todasLasVentas = $fechaInicio === '' && $fechaFin === '';
+    $fechaValida = static function (string $fecha): bool {
+        $obj = DateTimeImmutable::createFromFormat('!Y-m-d', $fecha);
+        return $obj !== false && $obj->format('Y-m-d') === $fecha;
+    };
+    if (!$todasLasVentas && (!$fechaValida($fechaInicio) || !$fechaValida($fechaFin))) {
+        responderVenta(false, 'Selecciona un rango de fechas válido.');
+    }
+    if (!$todasLasVentas && $fechaInicio > $fechaFin) {
+        responderVenta(false, 'La fecha inicial no puede ser posterior a la fecha final.');
+    }
+
+    $where = ["v.estado = 'completada'"];
+    $params = [];
+    if (!$todasLasVentas) {
+        $where[] = 'v.fecha_venta >= CAST(:fecha_inicio AS date)';
+        $where[] = "v.fecha_venta < CAST(:fecha_fin AS date) + INTERVAL '1 day'";
+        $params['fecha_inicio'] = $fechaInicio;
+        $params['fecha_fin'] = $fechaFin;
+    }
+    $ventasPeriodo = "WITH ventas_periodo AS (
+        SELECT v.id, v.fecha_venta, v.monto_total, v.vendedor_usuario_id, v.cliente_ruc,
+               COALESCE(u.nombre_completo, 'Sin vendedor registrado') AS vendedor,
+               COALESCE(p.razon_social, 'Clientes Varios') AS cliente
+        FROM venta v
+        LEFT JOIN usuario u ON u.id = v.vendedor_usuario_id
+        LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
+        WHERE " . implode(' AND ', $where) . "
+    ) ";
+
+    $vendedores = executeQuery($conectar, $ventasPeriodo . "
+        SELECT vendedor_usuario_id, vendedor,
+               COUNT(*) AS ventas,
+               ROUND(SUM(monto_total), 2) AS importe_total,
+               ROUND(AVG(monto_total), 2) AS promedio_venta,
+               COUNT(DISTINCT cliente_ruc) AS clientes
+        FROM ventas_periodo
+        GROUP BY vendedor_usuario_id, vendedor
+        ORDER BY SUM(monto_total) DESC, vendedor
+    ", $params);
+
+    $clientes = executeQuery($conectar, $ventasPeriodo . "
+        SELECT cliente_ruc, cliente,
+               COUNT(*) AS ventas,
+               ROUND(SUM(monto_total), 2) AS importe_total,
+               ROUND(AVG(monto_total), 2) AS promedio_venta,
+               MAX(fecha_venta) AS ultima_venta
+        FROM ventas_periodo
+        GROUP BY cliente_ruc, cliente
+        ORDER BY SUM(monto_total) DESC, cliente
+    ", $params);
+
+    $pagos = executeQuery($conectar, $ventasPeriodo . ", pagos_periodo AS (
+        SELECT vp.vendedor_usuario_id, vp.vendedor,
+               pago.medio_pago, cuenta.nombre AS cuenta,
+               pago.monto
+        FROM ventas_periodo vp
+        JOIN venta_pago pago ON pago.venta_id = vp.id
+        LEFT JOIN cuenta_receptora cuenta ON cuenta.id = pago.cuenta_receptora_id
+    )
+        SELECT vendedor_usuario_id, vendedor, medio_pago,
+               CASE
+                   WHEN medio_pago IN ('yape', 'plin') THEN 'Billetera del vendedor'
+                   WHEN medio_pago = 'efectivo' THEN 'Caja / efectivo'
+                   ELSE COALESCE(cuenta, 'Cuenta no disponible')
+               END AS destino,
+               ROUND(SUM(monto), 2) AS importe_total,
+               COUNT(*) AS pagos
+        FROM pagos_periodo
+        GROUP BY vendedor_usuario_id, vendedor, medio_pago, destino
+        ORDER BY vendedor, medio_pago, destino
+    ", $params);
+
+    responderVenta(true, 'OK', [
+        'vendedores' => $vendedores,
+        'clientes' => $clientes,
+        'pagos' => $pagos,
+        'fecha_inicio' => $todasLasVentas ? null : $fechaInicio,
+        'fecha_fin' => $todasLasVentas ? null : $fechaFin,
+        'todas_las_ventas' => $todasLasVentas,
+    ]);
+}
+
+/** Sugerencias de catálogo para el autocompletado del reporte de ventas. */
+function buscarProductosReporteVentas(): void
+{
+    $texto = trim($_POST['texto'] ?? '');
+    $longitudTexto = function_exists('mb_strlen') ? mb_strlen($texto, 'UTF-8') : strlen($texto);
+    if ($longitudTexto < 2) {
+        responderVenta(true, 'OK', ['productos' => []]);
+    }
+
+    $conectar = conectar_oll_BD();
+    $productos = executeQuery($conectar, "
+        SELECT id, codigo, descripcion
+        FROM producto
+        WHERE activo = true
+          AND (LOWER(codigo) LIKE LOWER(:texto)
+           OR LOWER(descripcion) LIKE LOWER(:texto)
+          )
+        ORDER BY descripcion, codigo
+        LIMIT 12
+    ", ['texto' => '%' . $texto . '%']);
+
+    responderVenta(true, 'OK', ['productos' => $productos]);
+}
+
+function listarVendedoresVenta(): void
+{
+    $conectar = conectar_oll_BD();
+    $vendedores = executeQuery($conectar, "
+        SELECT id, nombre_completo
+        FROM usuario
+        WHERE deleted_at IS NULL
+          AND operario_id IS NULL
+          AND UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+        ORDER BY nombre_completo
+    ");
+    responderVenta(true, 'OK', ['vendedores' => $vendedores]);
+}
+
+function listarCuentasReceptorasVenta(): void
+{
+    $conectar = conectar_oll_BD();
+    $cuentas = executeQuery($conectar, "
+        SELECT id, nombre
+        FROM cuenta_receptora
+        WHERE activo IS TRUE
+        ORDER BY nombre
+    ");
+    responderVenta(true, 'OK', ['cuentas' => $cuentas]);
+}
+
+function crearCuentaReceptoraVenta(): void
+{
+    $nombre = trim($_POST['nombre'] ?? '');
+    $longitud = function_exists('mb_strlen') ? mb_strlen($nombre, 'UTF-8') : strlen($nombre);
+    if ($nombre === '' || $longitud > 100) {
+        responderVenta(false, 'Ingresa un nombre de cuenta de hasta 100 caracteres.');
+    }
+    $conectar = conectar_oll_BD();
+    try {
+        $stmt = $conectar->prepare("
+            INSERT INTO cuenta_receptora (nombre, activo)
+            VALUES (:nombre, TRUE)
+            RETURNING id, nombre
+        ");
+        $stmt->execute(['nombre' => $nombre]);
+        responderVenta(true, 'Cuenta agregada.', ['cuenta' => $stmt->fetch(PDO::FETCH_ASSOC) ?: null]);
+    } catch (PDOException $e) {
+        if (($e->errorInfo[0] ?? '') === '23505') {
+            responderVenta(false, 'Ya existe una cuenta con ese nombre.');
+        }
+        throw $e;
+    }
+}
+
+function editarCuentaReceptoraVenta(): void
+{
+    $id = (int)($_POST['id'] ?? 0);
+    $nombre = trim($_POST['nombre'] ?? '');
+    $longitud = function_exists('mb_strlen') ? mb_strlen($nombre, 'UTF-8') : strlen($nombre);
+    if ($id <= 0 || $nombre === '' || $longitud > 100) {
+        responderVenta(false, 'Selecciona una cuenta e ingresa un nombre de hasta 100 caracteres.');
+    }
+
+    $conectar = conectar_oll_BD();
+    try {
+        $stmt = $conectar->prepare("UPDATE cuenta_receptora SET nombre = :nombre WHERE id = :id RETURNING id, nombre");
+        $stmt->execute(['nombre' => $nombre, 'id' => $id]);
+        $cuenta = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$cuenta) responderVenta(false, 'La cuenta receptora ya no existe.');
+        responderVenta(true, 'Cuenta actualizada.', ['cuenta' => $cuenta]);
+    } catch (PDOException $e) {
+        if (($e->errorInfo[0] ?? '') === '23505') {
+            responderVenta(false, 'Ya existe una cuenta con ese nombre.');
+        }
+        throw $e;
+    }
+}
+
 function obtenerVenta(int $id)
 {
     $conectar = conectar_oll_BD();
@@ -568,6 +900,46 @@ function guardarVenta()
         responderVenta(false, 'Debes agregar al menos un producto a la venta.');
     }
 
+    $vendedorId = (int)($_POST['vendedor_usuario_id'] ?? 0);
+    $pagosInput = json_decode(trim($_POST['pagos'] ?? '[]'), true);
+    if ($vendedorId <= 0) responderVenta(false, 'Selecciona quién realizó la venta.');
+    if (!is_array($pagosInput) || count($pagosInput) === 0) {
+        responderVenta(false, 'Agrega al menos una forma de pago.');
+    }
+
+    $vendedorValido = executeQuery($conectar, "
+        SELECT id
+        FROM usuario
+        WHERE id = :id
+          AND deleted_at IS NULL
+          AND operario_id IS NULL
+          AND UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+    ", ['id' => $vendedorId]);
+    if (empty($vendedorValido)) responderVenta(false, 'El vendedor seleccionado no está activo o no puede registrar ventas.');
+
+    $metodosPagoPermitidos = ['efectivo', 'deposito', 'transferencia', 'yape', 'plin'];
+    $pagos = [];
+    foreach ($pagosInput as $pago) {
+        $medio = strtolower(trim((string)($pago['medio_pago'] ?? '')));
+        $cuentaId = (int)($pago['cuenta_receptora_id'] ?? 0);
+        $monto = round((float)($pago['monto'] ?? 0), 2);
+        $referencia = trim((string)($pago['referencia'] ?? ''));
+        if (!in_array($medio, $metodosPagoPermitidos, true) || $monto <= 0) {
+            responderVenta(false, 'Revisa el medio de pago y el monto de cada pago.');
+        }
+        $requiereCuenta = in_array($medio, ['deposito', 'transferencia'], true);
+        if ($requiereCuenta && $cuentaId <= 0) {
+            responderVenta(false, 'Selecciona la cuenta receptora del depósito o transferencia.');
+        }
+        $pagos[] = [
+            'medio_pago' => $medio,
+            // Yape/Plin llegan al vendedor elegido; el vendedor queda registrado en venta.
+            'cuenta_receptora_id' => $requiereCuenta ? $cuentaId : null,
+            'monto' => $monto,
+            'referencia' => $referencia !== '' ? $referencia : null,
+        ];
+    }
+
     try {
         $conectar->beginTransaction();
 
@@ -649,16 +1021,35 @@ function guardarVenta()
             ];
         }
 
-        $movimiento = obtenerMovimientoSesion('crear');
+        $totalPagado = round(array_sum(array_column($pagos, 'monto')), 2);
+        if (abs($totalPagado - round($montoTotal, 2)) > 0.009) {
+            throw new RuntimeException('Los pagos deben sumar exactamente el total de la venta.');
+        }
+        foreach ($pagos as $pago) {
+            if ($pago['cuenta_receptora_id'] === null) continue;
+            $cuentaValida = executeQuery($conectar, "
+                SELECT id FROM cuenta_receptora
+                WHERE id = :id AND activo IS TRUE
+            ", ['id' => $pago['cuenta_receptora_id']]);
+            if (empty($cuentaValida)) {
+                throw new RuntimeException('Una de las cuentas receptoras ya no está activa.');
+            }
+        }
+
+        $movimiento = obtenerMovimientoSesion('crear', [
+            'vendedor_usuario_id' => $vendedorId,
+            'pagos' => $pagos,
+        ]);
 
         $stmtInsert = $conectar->prepare("
-            INSERT INTO venta (codigo, cliente_ruc, fecha_venta, js_items, monto_total, estado, created_at, js_session, js_historial)
-            VALUES (:codigo, :cliente_ruc, NOW(), :js_items::jsonb, :monto_total, 'completada', NOW(), :js_session, :js_historial::jsonb)
+            INSERT INTO venta (codigo, cliente_ruc, vendedor_usuario_id, fecha_venta, js_items, monto_total, estado, created_at, js_session, js_historial)
+            VALUES (:codigo, :cliente_ruc, :vendedor_id, NOW(), :js_items::jsonb, :monto_total, 'completada', NOW(), :js_session, :js_historial::jsonb)
             RETURNING id
         ");
         $stmtInsert->execute([
             'codigo'       => 'V-TEMP',
             'cliente_ruc'  => $cliente_ruc,
+            'vendedor_id'  => $vendedorId,
             'js_items'     => json_encode($itemsFinal, JSON_UNESCAPED_UNICODE),
             'monto_total'  => round($montoTotal, 2),
             'js_session'   => json_encode($movimiento, JSON_UNESCAPED_UNICODE),
@@ -669,6 +1060,23 @@ function guardarVenta()
         $codigo = 'V-' . str_pad((string)$ventaId, 6, '0', STR_PAD_LEFT);
         $stmtCodigo = $conectar->prepare("UPDATE venta SET codigo = :codigo WHERE id = :id");
         $stmtCodigo->execute(['codigo' => $codigo, 'id' => $ventaId]);
+
+        $stmtPago = $conectar->prepare("
+            INSERT INTO venta_pago
+                (venta_id, medio_pago, cuenta_receptora_id, monto, referencia, registrado_por_usuario_id)
+            VALUES
+                (:venta_id, :medio_pago, :cuenta_id, :monto, :referencia, :registrado_por)
+        ");
+        foreach ($pagos as $pago) {
+            $stmtPago->execute([
+                'venta_id' => $ventaId,
+                'medio_pago' => $pago['medio_pago'],
+                'cuenta_id' => $pago['cuenta_receptora_id'],
+                'monto' => $pago['monto'],
+                'referencia' => $pago['referencia'],
+                'registrado_por' => (int)($_SESSION['usuario_id'] ?? 0) ?: null,
+            ]);
+        }
 
         // NUEVO: registrar en empaquetado.js_venta qué venta consumió cada
         // registro y cuánto. Recién acá tenemos $ventaId/$codigo, por eso

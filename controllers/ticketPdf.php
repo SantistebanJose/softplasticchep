@@ -52,9 +52,11 @@ $conectar = conectar_oll_BD();
 
 $result = executeQuery($conectar, "
     SELECT v.codigo, v.fecha_venta, v.monto_total, v.estado, v.js_items,
-           v.cliente_ruc, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre
+           v.cliente_ruc, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
+           COALESCE(u.nombre_completo, 'No registrado') AS vendedor_nombre
     FROM venta v
     LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
+    LEFT JOIN usuario u ON u.id = v.vendedor_usuario_id
     WHERE v.id = :id
 ", ['id' => $id]);
 
@@ -65,6 +67,13 @@ if (empty($result)) {
 
 $venta = $result[0];
 $items = json_decode($venta['js_items'], true) ?: [];
+$pagos = executeQuery($conectar, "
+    SELECT pago.medio_pago, pago.monto, pago.referencia, cuenta.nombre AS cuenta_nombre
+    FROM venta_pago pago
+    LEFT JOIN cuenta_receptora cuenta ON cuenta.id = pago.cuenta_receptora_id
+    WHERE pago.venta_id = :venta_id
+    ORDER BY pago.id
+", ['venta_id' => $id]);
 
 // =============================================================================
 // GENERADOR DE PDF MÍNIMO (sin librerías)
@@ -645,7 +654,7 @@ if ($venta['estado'] === 'anulada') {
 }
 
 // ── Datos de la operación y del adquirente ───────────────────────────────────
-$etiquetas = ['Fecha emisión:', 'Cliente:', $etiquetaDoc, 'Moneda:'];
+$etiquetas = ['Fecha emisión:', 'Cliente:', $etiquetaDoc, 'Moneda:', 'Vendedor:', 'Pago:'];
 $xValor = $xL;
 foreach ($etiquetas as $e) {
     $xValor = max($xValor, $xL + $t->medir($e, 8, true));
@@ -658,6 +667,26 @@ if ($docCliente !== '') {
     ticketFilaDato($t, $etiquetaDoc, $docCliente, $xValor);
 }
 ticketFilaDato($t, 'Moneda:', 'SOLES', $xValor);
+ticketFilaDato($t, 'Vendedor:', (string)$venta['vendedor_nombre'], $xValor);
+$nombresMedioPago = [
+    'efectivo' => 'Efectivo',
+    'deposito' => 'Depósito',
+    'transferencia' => 'Transferencia',
+    'yape' => 'Yape',
+    'plin' => 'Plin',
+];
+foreach ($pagos as $pago) {
+    $medio = $nombresMedioPago[$pago['medio_pago']] ?? ucfirst((string)$pago['medio_pago']);
+    $destino = trim((string)($pago['cuenta_nombre'] ?? ''));
+    if (in_array($pago['medio_pago'], ['yape', 'plin'], true)) {
+        $destino = 'del vendedor';
+    }
+    $textoPago = $medio . ($destino !== '' ? ' · ' . $destino : '') . ': S/ ' . number_format((float)$pago['monto'], 2);
+    ticketFilaDato($t, 'Pago:', $textoPago, $xValor);
+}
+if (!$pagos) {
+    ticketFilaDato($t, 'Pago:', 'No registrado', $xValor);
+}
 
 $t->y += 5;
 

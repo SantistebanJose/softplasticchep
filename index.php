@@ -154,6 +154,9 @@ window.addEventListener('load', function () {
             <a href="reporte_pase_ensamblaje.php" class="pc-quick-btn q-warning">
                 <i class="fa-solid fa-right-left"></i> Pase a Ensamblaje
             </a>
+            <a href="reporte_ventas_productos.php" class="pc-quick-btn q-success">
+                <i class="fa-solid fa-chart-line"></i> Ventas por Producto
+            </a>
         </div>
 
     </div>
