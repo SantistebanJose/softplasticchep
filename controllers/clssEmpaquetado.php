@@ -581,7 +581,7 @@ function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
     $result = executeQuery($conectar, "
         SELECT
             emp.id, emp.producto_id, emp.emsamblaje_id, emp.produccion_id, emp.unidad_medida,
-            emp.cantidad_tota, emp.js_cantidades,
+            emp.cantidad_tota, emp.js_cantidades, emp.fuente_inventario, emp.fecha_inventario,
             emp.operario_id, emp.js_operarios, emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
             um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto,
@@ -748,7 +748,8 @@ function listarTodosEmpaquetados()
                 END
                 FROM rel_empaquetado_origen reo
                 WHERE reo.empaquetado_id = emp.id AND reo.deleted_at IS NULL
-            ), CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
+            ), CASE WHEN emp.fuente_inventario = 'INVENTARIO_INICIAL' THEN 'inventario_inicial'
+                    WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
                     WHEN emp.produccion_id IS NOT NULL THEN 'produccion'
                     ELSE NULL END) AS origen_tipo
         FROM empaquetado emp
@@ -788,8 +789,8 @@ function reporteEmpaquetadoDashboard(): void
             responder(false, 'El rango de fechas no es válido.');
         }
     }
-    if ($desde !== '') { $where[] = 'emp.created_at >= :desde'; $params['desde'] = $desde . ' 00:00:00'; }
-    if ($hasta !== '') { $where[] = 'emp.created_at < :hasta'; $params['hasta'] = date('Y-m-d', strtotime($hasta . ' +1 day')) . ' 00:00:00'; }
+    if ($desde !== '') { $where[] = 'COALESCE(emp.fecha_inventario::timestamp, emp.created_at) >= :desde'; $params['desde'] = $desde . ' 00:00:00'; }
+    if ($hasta !== '') { $where[] = 'COALESCE(emp.fecha_inventario::timestamp, emp.created_at) < :hasta'; $params['hasta'] = date('Y-m-d', strtotime($hasta . ' +1 day')) . ' 00:00:00'; }
     if ($texto !== '') {
         $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = '%' . $texto . '%';
@@ -810,8 +811,10 @@ function reporteEmpaquetadoDashboard(): void
                    emp.cantidad_tota, emp.js_cantidades, emp.js_operarios,
                    emp.operario_id, op.nombre_completo AS operario_nombre,
                    su.nombre AS sucursal_nombre, emp.pasado_venta, emp.created_at,
+                   emp.fuente_inventario, emp.fecha_inventario,
                    um.nombre_corto AS unidad_corto,
-                   CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
+                   CASE WHEN emp.fuente_inventario = 'INVENTARIO_INICIAL' THEN 'inventario_inicial'
+                        WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
                         WHEN emp.produccion_id IS NOT NULL THEN 'produccion' ELSE NULL END AS origen_tipo
             FROM empaquetado emp
             LEFT JOIN producto p ON p.id = emp.producto_id

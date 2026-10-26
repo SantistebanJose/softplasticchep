@@ -790,7 +790,8 @@ async function cargarListadoGeneralEmp() {
         const bultosTexto = textoBultosDetalle(bultos);
         const vendido = !!r.pasado_venta;
         const productoLabel = `${(r.producto_codigo ?? '')} - ${(r.producto_descripcion ?? '')}`.replace(/'/g, "\\'");
-        const origenTexto = r.origen_tipo === 'mixto' ? 'Mixto'
+        const origenTexto = r.origen_tipo === 'inventario_inicial' ? 'Inventario inicial'
+            : r.origen_tipo === 'mixto' ? 'Mixto'
             : r.origen_tipo === 'produccion' ? 'Producción directa'
             : r.origen_tipo === 'ensamblaje' ? 'Ensamblaje' : '-';
         return `

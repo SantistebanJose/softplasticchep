@@ -127,6 +127,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     .pc-emp-workspace{ grid-template-columns:1fr; }
     .pc-panel-list{ order:1; }
     .pc-panel-detail{ order:2; }
+    .pc-emp-workspace.pc-vista-armado-movil{ grid-template-columns:1fr; padding-top:12px; }
+    .pc-emp-workspace.pc-vista-armado-movil .pc-panel-list{ display:none; }
+    .pc-emp-workspace.pc-vista-armado-movil .pc-panel-detail{ order:1; padding:14px; }
+    .pc-emp-workspace.pc-vista-armado-movil #estacionVaciaCard{ display:none !important; }
 }
 
 /* Tablets grandes / escritorio: centrar el conjunto para que no se estire de más */
@@ -224,6 +228,15 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 #formEstacionArmado .form-control:focus{
     border-color:var(--emp-accent); box-shadow:0 0 0 3px var(--emp-accent-bg);
 }
+.pc-estacion-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;z-index:5;background:var(--pc-surface);padding:0 0 10px;margin-bottom:8px;border-bottom:1px solid var(--pc-border-soft)}
+.pc-estacion-toolbar h4{margin:0!important;min-width:0;font-size:1.05rem;line-height:1.3}
+.pc-btn-volver-productos{display:none;flex:0 0 auto;min-height:42px;border:1px solid var(--pc-border);background:#fff;color:var(--pc-ink);border-radius:var(--pc-r-sm);padding:8px 11px;font-weight:700}
+@media (orientation:portrait){
+ .pc-estacion-toolbar{position:sticky;top:0;padding-top:6px}
+ .pc-btn-volver-productos{display:inline-flex;align-items:center;gap:7px}
+ .pc-estacion-titulo-paso{margin:16px 0 8px}
+ .pc-chip-wrap-scroll{max-height:112px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+}
 
 /* ---------- Estación visual de sacos/colores (táctil, agrandada) ---------- */
 .pc-estacion-titulo-paso{
@@ -285,6 +298,33 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     font-size:.95em; margin-top:12px;
 }
 .pc-bultos-total b{ color:var(--emp-accent); font-size:1.1em; }
+.pc-packer-layout{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:14px;align-items:start}
+.pc-packer-pane{min-width:0;border:1px solid var(--pc-border-soft);border-radius:var(--pc-r-md);padding:12px;background:var(--pc-surface)}
+.pc-packer-pane-title{font-size:.82em;font-weight:700;color:var(--pc-ink-soft);text-transform:uppercase;letter-spacing:.03em;margin:0 0 8px}
+.pc-packer-scroll{max-height:min(48vh,520px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:2px 4px 2px 0}
+.pc-packer-switch{display:none}
+@media (orientation:portrait){
+ .pc-packer-layout{grid-template-columns:1fr}
+ .pc-packer-switch{display:flex;gap:6px;padding:4px;background:var(--pc-canvas);border:1px solid var(--pc-border-soft);border-radius:var(--pc-r-md);margin:8px 0}
+ .pc-packer-switch button{flex:1;min-height:42px;border:0;border-radius:9px;background:transparent;color:var(--pc-ink-soft);font-weight:700;padding:8px}
+ .pc-packer-switch button.activo{background:#fff;color:var(--pc-ink);box-shadow:0 1px 4px rgba(20,33,61,.12)}
+ .pc-packer-pane[aria-hidden="true"]{display:none}
+ .pc-packer-scroll{max-height:35vh}
+ .pc-packer-pane .pc-sacos-grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+ .pc-packer-pane .pc-saco-card{min-height:108px;padding:9px}
+ .pc-packer-pane .pc-saco-card .swatch{height:34px}
+ .pc-packer-pane .pc-saco-card .nombre{margin-top:6px;font-size:.86em}
+ .pc-packer-pane .pc-saco-card .origen,.pc-packer-pane .pc-saco-card .disp{font-size:.74em}
+ .pc-packer-pane .pc-swatch-picker{gap:5px}
+ .pc-packer-pane .pc-swatch-chip{width:30px;height:30px}
+ .pc-estacion-titulo-paso{margin:16px 0 8px}
+ .pc-bulto-card{padding:11px;margin-bottom:9px}
+ .pc-bulto-card-head{font-size:.86em;margin-bottom:7px}
+ .pc-color-row select{min-width:130px;min-height:42px}
+ .pc-color-row input{min-width:78px;min-height:42px}
+ .pc-chip-wrap-scroll{max-height:112px}
+ .pc-estacion > div:first-child .pc-sacos-grid{max-height:35vh;overflow-y:auto;overscroll-behavior:contain;padding:2px}
+}
 
 .pc-btn-tap{ min-height:48px; font-size:.95em; touch-action:manipulation; border-radius:var(--pc-r-sm); }
 
@@ -325,6 +365,23 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-btn-guardar:active{ transform:scale(.97); background:var(--emp-accent-dark); }
 .pc-btn-guardar:disabled{ opacity:.45; box-shadow:none; }
+.pc-emp-wizard-progress{display:none;align-items:center;gap:10px;margin:0 0 14px;color:#64748b;font-size:.88rem;font-weight:700}
+.pc-emp-wizard-progress .progress{height:7px;flex:1;background:#e9edf5;border-radius:999px}
+.pc-emp-wizard-progress .progress-bar{background:#1769ff;border-radius:999px;transition:width .2s ease}
+.pc-emp-wizard-step{min-width:0}
+.pc-emp-wizard-controls{display:none;flex:1;gap:10px;justify-content:flex-end}
+.pc-emp-wizard-controls .btn{min-height:52px;flex:1;font-weight:700}
+@media(max-width:1024px){
+ .pc-emp-wizard-progress{display:flex}
+ .pc-emp-wizard-step{display:none}
+ .pc-emp-wizard-step.active{display:block}
+ .pc-emp-wizard-controls{display:flex}
+ .pc-action-bar{gap:8px;padding:10px calc(14px + var(--safe-r)) calc(10px + var(--safe-b)) calc(14px + var(--safe-l));min-height:72px}
+ .pc-action-bar-info{display:none}
+ .pc-btn-guardar{flex:1;min-width:0;min-height:52px;padding:12px}
+}
+@media(max-width:480px){.pc-emp-wizard-controls{gap:7px}.pc-emp-wizard-controls .btn{padding:9px 7px;font-size:.9rem}}
+#btnGuardarPaquete[hidden]{display:none}
 
 @media (orientation:portrait){
     .pc-action-bar-info{ display:none; } /* en vertical se prioriza el botón, ancho completo */
@@ -378,12 +435,19 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
             </div>
 
             <div id="estacionArmadoCard" style="display:none;">
-                <h4 id="estacionArmadoTitulo" style="margin-bottom:14px;">Armar paquete</h4>
+                <div class="pc-estacion-toolbar">
+                    <button type="button" class="pc-btn-volver-productos" onclick="volverAProductos()"><i class="fa-solid fa-arrow-left"></i> Productos</button>
+                    <h4 id="estacionArmadoTitulo" tabindex="-1">Armar paquete</h4>
+                </div>
 
                 <form id="formEstacionArmado">
                     <input type="hidden" id="est_producto_id" value="0">
-
-                    <p class="pc-estacion-titulo-paso"><span class="num">1</span> Quiénes están armando</p>
+                    <div class="pc-emp-wizard-progress" aria-live="polite">
+                        <span id="empWizardPasoTexto">Paso 1 de 2</span>
+                        <div class="progress" role="progressbar" aria-label="Progreso del empaquetado" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1"><div class="progress-bar" id="empWizardBarra" style="width:50%"></div></div>
+                    </div>
+                    <section class="pc-emp-wizard-step active" data-emp-wizard-step="1">
+                    <p class="pc-estacion-titulo-paso"><span class="num">1</span> Datos del empaquetado</p>
                     <div class="mb-3">
                         <label class="form-label">Unidad de medida *</label>
                         <select class="form-select form-select-lg" id="est_unidad_medida" required style="max-width:280px;"></select>
@@ -399,25 +463,38 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Operarios * <span class="pc-chip-count" id="est_operarios_count"></span></label>
+                        <small class="text-muted d-block mb-2">Tu usuario ya está seleccionado. Solo aparecen operarios habilitados para Empaquetado.</small>
                         <div id="est_operarios_chips" class="pc-chip-wrap"></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Sucursal *</label>
-                        <div id="est_sucursal_chips" class="pc-chip-wrap"></div>
+                        <div id="est_sucursal_chips" class="pc-chip-wrap pc-chip-wrap-scroll"></div>
                     </div>
+                    </section>
 
+                    <section class="pc-emp-wizard-step" data-emp-wizard-step="2">
                     <div id="bloqueBultos">
-                        <p class="pc-estacion-titulo-paso"><span class="num">2</span> Arma el paquete</p>
-                        <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Ajusta la cantidad exacta abajo si hace falta.</p>
-                        <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:16px;"></div>
-
-                        <div id="listaBultos"></div>
-                        <button type="button" class="btn btn-outline-secondary pc-btn-tap mb-2" onclick="agregarBulto()">
-                            <i class="fa-solid fa-plus"></i> Agregar Paquete
-                        </button>
-                        <div class="pc-bultos-total">
-                            <span><span id="bultosCount">0</span> paquete(s)</span>
-                            <span>Total: <b id="bultosTotal">0</b></span>
+                        <p class="pc-estacion-titulo-paso"><span class="num">2</span> Arma los paquetes</p>
+                        <div class="pc-packer-switch" role="tablist" aria-label="Materiales y paquetes">
+                            <button type="button" data-packer-pane="disponibles" aria-pressed="true">Disponibles</button>
+                            <button type="button" data-packer-pane="paquetes" aria-pressed="false">Paquetes <span id="bultosTabCount"></span></button>
+                        </div>
+                        <div class="pc-packer-layout">
+                            <section class="pc-packer-pane" id="paneDisponibles" aria-hidden="false">
+                                <h5 class="pc-packer-pane-title">Toca un color para agregarlo</h5>
+                                <div class="pc-packer-scroll"><div class="pc-sacos-grid" id="sacosBultoGrid"></div></div>
+                            </section>
+                            <section class="pc-packer-pane" id="panePaquetes" aria-hidden="false">
+                                <h5 class="pc-packer-pane-title">Paquetes en preparación</h5>
+                                <div class="pc-packer-scroll"><div id="listaBultos"></div></div>
+                                <button type="button" class="btn btn-outline-secondary pc-btn-tap mt-2 mb-1" onclick="agregarBulto()">
+                                    <i class="fa-solid fa-plus"></i> Agregar paquete
+                                </button>
+                                <div class="pc-bultos-total">
+                                    <span><span id="bultosCount">0</span> paquete(s)</span>
+                                    <span>Total: <b id="bultosTotal">0</b></span>
+                                </div>
+                            </section>
                         </div>
                     </div>
 
@@ -461,6 +538,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <i class="fa-solid fa-plus"></i> Agregar saco/color manualmente
                         </button>
                     </div>
+                    </section>
                 </form>
             </div>
         </main>
@@ -472,6 +550,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <div class="pc-action-bar-info">
         <div class="titulo">Resumen</div>
         <div class="valor" id="accionBarResumen">Selecciona un producto</div>
+    </div>
+    <div class="pc-emp-wizard-controls" id="empWizardControls">
+        <button type="button" class="btn btn-outline-secondary" id="empWizardAnterior" onclick="moverPasoEmpaquetado(-1)" hidden>← Anterior</button>
+        <button type="button" class="btn btn-primary" id="empWizardSiguiente" onclick="moverPasoEmpaquetado(1)">Siguiente →</button>
     </div>
     <button type="submit" form="formEstacionArmado" class="pc-btn-guardar" id="btnGuardarPaquete">
         <i class="fa-solid fa-floppy-disk"></i> Guardar paquete
@@ -516,15 +598,23 @@ let tabActivoEmp = null;
 let registrosGlobalCache = [];
 
 let vistaListaActual = 'pendientes';
+let pasoWizardEmpaquetado = 1;
+const empWizardResponsive = window.matchMedia('(max-width: 1024px)');
 
 document.addEventListener('DOMContentLoaded', () => {
     // DeviceTracking.pedirNombreSiFalta(); // <-- NUEVO
+
+    document.querySelectorAll('[data-packer-pane]').forEach(btn => {
+        btn.addEventListener('click', () => seleccionarPanelPacker(btn.dataset.packerPane));
+    });
 
     cargarPendientesEmpaquetado();
     cargarMisRegistros();
     iniciarAutoRefreshEmp();
     actualizarResumenBarraAccion();
 });
+
+empWizardResponsive.addEventListener('change', () => mostrarPasoEmpaquetado(pasoWizardEmpaquetado));
 
 const POLL_INTERVAL_MS_EMP = 30000;
 let pollTimerEmp = null;
@@ -630,6 +720,7 @@ function cambiarVistaLista(vista) {
     document.getElementById('btnVistaRegistros').setAttribute('aria-selected', !esPendientes);
 
     document.getElementById('empWorkspace').classList.toggle('pc-vista-registros', !esPendientes);
+    if (!esPendientes) document.getElementById('empWorkspace').classList.remove('pc-vista-armado-movil');
     document.getElementById('empShell').classList.toggle('pc-shell-solo-lista', !esPendientes);
     document.getElementById('actionBarEmp').classList.toggle('pc-oculta', !esPendientes);
 
@@ -644,9 +735,11 @@ function actualizarResumenBarraAccion() {
     if (!estacionProductoIdActual) {
         el.textContent = 'Selecciona un producto';
         btn.disabled = true;
+        document.getElementById('empWizardSiguiente').disabled = true;
         return;
     }
     btn.disabled = false;
+    document.getElementById('empWizardSiguiente').disabled = false;
 
     if (esModoMezcla()) {
         const kgTotal = mezclaOrigenes.reduce((s, m) => s + (parseFloat(m.cantidad_kg) || 0), 0);
@@ -672,11 +765,17 @@ function renderOperariosChips(containerId, seleccionados, toggleFnName) {
         cont.innerHTML = '<div class="text-muted" style="font-size:.9em;">(sin operarios disponibles - revisar consola)</div>';
         return;
     }
-    cont.innerHTML = empOperariosCache.map(o => `
-        <button type="button" class="pc-chip-tap ${seleccionados.includes(o.id) ? 'activo' : ''}"
-                onclick="${toggleFnName}(${o.id})">
-            ${o.nombre_completo}
-        </button>`).join('');
+    cont.innerHTML = empOperariosCache.map(o => {
+        const operarioId = Number(o.id);
+        const seleccionado = seleccionados.some(id => Number(id) === operarioId);
+        const esUsuarioActual = operarioId === Number(OPERARIO_ID);
+        return `
+        <button type="button" class="pc-chip-tap ${seleccionado ? 'activo' : ''}"
+                aria-pressed="${seleccionado ? 'true' : 'false'}"
+                onclick="${toggleFnName}(${operarioId})">
+            ${o.nombre_completo}${esUsuarioActual ? ' · Tú' : ''}
+        </button>`;
+    }).join('');
 
     const contador = document.getElementById('est_operarios_count');
     if (contador) {
@@ -687,6 +786,7 @@ function renderOperariosChips(containerId, seleccionados, toggleFnName) {
 }
 
 function toggleOperarioEstacion(id) {
+    id = Number(id);
     const i = estOperariosSeleccionados.indexOf(id);
     if (i >= 0) estOperariosSeleccionados.splice(i, 1); else estOperariosSeleccionados.push(id);
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
@@ -810,11 +910,75 @@ function renderTabsEmp() {
 function seleccionarTabEmp(clave) {
     tabActivoEmp = clave;
     if (vistaListaActual !== 'pendientes') cambiarVistaLista('pendientes');
+    mostrarPasoEmpaquetado(1);
+    const vistaVertical = window.matchMedia('(orientation: portrait)').matches;
+    document.getElementById('empWorkspace').classList.toggle('pc-vista-armado-movil', vistaVertical);
+    document.getElementById('actionBarEmp').classList.remove('pc-oculta');
     renderTabsEmp();
     actualizarEstacionArmado();
-    if (window.matchMedia('(orientation: portrait)').matches) {
+    if (vistaVertical) {
         document.getElementById('estacionArmadoCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+}
+
+function mostrarPasoEmpaquetado(paso) {
+    pasoWizardEmpaquetado = Math.max(1, Math.min(2, paso));
+    document.querySelectorAll('#formEstacionArmado [data-emp-wizard-step]').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.empWizardStep) === pasoWizardEmpaquetado);
+    });
+    const texto = document.getElementById('empWizardPasoTexto');
+    const barra = document.getElementById('empWizardBarra');
+    const progreso = barra?.closest('[role="progressbar"]');
+    if (texto) texto.textContent = `Paso ${pasoWizardEmpaquetado} de 2`;
+    if (barra) barra.style.width = `${pasoWizardEmpaquetado * 50}%`;
+    if (progreso) progreso.setAttribute('aria-valuenow', String(pasoWizardEmpaquetado));
+    document.getElementById('empWizardAnterior').hidden = pasoWizardEmpaquetado === 1;
+    document.getElementById('empWizardSiguiente').hidden = pasoWizardEmpaquetado === 2;
+    document.getElementById('empWizardSiguiente').disabled = !estacionProductoIdActual;
+    document.getElementById('btnGuardarPaquete').hidden = empWizardResponsive.matches && pasoWizardEmpaquetado !== 2;
+}
+
+function moverPasoEmpaquetado(delta) {
+    const siguiente = pasoWizardEmpaquetado + delta;
+    if (siguiente > pasoWizardEmpaquetado && pasoWizardEmpaquetado === 1) {
+        const unidad = document.getElementById('est_unidad_medida');
+        if (!unidad.value) {
+            Swal.fire('Falta la unidad', 'Selecciona la unidad de medida para continuar.', 'warning');
+            return;
+        }
+        if (!estOperariosSeleccionados.length) {
+            Swal.fire('Falta información', 'Selecciona al menos un operario para continuar.', 'warning');
+            return;
+        }
+        if (!estSucursalSeleccionada) {
+            Swal.fire('Falta la sucursal', 'Selecciona la sucursal donde se armó este paquete.', 'warning');
+            return;
+        }
+        const maquina = document.getElementById('est_maquina_id');
+        if (maquina.required && !maquina.value) {
+            Swal.fire('Falta seleccionar máquina', 'Este producto requiere elegir la máquina utilizada en Empaquetado.', 'warning');
+            return;
+        }
+    }
+    mostrarPasoEmpaquetado(siguiente);
+    document.getElementById('estacionArmadoCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function volverAProductos() {
+    document.getElementById('empWorkspace').classList.remove('pc-vista-armado-movil');
+    document.getElementById('actionBarEmp').classList.add('pc-oculta');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function seleccionarPanelPacker(panel) {
+    const disponiblesActivo = panel === 'disponibles';
+    document.getElementById('paneDisponibles').setAttribute('aria-hidden', disponiblesActivo ? 'false' : 'true');
+    document.getElementById('panePaquetes').setAttribute('aria-hidden', disponiblesActivo ? 'true' : 'false');
+    document.querySelectorAll('[data-packer-pane]').forEach(btn => {
+        const activo = btn.dataset.packerPane === panel;
+        btn.classList.toggle('activo', activo);
+        btn.setAttribute('aria-pressed', activo ? 'true' : 'false');
+    });
 }
 
 async function actualizarEstacionArmado() {
@@ -826,6 +990,7 @@ async function actualizarEstacionArmado() {
         estCard.style.display = 'none';
         vacCard.style.display = 'block';
         estacionProductoIdActual = 0;
+        if (cacheFilasEmpaquetado.length === 0) document.getElementById('empWorkspace').classList.remove('pc-vista-armado-movil');
         actualizarResumenBarraAccion();
         return;
     }
@@ -1021,7 +1186,7 @@ async function cargarSelectsEstacion() {
     sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
 
     const yoEstoyEnLista = (operarios || []).some(o => o.id == OPERARIO_ID);
-    estOperariosSeleccionados = yoEstoyEnLista ? [OPERARIO_ID] : [];
+    estOperariosSeleccionados = yoEstoyEnLista ? [Number(OPERARIO_ID)] : [];
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');
 
     estSucursalSeleccionada = (sucursales && sucursales.length === 1) ? sucursales[0].id : 0;
@@ -1329,6 +1494,7 @@ function inicializarBloqueFormulario() {
     if (modoMezcla) {
         renderMezcla();
     } else {
+        seleccionarPanelPacker('disponibles');
         if (bultosState.length === 0) agregarBulto(); else renderBultos();
     }
 }
@@ -1482,6 +1648,7 @@ function renderBultos() {
 function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
+    document.getElementById('bultosTabCount').textContent = bultosState.length > 0 ? `(${bultosState.length})` : '';
 
     const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
@@ -1510,6 +1677,11 @@ function obtenerBultosJsonEmp() {
 
 document.getElementById('formEstacionArmado').addEventListener('submit', async function (e) {
     e.preventDefault();
+
+    if (empWizardResponsive.matches && pasoWizardEmpaquetado !== 2) {
+        moverPasoEmpaquetado(1);
+        return;
+    }
 
     if (!estSucursalSeleccionada) {
         Swal.fire('Falta la sucursal', 'Selecciona la sucursal donde se armó este paquete.', 'warning');
