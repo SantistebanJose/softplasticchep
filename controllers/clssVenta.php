@@ -53,6 +53,7 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/clssVerificarSession.php';
+require_once __DIR__ . '/tipoCambio.php';
 
 if (isset($_POST['accion'])) {
     try {
@@ -77,6 +78,7 @@ function controladorVenta(string $accion): void
         'BUSCARPRODUCTOSREPORTEVENTAS',
         'LISTARVENDEDORESVENTA',
         'LISTARCUENTASRECEPTORAS',
+        'CONSULTARTIPOCAMBIOVENTA',
         'OBTENERVENTA',
         'BUSCARCLIENTES',
         'BUSCARDISPONIBLESVENTA',
@@ -129,6 +131,10 @@ function controladorVenta(string $accion): void
 
         case 'LISTARCUENTASRECEPTORAS':
             listarCuentasReceptorasVenta();
+            break;
+
+        case 'CONSULTARTIPOCAMBIOVENTA':
+            consultarTipoCambioVenta();
             break;
 
         case 'CREARCUENTARECEPTORA':
@@ -507,6 +513,8 @@ function listarVentas()
     $sql = "SELECT v.id, v.codigo, v.cliente_ruc,
                    COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
                    v.fecha_venta, v.monto_total, v.estado,
+                   COALESCE(v.js_session #>> '{venta_moneda,moneda}', 'PEN') AS moneda,
+                   COALESCE(NULLIF(v.js_session #>> '{venta_moneda,monto_total_moneda}', '')::numeric, v.monto_total) AS monto_total_moneda,
                    jsonb_array_length(v.js_items) AS items_count
             FROM venta v
             LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
@@ -766,6 +774,17 @@ function listarCuentasReceptorasVenta(): void
     responderVenta(true, 'OK', ['cuentas' => $cuentas]);
 }
 
+function consultarTipoCambioVenta(): void
+{
+    $fecha = trim($_POST['fecha'] ?? '');
+    $moneda = strtoupper(trim($_POST['moneda'] ?? 'USD'));
+    try {
+        responderVenta(true, 'OK', ['tipo_cambio' => consultarTipoCambio($fecha, $moneda)]);
+    } catch (Throwable $e) {
+        responderVenta(false, $e->getMessage());
+    }
+}
+
 function crearCuentaReceptoraVenta(): void
 {
     $nombre = trim($_POST['nombre'] ?? '');
@@ -900,6 +919,43 @@ function guardarVenta()
         responderVenta(false, 'Debes agregar al menos un producto a la venta.');
     }
 
+    $moneda = strtoupper(trim($_POST['moneda'] ?? 'PEN'));
+    if (!in_array($moneda, ['PEN', 'USD', 'EUR'], true)) responderVenta(false, 'Selecciona una moneda válida.');
+    $fuenteTipoCambio = strtolower(trim($_POST['fuente_tipo_cambio'] ?? 'oficial'));
+    $fechaTipoCambio = (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format('Y-m-d');
+    if ($moneda === 'PEN') {
+        $tipoCambioAplicado = 1.0;
+        $snapshotTipoCambio = ['fecha' => $fechaTipoCambio, 'compra' => 1, 'venta' => 1, 'fuente' => 'local', 'moneda' => 'PEN'];
+    } elseif ($fuenteTipoCambio === 'oficial') {
+        try {
+            $snapshotTipoCambio = consultarTipoCambio($fechaTipoCambio, $moneda);
+        } catch (Throwable $e) {
+            responderVenta(false, $e->getMessage());
+        }
+        $snapshotTipoCambio['moneda'] = $moneda;
+        $snapshotTipoCambio['fecha'] = $snapshotTipoCambio['fecha'] ?? $fechaTipoCambio;
+        $tipoCambioAplicado = (float)($snapshotTipoCambio['venta'] ?? 0);
+        $snapshotTipoCambio['fuente'] = 'oficial';
+    } elseif ($fuenteTipoCambio === 'calle') {
+        $tipoCambioAplicado = (float)($_POST['tipo_cambio'] ?? 0);
+        if (!is_finite($tipoCambioAplicado) || $tipoCambioAplicado <= 0 || $tipoCambioAplicado > 10000) {
+            responderVenta(false, 'Ingresa un tipo de cambio manual válido.');
+        }
+        $snapshotTipoCambio = [
+            'fecha' => $fechaTipoCambio,
+            'compra' => null,
+            'venta' => null,
+            'fuente' => 'calle',
+            'moneda' => $moneda,
+            'tasa_aplicada' => $tipoCambioAplicado,
+        ];
+    } else {
+        responderVenta(false, 'Selecciona un origen de tipo de cambio válido.');
+    }
+    if (!is_finite($tipoCambioAplicado) || $tipoCambioAplicado <= 0) {
+        responderVenta(false, 'No se pudo obtener un tipo de cambio válido.');
+    }
+
     $vendedorId = (int)($_POST['vendedor_usuario_id'] ?? 0);
     $pagosInput = json_decode(trim($_POST['pagos'] ?? '[]'), true);
     if ($vendedorId <= 0) responderVenta(false, 'Selecciona quién realizó la venta.');
@@ -970,11 +1026,12 @@ function guardarVenta()
 
         $itemsFinal = [];
         $montoTotal = 0.0;
+        $montoTotalMoneda = 0.0;
 
         foreach ($itemsInput as $item) {
             $productoId       = (int)($item['producto_id'] ?? 0);
             $cantidadPaquetes = (float)($item['cantidad'] ?? 0);
-            $precio           = (float)($item['precio_unitario'] ?? 0);
+            $precioMoneda     = (float)($item['precio_unitario'] ?? 0);
             // El color ya no divide el artículo de venta; se consumen paquetes
             // del producto consolidando todos sus colores.
             $colorIdEfectivo  = null;
@@ -1003,7 +1060,10 @@ function guardarVenta()
             $cantidadBaseNecesaria = round($cantidadPaquetes * $capacidadVenta['capacidad_base'], 4);
 
             $consumo  = consumirStockFIFOVenta($conectar, $productoId, $cantidadBaseNecesaria);
-            $subtotal = round($cantidadPaquetes * $precio, 2);
+            $subtotalMoneda = round($cantidadPaquetes * $precioMoneda, 2);
+            $precio = round($precioMoneda * $tipoCambioAplicado, 4);
+            $subtotal = round($subtotalMoneda * $tipoCambioAplicado, 2);
+            $montoTotalMoneda += $subtotalMoneda;
             $montoTotal += $subtotal;
 
             $itemsFinal[] = [
@@ -1017,14 +1077,29 @@ function guardarVenta()
                 'cantidad_base_consumida' => $cantidadBaseNecesaria,  // auditoría
                 'precio_unitario'     => $precio,
                 'subtotal'            => $subtotal,
+                'moneda_original'     => $moneda,
+                'tipo_cambio_aplicado' => $tipoCambioAplicado,
+                'precio_unitario_moneda' => $precioMoneda,
+                'subtotal_moneda'     => $subtotalMoneda,
                 'js_consumo'          => $consumo,
             ];
         }
 
-        $totalPagado = round(array_sum(array_column($pagos, 'monto')), 2);
-        if (abs($totalPagado - round($montoTotal, 2)) > 0.009) {
-            throw new RuntimeException('Los pagos deben sumar exactamente el total de la venta.');
+        $totalPagadoMoneda = round(array_sum(array_column($pagos, 'monto')), 2);
+        if (abs($totalPagadoMoneda - round($montoTotalMoneda, 2)) > 0.009) {
+            throw new RuntimeException('Los pagos deben sumar exactamente el total de la venta en ' . $moneda . '.');
         }
+        $totalPagosPen = 0.0;
+        foreach ($pagos as $indicePago => &$pago) {
+            $pago['monto_moneda'] = $pago['monto'];
+            $pagoPen = round($pago['monto_moneda'] * $tipoCambioAplicado, 2);
+            if ($indicePago === array_key_last($pagos)) {
+                $pagoPen = round($montoTotal - $totalPagosPen, 2);
+            }
+            $pago['monto'] = $pagoPen;
+            $totalPagosPen += $pagoPen;
+        }
+        unset($pago);
         foreach ($pagos as $pago) {
             if ($pago['cuenta_receptora_id'] === null) continue;
             $cuentaValida = executeQuery($conectar, "
@@ -1039,7 +1114,25 @@ function guardarVenta()
         $movimiento = obtenerMovimientoSesion('crear', [
             'vendedor_usuario_id' => $vendedorId,
             'pagos' => $pagos,
+            'moneda' => $moneda,
+            'tipo_cambio' => $snapshotTipoCambio,
+            'monto_total_moneda' => round($montoTotalMoneda, 2),
         ]);
+        $movimiento['venta_moneda'] = [
+            'moneda' => $moneda,
+            'monto_total_moneda' => round($montoTotalMoneda, 2),
+            'monto_total_pen' => round($montoTotal, 2),
+            'tipo_cambio' => $snapshotTipoCambio,
+            'pagos' => array_map(static function (array $pago) use ($moneda): array {
+                return [
+                    'medio_pago' => $pago['medio_pago'],
+                    'cuenta_receptora_id' => $pago['cuenta_receptora_id'],
+                    'monto' => $pago['monto_moneda'],
+                    'moneda' => $moneda,
+                    'referencia' => $pago['referencia'],
+                ];
+            }, $pagos),
+        ];
 
         $stmtInsert = $conectar->prepare("
             INSERT INTO venta (codigo, cliente_ruc, vendedor_usuario_id, fecha_venta, js_items, monto_total, estado, created_at, js_session, js_historial)
@@ -1137,6 +1230,10 @@ function anularVenta(int $id)
         $movimiento = obtenerMovimientoSesion('anular', [[
             'campo' => 'Estado', 'valor_antes' => 'completada', 'valor_despues' => 'anulada',
         ]]);
+        $sesionVentaAnterior = json_decode((string)($venta['js_session'] ?? '{}'), true) ?: [];
+        if (isset($sesionVentaAnterior['venta_moneda'])) {
+            $movimiento['venta_moneda'] = $sesionVentaAnterior['venta_moneda'];
+        }
 
         $upd = $conectar->prepare("
             UPDATE venta SET

@@ -33,6 +33,8 @@ $esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADM
 #pv_total{ font-weight:700; font-size:1.2em; color:#2F6FED; }
 .pc-venta-carrito-fila-color{ font-size:.75em; color:#8a8578; }
 .pv-pagos{border:1px solid #e5eaf2;border-radius:12px;padding:12px;background:#fbfcff;margin-top:16px}
+.pv-moneda-venta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pv-moneda-venta small{grid-column:1/-1}
 .pv-pagos{container-type:inline-size}
 .pv-pago-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,.8fr) 40px;grid-template-areas:"medio cuenta monto eliminar" "referencia referencia referencia referencia";gap:8px;align-items:center;margin-top:8px}
 .pv-pago-row.sin-cuenta{grid-template-columns:minmax(0,1fr) minmax(0,.8fr) 40px;grid-template-areas:"medio monto eliminar"}
@@ -43,6 +45,7 @@ $esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADM
 .pv-pagos-total .saldo{font-weight:800;color:#178448}.pv-pagos-total .saldo.invalido{color:#c0392b}
 @container (max-width:520px){
     .pv-pagos{padding:10px}
+    .pv-moneda-venta{grid-template-columns:1fr}
     .pv-pago-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px;grid-template-areas:"medio monto eliminar" "cuenta cuenta cuenta" "referencia referencia referencia"}
     .pv-pago-row.sin-cuenta{grid-template-areas:"medio monto eliminar"}
     .pc-venta-carrito-sticky .pc-table-wrap{overflow:visible}
@@ -174,8 +177,31 @@ $esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADM
                 </div>
                 <div class="text-end mt-3">
                     Total: <span id="pv_total">S/ 0.00</span>
+                    <div id="pv_total_pen_info" class="small text-muted"></div>
                 </div>
                 <div class="pv-pagos">
+                    <div class="pv-moneda-venta mb-3">
+                        <div>
+                            <label class="form-label fw-semibold" for="pv_moneda">Moneda de la venta</label>
+                            <select id="pv_moneda" class="form-select">
+                                <option value="PEN">Soles (PEN)</option>
+                                <option value="USD">Dólares (USD)</option>
+                                <option value="EUR">Euros (EUR)</option>
+                            </select>
+                        </div>
+                        <div id="pv_tc_fuente_wrap" hidden>
+                            <label class="form-label fw-semibold" for="pv_tc_fuente">Tipo de cambio</label>
+                            <select id="pv_tc_fuente" class="form-select">
+                                <option value="oficial">Tipo de cambio oficial</option>
+                                <option value="calle">Cambio de calle</option>
+                            </select>
+                        </div>
+                        <div id="pv_tc_manual_wrap" hidden>
+                            <label class="form-label fw-semibold" for="pv_tc_manual">Cambio aplicado (S/ por unidad)</label>
+                            <input id="pv_tc_manual" type="number" class="form-control" min="0.0001" step="0.0001" placeholder="Ej. 3.7500">
+                        </div>
+                        <small id="pv_tc_info" class="text-muted" hidden></small>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold" for="pv_vendedor">Vendedor *</label>
                         <select id="pv_vendedor" class="form-select"><option value="">Cargando vendedores...</option></select>
@@ -210,6 +236,9 @@ const CONTROLADOR_PROVEEDORES = 'controllers/clssProveedor.php';
 const TICKET_PDF_URL = 'controllers/ticketPdf.php';
 const CLIENTE_VARIOS_RUC = '99999999';
 const USUARIO_ID_ACTUAL_PV = <?= json_encode((int)($_SESSION['usuario_id'] ?? 0)) ?>;
+let monedaVentaPV = 'PEN';
+let tasaCambioVentaPV = 1;
+let tipoCambioOficialVentaPV = null;
 const modalClientePV = new bootstrap.Modal(document.getElementById('modalClientePV'));
 const elementoModalCuentasPV = document.getElementById('modalCuentasReceptorasPV');
 const modalCuentasPV = elementoModalCuentasPV ? new bootstrap.Modal(elementoModalCuentasPV) : null;
@@ -240,8 +269,8 @@ async function llamarProveedoresPV(accion, params = {}) {
     catch (e) { console.error(`Respuesta no válida para accion=${accion}:`, texto); throw new Error('El servidor no devolvió JSON válido.'); }
 }
 
-function formatearMoneda(n) {
-    return 'S/ ' + Number(n || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatearMoneda(n, moneda = monedaVentaPV) {
+    return new Intl.NumberFormat('es-PE', { style: 'currency', currency: moneda, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n || 0));
 }
 function formatearCantidadVenta(n) {
     return Number(n || 0).toLocaleString('es-PE', { maximumFractionDigits: 0 });
@@ -271,6 +300,7 @@ function resolverImagenVenta(ruta) {
 document.addEventListener('DOMContentLoaded', () => {
     cargarGridProductos('');
     cargarCatalogosPagoPV();
+    actualizarTipoCambioVentaPV();
     seleccionarClienteVariosPV();
 
     let debounceProducto = null;
@@ -279,6 +309,90 @@ document.addEventListener('DOMContentLoaded', () => {
         const valor = this.value.trim();
         debounceProducto = setTimeout(() => cargarGridProductos(valor), 300);
     });
+});
+
+function fechaActualVentaPV() {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+}
+
+async function actualizarTipoCambioVentaPV() {
+    const moneda = document.getElementById('pv_moneda').value;
+    const fuente = document.getElementById('pv_tc_fuente').value;
+    const fuenteWrap = document.getElementById('pv_tc_fuente_wrap');
+    const manualWrap = document.getElementById('pv_tc_manual_wrap');
+    const info = document.getElementById('pv_tc_info');
+    monedaVentaPV = moneda;
+    if (moneda === 'PEN') {
+        tasaCambioVentaPV = 1;
+        fuenteWrap.hidden = true;
+        manualWrap.hidden = true;
+        info.hidden = true;
+        actualizarResumenEquivalenciaVentaPV();
+        renderPagosPV();
+        return;
+    }
+
+    fuenteWrap.hidden = false;
+    info.hidden = false;
+    if (fuente === 'calle') {
+        manualWrap.hidden = false;
+        const campo = document.getElementById('pv_tc_manual');
+        if (!campo.value && tipoCambioOficialVentaPV && tipoCambioOficialVentaPV.moneda === moneda) campo.value = Number(tipoCambioOficialVentaPV.venta).toFixed(4);
+        tasaCambioVentaPV = Number(campo.value) || 0;
+        info.textContent = tasaCambioVentaPV > 0
+            ? `Cambio manual aplicado: ${tasaCambioVentaPV.toFixed(4)} S/ por ${moneda}.`
+            : 'Ingresa el tipo de cambio de calle que acordaron.';
+        actualizarResumenEquivalenciaVentaPV();
+        renderPagosPV();
+        return;
+    }
+
+    manualWrap.hidden = true;
+    info.textContent = 'Consultando tipo de cambio oficial…';
+    tasaCambioVentaPV = 0;
+    actualizarResumenEquivalenciaVentaPV();
+    try {
+        const respuesta = await llamarVenta('CONSULTARTIPOCAMBIOVENTA', { fecha: fechaActualVentaPV(), moneda });
+        if (!respuesta.success) throw new Error(respuesta.message || 'No se pudo consultar el tipo de cambio oficial.');
+        tipoCambioOficialVentaPV = { ...respuesta.tipo_cambio, moneda };
+        tasaCambioVentaPV = Number(tipoCambioOficialVentaPV.venta) || 0;
+        info.textContent = `${moneda} · compra ${Number(tipoCambioOficialVentaPV.compra).toFixed(4)} / venta ${tasaCambioVentaPV.toFixed(4)} (${tipoCambioOficialVentaPV.fecha})`;
+        actualizarResumenEquivalenciaVentaPV();
+        renderPagosPV();
+    } catch (error) {
+        info.textContent = `${error.message} Puedes elegir cambio de calle e ingresarlo manualmente.`;
+        actualizarResumenEquivalenciaVentaPV();
+    }
+}
+
+function actualizarResumenEquivalenciaVentaPV() {
+    const total = totalCarritoPV();
+    const nodo = document.getElementById('pv_total_pen_info');
+    if (!nodo) return;
+    nodo.textContent = monedaVentaPV === 'PEN' ? '' : (tasaCambioVentaPV > 0
+        ? `Equivalente referencial: ${formatearMoneda(total * tasaCambioVentaPV, 'PEN')} · cambio ${tasaCambioVentaPV.toFixed(4)}`
+        : 'Ingresa o consulta el tipo de cambio para ver el equivalente en soles.');
+}
+
+document.getElementById('pv_moneda').addEventListener('change', async event => {
+    if (carritoVenta.length > 0) {
+        event.target.value = monedaVentaPV;
+        await Swal.fire('No se puede cambiar la moneda', 'Termina o vacía el carrito para cambiar la moneda de la venta.', 'info');
+        return;
+    }
+    tipoCambioOficialVentaPV = null;
+    document.getElementById('pv_tc_manual').value = '';
+    await actualizarTipoCambioVentaPV();
+});
+document.getElementById('pv_tc_fuente').addEventListener('change', actualizarTipoCambioVentaPV);
+document.getElementById('pv_tc_manual').addEventListener('input', () => {
+    if (document.getElementById('pv_tc_fuente').value !== 'calle') return;
+    tasaCambioVentaPV = Number(document.getElementById('pv_tc_manual').value) || 0;
+    document.getElementById('pv_tc_info').textContent = tasaCambioVentaPV > 0
+        ? `Cambio manual aplicado: ${tasaCambioVentaPV.toFixed(4)} S/ por ${monedaVentaPV}.`
+        : 'Ingresa el tipo de cambio de calle que acordaron.';
+    actualizarResumenEquivalenciaVentaPV();
 });
 
 // ── Cliente: buscador ────────────────────────────────────────────────────────
@@ -474,7 +588,7 @@ function renderPagosPV() {
         return `<div class="pv-pago-row ${requiereCuenta ? '' : 'sin-cuenta'}" data-pago="${pago.uid}">
             <select class="form-select pv-medio" aria-label="Medio de pago">${opcionesMedios}</select>
             ${requiereCuenta ? `<select class="form-select pv-cuenta-select" aria-label="Cuenta receptora">${opcionesCuentas}</select>` : ''}
-            <input class="form-control pv-monto" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Monto S/" value="${pago.monto ? Number(pago.monto).toFixed(2) : ''}" aria-label="Monto">
+            <input class="form-control pv-monto" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Monto ${monedaVentaPV}" value="${pago.monto ? Number(pago.monto).toFixed(2) : ''}" aria-label="Monto en ${monedaVentaPV}">
             <button type="button" class="btn btn-outline-danger" onclick="quitarPagoPV(${pago.uid})" title="Quitar pago" ${pagosPV.length === 1 ? 'disabled' : ''}><i class="fa-solid fa-trash"></i></button>
             ${requiereCuenta ? `<input class="form-control pv-referencia" maxlength="100" placeholder="Referencia (opcional)" value="${escaparHtmlPV(pago.referencia)}" aria-label="Referencia">` : ''}
             ${esDigital ? `<small class="pv-receptor-note text-muted">Se abonará al vendedor: ${escaparHtmlPV(vendedorSeleccionado?.nombre_completo || 'selecciona un vendedor')}</small>` : ''}
@@ -609,6 +723,7 @@ document.getElementById('formCuentaReceptoraPV')?.addEventListener('submit', asy
 
 function validarDatosVentaPV() {
     if (!document.getElementById('pv_vendedor').value) throw new Error('Selecciona al vendedor de esta venta.');
+    if (monedaVentaPV !== 'PEN' && (!Number.isFinite(tasaCambioVentaPV) || tasaCambioVentaPV <= 0)) throw new Error('Consulta o ingresa un tipo de cambio válido antes de registrar la venta.');
     if (!pagosPV.length) throw new Error('Agrega al menos una forma de pago.');
     const pagos = pagosPV.map(pago => ({
         medio_pago: pago.medio_pago,
@@ -619,7 +734,13 @@ function validarDatosVentaPV() {
     if (pagos.some(p => p.monto <= 0)) throw new Error('Cada forma de pago debe tener un monto mayor que cero.');
     if (pagos.some(p => ['deposito', 'transferencia'].includes(p.medio_pago) && !p.cuenta_receptora_id)) throw new Error('Selecciona la cuenta receptora de cada depósito o transferencia.');
     if (Math.abs(pagos.reduce((s, p) => s + p.monto, 0) - totalCarritoPV()) > 0.009) throw new Error('Los montos de pago deben sumar exactamente el total de la venta.');
-    return { vendedor_usuario_id: document.getElementById('pv_vendedor').value, pagos };
+    return {
+        vendedor_usuario_id: document.getElementById('pv_vendedor').value,
+        pagos,
+        moneda: monedaVentaPV,
+        fuente_tipo_cambio: monedaVentaPV === 'PEN' ? 'local' : document.getElementById('pv_tc_fuente').value,
+        tipo_cambio: monedaVentaPV === 'PEN' ? 1 : tasaCambioVentaPV
+    };
 }
 
 function abrirAgregarCarrito(datos, filaExistente = null) {
@@ -634,7 +755,7 @@ function abrirAgregarCarrito(datos, filaExistente = null) {
             <p class="mb-2">Stock agrupado de todos los colores &middot; Disponible: <b>${formatearCantidadVenta(disp)} ${datos.unidad_venta_corto ?? 'paq.'}</b></p>
             <label class="form-label mb-1">Cantidad (paquetes)</label>
             <input type="number" id="swal_pv_cantidad" class="swal2-input" min="1" max="${disp}" step="1" value="${cantidadInicial}">
-            <label class="form-label mb-1">Precio unitario (S/)</label>
+            <label class="form-label mb-1">Precio unitario (${monedaVentaPV})</label>
             <input type="number" id="swal_pv_precio" class="swal2-input" min="0" step="0.01" value="${precioInicial}">
           </div>
         `,
@@ -700,8 +821,10 @@ function renderCarrito() {
         vacio.style.display = '';
         wrap.style.display = 'none';
         document.getElementById('pv_total').textContent = formatearMoneda(0);
+        document.getElementById('pv_moneda').disabled = false;
         pagosPV.forEach(pago => { if (pago.automatico) pago.monto = 0; });
         renderPagosPV();
+        actualizarResumenEquivalenciaVentaPV();
         return;
     }
 
@@ -733,9 +856,11 @@ function renderCarrito() {
     }).join('');
 
     document.getElementById('pv_total').textContent = formatearMoneda(total);
+    document.getElementById('pv_moneda').disabled = true;
     const pagoAutomatico = pagosPV.find(pago => pago.automatico);
     if (pagoAutomatico) pagoAutomatico.monto = Math.max(0, Math.round((total - pagosPV.filter(p => p !== pagoAutomatico).reduce((s, p) => s + (Number(p.monto) || 0), 0)) * 100) / 100);
     renderPagosPV();
+    actualizarResumenEquivalenciaVentaPV();
 }
 
 // ── Registrar venta ──────────────────────────────────────────────────────────
@@ -786,6 +911,7 @@ async function confirmarVentaRapida(clienteRuc) {
             </div>
             <div class="text-start"><b>Pagos:</b><ul class="mb-2">${resumenPagos}</ul></div>
             <div class="text-end fs-5"><b>Total: ${formatearMoneda(total)}</b></div>
+            ${monedaVentaPV !== 'PEN' ? `<div class="text-end text-muted small">Cambio ${datosPago.tipo_cambio.toFixed(4)} (${datosPago.fuente_tipo_cambio === 'oficial' ? 'oficial' : 'calle'}) · Equivalente ${formatearMoneda(total * datosPago.tipo_cambio, 'PEN')}</div>` : ''}
         `,
         showCancelButton: true,
         confirmButtonText: '<i class="fa-solid fa-check"></i> Sí, registrar venta',
@@ -828,6 +954,9 @@ async function registrarVentaRapida() {
             items: JSON.stringify(items),
             vendedor_usuario_id: datosVenta.vendedor_usuario_id,
             pagos: JSON.stringify(datosVenta.pagos),
+            moneda: datosVenta.moneda,
+            fuente_tipo_cambio: datosVenta.fuente_tipo_cambio,
+            tipo_cambio: datosVenta.tipo_cambio,
         });
     } catch (error) {
         btn.disabled = false;
@@ -839,6 +968,12 @@ async function registrarVentaRapida() {
     if (json.success) {
         Swal.fire('Listo', `Venta ${json.codigo} registrada correctamente.`, 'success');
         carritoVenta = [];
+        monedaVentaPV = 'PEN';
+        tasaCambioVentaPV = 1;
+        document.getElementById('pv_moneda').value = 'PEN';
+        document.getElementById('pv_tc_fuente').value = 'oficial';
+        document.getElementById('pv_tc_manual').value = '';
+        actualizarTipoCambioVentaPV();
         pagosPV = [{ uid: ++contadorPagoPV, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: 0, referencia: '', automatico: true }];
         renderCarrito();
         seleccionarClienteVariosPV();

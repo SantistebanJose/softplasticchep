@@ -15,6 +15,7 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Mi perfil · Plásticos Chepito</title>
+    <link rel="icon" type="image/png" href="../assets/img/logo.png?v=20261028">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">

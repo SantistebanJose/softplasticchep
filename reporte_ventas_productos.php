@@ -47,6 +47,7 @@ include 'header.php';
 </style>
 
 <section class="rvp-wrap">
+    <div class="text-muted small mb-3">Los reportes consolidados muestran equivalentes en soles. Las ventas en USD o EUR usan el tipo de cambio guardado al registrarlas.</div>
     <div class="rvp-periodos" role="group" aria-label="Periodo de ventas">
         <button type="button" data-rvp-periodo="dia">Día</button>
         <button type="button" data-rvp-periodo="semana">Semana</button>
@@ -122,13 +123,13 @@ include 'header.php';
         </div>
         <div class="rvp-table-wrap">
             <table class="rvp-table">
-                <thead><tr><th>Vendedor</th><th class="text-end">Ventas</th><th class="text-end">Clientes</th><th class="text-end">Promedio</th><th class="text-end">Importe total</th></tr></thead>
+                <thead><tr><th>Vendedor</th><th class="text-end">Ventas</th><th class="text-end">Clientes</th><th class="text-end">Promedio (S/)</th><th class="text-end">Importe total (S/)</th></tr></thead>
                 <tbody id="rvpVendedoresFilas"><tr><td colspan="5" class="rvp-empty">Cargando...</td></tr></tbody>
             </table>
         </div>
     </section>
     <section class="rvp-wrap">
-        <h2 class="h5 mb-3">Pagos registrados</h2>
+        <h2 class="h5 mb-3">Pagos registrados (equivalente en soles)</h2>
         <div class="rvp-table-wrap">
             <table class="rvp-table">
                 <thead><tr><th>Vendedor</th><th>Medio</th><th>Destino</th><th class="text-end">Pagos</th><th class="text-end">Importe</th></tr></thead>
@@ -145,7 +146,7 @@ include 'header.php';
         </div>
         <div class="rvp-table-wrap">
             <table class="rvp-table">
-                <thead><tr><th>Cliente</th><th>RUC / DNI</th><th class="text-end">Ventas</th><th class="text-end">Promedio</th><th>Última venta</th><th class="text-end">Importe total</th></tr></thead>
+                <thead><tr><th>Cliente</th><th>RUC / DNI</th><th class="text-end">Ventas</th><th class="text-end">Promedio (S/)</th><th>Última venta</th><th class="text-end">Importe total (S/)</th></tr></thead>
                 <tbody id="rvpClientesFilas"><tr><td colspan="6" class="rvp-empty">Cargando...</td></tr></tbody>
             </table>
         </div>

@@ -52,7 +52,7 @@ include("header.php");
 <div class="row g-3 mb-3">
     <div class="col-md-4">
         <div class="lv-resumen-card d-flex flex-column justify-content-center">
-            <div class="lv-resumen-label">Total del período (completadas)</div>
+            <div class="lv-resumen-label">Total equivalente en soles (completadas)</div>
             <div class="lv-resumen-total" id="lv_total_periodo">S/ 0.00</div>
         </div>
     </div>
@@ -80,7 +80,7 @@ include("header.php");
                     <th>Fecha</th>
                     <th>Hora</th>
                     <th>Ítems</th>
-                    <th>Monto</th>
+                    <th>Monto de venta</th>
                     <th>Estado</th>
                     <th>Acciones</th>
                 </tr>
@@ -115,8 +115,8 @@ async function llamarVenta(accion, params = {}) {
     }
 }
 
-function formatearMoneda(n) {
-    return 'S/ ' + Number(n || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatearMoneda(n, moneda = 'PEN') {
+    return new Intl.NumberFormat('es-PE', { style:'currency', currency:moneda, minimumFractionDigits:2, maximumFractionDigits:2 }).format(Number(n || 0));
 }
 
 let rangoActual = 'hoy';
@@ -192,7 +192,7 @@ function renderTablaVentas(ventas) {
             <td data-label="Fecha">${fecha}</td>
             <td data-label="Hora">${hora}</td>
             <td data-label="Ítems">${v.items_count}</td>
-            <td data-label="Monto">${formatearMoneda(v.monto_total)}</td>
+            <td data-label="Monto de venta"><strong>${formatearMoneda(v.monto_total_moneda ?? v.monto_total, v.moneda || 'PEN')}</strong>${(v.moneda || 'PEN') !== 'PEN' ? `<div class="small text-muted">Equiv. ${formatearMoneda(v.monto_total, 'PEN')}</div>` : ''}</td>
             <td data-label="Estado">${badgeEstado}</td>
             <td data-label="Acciones" class="pc-td-acciones">
                 <button class="pc-icon-btn" onclick="imprimirTicketVenta(${v.id})" title="Ver ticket (PDF)">

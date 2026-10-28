@@ -51,7 +51,7 @@ if ($id <= 0) {
 $conectar = conectar_oll_BD();
 
 $result = executeQuery($conectar, "
-    SELECT v.codigo, v.fecha_venta, v.monto_total, v.estado, v.js_items,
+    SELECT v.codigo, v.fecha_venta, v.monto_total, v.estado, v.js_items, v.js_session,
            v.cliente_ruc, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
            COALESCE(u.nombre_completo, 'No registrado') AS vendedor_nombre
     FROM venta v
@@ -67,6 +67,11 @@ if (empty($result)) {
 
 $venta = $result[0];
 $items = json_decode($venta['js_items'], true) ?: [];
+$datosMonedaVenta = (json_decode($venta['js_session'] ?? '{}', true)['venta_moneda'] ?? []);
+$monedaVenta = strtoupper((string)($datosMonedaVenta['moneda'] ?? 'PEN'));
+$simboloMonedaVenta = ticketPrefijoMoneda($monedaVenta);
+$tipoCambioVenta = $datosMonedaVenta['tipo_cambio'] ?? [];
+$pagosMonedaVenta = $datosMonedaVenta['pagos'] ?? [];
 $pagos = executeQuery($conectar, "
     SELECT pago.medio_pago, pago.monto, pago.referencia, cuenta.nombre AS cuenta_nombre
     FROM venta_pago pago
@@ -467,11 +472,20 @@ function ticketFilaDato(TicketPdf $t, string $etiqueta, string $valor, float $xV
 }
 
 /** Fila "Concepto ........ S/ 0.00" (etiqueta a la izquierda, monto a la derecha). */
-function ticketFilaMonto(TicketPdf $t, string $etiqueta, float $monto): void
+function ticketFilaMonto(TicketPdf $t, string $etiqueta, float $monto, string $moneda = 'PEN'): void
 {
     $t->texto($etiqueta, 8, false, 'left');
-    $t->texto('S/ ' . number_format($monto, 2), 8, true, 'right');
+    $t->texto(ticketPrefijoMoneda($moneda) . ' ' . number_format($monto, 2), 8, true, 'right');
     $t->y += 11.5;
+}
+
+function ticketPrefijoMoneda(string $moneda): string
+{
+    return match (strtoupper($moneda)) {
+        'USD' => 'US$',
+        'EUR' => 'EUR',
+        default => 'S/',
+    };
 }
 
 /** 5 -> "5", 2.5 -> "2.5" (sin ceros de sobra). */
@@ -592,7 +606,8 @@ $lenDoc     = strlen($docCliente);
 $etiquetaDoc   = $lenDoc === 11 ? 'RUC:' : ($lenDoc === 8 ? 'DNI:' : 'Documento:');
 $tipoDocCli    = $lenDoc === 11 ? '6' : ($lenDoc === 8 ? '1' : '0');
 
-$montoTotal = (float)$venta['monto_total'];
+$montoTotalPen = (float)$venta['monto_total'];
+$montoTotal = (float)($datosMonedaVenta['monto_total_moneda'] ?? $montoTotalPen);
 if (PRECIOS_INCLUYEN_IGV) {
     $opGravada = round($montoTotal / (1 + IGV_TASA), 2);
     $igv       = round($montoTotal - $opGravada, 2);
@@ -654,7 +669,7 @@ if ($venta['estado'] === 'anulada') {
 }
 
 // ── Datos de la operación y del adquirente ───────────────────────────────────
-$etiquetas = ['Fecha emisión:', 'Cliente:', $etiquetaDoc, 'Moneda:', 'Vendedor:', 'Pago:'];
+$etiquetas = ['Fecha emisión:', 'Cliente:', $etiquetaDoc, 'Moneda:', 'Vendedor:', 'Pago:', 'Tipo cambio:'];
 $xValor = $xL;
 foreach ($etiquetas as $e) {
     $xValor = max($xValor, $xL + $t->medir($e, 8, true));
@@ -666,7 +681,7 @@ ticketFilaDato($t, 'Cliente:', (string)$venta['cliente_nombre'], $xValor);
 if ($docCliente !== '') {
     ticketFilaDato($t, $etiquetaDoc, $docCliente, $xValor);
 }
-ticketFilaDato($t, 'Moneda:', 'SOLES', $xValor);
+ticketFilaDato($t, 'Moneda:', $monedaVenta, $xValor);
 ticketFilaDato($t, 'Vendedor:', (string)$venta['vendedor_nombre'], $xValor);
 $nombresMedioPago = [
     'efectivo' => 'Efectivo',
@@ -675,17 +690,24 @@ $nombresMedioPago = [
     'yape' => 'Yape',
     'plin' => 'Plin',
 ];
-foreach ($pagos as $pago) {
+foreach ($pagos as $indicePago => $pago) {
     $medio = $nombresMedioPago[$pago['medio_pago']] ?? ucfirst((string)$pago['medio_pago']);
     $destino = trim((string)($pago['cuenta_nombre'] ?? ''));
     if (in_array($pago['medio_pago'], ['yape', 'plin'], true)) {
         $destino = 'del vendedor';
     }
-    $textoPago = $medio . ($destino !== '' ? ' · ' . $destino : '') . ': S/ ' . number_format((float)$pago['monto'], 2);
+    $montoPagoImpreso = (float)($pagosMonedaVenta[$indicePago]['monto'] ?? $pago['monto']);
+    $textoPago = $medio . ($destino !== '' ? ' · ' . $destino : '') . ': ' . $simboloMonedaVenta . ' ' . number_format($montoPagoImpreso, 2);
     ticketFilaDato($t, 'Pago:', $textoPago, $xValor);
 }
 if (!$pagos) {
     ticketFilaDato($t, 'Pago:', 'No registrado', $xValor);
+}
+if ($monedaVenta !== 'PEN') {
+    $tasaDatoTicket = (float)($tipoCambioVenta['tasa_aplicada'] ?? $tipoCambioVenta['venta'] ?? 0);
+    if ($tasaDatoTicket > 0) {
+        ticketFilaDato($t, 'Tipo cambio:', number_format($tasaDatoTicket, 4) . ' (' . strtoupper((string)($tipoCambioVenta['fuente'] ?? 'oficial')) . ')', $xValor);
+    }
 }
 
 $t->y += 5;
@@ -715,8 +737,10 @@ foreach ($items as $it) {
     if ($unidad !== '') {
         $cantidadTxt .= ' ' . $unidad;
     }
-    $precioTxt   = 'S/ ' . number_format((float)($it['precio_unitario'] ?? 0), 2);
-    $subtotalTxt = 'S/ ' . number_format((float)($it['subtotal'] ?? 0), 2);
+    $precioItem = (float)($it['precio_unitario_moneda'] ?? $it['precio_unitario'] ?? 0);
+    $subtotalItem = (float)($it['subtotal_moneda'] ?? $it['subtotal'] ?? 0);
+    $precioTxt   = $simboloMonedaVenta . ' ' . number_format($precioItem, 2);
+    $subtotalTxt = $simboloMonedaVenta . ' ' . number_format($subtotalItem, 2);
 
     $t->parrafo($nombre, 8.5, true, 'left', 11);
     if ($color !== '') {
@@ -741,11 +765,11 @@ $t->y += 3;
 $t->lineaH($t->y, false, 1.0);
 $t->y += 8;
 
-ticketFilaMonto($t, 'Op. gravada', $opGravada);
-ticketFilaMonto($t, 'IGV ' . rtrim(rtrim(number_format(IGV_TASA * 100, 2, '.', ''), '0'), '.') . '%', $igv);
+ticketFilaMonto($t, 'Op. gravada', $opGravada, $monedaVenta);
+ticketFilaMonto($t, 'IGV ' . rtrim(rtrim(number_format(IGV_TASA * 100, 2, '.', ''), '0'), '.') . '%', $igv, $monedaVenta);
 $t->y += 4;
 
-$totalTxt  = 'S/ ' . number_format($montoTotal, 2);
+$totalTxt  = $simboloMonedaVenta . ' ' . number_format($montoTotal, 2);
 $altoTotal = 28.0;
 $totalY    = $t->y;
 $etiquetaTotal = 'IMPORTE TOTAL';
@@ -759,6 +783,14 @@ $t->texto($totalTxt, $sizeTotal, true, 'right', null, $xR - 8, true);
 
 $t->y = $totalY + $altoTotal + 9;
 $t->parrafo(ticketMontoEnLetras($montoTotal), 7.5, true, 'left', 10);
+if ($monedaVenta !== 'PEN') {
+    $t->y += 3;
+    $tasaImpresion = (float)($tipoCambioVenta['tasa_aplicada'] ?? $tipoCambioVenta['venta'] ?? 0);
+    if ($tasaImpresion > 0) {
+        $origenImpresion = strtoupper((string)($tipoCambioVenta['fuente'] ?? 'oficial'));
+        $t->parrafo('Equivalente: S/ ' . number_format($montoTotalPen, 2) . ' · cambio ' . number_format($tasaImpresion, 4) . ' (' . $origenImpresion . ')', 7, false, 'left', 9);
+    }
+}
 
 // ── Mecanismo de seguridad SUNAT (solo si ya es comprobante electrónico) ─────
 if ($esElectronico) {

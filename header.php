@@ -24,6 +24,8 @@ if (empty($_SESSION['usuario_id'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= isset($pageTitle) ? htmlspecialchars($pageTitle) . ' — ' : '' ?>Plásticos Chepito</title>
+    <link rel="icon" type="image/png" href="assets/img/logo.png?v=20261028">
+    <link rel="apple-touch-icon" href="assets/img/logo.png?v=20261028">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
