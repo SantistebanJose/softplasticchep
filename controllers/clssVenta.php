@@ -513,8 +513,8 @@ function listarVentas()
     $sql = "SELECT v.id, v.codigo, v.cliente_ruc,
                    COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
                    v.fecha_venta, v.monto_total, v.estado,
-                   COALESCE(v.js_session #>> '{venta_moneda,moneda}', 'PEN') AS moneda,
-                   COALESCE(NULLIF(v.js_session #>> '{venta_moneda,monto_total_moneda}', '')::numeric, v.monto_total) AS monto_total_moneda,
+                   COALESCE(v.js_session #>> '{venta_moneda,moneda_cobro}', v.js_session #>> '{venta_moneda,moneda}', 'PEN') AS moneda_cobro,
+                   COALESCE(NULLIF(v.js_session #>> '{venta_moneda,monto_total_cobro}', '')::numeric, NULLIF(v.js_session #>> '{venta_moneda,monto_total_moneda}', '')::numeric, v.monto_total) AS monto_total_cobro,
                    jsonb_array_length(v.js_items) AS items_count
             FROM venta v
             LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
@@ -1031,7 +1031,7 @@ function guardarVenta()
         foreach ($itemsInput as $item) {
             $productoId       = (int)($item['producto_id'] ?? 0);
             $cantidadPaquetes = (float)($item['cantidad'] ?? 0);
-            $precioMoneda     = (float)($item['precio_unitario'] ?? 0);
+            $precioMoneda     = (float)($item['precio_unitario'] ?? 0); // Los precios de lista siempre están en soles.
             // El color ya no divide el artículo de venta; se consumen paquetes
             // del producto consolidando todos sus colores.
             $colorIdEfectivo  = null;
@@ -1061,8 +1061,8 @@ function guardarVenta()
 
             $consumo  = consumirStockFIFOVenta($conectar, $productoId, $cantidadBaseNecesaria);
             $subtotalMoneda = round($cantidadPaquetes * $precioMoneda, 2);
-            $precio = round($precioMoneda * $tipoCambioAplicado, 4);
-            $subtotal = round($subtotalMoneda * $tipoCambioAplicado, 2);
+            $precio = round($precioMoneda, 4);
+            $subtotal = $subtotalMoneda;
             $montoTotalMoneda += $subtotalMoneda;
             $montoTotal += $subtotal;
 
@@ -1077,17 +1077,18 @@ function guardarVenta()
                 'cantidad_base_consumida' => $cantidadBaseNecesaria,  // auditoría
                 'precio_unitario'     => $precio,
                 'subtotal'            => $subtotal,
-                'moneda_original'     => $moneda,
+                'moneda_original'     => 'PEN',
                 'tipo_cambio_aplicado' => $tipoCambioAplicado,
-                'precio_unitario_moneda' => $precioMoneda,
-                'subtotal_moneda'     => $subtotalMoneda,
+                'precio_unitario_moneda' => $precio,
+                'subtotal_moneda'     => $subtotal,
                 'js_consumo'          => $consumo,
             ];
         }
 
         $totalPagadoMoneda = round(array_sum(array_column($pagos, 'monto')), 2);
-        if (abs($totalPagadoMoneda - round($montoTotalMoneda, 2)) > 0.009) {
-            throw new RuntimeException('Los pagos deben sumar exactamente el total de la venta en ' . $moneda . '.');
+        $montoTotalCobro = $moneda === 'PEN' ? round($montoTotal, 2) : round($montoTotal / $tipoCambioAplicado, 2);
+        if (abs($totalPagadoMoneda - $montoTotalCobro) > 0.009) {
+            throw new RuntimeException('Los pagos deben sumar exactamente el total de cobro en ' . $moneda . '.');
         }
         $totalPagosPen = 0.0;
         foreach ($pagos as $indicePago => &$pago) {
@@ -1116,11 +1117,14 @@ function guardarVenta()
             'pagos' => $pagos,
             'moneda' => $moneda,
             'tipo_cambio' => $snapshotTipoCambio,
-            'monto_total_moneda' => round($montoTotalMoneda, 2),
+            'monto_total_moneda' => $montoTotalCobro,
         ]);
         $movimiento['venta_moneda'] = [
             'moneda' => $moneda,
-            'monto_total_moneda' => round($montoTotalMoneda, 2),
+            'moneda_precio' => 'PEN',
+            'moneda_cobro' => $moneda,
+            'monto_total_moneda' => $montoTotalCobro,
+            'monto_total_cobro' => $montoTotalCobro,
             'monto_total_pen' => round($montoTotal, 2),
             'tipo_cambio' => $snapshotTipoCambio,
             'pagos' => array_map(static function (array $pago) use ($moneda): array {

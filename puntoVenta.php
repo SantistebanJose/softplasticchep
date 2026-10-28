@@ -182,7 +182,7 @@ $esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADM
                 <div class="pv-pagos">
                     <div class="pv-moneda-venta mb-3">
                         <div>
-                            <label class="form-label fw-semibold" for="pv_moneda">Moneda de la venta</label>
+                            <label class="form-label fw-semibold" for="pv_moneda">Moneda de cobro</label>
                             <select id="pv_moneda" class="form-select">
                                 <option value="PEN">Soles (PEN)</option>
                                 <option value="USD">Dólares (USD)</option>
@@ -269,7 +269,7 @@ async function llamarProveedoresPV(accion, params = {}) {
     catch (e) { console.error(`Respuesta no válida para accion=${accion}:`, texto); throw new Error('El servidor no devolvió JSON válido.'); }
 }
 
-function formatearMoneda(n, moneda = monedaVentaPV) {
+function formatearMoneda(n, moneda = 'PEN') {
     return new Intl.NumberFormat('es-PE', { style: 'currency', currency: moneda, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n || 0));
 }
 function formatearCantidadVenta(n) {
@@ -329,6 +329,7 @@ async function actualizarTipoCambioVentaPV() {
         manualWrap.hidden = true;
         info.hidden = true;
         actualizarResumenEquivalenciaVentaPV();
+        ajustarPagoAutomaticoPV();
         renderPagosPV();
         return;
     }
@@ -344,6 +345,7 @@ async function actualizarTipoCambioVentaPV() {
             ? `Cambio manual aplicado: ${tasaCambioVentaPV.toFixed(4)} S/ por ${moneda}.`
             : 'Ingresa el tipo de cambio de calle que acordaron.';
         actualizarResumenEquivalenciaVentaPV();
+        ajustarPagoAutomaticoPV();
         renderPagosPV();
         return;
     }
@@ -352,6 +354,8 @@ async function actualizarTipoCambioVentaPV() {
     info.textContent = 'Consultando tipo de cambio oficial…';
     tasaCambioVentaPV = 0;
     actualizarResumenEquivalenciaVentaPV();
+    ajustarPagoAutomaticoPV();
+    renderPagosPV();
     try {
         const respuesta = await llamarVenta('CONSULTARTIPOCAMBIOVENTA', { fecha: fechaActualVentaPV(), moneda });
         if (!respuesta.success) throw new Error(respuesta.message || 'No se pudo consultar el tipo de cambio oficial.');
@@ -359,10 +363,13 @@ async function actualizarTipoCambioVentaPV() {
         tasaCambioVentaPV = Number(tipoCambioOficialVentaPV.venta) || 0;
         info.textContent = `${moneda} · compra ${Number(tipoCambioOficialVentaPV.compra).toFixed(4)} / venta ${tasaCambioVentaPV.toFixed(4)} (${tipoCambioOficialVentaPV.fecha})`;
         actualizarResumenEquivalenciaVentaPV();
+        ajustarPagoAutomaticoPV();
         renderPagosPV();
     } catch (error) {
         info.textContent = `${error.message} Puedes elegir cambio de calle e ingresarlo manualmente.`;
         actualizarResumenEquivalenciaVentaPV();
+        ajustarPagoAutomaticoPV();
+        renderPagosPV();
     }
 }
 
@@ -371,16 +378,11 @@ function actualizarResumenEquivalenciaVentaPV() {
     const nodo = document.getElementById('pv_total_pen_info');
     if (!nodo) return;
     nodo.textContent = monedaVentaPV === 'PEN' ? '' : (tasaCambioVentaPV > 0
-        ? `Equivalente referencial: ${formatearMoneda(total * tasaCambioVentaPV, 'PEN')} · cambio ${tasaCambioVentaPV.toFixed(4)}`
-        : 'Ingresa o consulta el tipo de cambio para ver el equivalente en soles.');
+        ? `Cobro equivalente: ${formatearMoneda(total / tasaCambioVentaPV, monedaVentaPV)} · cambio ${tasaCambioVentaPV.toFixed(4)} S/ por ${monedaVentaPV}`
+        : 'Ingresa o consulta el tipo de cambio para calcular el cobro.');
 }
 
 document.getElementById('pv_moneda').addEventListener('change', async event => {
-    if (carritoVenta.length > 0) {
-        event.target.value = monedaVentaPV;
-        await Swal.fire('No se puede cambiar la moneda', 'Termina o vacía el carrito para cambiar la moneda de la venta.', 'info');
-        return;
-    }
     tipoCambioOficialVentaPV = null;
     document.getElementById('pv_tc_manual').value = '';
     await actualizarTipoCambioVentaPV();
@@ -393,6 +395,8 @@ document.getElementById('pv_tc_manual').addEventListener('input', () => {
         ? `Cambio manual aplicado: ${tasaCambioVentaPV.toFixed(4)} S/ por ${monedaVentaPV}.`
         : 'Ingresa el tipo de cambio de calle que acordaron.';
     actualizarResumenEquivalenciaVentaPV();
+    ajustarPagoAutomaticoPV();
+    actualizarResumenPagosPV();
 });
 
 // ── Cliente: buscador ────────────────────────────────────────────────────────
@@ -572,6 +576,11 @@ function totalCarritoPV() {
     return carritoVenta.reduce((suma, item) => suma + Number(item.cantidad) * Number(item.precio), 0);
 }
 
+function totalCobroPV() {
+    const totalPen = totalCarritoPV();
+    return monedaVentaPV === 'PEN' ? totalPen : (tasaCambioVentaPV > 0 ? totalPen / tasaCambioVentaPV : 0);
+}
+
 function renderPagosPV() {
     const contenedor = document.getElementById('pv_pagos_lista');
     if (!contenedor) return;
@@ -603,23 +612,23 @@ function renderPagosPV() {
 }
 
 function actualizarResumenPagosPV() {
-    const total = totalCarritoPV();
+    const total = totalCobroPV();
     const pagado = pagosPV.reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
     const diferencia = Math.round((pagado - total) * 100) / 100;
     const pagoTotal = document.getElementById('pv_pago_total');
     const saldo = document.getElementById('pv_pago_saldo');
     if (!pagoTotal || !saldo) return;
-    pagoTotal.textContent = formatearMoneda(pagado);
+    pagoTotal.textContent = formatearMoneda(pagado, monedaVentaPV);
     saldo.classList.toggle('invalido', Math.abs(diferencia) > 0.009);
     saldo.textContent = Math.abs(diferencia) <= 0.009 ? 'Pago completo' : diferencia < 0
-        ? `Pendiente: ${formatearMoneda(-diferencia)}` : `Exceso: ${formatearMoneda(diferencia)}`;
+        ? `Pendiente: ${formatearMoneda(-diferencia, monedaVentaPV)}` : `Exceso: ${formatearMoneda(diferencia, monedaVentaPV)}`;
 }
 
 function ajustarPagoAutomaticoPV(excluirUid = null) {
     const automatico = pagosPV.find(pago => pago.automatico && pago.uid !== excluirUid);
     if (!automatico) return;
     const otros = pagosPV.filter(pago => pago !== automatico).reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
-    automatico.monto = Math.max(0, Math.round((totalCarritoPV() - otros) * 100) / 100);
+    automatico.monto = Math.max(0, Math.round((totalCobroPV() - otros) * 100) / 100);
     const fila = document.querySelector(`#pv_pagos_lista [data-pago="${automatico.uid}"]`);
     const input = fila?.querySelector('.pv-monto');
     if (input && document.activeElement !== input) input.value = automatico.monto ? automatico.monto.toFixed(2) : '';
@@ -627,7 +636,7 @@ function ajustarPagoAutomaticoPV(excluirUid = null) {
 
 function agregarPagoPV() {
     const pagado = pagosPV.reduce((suma, pago) => suma + (Number(pago.monto) || 0), 0);
-    pagosPV.push({ uid: ++contadorPagoPV, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: Math.max(0, Math.round((totalCarritoPV() - pagado) * 100) / 100), referencia: '', automatico: false });
+    pagosPV.push({ uid: ++contadorPagoPV, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: Math.max(0, Math.round((totalCobroPV() - pagado) * 100) / 100), referencia: '', automatico: false });
     renderPagosPV();
 }
 
@@ -733,7 +742,7 @@ function validarDatosVentaPV() {
     }));
     if (pagos.some(p => p.monto <= 0)) throw new Error('Cada forma de pago debe tener un monto mayor que cero.');
     if (pagos.some(p => ['deposito', 'transferencia'].includes(p.medio_pago) && !p.cuenta_receptora_id)) throw new Error('Selecciona la cuenta receptora de cada depósito o transferencia.');
-    if (Math.abs(pagos.reduce((s, p) => s + p.monto, 0) - totalCarritoPV()) > 0.009) throw new Error('Los montos de pago deben sumar exactamente el total de la venta.');
+    if (Math.abs(pagos.reduce((s, p) => s + p.monto, 0) - totalCobroPV()) > 0.009) throw new Error(`Los montos de pago deben sumar exactamente el total de cobro en ${monedaVentaPV}.`);
     return {
         vendedor_usuario_id: document.getElementById('pv_vendedor').value,
         pagos,
@@ -746,7 +755,7 @@ function validarDatosVentaPV() {
 function abrirAgregarCarrito(datos, filaExistente = null) {
     const disp = Number(datos.paquetes_disponibles) || 0;
     const cantidadInicial = filaExistente ? filaExistente.cantidad : 1;
-    const precioInicial   = filaExistente ? filaExistente.precio : 0;
+    const precioInicial   = filaExistente ? filaExistente.precio : '';
 
     Swal.fire({
         title: `${datos.producto_codigo} - ${datos.producto}`,
@@ -755,8 +764,8 @@ function abrirAgregarCarrito(datos, filaExistente = null) {
             <p class="mb-2">Stock agrupado de todos los colores &middot; Disponible: <b>${formatearCantidadVenta(disp)} ${datos.unidad_venta_corto ?? 'paq.'}</b></p>
             <label class="form-label mb-1">Cantidad (paquetes)</label>
             <input type="number" id="swal_pv_cantidad" class="swal2-input" min="1" max="${disp}" step="1" value="${cantidadInicial}">
-            <label class="form-label mb-1">Precio unitario (${monedaVentaPV})</label>
-            <input type="number" id="swal_pv_precio" class="swal2-input" min="0" step="0.01" value="${precioInicial}">
+            <label class="form-label mb-1">Precio unitario (S/)</label>
+            <input type="number" id="swal_pv_precio" class="swal2-input" min="0" step="0.01" value="${precioInicial}" placeholder="Ej. 155.00" inputmode="decimal">
           </div>
         `,
         showCancelButton: true,
@@ -821,7 +830,6 @@ function renderCarrito() {
         vacio.style.display = '';
         wrap.style.display = 'none';
         document.getElementById('pv_total').textContent = formatearMoneda(0);
-        document.getElementById('pv_moneda').disabled = false;
         pagosPV.forEach(pago => { if (pago.automatico) pago.monto = 0; });
         renderPagosPV();
         actualizarResumenEquivalenciaVentaPV();
@@ -856,9 +864,8 @@ function renderCarrito() {
     }).join('');
 
     document.getElementById('pv_total').textContent = formatearMoneda(total);
-    document.getElementById('pv_moneda').disabled = true;
     const pagoAutomatico = pagosPV.find(pago => pago.automatico);
-    if (pagoAutomatico) pagoAutomatico.monto = Math.max(0, Math.round((total - pagosPV.filter(p => p !== pagoAutomatico).reduce((s, p) => s + (Number(p.monto) || 0), 0)) * 100) / 100);
+    if (pagoAutomatico) pagoAutomatico.monto = Math.max(0, Math.round((totalCobroPV() - pagosPV.filter(p => p !== pagoAutomatico).reduce((s, p) => s + (Number(p.monto) || 0), 0)) * 100) / 100);
     renderPagosPV();
     actualizarResumenEquivalenciaVentaPV();
 }
@@ -884,7 +891,7 @@ async function confirmarVentaRapida(clienteRuc) {
     const resumenPagos = datosPago.pagos.map(p => {
         const cuenta = cuentasPV.find(c => Number(c.id) === Number(p.cuenta_receptora_id));
         const destino = cuenta ? ` · ${escaparHtmlPV(cuenta.nombre)}` : (['yape', 'plin'].includes(p.medio_pago) ? ` · vendedor ${escaparHtmlPV(vendedor?.nombre_completo || '')}` : '');
-        return `<li>${escaparHtmlPV(MEDIOS_PAGO_PV[p.medio_pago])}${destino}: <b>${formatearMoneda(p.monto)}</b>${p.referencia ? ` <small>(${escaparHtmlPV(p.referencia)})</small>` : ''}</li>`;
+        return `<li>${escaparHtmlPV(MEDIOS_PAGO_PV[p.medio_pago])}${destino}: <b>${formatearMoneda(p.monto, monedaVentaPV)}</b>${p.referencia ? ` <small>(${escaparHtmlPV(p.referencia)})</small>` : ''}</li>`;
     }).join('');
     const filas = carritoVenta.map(item => `
         <tr>
@@ -910,8 +917,8 @@ async function confirmarVentaRapida(clienteRuc) {
                 </table>
             </div>
             <div class="text-start"><b>Pagos:</b><ul class="mb-2">${resumenPagos}</ul></div>
-            <div class="text-end fs-5"><b>Total: ${formatearMoneda(total)}</b></div>
-            ${monedaVentaPV !== 'PEN' ? `<div class="text-end text-muted small">Cambio ${datosPago.tipo_cambio.toFixed(4)} (${datosPago.fuente_tipo_cambio === 'oficial' ? 'oficial' : 'calle'}) · Equivalente ${formatearMoneda(total * datosPago.tipo_cambio, 'PEN')}</div>` : ''}
+            <div class="text-end fs-5"><b>Total de productos: ${formatearMoneda(total, 'PEN')}</b></div>
+            ${monedaVentaPV !== 'PEN' ? `<div class="text-end text-muted small">Cobro: ${formatearMoneda(total / datosPago.tipo_cambio, monedaVentaPV)} · Cambio ${datosPago.tipo_cambio.toFixed(4)} S/ por ${monedaVentaPV} (${datosPago.fuente_tipo_cambio === 'oficial' ? 'oficial' : 'calle'})</div>` : ''}
         `,
         showCancelButton: true,
         confirmButtonText: '<i class="fa-solid fa-check"></i> Sí, registrar venta',

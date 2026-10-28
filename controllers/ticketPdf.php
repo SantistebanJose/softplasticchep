@@ -68,7 +68,8 @@ if (empty($result)) {
 $venta = $result[0];
 $items = json_decode($venta['js_items'], true) ?: [];
 $datosMonedaVenta = (json_decode($venta['js_session'] ?? '{}', true)['venta_moneda'] ?? []);
-$monedaVenta = strtoupper((string)($datosMonedaVenta['moneda'] ?? 'PEN'));
+$monedaCobro = strtoupper((string)($datosMonedaVenta['moneda_cobro'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
+$monedaVenta = strtoupper((string)($datosMonedaVenta['moneda_precio'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
 $simboloMonedaVenta = ticketPrefijoMoneda($monedaVenta);
 $tipoCambioVenta = $datosMonedaVenta['tipo_cambio'] ?? [];
 $pagosMonedaVenta = $datosMonedaVenta['pagos'] ?? [];
@@ -607,7 +608,9 @@ $etiquetaDoc   = $lenDoc === 11 ? 'RUC:' : ($lenDoc === 8 ? 'DNI:' : 'Documento:
 $tipoDocCli    = $lenDoc === 11 ? '6' : ($lenDoc === 8 ? '1' : '0');
 
 $montoTotalPen = (float)$venta['monto_total'];
-$montoTotal = (float)($datosMonedaVenta['monto_total_moneda'] ?? $montoTotalPen);
+$montoTotal = $monedaVenta === 'PEN'
+    ? $montoTotalPen
+    : (float)($datosMonedaVenta['monto_total_moneda'] ?? $montoTotalPen);
 if (PRECIOS_INCLUYEN_IGV) {
     $opGravada = round($montoTotal / (1 + IGV_TASA), 2);
     $igv       = round($montoTotal - $opGravada, 2);
@@ -696,14 +699,15 @@ foreach ($pagos as $indicePago => $pago) {
     if (in_array($pago['medio_pago'], ['yape', 'plin'], true)) {
         $destino = 'del vendedor';
     }
+    $pagoMoneda = strtoupper((string)($pagosMonedaVenta[$indicePago]['moneda'] ?? $monedaCobro));
     $montoPagoImpreso = (float)($pagosMonedaVenta[$indicePago]['monto'] ?? $pago['monto']);
-    $textoPago = $medio . ($destino !== '' ? ' · ' . $destino : '') . ': ' . $simboloMonedaVenta . ' ' . number_format($montoPagoImpreso, 2);
+    $textoPago = $medio . ($destino !== '' ? ' · ' . $destino : '') . ': ' . ticketPrefijoMoneda($pagoMoneda) . ' ' . number_format($montoPagoImpreso, 2);
     ticketFilaDato($t, 'Pago:', $textoPago, $xValor);
 }
 if (!$pagos) {
     ticketFilaDato($t, 'Pago:', 'No registrado', $xValor);
 }
-if ($monedaVenta !== 'PEN') {
+if ($monedaCobro !== 'PEN') {
     $tasaDatoTicket = (float)($tipoCambioVenta['tasa_aplicada'] ?? $tipoCambioVenta['venta'] ?? 0);
     if ($tasaDatoTicket > 0) {
         ticketFilaDato($t, 'Tipo cambio:', number_format($tasaDatoTicket, 4) . ' (' . strtoupper((string)($tipoCambioVenta['fuente'] ?? 'oficial')) . ')', $xValor);
@@ -737,8 +741,8 @@ foreach ($items as $it) {
     if ($unidad !== '') {
         $cantidadTxt .= ' ' . $unidad;
     }
-    $precioItem = (float)($it['precio_unitario_moneda'] ?? $it['precio_unitario'] ?? 0);
-    $subtotalItem = (float)($it['subtotal_moneda'] ?? $it['subtotal'] ?? 0);
+    $precioItem = (float)($monedaVenta === 'PEN' ? ($it['precio_unitario'] ?? 0) : ($it['precio_unitario_moneda'] ?? $it['precio_unitario'] ?? 0));
+    $subtotalItem = (float)($monedaVenta === 'PEN' ? ($it['subtotal'] ?? 0) : ($it['subtotal_moneda'] ?? $it['subtotal'] ?? 0));
     $precioTxt   = $simboloMonedaVenta . ' ' . number_format($precioItem, 2);
     $subtotalTxt = $simboloMonedaVenta . ' ' . number_format($subtotalItem, 2);
 
@@ -783,12 +787,13 @@ $t->texto($totalTxt, $sizeTotal, true, 'right', null, $xR - 8, true);
 
 $t->y = $totalY + $altoTotal + 9;
 $t->parrafo(ticketMontoEnLetras($montoTotal), 7.5, true, 'left', 10);
-if ($monedaVenta !== 'PEN') {
+if ($monedaCobro !== 'PEN') {
     $t->y += 3;
     $tasaImpresion = (float)($tipoCambioVenta['tasa_aplicada'] ?? $tipoCambioVenta['venta'] ?? 0);
     if ($tasaImpresion > 0) {
         $origenImpresion = strtoupper((string)($tipoCambioVenta['fuente'] ?? 'oficial'));
-        $t->parrafo('Equivalente: S/ ' . number_format($montoTotalPen, 2) . ' · cambio ' . number_format($tasaImpresion, 4) . ' (' . $origenImpresion . ')', 7, false, 'left', 9);
+        $montoCobroImpresion = (float)($datosMonedaVenta['monto_total_cobro'] ?? $datosMonedaVenta['monto_total_moneda'] ?? ($montoTotalPen / $tasaImpresion));
+        $t->parrafo('Cobro: ' . ticketPrefijoMoneda($monedaCobro) . ' ' . number_format($montoCobroImpresion, 2) . ' · cambio ' . number_format($tasaImpresion, 4) . ' S/ por ' . $monedaCobro . ' (' . $origenImpresion . ')', 7, false, 'left', 9);
     }
 }
 

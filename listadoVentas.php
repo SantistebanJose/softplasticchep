@@ -192,7 +192,7 @@ function renderTablaVentas(ventas) {
             <td data-label="Fecha">${fecha}</td>
             <td data-label="Hora">${hora}</td>
             <td data-label="Ítems">${v.items_count}</td>
-            <td data-label="Monto de venta"><strong>${formatearMoneda(v.monto_total_moneda ?? v.monto_total, v.moneda || 'PEN')}</strong>${(v.moneda || 'PEN') !== 'PEN' ? `<div class="small text-muted">Equiv. ${formatearMoneda(v.monto_total, 'PEN')}</div>` : ''}</td>
+            <td data-label="Monto de venta"><strong>${formatearMoneda(v.monto_total, 'PEN')}</strong>${(v.moneda_cobro || 'PEN') !== 'PEN' ? `<div class="small text-muted">Cobro ${formatearMoneda(v.monto_total_cobro ?? v.monto_total, v.moneda_cobro)}</div>` : ''}</td>
             <td data-label="Estado">${badgeEstado}</td>
             <td data-label="Acciones" class="pc-td-acciones">
                 <button class="pc-icon-btn" onclick="imprimirTicketVenta(${v.id})" title="Ver ticket (PDF)">
