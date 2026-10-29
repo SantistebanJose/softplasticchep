@@ -662,7 +662,7 @@ function reporteVentasPorVendedorCliente(): void
         $params['fecha_fin'] = $fechaFin;
     }
     $ventasPeriodo = "WITH ventas_periodo AS (
-        SELECT v.id, v.fecha_venta, v.monto_total, v.vendedor_usuario_id, v.cliente_ruc,
+        SELECT v.id, v.fecha_venta, v.monto_total, v.vendedor_usuario_id, v.cliente_ruc, v.js_session,
                COALESCE(u.nombre_completo, 'Sin vendedor registrado') AS vendedor,
                COALESCE(p.razon_social, 'Clientes Varios') AS cliente
         FROM venta v
@@ -714,10 +714,42 @@ function reporteVentasPorVendedorCliente(): void
         ORDER BY vendedor, medio_pago, destino
     ", $params);
 
+    $ingresosMoneda = executeQuery($conectar, $ventasPeriodo . ", pagos_moneda AS (
+        SELECT vp.id AS venta_id,
+               UPPER(COALESCE(NULLIF(pago->>'moneda', ''), 'PEN')) AS moneda,
+               COALESCE(NULLIF(pago->>'monto', '')::numeric, 0) AS monto
+        FROM ventas_periodo vp
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE
+                WHEN jsonb_typeof(vp.js_session #> '{venta_moneda,pagos}') = 'array'
+                    THEN vp.js_session #> '{venta_moneda,pagos}'
+                ELSE '[]'::jsonb
+            END
+        ) AS detalle(pago)
+        UNION ALL
+        SELECT vp.id AS venta_id, 'PEN' AS moneda, pago.monto
+        FROM ventas_periodo vp
+        JOIN venta_pago pago ON pago.venta_id = vp.id
+        WHERE COALESCE(jsonb_array_length(
+            CASE
+                WHEN jsonb_typeof(vp.js_session #> '{venta_moneda,pagos}') = 'array'
+                    THEN vp.js_session #> '{venta_moneda,pagos}'
+                ELSE '[]'::jsonb
+            END
+        ), 0) = 0
+    )
+        SELECT moneda, ROUND(SUM(monto), 2) AS importe_total,
+               COUNT(*) AS pagos, COUNT(DISTINCT venta_id) AS ventas
+        FROM pagos_moneda
+        GROUP BY moneda
+        ORDER BY CASE moneda WHEN 'PEN' THEN 1 WHEN 'USD' THEN 2 WHEN 'EUR' THEN 3 ELSE 4 END, moneda
+    ", $params);
+
     responderVenta(true, 'OK', [
         'vendedores' => $vendedores,
         'clientes' => $clientes,
         'pagos' => $pagos,
+        'ingresos_moneda' => $ingresosMoneda,
         'fecha_inicio' => $todasLasVentas ? null : $fechaInicio,
         'fecha_fin' => $todasLasVentas ? null : $fechaFin,
         'todas_las_ventas' => $todasLasVentas,

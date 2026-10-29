@@ -118,6 +118,16 @@ include 'header.php';
 
 <div id="rvpPaneVendedores" role="tabpanel" hidden>
     <section class="rvp-wrap">
+        <h2 class="h5 mb-3">Ingresos recibidos por moneda</h2>
+        <div class="text-muted small mb-3">Muestra el importe en la moneda que se recibió. No suma dólares o euros como si fueran soles.</div>
+        <div class="rvp-table-wrap">
+            <table class="rvp-table">
+                <thead><tr><th>Moneda recibida</th><th class="text-end">Ventas</th><th class="text-end">Pagos</th><th class="text-end">Importe recibido</th></tr></thead>
+                <tbody id="rvpIngresosMonedaFilas"><tr><td colspan="4" class="rvp-empty">Cargando...</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+    <section class="rvp-wrap">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <h2 class="h5 m-0">Resumen por vendedor</h2><span class="text-muted small" id="rvpVendedorCantidad"></span>
         </div>
@@ -160,6 +170,7 @@ let rvpProductosActuales = [];
 let rvpVendedoresActuales = [];
 let rvpClientesActuales = [];
 let rvpPagosActuales = [];
+let rvpIngresosMonedaActuales = [];
 let rvpTabActual = 'productos';
 let rvpChartVentas = null;
 const rvpDesde = document.getElementById('rvpDesde');
@@ -235,6 +246,7 @@ async function rvpConsultarVendedoresClientes(fechas = rvpObtenerFechas()) {
     cuerpoVendedores.innerHTML = '<tr><td colspan="5" class="rvp-empty">Consultando...</td></tr>';
     cuerpoClientes.innerHTML = '<tr><td colspan="6" class="rvp-empty">Consultando...</td></tr>';
     document.getElementById('rvpPagosFilas').innerHTML = '<tr><td colspan="5" class="rvp-empty">Consultando...</td></tr>';
+    document.getElementById('rvpIngresosMonedaFilas').innerHTML = '<tr><td colspan="4" class="rvp-empty">Consultando...</td></tr>';
     try {
         const body = new URLSearchParams({
             accion: 'REPORTEVENTASPORVENDEDORCLIENTE',
@@ -247,6 +259,7 @@ async function rvpConsultarVendedoresClientes(fechas = rvpObtenerFechas()) {
         rvpVendedoresActuales = data.vendedores || [];
         rvpClientesActuales = data.clientes || [];
         rvpPagosActuales = data.pagos || [];
+        rvpIngresosMonedaActuales = data.ingresos_moneda || [];
         document.getElementById('rvpVendedorCantidad').textContent = `${rvpVendedoresActuales.length} vendedores`;
         document.getElementById('rvpClienteCantidad').textContent = `${rvpClientesActuales.length} clientes`;
         cuerpoVendedores.innerHTML = rvpVendedoresActuales.length ? rvpVendedoresActuales.map(v => `
@@ -271,17 +284,34 @@ async function rvpConsultarVendedoresClientes(fechas = rvpObtenerFechas()) {
                 <td>${rvpEsc(p.vendedor)}</td><td>${rvpEsc(rvpEtiquetaMedioPago(p.medio_pago))}</td><td>${rvpEsc(p.destino)}</td>
                 <td class="num">${rvpNumero(p.pagos)}</td><td class="num fw-bold">${rvpDinero(p.importe_total)}</td>
             </tr>`).join('') : '<tr><td colspan="5" class="rvp-empty">No hay pagos registrados para este periodo.</td></tr>';
+        document.getElementById('rvpIngresosMonedaFilas').innerHTML = rvpIngresosMonedaActuales.length ? rvpIngresosMonedaActuales.map(item => `
+            <tr>
+                <td><div class="rvp-product-name">${rvpEsc(rvpEtiquetaMoneda(item.moneda))}</div></td>
+                <td class="num">${rvpNumero(item.ventas)}</td>
+                <td class="num">${rvpNumero(item.pagos)}</td>
+                <td class="num fw-bold">${rvpDineroMoneda(item.importe_total, item.moneda)}</td>
+            </tr>`).join('') : '<tr><td colspan="4" class="rvp-empty">No hay pagos registrados para este periodo.</td></tr>';
     } catch (error) {
         const mensaje = rvpEsc(error.message || 'Error de conexión.');
         cuerpoVendedores.innerHTML = `<tr><td colspan="5" class="rvp-empty text-danger">${mensaje}</td></tr>`;
         cuerpoClientes.innerHTML = `<tr><td colspan="6" class="rvp-empty text-danger">${mensaje}</td></tr>`;
         document.getElementById('rvpPagosFilas').innerHTML = `<tr><td colspan="5" class="rvp-empty text-danger">${mensaje}</td></tr>`;
-        rvpVendedoresActuales = []; rvpClientesActuales = []; rvpPagosActuales = [];
+        document.getElementById('rvpIngresosMonedaFilas').innerHTML = `<tr><td colspan="4" class="rvp-empty text-danger">${mensaje}</td></tr>`;
+        rvpVendedoresActuales = []; rvpClientesActuales = []; rvpPagosActuales = []; rvpIngresosMonedaActuales = [];
     }
 }
 
 function rvpEtiquetaMedioPago(medio) {
     return ({efectivo:'Efectivo', deposito:'Depósito', transferencia:'Transferencia', yape:'Yape', plin:'Plin'})[medio] || medio;
+}
+
+function rvpEtiquetaMoneda(moneda) {
+    return ({PEN:'Soles (PEN)',USD:'Dólares (USD)',EUR:'Euros (EUR)'})[String(moneda || '').toUpperCase()] || String(moneda || 'Moneda');
+}
+
+function rvpDineroMoneda(value, moneda) {
+    const codigo = String(moneda || 'PEN').toUpperCase();
+    return new Intl.NumberFormat('es-PE', {style:'currency', currency:codigo, minimumFractionDigits:2, maximumFractionDigits:2}).format(Number(value || 0));
 }
 
 function rvpRender(data) {
