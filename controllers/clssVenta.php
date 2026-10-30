@@ -568,6 +568,9 @@ function reporteVentasPorProducto(): void
                COALESCE(NULLIF(item->>'unidad_venta_corto', ''), 'PAQ') AS unidad,
                COALESCE(NULLIF(item->>'cantidad', '')::numeric, 0) AS cantidad,
                COALESCE(NULLIF(item->>'precio_unitario', '')::numeric, 0) AS precio_unitario,
+               UPPER(COALESCE(NULLIF(v.js_session #>> '{venta_moneda,moneda_cobro}', ''), NULLIF(v.js_session #>> '{venta_moneda,moneda}', ''), 'PEN')) AS moneda_cobro,
+               COALESCE(NULLIF(item->>'tipo_cambio_aplicado', '')::numeric,
+                        NULLIF(v.js_session #>> '{venta_moneda,tipo_cambio,venta}', '')::numeric, 1) AS tipo_cambio,
                COALESCE(NULLIF(item->>'subtotal', '')::numeric,
                    COALESCE(NULLIF(item->>'cantidad', '')::numeric, 0) *
                    COALESCE(NULLIF(item->>'precio_unitario', '')::numeric, 0)) AS importe
@@ -583,6 +586,9 @@ function reporteVentasPorProducto(): void
         SELECT producto_id, codigo, producto, unidad,
                SUM(cantidad) AS cantidad_vendida,
                ROUND(SUM(importe), 2) AS importe_total,
+               ROUND(SUM(CASE WHEN moneda_cobro = 'PEN' THEN importe ELSE 0 END), 2) AS importe_pen,
+               ROUND(SUM(CASE WHEN moneda_cobro = 'USD' THEN importe / NULLIF(tipo_cambio, 0) ELSE 0 END), 2) AS importe_usd,
+               ROUND(SUM(CASE WHEN moneda_cobro = 'EUR' THEN importe / NULLIF(tipo_cambio, 0) ELSE 0 END), 2) AS importe_eur,
                ROUND(SUM(importe) / NULLIF(SUM(cantidad), 0), 2) AS precio_promedio,
                COUNT(DISTINCT venta_id) AS ventas
         FROM lineas
@@ -600,6 +606,14 @@ function reporteVentasPorProducto(): void
     $resumen['promedio_venta'] = (int)$resumen['ventas'] > 0
         ? round((float)$resumen['importe_total'] / (int)$resumen['ventas'], 2)
         : 0;
+
+    $resumenMoneda = executeQuery($conectar, $cte . "
+        SELECT moneda_cobro AS moneda,
+               ROUND(SUM(CASE WHEN moneda_cobro = 'PEN' THEN importe ELSE importe / NULLIF(tipo_cambio, 0) END), 2) AS importe_total
+        FROM lineas
+        GROUP BY moneda_cobro
+        ORDER BY CASE moneda_cobro WHEN 'PEN' THEN 1 WHEN 'USD' THEN 2 WHEN 'EUR' THEN 3 ELSE 4 END, moneda_cobro
+    ", $params);
 
     if ($todasLasVentas) {
         $dias = executeQuery($conectar, $cte . "
@@ -628,6 +642,7 @@ function reporteVentasPorProducto(): void
     responderVenta(true, 'OK', [
         'productos' => $productos,
         'resumen' => $resumen,
+        'resumen_moneda' => $resumenMoneda,
         'dias' => $dias,
         'fecha_inicio' => $todasLasVentas ? null : $fechaInicio,
         'fecha_fin' => $todasLasVentas ? null : $fechaFin,

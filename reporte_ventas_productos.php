@@ -6,14 +6,14 @@ include 'header.php';
 ?>
 
 <style>
-.rvp-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-bottom:16px}
-.rvp-periodos{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-.rvp-periodos button{border:1px solid #d8dfeb;background:#fff;color:#475569;border-radius:9px;padding:9px 14px;font-weight:700;min-height:42px}
+.rvp-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:12px}
+.rvp-periodos{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.rvp-periodos button{border:1px solid #d8dfeb;background:#fff;color:#475569;border-radius:8px;padding:6px 11px;font-weight:700;min-height:34px}
 .rvp-periodos button.activo{background:#246bfe;border-color:#246bfe;color:#fff}
-.rvp-filtros{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:12px;align-items:end}
-.rvp-filtros .rvp-producto{grid-column:1/-1}
-.rvp-date-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-column:1/-1}
-.rvp-search-actions{display:flex;gap:10px;grid-column:1/-1}
+.rvp-filtros{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.rvp-filtros .rvp-producto{flex:1 1 300px;min-width:220px}
+.rvp-date-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:0 0 100%}
+.rvp-search-actions{display:flex;gap:8px;flex:0 1 340px}
 .rvp-search-actions button{flex:1}
 .rvp-autocomplete{position:relative}
 .rvp-sugerencias{position:absolute;z-index:30;top:calc(100% + 4px);left:0;right:0;max-height:280px;overflow:auto;background:#fff;border:1px solid #dce3ef;border-radius:10px;box-shadow:0 12px 28px rgba(20,33,61,.16);display:none}
@@ -24,12 +24,21 @@ include 'header.php';
 .rvp-sugerencias-vacio{padding:12px;color:#64748b;font-size:.88rem}
 #rvpFechas[hidden]{display:none!important}
 .rvp-filtros label{font-size:.84rem;font-weight:600;color:#475569;margin-bottom:5px}
-.rvp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-.rvp-stat{background:#fff;border:1px solid #e5e7eb;border-top:3px solid #246bfe;border-radius:12px;padding:15px}
+.rvp-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:12px}
+.rvp-stat{background:#fff;border:1px solid #e5e7eb;border-top:3px solid #246bfe;border-radius:11px;padding:11px 12px;min-width:0;min-height:78px;box-shadow:0 3px 10px rgba(15,23,42,.035)}
+.rvp-stat--equiv{background:linear-gradient(145deg,#fff,#f3f7ff);border-top-color:#246bfe}
+.rvp-stat--pen{background:linear-gradient(145deg,#fff,#f0fbf5);border-top-color:#16a34a}
+.rvp-stat--usd{background:linear-gradient(145deg,#fff,#f1f7ff);border-top-color:#2563eb}
+.rvp-stat--eur{background:linear-gradient(145deg,#fff,#f8f3ff);border-top-color:#7c3aed}
+.rvp-stat--count{background:#f8fafc;border-top-color:#94a3b8;padding:11px 12px}
+.rvp-stat--count span{font-size:.68rem}.rvp-stat--count strong{margin-top:4px;font-size:1.2rem}
 .rvp-stat span{display:block;color:#64748b;text-transform:uppercase;font-size:.72rem;font-weight:700;letter-spacing:.03em}
 .rvp-stat strong{display:block;color:#14213d;font-size:1.35rem;margin-top:5px;overflow-wrap:anywhere}
 .rvp-chart{height:280px;position:relative}
-.rvp-table-wrap{overflow:auto}.rvp-table{width:100%;min-width:720px;border-collapse:collapse}
+.rvp-visual-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(330px,1fr);gap:14px;margin-bottom:16px;align-items:stretch}
+.rvp-visual-grid .rvp-wrap{margin:0;min-width:0}
+.rvp-visual-grid .rvp-bar-row{grid-template-columns:minmax(95px,155px) minmax(35px,1fr) auto}
+.rvp-table-wrap{overflow:auto}.rvp-table{width:100%;min-width:720px;border-collapse:collapse}#rvpTablaProductos{min-width:1050px}
 .rvp-table th,.rvp-table td{padding:11px 12px;border-bottom:1px solid #e9edf3;text-align:left;vertical-align:middle}
 .rvp-table th{background:#f3f5f9;color:#5d6878;font-size:.76rem;text-transform:uppercase;white-space:nowrap}
 .rvp-table td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -37,17 +46,19 @@ include 'header.php';
 .rvp-bars{display:grid;gap:10px}.rvp-bar-row{display:grid;grid-template-columns:minmax(120px,240px) minmax(60px,1fr) auto;gap:10px;align-items:center;font-size:.84rem}
 .rvp-bar-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.rvp-bar-track{height:10px;background:#edf1f7;border-radius:999px;overflow:hidden}.rvp-bar-fill{height:100%;background:linear-gradient(90deg,#246bfe,#25a7ff);border-radius:inherit}
 .rvp-empty{text-align:center;color:#64748b;padding:30px!important}
-.rvp-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
-.rvp-tabs button{border:1px solid #d8dfeb;background:#fff;color:#475569;border-radius:9px;padding:10px 15px;font-weight:700;min-height:42px}
-.rvp-tabs button.activo{background:#246bfe;border-color:#246bfe;color:#fff}
+.rvp-tabs{display:inline-flex;gap:4px;flex-wrap:wrap;margin:0 0 16px;padding:5px;border-radius:13px;background:#e9eef8;max-width:100%}
+.rvp-tabs button{border:1px solid transparent;background:transparent;color:#475569;border-radius:9px;padding:10px 15px;font-weight:700;min-height:42px;transition:background .15s,color .15s,box-shadow .15s}
+.rvp-tabs button.activo{background:#246bfe;border-color:#246bfe;color:#fff;box-shadow:0 3px 8px rgba(36,107,254,.2)}
 #rvpPaneVendedores[hidden],#rvpPaneClientes[hidden],#rvpPaneProductos[hidden]{display:none!important}
 .rvp-producto[hidden]{display:none!important}
-@media(max-width:760px){.rvp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.rvp-stat{padding:12px}.rvp-stat strong{font-size:1.15rem}.rvp-wrap{padding:14px}.rvp-bar-row{grid-template-columns:minmax(90px,145px) minmax(40px,1fr);gap:7px}.rvp-bar-row .rvp-bar-value{grid-column:2;text-align:right;font-size:.78rem}}
-@media(max-width:480px){.rvp-date-fields{grid-template-columns:1fr}.rvp-periodos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.rvp-periodos button{padding:8px 6px;font-size:.84rem}.rvp-search-actions{flex-direction:column}.rvp-search-actions button{min-height:44px}}
+@media(max-width:1200px){.rvp-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1100px){.rvp-visual-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.rvp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.rvp-stat{padding:10px}.rvp-stat strong{font-size:1.1rem}.rvp-wrap{padding:12px}.rvp-bar-row,.rvp-visual-grid .rvp-bar-row{grid-template-columns:minmax(90px,145px) minmax(40px,1fr);gap:7px}.rvp-bar-row .rvp-bar-value{grid-column:2;text-align:right;font-size:.78rem}.rvp-search-actions{flex:1 1 100%}}
+@media(max-width:480px){.rvp-date-fields{grid-template-columns:1fr}.rvp-periodos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.rvp-periodos button{padding:6px;font-size:.82rem}.rvp-search-actions{flex-direction:column}.rvp-search-actions button{min-height:40px}.rvp-tabs{display:grid;grid-template-columns:1fr;width:100%;margin-bottom:10px}.rvp-tabs button{width:100%;text-align:left;min-height:38px;padding:7px 11px}.rvp-visual-grid{gap:8px}.rvp-chart{height:220px}}
 </style>
 
 <section class="rvp-wrap">
-    <div class="text-muted small mb-3">Los reportes consolidados muestran equivalentes en soles. Las ventas en USD o EUR usan el tipo de cambio guardado al registrarlas.</div>
+    <div class="text-muted small mb-2">Totales separados por moneda; el equivalente usa el tipo de cambio guardado en cada venta.</div>
     <div class="rvp-periodos" role="group" aria-label="Periodo de ventas">
         <button type="button" data-rvp-periodo="dia">Día</button>
         <button type="button" data-rvp-periodo="semana">Semana</button>
@@ -81,35 +92,38 @@ include 'header.php';
 </nav>
 
 <section class="rvp-stats" id="rvpStats" aria-live="polite">
-    <div class="rvp-stat"><span>Importe vendido</span><strong>S/ 0.00</strong></div>
-    <div class="rvp-stat"><span>Ventas completadas</span><strong>0</strong></div>
-    <div class="rvp-stat"><span>Productos vendidos</span><strong>0</strong></div>
-    <div class="rvp-stat"><span>Promedio por venta</span><strong>S/ 0.00</strong></div>
-</section>
-
-<section class="rvp-wrap">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h5 m-0" id="rvpChartTitulo">Importe vendido por día</h2><span class="text-muted small">Solo ventas completadas</span>
-    </div>
-    <div class="rvp-chart"><canvas id="rvpChartVentas" aria-label="Gráfico del importe vendido por día" role="img"></canvas></div>
+    <div class="rvp-stat rvp-stat--equiv"><span>Equivalente vendido (PEN)</span><strong>S/ 0.00</strong></div>
+    <div class="rvp-stat rvp-stat--pen"><span>Cobrado en PEN</span><strong>S/ 0.00</strong></div>
+    <div class="rvp-stat rvp-stat--usd"><span>Cobrado en USD</span><strong>US$ 0.00</strong></div>
+    <div class="rvp-stat rvp-stat--eur"><span>Cobrado en EUR</span><strong>€ 0.00</strong></div>
+    <div class="rvp-stat rvp-stat--count"><span>Ventas completadas</span><strong>0</strong></div>
+    <div class="rvp-stat rvp-stat--count"><span>Productos vendidos</span><strong>0</strong></div>
 </section>
 
 <div id="rvpPaneProductos" role="tabpanel">
-<section class="rvp-wrap">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h5 m-0">Productos con más ventas</h2><span class="text-muted small" id="rvpPeriodo"></span>
-    </div>
-    <div class="rvp-bars" id="rvpBarras"><div class="rvp-empty">Selecciona un periodo y consulta.</div></div>
-</section>
+<div class="rvp-visual-grid">
+    <section class="rvp-wrap">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h2 class="h5 m-0" id="rvpChartTitulo">Importe equivalente en PEN por día</h2><span class="text-muted small">Solo ventas completadas</span>
+        </div>
+        <div class="rvp-chart"><canvas id="rvpChartVentas" aria-label="Gráfico del importe vendido por día" role="img"></canvas></div>
+    </section>
+    <section class="rvp-wrap">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h2 class="h5 m-0">Productos con más ventas</h2><span class="text-muted small" id="rvpPeriodo"></span>
+        </div>
+        <div class="rvp-bars" id="rvpBarras"><div class="rvp-empty">Selecciona un periodo y consulta.</div></div>
+    </section>
+</div>
 
 <section class="rvp-wrap">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <h2 class="h5 m-0">Detalle por producto</h2><span class="text-muted small" id="rvpCantidad"></span>
     </div>
     <div class="rvp-table-wrap">
-        <table class="rvp-table">
-            <thead><tr><th>Producto</th><th class="text-end">Cantidad vendida</th><th class="text-end">Importe total</th><th class="text-end">Precio promedio</th><th class="text-end">Ventas</th></tr></thead>
-            <tbody id="rvpFilas"><tr><td colspan="5" class="rvp-empty">Cargando...</td></tr></tbody>
+        <table class="rvp-table" id="rvpTablaProductos">
+            <thead><tr><th>Producto</th><th class="text-end">Cantidad</th><th class="text-end">Equivalente (PEN)</th><th class="text-end">Cobrado (PEN)</th><th class="text-end">Cobrado (USD)</th><th class="text-end">Cobrado (EUR)</th><th class="text-end">Precio prom. (PEN)</th><th class="text-end">Ventas</th></tr></thead>
+            <tbody id="rvpFilas"><tr><td colspan="8" class="rvp-empty">Cargando...</td></tr></tbody>
         </table>
     </div>
 </section>
@@ -212,14 +226,14 @@ function rvpObtenerFechas() {
 async function rvpConsultar() {
     const fechas = rvpObtenerFechas();
     if (rvpPeriodoActual === 'rango' && (!fechas.fecha_inicio || !fechas.fecha_fin)) {
-        rvpFilas.innerHTML = '<tr><td colspan="5" class="rvp-empty">Selecciona ambas fechas.</td></tr>';
+        rvpFilas.innerHTML = '<tr><td colspan="8" class="rvp-empty">Selecciona ambas fechas.</td></tr>';
         return;
     }
     if (fechas.fecha_inicio && fechas.fecha_inicio > fechas.fecha_fin) {
-        rvpFilas.innerHTML = '<tr><td colspan="5" class="rvp-empty text-danger">La fecha inicial no puede ser posterior a la fecha final.</td></tr>';
+        rvpFilas.innerHTML = '<tr><td colspan="8" class="rvp-empty text-danger">La fecha inicial no puede ser posterior a la fecha final.</td></tr>';
         return;
     }
-    rvpFilas.innerHTML = '<tr><td colspan="5" class="rvp-empty">Consultando ventas...</td></tr>';
+    rvpFilas.innerHTML = '<tr><td colspan="8" class="rvp-empty">Consultando ventas...</td></tr>';
     rvpBarras.innerHTML = '<div class="rvp-empty">Cargando...</div>';
     try {
         const body = new URLSearchParams({
@@ -235,7 +249,7 @@ async function rvpConsultar() {
         await rvpConsultarVendedoresClientes(fechas);
     } catch (error) {
         rvpProductosActuales = [];
-        rvpFilas.innerHTML = `<tr><td colspan="5" class="rvp-empty text-danger">${rvpEsc(error.message || 'Error de conexión.')}</td></tr>`;
+        rvpFilas.innerHTML = `<tr><td colspan="8" class="rvp-empty text-danger">${rvpEsc(error.message || 'Error de conexión.')}</td></tr>`;
         rvpBarras.innerHTML = '<div class="rvp-empty">No se pudo cargar el resumen.</div>';
     }
 }
@@ -318,21 +332,24 @@ function rvpRender(data) {
     rvpProductosActuales = data.productos || [];
     const s = data.resumen || {};
     const ventaCount = Number(s.ventas || 0);
+    const importesMoneda = Object.fromEntries((data.resumen_moneda || []).map(item => [String(item.moneda || '').toUpperCase(), Number(item.importe_total || 0)]));
     rvpStats.innerHTML = `
-        <div class="rvp-stat"><span>Importe vendido</span><strong>${rvpDinero(s.importe_total)}</strong></div>
-        <div class="rvp-stat"><span>Ventas completadas</span><strong>${rvpNumero(ventaCount)}</strong></div>
-        <div class="rvp-stat"><span>Productos vendidos</span><strong>${rvpNumero(s.productos)}</strong></div>
-        <div class="rvp-stat"><span>Promedio por venta</span><strong>${rvpDinero(s.promedio_venta)}</strong></div>`;
+        <div class="rvp-stat rvp-stat--equiv"><span>Equivalente vendido (PEN)</span><strong>${rvpDinero(s.importe_total)}</strong></div>
+        <div class="rvp-stat rvp-stat--pen"><span>Cobrado en PEN</span><strong>${rvpDineroMoneda(importesMoneda.PEN || 0, 'PEN')}</strong></div>
+        <div class="rvp-stat rvp-stat--usd"><span>Cobrado en USD</span><strong>${rvpDineroMoneda(importesMoneda.USD || 0, 'USD')}</strong></div>
+        <div class="rvp-stat rvp-stat--eur"><span>Cobrado en EUR</span><strong>${rvpDineroMoneda(importesMoneda.EUR || 0, 'EUR')}</strong></div>
+        <div class="rvp-stat rvp-stat--count"><span>Ventas completadas</span><strong>${rvpNumero(ventaCount)}</strong></div>
+        <div class="rvp-stat rvp-stat--count"><span>Productos vendidos</span><strong>${rvpNumero(s.productos)}</strong></div>`;
     document.getElementById('rvpPeriodo').textContent = data.todas_las_ventas
         ? 'Todas las ventas'
         : `${data.fecha_inicio} — ${data.fecha_fin}`;
     document.getElementById('rvpChartTitulo').textContent = data.todas_las_ventas
-        ? 'Importe vendido por mes'
-        : 'Importe vendido por día';
+        ? 'Importe equivalente en PEN por mes'
+        : 'Importe equivalente en PEN por día';
     document.getElementById('rvpCantidad').textContent = `${rvpProductosActuales.length} productos`;
     rvpRenderGrafico(data.dias || []);
     if (!rvpProductosActuales.length) {
-        rvpFilas.innerHTML = '<tr><td colspan="5" class="rvp-empty">No hay ventas completadas para los filtros seleccionados.</td></tr>';
+        rvpFilas.innerHTML = '<tr><td colspan="8" class="rvp-empty">No hay ventas completadas para los filtros seleccionados.</td></tr>';
         rvpBarras.innerHTML = '<div class="rvp-empty">Sin productos vendidos en este periodo.</div>';
         return;
     }
@@ -341,6 +358,9 @@ function rvpRender(data) {
             <td><div class="rvp-product-name">${rvpEsc(p.producto)}</div><div class="rvp-code">${rvpEsc(p.codigo)}</div></td>
             <td class="num">${rvpNumero(p.cantidad_vendida)} ${rvpEsc(p.unidad)}</td>
             <td class="num fw-bold">${rvpDinero(p.importe_total)}</td>
+            <td class="num">${rvpDineroMoneda(p.importe_pen, 'PEN')}</td>
+            <td class="num">${rvpDineroMoneda(p.importe_usd, 'USD')}</td>
+            <td class="num">${rvpDineroMoneda(p.importe_eur, 'EUR')}</td>
             <td class="num">${rvpDinero(p.precio_promedio)} / ${rvpEsc(p.unidad)}</td>
             <td class="num">${rvpNumero(p.ventas)}</td>
         </tr>`).join('');
@@ -371,7 +391,7 @@ function rvpRenderGrafico(dias) {
         data: {
             labels: etiquetas,
             datasets: [{
-                label: 'Importe vendido',
+                label: 'Equivalente vendido (PEN)',
                 data: dias.map(d => Number(d.importe_total || 0)),
                 borderColor: '#246bfe',
                 backgroundColor: 'rgba(36,107,254,.12)',
@@ -387,7 +407,7 @@ function rvpRenderGrafico(dias) {
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
             plugins: {
-                legend: { display: false },
+                legend: { display: true },
                 tooltip: { callbacks: { label: context => ` ${rvpDinero(context.parsed.y)} · ${rvpNumero(dias[context.dataIndex]?.ventas)} ventas` } }
             },
             scales: {
@@ -414,8 +434,8 @@ function rvpExportar() {
         nombreReporte = 'ventas-por-cliente';
     } else {
         if (!rvpProductosActuales.length) return;
-        encabezados = ['Código','Producto','Cantidad vendida','Unidad de venta','Importe total','Precio promedio','Ventas'];
-        filas = rvpProductosActuales.map(p => [p.codigo,p.producto,p.cantidad_vendida,p.unidad,p.importe_total,p.precio_promedio,p.ventas]);
+        encabezados = ['Código','Producto','Cantidad vendida','Unidad de venta','Equivalente vendido (PEN)','Cobrado (PEN)','Cobrado (USD)','Cobrado (EUR)','Precio promedio (PEN)','Ventas'];
+        filas = rvpProductosActuales.map(p => [p.codigo,p.producto,p.cantidad_vendida,p.unidad,p.importe_total,p.importe_pen,p.importe_usd,p.importe_eur,p.precio_promedio,p.ventas]);
         nombreReporte = 'ventas-por-producto';
     }
     const csv = '\ufeff' + [encabezados,...filas].map(f => f.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(';')).join('\r\n');
