@@ -743,9 +743,20 @@ function tarjetaEnsamblajeHtml(e) {
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
-    const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
+    const categoriaMaterial = (e.categoria_material_nombre ?? '').trim().toLowerCase();
+    const esDeSegunda = categoriaMaterial.includes('segunda');
+    const esDePrimera = categoriaMaterial.includes('primera');
+    const esPinzaPalanita = String(e.producto_codigo ?? '').trim().toUpperCase() === 'PI';
     const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
     const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const historialComponente = parseJsonColumna(e.js_historial);
+    const eventoActivoComponente = h => !['true', 't', '1'].includes(String(h.anulado).toLowerCase());
+    const envioComponenteExt = historialComponente.find(h => h.tipo === 'envio_componente_externo' && eventoActivoComponente(h));
+    const rutaComponenteLocal = historialComponente.find(h => h.tipo === 'ruta_componente_local' && eventoActivoComponente(h));
+    const disponibleComoComponenteLocal = !e.deleted_at && e.proveniente !== 'externo' && e.fin && esDePrimera && !esMultiMoldeCompleto && !e.ensamblaje_id_referido && !e.enviado_empaquetado && !envioComponenteExt;
+    const puedeSeleccionarRutaLocal = esPinzaPalanita && disponibleComoComponenteLocal && !rutaComponenteLocal;
+    const puedeMarcarComponenteLocal = disponibleComoComponenteLocal && !esPinzaPalanita && !productoEmsamblado;
+    const puedeEnviarComponenteExt = puedeRegistrarExternoEns && disponibleComoComponenteLocal && !rutaComponenteLocal && (esPinzaPalanita || !productoEmsamblado);
     const complementoUsado = !!e.ensamblaje_id_referido;
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
@@ -756,6 +767,8 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
             <div class="badges">
                 ${e.proveniente === 'externo' ? '<span class="badge text-bg-warning">Retorno externo</span>' : ''}
+                ${envioComponenteExt ? `<span class="badge text-bg-info">Componente enviado a ${envioComponenteExt.enviado_a || 'exterior'}</span>` : ''}
+                ${rutaComponenteLocal ? '<span class="badge text-bg-success">Ruta local</span>' : ''}
                 ${badgeRegistroEns(e.deleted_at)}
             </div>
         </div>
@@ -782,7 +795,7 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
             <div class="pc-ens-field">
                 <span class="lbl">Categoría material</span>
-                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo, disponible en Empaquetado' : ''}</span>
+                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo, disponible en Empaquetado' : ''}${esPinzaPalanita && disponibleComoComponenteLocal ? (rutaComponenteLocal ? ' · Ruta local seleccionada; consumo según receta' : ' · Selecciona Local o Exterior') : ''}</span>
             </div>
             <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
@@ -828,7 +841,7 @@ function tarjetaEnsamblajeHtml(e) {
                         : '0'}
                 </span>
             </div>
-            ${productoEmsamblado && !esMultiMoldeCompleto ? `
+            ${productoEmsamblado && !esMultiMoldeCompleto && !esPinzaPalanita ? `
             <div class="pc-ens-field">
                 <span class="lbl">Complementa a</span>
                 <span class="val">
@@ -877,6 +890,9 @@ function tarjetaEnsamblajeHtml(e) {
                 <button type="button" class="pc-btn-empaquetado" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})" title="Enviar directo a empaquetado">
                     <i class="fa-solid fa-box"></i> A Empaquetado</button>
             ` : ''}
+            ${puedeMarcarComponenteLocal ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="marcarComplementoAccion(${e.ensamblaje_id})" title="Reservar como componente para un armado local"><i class="fa-solid fa-puzzle-piece"></i> Componente local</button>` : ''}
+            ${puedeSeleccionarRutaLocal ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="seleccionarComponenteLocalAccion(${e.ensamblaje_id})" title="Mantenerlo local; cada receta define cuánto consume"><i class="fa-solid fa-house"></i> Local</button>` : ''}
+            ${puedeEnviarComponenteExt ? `<button type="button" class="btn btn-sm btn-outline-warning" onclick="enviarComponenteExteriorAccion(${e.ensamblaje_id})" title="Enviar este componente a un servicio externo"><i class="fa-solid fa-truck-fast"></i> Exterior</button>` : ''}
             
             ${!e.deleted_at
                 ? `<button class="pc-icon-btn" onclick="eliminarEnsamblaje(${e.ensamblaje_id})" title="Desactivar">
@@ -1099,6 +1115,46 @@ async function marcarComplementoAccion(id) {
     if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
     else { Swal.fire('Error', json.message, 'error'); }
 }
+async function seleccionarComponenteLocalAccion(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Dejar la Pinza Palanita en local?',
+        text: 'Quedará disponible para los productos que la tengan en su receta. Cada ensamblaje consumirá su cantidad y el saldo restante podrá usarse en otro producto compatible.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Seleccionar local',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+    const json = await llamarEnsamblaje('SELECCIONARRUTACOMPONENTELOCAL', { id });
+    if (json.success) {
+        Swal.fire('Ruta local seleccionada', json.message, 'success');
+        cargarEnsamblajes();
+    } else {
+        Swal.fire('Error', json.message, 'error');
+    }
+}
+async function enviarComponenteExteriorAccion(id) {
+    const { value: enviadoA } = await Swal.fire({
+        title: 'Enviar componente al exterior',
+        html: 'La pinza quedará disponible como componente únicamente en ensamblajes externos compatibles. Se registrará su saldo disponible y destinatario.',
+        input: 'text',
+        inputLabel: 'Destinatario del servicio externo',
+        inputPlaceholder: 'Nombre de la persona o taller',
+        inputAttributes: { maxlength: 160, autocomplete: 'off' },
+        showCancelButton: true,
+        confirmButtonText: 'Registrar envío',
+        cancelButtonText: 'Cancelar',
+        inputValidator: value => !value?.trim() ? 'Indica a quién se envía el componente.' : undefined
+    });
+    if (!enviadoA) return;
+    const json = await llamarEnsamblaje('ENVIARCOMPONENTEEXTERNO', { id, enviado_a: enviadoA.trim() });
+    if (json.success) {
+        Swal.fire('Envío registrado', json.message, 'success');
+        cargarEnsamblajes();
+    } else {
+        Swal.fire('Error', json.message, 'error');
+    }
+}
 async function pasarAEmpaquetadoAccion(id) {
     const confirmacion = await Swal.fire({
         title: '¿Enviar este armado a Empaquetado?',
@@ -1233,7 +1289,7 @@ async function renderGridDetalle() {
             return;
         }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId || '', excluir_id: ensamblajeIdActual, texto });
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId || '', excluir_id: ensamblajeIdActual, texto, destino_ensamblaje: destinoEnsamblaje });
         const complementos = json.success ? (json.complementos || []) : [];
 
         if (complementos.length === 0) {
@@ -1260,12 +1316,15 @@ async function renderGridDetalle() {
                         unidad_salida_codigo: unidad,
                         nombre_mostrar: nombreMostrar,
                         fin: c.fin,
+                        destino_ensamblaje: c.destino_ensamblaje || destinoEnsamblaje,
+                        enviado_a: c.enviado_a || null,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
                 <span class="nombre">${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
                 <span class="meta">De Primera · Color: <b>${c.complemento_color_nombre || '-'}</b></span>
-                <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
+                <span class="meta">Armado #${c.ensamblaje_id} · Saldo: <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
+                ${destinoEnsamblaje === 'externo' ? `<span class="meta text-warning-emphasis"><b>Enviado al exterior · ${c.enviado_a || 'destinatario sin dato'}</b></span>` : ''}
                 <span class="meta">${formatearFechaHoraLegibleEns(c.fin)}</span>
             </button>`;
         }).join('');
@@ -1274,8 +1333,16 @@ async function renderGridDetalle() {
 
 async function agregarLineaDetalle(tipo, datos) {
     const destinoSeleccionado = document.getElementById('ens_destino')?.value || 'local';
-    if (destinoSeleccionado === 'externo' && tipo !== 'produccion') {
-        Swal.fire('Retorno externo', 'Vincula únicamente producciones que se enviaron a externo.', 'info');
+    if (destinoSeleccionado === 'externo' && tipo === 'derivado') {
+        Swal.fire('Retorno externo', 'Los derivados no se pueden vincular en este flujo externo.', 'info');
+        return;
+    }
+    if (destinoSeleccionado === 'externo' && tipo === 'complemento' && datos.destino_ensamblaje !== 'externo') {
+        Swal.fire('Destino diferente', 'Este ensamblaje no está marcado para enviarse al exterior.', 'warning');
+        return;
+    }
+    if (destinoSeleccionado === 'local' && tipo === 'complemento' && datos.destino_ensamblaje === 'externo') {
+        Swal.fire('Destino diferente', 'Este componente está enviado al exterior. Cambia el destino del armado a Externo.', 'warning');
         return;
     }
     if (tipo === 'produccion' && (datos.destino_ensamblaje || 'local') !== destinoSeleccionado) {
@@ -1395,8 +1462,9 @@ async function agregarLineaDetalle(tipo, datos) {
             color_nombre: datos.color_nombre,
             categoria_material_id: datos.categoria_material_id,
             nombre: datos.nombre_mostrar || `${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''}`,
-            meta: `Complementa a ${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''} · Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
+            meta: `${destinoSeleccionado === 'externo' ? `Externo · enviado a ${datos.enviado_a || 'destinatario sin dato'} · ` : 'Complementa a '}${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''} · Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece',
+            destino_ensamblaje: datos.destino_ensamblaje || 'local',
             color: est.color, bg: est.bg,
         });
     }
@@ -1538,15 +1606,14 @@ function actualizarFormularioRecepcionExternaEns() {
         document.getElementById('ens_maquina_id').value = '';
     }
     else actualizarCampoMaquinaEnsamblaje();
-    ['tab_derivados', 'tab_complementos'].forEach(id => {
-        const tab = document.getElementById(id);
-        if (tab) tab.style.display = esExterno ? 'none' : '';
-    });
-    if (esExterno && tabDetalleActiva !== 'produccion') {
+    const tabDerivados = document.getElementById('tab_derivados');
+    if (tabDerivados) tabDerivados.style.display = esExterno ? 'none' : '';
+    const tabComplementos = document.getElementById('tab_complementos');
+    if (tabComplementos) tabComplementos.style.display = '';
+    if (esExterno && tabDetalleActiva === 'derivado') {
         tabDetalleActiva = 'produccion';
         document.getElementById('tab_producciones').classList.add('activa');
         document.getElementById('tab_derivados').classList.remove('activa');
-        document.getElementById('tab_complementos').classList.remove('activa');
         document.getElementById('ens_buscar_detalle').value = '';
     }
 }
@@ -1873,7 +1940,10 @@ function finalizarEnsamblajeAccion(id) {
     const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
     const esRetornoExterno = e?.proveniente === 'externo';
     const componentes = esRetornoExterno ? parseJsonColumna(e?.js_moldes_utilizados) : [];
-    const filasMerma = componentes.map((m, i) => {
+    const componentesArmadosExternos = esRetornoExterno
+        ? parseJsonColumna(e?.js_complementos_utilizados).filter(c => ['true', 't', '1'].includes(String(c.es_componente_externo).toLowerCase()))
+        : [];
+    const filasMermaProduccion = componentes.map((m, i) => {
         const enviada = Math.max(0, parseFloat(m.cantidad_kg || 0));
         const usada = Math.max(0, parseFloat(m.cantidad_entrada_produccion || 0));
         const maxMerma = Math.max(0, enviada - usada);
@@ -1887,6 +1957,18 @@ function finalizarEnsamblajeAccion(id) {
             <input class="form-control form-control-sm mt-2 ens-merma-motivo" maxlength="180" placeholder="Motivo (opcional)" data-i="${i}">
         </div>`;
     }).join('');
+    const filasMermaComplemento = componentesArmadosExternos.map((c, i) => {
+        const enviado = Math.max(0, parseFloat(c.cantidad_peso_kg || 0));
+        const key = `complemento:${c.ensamblaje_complemento_id}`;
+        const unidad = c.unidad_salida_codigo || 'UND';
+        return `<div class="text-start border rounded p-2 mb-2">
+            <strong>${c.producto_codigo || ''} - ${c.producto_descripcion || 'Componente ensamblado'}</strong><small class="d-block text-muted">Armado #${c.ensamblaje_complemento_id} · Enviado a ${c.enviado_a || 'servicio externo'} · Disponible enviado: ${formatearCantidadEns(enviado)} ${unidad}</small>
+            <label class="form-label mt-2 mb-1">Merma (${unidad})</label>
+            <input class="form-control ens-merma-cantidad" type="number" min="0" max="${enviado}" step="0.001" value="0" data-key="${key}" data-i="c${i}">
+            <input class="form-control form-control-sm mt-2 ens-merma-motivo" maxlength="180" placeholder="Motivo (opcional)" data-i="c${i}">
+        </div>`;
+    }).join('');
+    const filasMerma = filasMermaProduccion + filasMermaComplemento;
 
     Swal.fire({
         title: '¿Finalizar el armado?',

@@ -191,6 +191,8 @@ function controladorEnsamblaje(string $accion): void
         'FINALIZARENSAMBLAJE',
         'PASARAEMPAQUETADO',
         'COMPLEMENTAR',
+        'ENVIARCOMPONENTEEXTERNO',
+        'SELECCIONARRUTACOMPONENTELOCAL',
     ];
 
     $accionesSoloAdmin = [
@@ -255,6 +257,12 @@ function controladorEnsamblaje(string $accion): void
             break;
         case 'COMPLEMENTAR':
             marcarComplemento();
+            break;
+        case 'ENVIARCOMPONENTEEXTERNO':
+            enviarComponenteEnsambladoAlExterior();
+            break;
+        case 'SELECCIONARRUTACOMPONENTELOCAL':
+            seleccionarComponenteEnsambladoLocal();
             break;
         case 'BUSCARPRODUCTOS':
             buscarProductos();
@@ -575,6 +583,11 @@ function buscarComplementos()
     $productoId = intval($_POST['producto_id'] ?? 0);
     $colorId    = intval($_POST['color_id'] ?? 0) ?: null;
     $excluirId  = intval($_POST['excluir_id'] ?? 0);
+    $destino = strtolower(trim((string)($_POST['destino_ensamblaje'] ?? 'local')));
+    if (!in_array($destino, ['local', 'externo'], true)) $destino = 'local';
+    if ($destino === 'externo' && !esAdministradorSesionEnsamblaje()) {
+        responder(false, 'Solo un administrador puede seleccionar componentes enviados al exterior.');
+    }
     if ($productoId <= 0) {
         responder(true, 'OK', ['complementos' => []]);
     }
@@ -583,12 +596,18 @@ function buscarComplementos()
         "e.deleted_at IS NULL",
         "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
-        "GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0)) > 0",
+        "GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0) - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) > 0",
         "LOWER(COALESCE(cm.nombre, '')) LIKE '%primera%'",
         "NOT " . sqlEsMultiMoldeCompleto('e', 'p'),
         sqlEsComplementoCompatible('e', 'p', 'pt'),
     ];
-    $params = ['producto_id' => $productoId, 'producto_objetivo_id' => $productoId];
+    $eventoEnvioExterno = "EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_ext
+        WHERE ev_ext->>'tipo' = 'envio_componente_externo'
+          AND COALESCE(ev_ext->>'anulado', 'false') <> 'true'
+    )";
+    $where[] = $destino === 'externo' ? $eventoEnvioExterno : "NOT ($eventoEnvioExterno)";
+    $params = ['producto_id' => $productoId, 'producto_objetivo_id' => $productoId, 'destino_complemento' => $destino];
     if ($colorId !== null) {
         $where[] = "COALESCE(e.color_id, (
             SELECT pd.color_id FROM rel_ensamblaje_producto rep
@@ -596,13 +615,13 @@ function buscarComplementos()
             WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
         )) = :color_id";
         $params['color_id'] = $colorId;
-        $where[] = "(e.js_producto_emsamblado IS NULL OR (
+        $where[] = "(UPPER(COALESCE(p.codigo, '')) = 'PI' OR e.js_producto_emsamblado IS NULL OR (
             (e.js_producto_emsamblado->>'producto_id')::bigint = :producto_id
             AND (e.js_producto_emsamblado->>'color_id')::bigint = :marker_color_id
         ))";
         $params['marker_color_id'] = $colorId;
     } else {
-        $where[] = "(e.js_producto_emsamblado IS NULL OR
+        $where[] = "(UPPER(COALESCE(p.codigo, '')) = 'PI' OR e.js_producto_emsamblado IS NULL OR
             (e.js_producto_emsamblado->>'producto_id')::bigint = :producto_id)";
     }
     if ($excluirId > 0) {
@@ -630,8 +649,10 @@ function buscarComplementos()
                 JOIN produccion pd ON pd.id = rep.molde_produccion_id
                 WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
             )) AS color_id,
-            GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0)) AS cantidad_peso_kg,
+            GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0) - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) AS cantidad_peso_kg,
             e.fin,
+            :destino_complemento AS destino_ensamblaje,
+            (SELECT ev_ext->>'enviado_a' FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado', 'false') <> 'true' ORDER BY ev_ext->>'fecha' DESC LIMIT 1) AS enviado_a,
             co.nombre AS complemento_color_nombre,
             cm.nombre AS categoria_material_nombre,
             COALESCE(
@@ -1065,7 +1086,11 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
                 'color_id', COALESCE(ec.color_id, (SELECT pd.color_id FROM rel_ensamblaje_producto r0 JOIN produccion pd ON pd.id = r0.molde_produccion_id WHERE r0.ensamblaje_id = ec.id AND r0.deleted_at IS NULL LIMIT 1)),
                 'color_nombre', co.nombre, 'categoria_material_id', ec.categoria_material_id,
                 'producto_codigo', pc.codigo, 'producto_descripcion', pc.descripcion,
-                'cantidad_peso_kg', ec.cantidad_peso_kg,
+                'cantidad_peso_kg', GREATEST(0, ec.cantidad_peso_kg
+                    - COALESCE((SELECT SUM(NULLIF(ev0->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev0 JOIN ensamblaje eu0 ON eu0.id = NULLIF(ev0->>'ensamblaje_id', '')::bigint WHERE ev0->>'tipo' = 'consumo_complemento' AND COALESCE(ev0->>'anulado','false') <> 'true' AND eu0.deleted_at IS NULL), 0)
+                    - COALESCE((SELECT SUM(NULLIF(ev1->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev1 WHERE ev1->>'tipo' = 'merma_componente_externo' AND COALESCE(ev1->>'anulado','false') <> 'true'), 0)),
+                'es_componente_externo', EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado','false') <> 'true'),
+                'enviado_a', (SELECT ev_ext->>'enviado_a' FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado','false') <> 'true' ORDER BY ev_ext->>'fecha' DESC LIMIT 1),
                 'moldes_nombres', COALESCE((SELECT string_agg(DISTINCT (m->>'molde_nombre'), ', ' ORDER BY (m->>'molde_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m), (SELECT string_agg(DISTINCT (d->>'derivado_nombre'), ', ' ORDER BY (d->>'derivado_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_derivados_utilizados,'[]'::jsonb)) d)),
                 'unidad_salida_codigo', COALESCE(ue.nombre_corto, (SELECT (m->>'unidad_produccion_codigo') FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1), 'kg')
             ) AS item
@@ -1081,6 +1106,8 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
                 'color_nombre', co.nombre, 'categoria_material_id', ec.categoria_material_id,
                 'producto_codigo', pc.codigo, 'producto_descripcion', pc.descripcion,
                 'cantidad_peso_kg', NULLIF(ev->>'cantidad', '')::numeric,
+                'es_componente_externo', EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado','false') <> 'true'),
+                'enviado_a', (SELECT ev_ext->>'enviado_a' FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado','false') <> 'true' ORDER BY ev_ext->>'fecha' DESC LIMIT 1),
                 'moldes_nombres', COALESCE((SELECT string_agg(DISTINCT (m->>'molde_nombre'), ', ' ORDER BY (m->>'molde_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m), (SELECT string_agg(DISTINCT (d->>'derivado_nombre'), ', ' ORDER BY (d->>'derivado_nombre')) FROM jsonb_array_elements(COALESCE(ec.js_derivados_utilizados,'[]'::jsonb)) d)),
                 'unidad_salida_codigo', COALESCE(ev->>'unidad_codigo', ue.nombre_corto, (SELECT (m->>'unidad_produccion_codigo') FROM jsonb_array_elements(COALESCE(ec.js_moldes_utilizados,'[]'::jsonb)) m LIMIT 1), 'kg')
             ) AS item
@@ -1273,6 +1300,7 @@ function listarEnsamblajes()
         upe.nombre AS producto_unidad_ensamblaje_nombre,
         e.deleted_at,
         e.proveniente,
+        e.js_historial,
         e.js_moldes_utilizados,
         e.js_derivados_utilizados,
         e.categoria_material_id,
@@ -1475,8 +1503,16 @@ function guardarEnsamblaje()
     $detalleTieneExterno = false;
     $detalleTieneLocal = false;
     foreach ($detalle as $linea) {
+        if ($linea['tipo'] === 'complemento') {
+            if (componenteEnsamblajeEnviadoExterior($conectar, (int)$linea['ensamblaje_complemento_id'])) {
+                $detalleTieneExterno = true;
+            } else {
+                $detalleTieneLocal = true;
+            }
+            continue;
+        }
         if ($linea['tipo'] !== 'produccion') {
-            if ($linea['tipo'] === 'derivado' || $linea['tipo'] === 'complemento') $detalleTieneLocal = true;
+            $detalleTieneLocal = true;
             continue;
         }
         $envioExterno = obtenerEnvioExternoProduccion(
@@ -1491,7 +1527,7 @@ function guardarEnsamblaje()
         responder(false, 'Registra por separado los armados externos y los armados locales; no mezcles sus componentes.');
     }
     if ($destinoSeleccionado === 'externo' && !$detalleTieneExterno) {
-        responder(false, 'Para registrar un retorno externo, vincula solo producciones enviadas a externo.');
+        responder(false, 'Para registrar un retorno externo, vincula producciones o componentes enviados a externo.');
     }
     if ($destinoSeleccionado === 'local' && $detalleTieneExterno) {
         responder(false, 'El destino seleccionado es Local; quita las producciones enviadas a externo o cambia el destino.');
@@ -1508,8 +1544,8 @@ function guardarEnsamblaje()
             responder(false, 'Configura la receta de componentes del producto antes de registrar un retorno externo.');
         }
     }
-    if ($detalleTieneExterno && count(array_filter($detalle, static fn($linea) => $linea['tipo'] !== 'produccion')) > 0) {
-        responder(false, 'Un retorno externo solo puede vincular producciones incluidas en la receta del producto.');
+    if ($detalleTieneExterno && count(array_filter($detalle, static fn($linea) => $linea['tipo'] === 'derivado')) > 0) {
+        responder(false, 'Los derivados no se pueden mezclar en el retorno externo; vincula producciones y componentes de primera enviados al exterior.');
     }
     if ($requiereMaquina && !$maquinaId && !$detalleTieneExterno) {
         responder(false, 'Este producto requiere seleccionar la máquina utilizada en Ensamblaje.');
@@ -2171,7 +2207,8 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 
             $comp = executeQuery(
                 $conectar,
-                "SELECT ec.id, ec.fin, ec.deleted_at, ec.js_producto_emsamblado, ec.ensamblaje_id_referido,
+                "SELECT ec.id, ec.fin, ec.deleted_at, ec.js_producto_emsamblado, ec.js_historial, ec.ensamblaje_id_referido,
+                        pc.codigo AS producto_codigo,
                         " . sqlEsMultiMoldeCompleto('ec', 'pc') . " AS es_multi_molde_completo,
                         ec.categoria_material_id, cm.nombre AS categoria_material_nombre,
                         COALESCE(ec.color_id, own.color_id) AS color_id
@@ -2203,6 +2240,13 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if (stripos((string)($comp[0]['categoria_material_nombre'] ?? ''), 'primera') === false) {
                 throw new Exception("El ensamblaje complemento #$complementoId no es de Primera Categoría.");
             }
+            $componenteMarcadoExterior = componenteEnsamblajeEnviadoExterior($conectar, $complementoId);
+            if ($contieneExterno && !$componenteMarcadoExterior) {
+                throw new Exception("El complemento #$complementoId no está marcado para enviarse al exterior.");
+            }
+            if (!$contieneExterno && $componenteMarcadoExterior) {
+                throw new Exception("El complemento #$complementoId está destinado al exterior; cambia el destino del armado a Externo.");
+            }
             $compatibilidad = executeQuery($conectar, "
                 SELECT " . sqlEsComplementoCompatible('ec', 'pc', 'pt') . " AS compatible
                 FROM ensamblaje ec
@@ -2216,7 +2260,7 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if ($colorObjetivoId <= 0 || intval($comp[0]['color_id'] ?? 0) !== $colorObjetivoId) {
                 throw new Exception("El color del ensamblaje complemento #$complementoId no coincide con el color del producto que se está armando.");
             }
-            if (!empty($comp[0]['js_producto_emsamblado'])) {
+            if (!empty($comp[0]['js_producto_emsamblado']) && strtoupper((string)($comp[0]['producto_codigo'] ?? '')) !== 'PI') {
                 $marcadoPara = json_decode($comp[0]['js_producto_emsamblado'], true) ?: [];
                 if (intval($marcadoPara['producto_id'] ?? 0) !== $productoObjetivoId
                     || intval($marcadoPara['color_id'] ?? 0) !== $colorObjetivoId) {
@@ -2689,12 +2733,17 @@ function aplicarConsumoConfiguracionArmado($conectar, int $ensamblajeId, float $
             $unidad = strtoupper(trim((string)$comp['unidad_codigo']));
             $requerido = cantidadRequeridaRecetaEnUnidad($componente, $unidadesArmadas, $unidad);
             $usadoAntes = executeQuery($conectar, "
-                SELECT COALESCE(SUM(NULLIF(ev->>'cantidad', '')::numeric), 0) AS usado
-                FROM ensamblaje ec
-                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
-                JOIN ensamblaje e ON e.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
-                WHERE ec.id = :id AND ev->>'tipo' = 'consumo_complemento'
-                  AND COALESCE(ev->>'anulado','false') <> 'true' AND e.deleted_at IS NULL
+                SELECT
+                    COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                        FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                        JOIN ensamblaje e ON e.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                        WHERE ev->>'tipo' = 'consumo_complemento'
+                          AND COALESCE(ev->>'anulado','false') <> 'true' AND e.deleted_at IS NULL), 0)
+                    + COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric)
+                        FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_m
+                        WHERE ev_m->>'tipo' = 'merma_componente_externo'
+                          AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0) AS usado
+                FROM ensamblaje ec WHERE ec.id = :id
             ", ['id' => $comp['id']]);
             $disponible = max(0, (float)$comp['cantidad_peso_kg'] - (float)($usadoAntes[0]['usado'] ?? 0));
             $grupos[$clave][] = [
@@ -2900,6 +2949,85 @@ function guardarRecepcionExternaEnProducciones($conectar, int $ensamblajeId, flo
     }
 }
 
+/** Registra la merma y el saldo que regresó de cada ensamblaje usado como componente externo. */
+function guardarRecepcionExternaEnComplementos($conectar, int $ensamblajeId, array $mermas): void
+{
+    $componentes = executeQuery($conectar, "
+        SELECT ec.id, ec.cantidad_peso_kg, ec.js_historial,
+               COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                   FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                   JOIN ensamblaje padre ON padre.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                   WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true'
+                     AND padre.deleted_at IS NULL), 0) AS consumido_total,
+               COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                   FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                   WHERE ev->>'tipo' = 'merma_componente_externo' AND COALESCE(ev->>'anulado','false') <> 'true'), 0) AS merma_previa,
+               COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                   FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev
+                   WHERE ev->>'tipo' = 'consumo_complemento'
+                     AND ev->>'ensamblaje_id' = :ensamblaje_id_usado::text
+                     AND COALESCE(ev->>'anulado','false') <> 'true'), 0) AS usado_en_este_armado
+        FROM ensamblaje ec
+        WHERE ec.deleted_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext
+              WHERE ev_ext->>'tipo' = 'envio_componente_externo'
+                AND COALESCE(ev_ext->>'anulado','false') <> 'true'
+          )
+          AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_use
+              WHERE ev_use->>'tipo' = 'consumo_complemento'
+                AND ev_use->>'ensamblaje_id' = :ensamblaje_id_filtro::text
+                AND COALESCE(ev_use->>'anulado','false') <> 'true'
+          )
+        FOR UPDATE OF ec
+    ", [
+        'ensamblaje_id_usado' => $ensamblajeId,
+        'ensamblaje_id_filtro' => $ensamblajeId,
+    ]);
+
+    foreach ($componentes as $componente) {
+        $complementoId = (int)$componente['id'];
+        $clave = 'complemento:' . $complementoId;
+        $mermaInfo = $mermas[$clave] ?? [];
+        $cantidadMerma = max(0, (float)($mermaInfo['cantidad'] ?? 0));
+        $motivo = trim((string)($mermaInfo['motivo'] ?? ''));
+        $saldoAntesMerma = max(0, (float)$componente['cantidad_peso_kg']
+            - (float)$componente['consumido_total'] - (float)$componente['merma_previa']);
+        if ($cantidadMerma > $saldoAntesMerma + 0.000001) {
+            throw new Exception("La merma del componente ensamblado #$complementoId supera el saldo que regresó.");
+        }
+        $sobrante = max(0, $saldoAntesMerma - $cantidadMerma);
+        $evento = [
+            'tipo' => 'merma_componente_externo',
+            'ensamblaje_id' => $ensamblajeId,
+            'cantidad' => $cantidadMerma,
+            'motivo' => $motivo,
+            'fecha' => date('c'),
+        ];
+        $retorno = [
+            'tipo' => 'retorno_componente_externo',
+            'ensamblaje_id' => $ensamblajeId,
+            'cantidad_utilizada' => (float)$componente['usado_en_este_armado'],
+            'cantidad_merma' => $cantidadMerma,
+            'motivo_merma' => $motivo,
+            'cantidad_sobrante' => $sobrante,
+            'fecha' => date('c'),
+        ];
+        executeNonQuery($conectar, "
+            UPDATE ensamblaje
+            SET js_historial = COALESCE(js_historial, '[]'::jsonb)
+                    || CAST(:evento_merma AS jsonb) || CAST(:evento_retorno AS jsonb),
+                update_at = NOW()
+            WHERE id = :id
+        ", [
+            'evento_merma' => json_encode($evento, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'evento_retorno' => json_encode($retorno, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'id' => $complementoId,
+        ]);
+    }
+}
+
 function registrarSobranteExternoDisponible($conectar, array $sobrante): void
 {
     $produccionId = (int)$sobrante['produccion_id'];
@@ -3062,6 +3190,7 @@ function finalizarEnsamblaje(int $id)
         if ($esRecepcionExterna) {
             if (empty($configArmado)) throw new Exception('El producto no tiene receta de armado configurada; no se pueden calcular los sobrantes externos.');
             guardarRecepcionExternaEnProducciones($conectar, $id, $cantidadSalida, $unidadSalidaId, $unidadLabel, $mermasExterno);
+            guardarRecepcionExternaEnComplementos($conectar, $id, $mermasExterno);
         }
 
         executeNonQuery($conectar, "
@@ -3114,7 +3243,7 @@ function marcarComplemento()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT e.id, e.deleted_at, e.fin, e.producto_id, e.js_producto_emsamblado, e.ensamblaje_id_referido, e.categoria_material_id, e.enviado_empaquetado,
+        "SELECT e.id, e.deleted_at, e.fin, e.producto_id, p.codigo AS producto_codigo, e.js_producto_emsamblado, e.ensamblaje_id_referido, e.categoria_material_id, e.enviado_empaquetado,
                 " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
                 cm.nombre AS categoria_material_nombre
          FROM ensamblaje e
@@ -3127,8 +3256,13 @@ function marcarComplemento()
     $e = $existe[0];
     verificarPropiedadEnsamblaje($conectar, $id);
 
+    if (strtoupper((string)($e['producto_codigo'] ?? '')) === 'PI') {
+        responder(false, 'La Pinza Palanita queda disponible localmente por su receta. Se asigna al Osito o al Ovalado al seleccionarla en el ensamblaje, sin marcar un producto de destino aquí.');
+    }
+
     if (!empty($e['deleted_at'])) responder(false, 'No puedes marcar como complemento un ensamblaje inactivo.');
     if (empty($e['fin'])) responder(false, 'Solo puedes marcar como complemento un ensamblaje ya finalizado.');
+    if (componenteEnsamblajeEnviadoExterior($conectar, $id)) responder(false, 'Este ensamblaje ya está destinado al exterior y no puede cambiarse a componente local.');
     if (!empty($e['js_producto_emsamblado'])) responder(false, 'Este ensamblaje ya fue marcado como complemento.');
     if (!empty($e['ensamblaje_id_referido'])) responder(false, 'Este ensamblaje ya está siendo utilizado como complemento.');
     if (!empty($e['enviado_empaquetado'])) responder(false, 'Este ensamblaje ya fue enviado a empaquetado; no puede marcarse como complemento.');
@@ -3285,6 +3419,181 @@ function marcarComplemento()
     ]);
 
     responder(true, "Ensamblaje marcado como complemento de {$p['codigo']} - {$p['descripcion']}" . ($colorFinalNombre ? " ({$colorFinalNombre})" : '') . ".");
+}
+
+/** Marca un ensamblaje local de primera como componente que puede salir a un servicio externo. */
+function componenteEnsamblajeEnviadoExterior($db, int $id): bool
+{
+    if ($id <= 0) return false;
+    $r = executeQuery($db, "
+        SELECT EXISTS (
+            SELECT 1 FROM ensamblaje e
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev
+            WHERE e.id = :id AND ev->>'tipo' = 'envio_componente_externo'
+              AND COALESCE(ev->>'anulado', 'false') <> 'true'
+        ) AS enviado
+    ", ['id' => $id]);
+    return !empty($r) && valorBooleanoEnsamblaje($r[0]['enviado'] ?? false);
+}
+
+function enviarComponenteEnsambladoAlExterior(): void
+{
+    if (!esAdministradorSesionEnsamblaje() && !esOperarioSesion()) {
+        responderAcceso(403, 'Solo un administrador o el operario asignado puede registrar el envío del componente.');
+    }
+    $id = (int)($_POST['id'] ?? 0);
+    $destinatario = trim((string)($_POST['enviado_a'] ?? ''));
+    if ($id <= 0) responder(false, 'ID de ensamblaje inválido.');
+    if ($destinatario === '' || mb_strlen($destinatario) > 160) responder(false, 'Indica el nombre del destinatario (máximo 160 caracteres).');
+
+    $db = conectar_oll_BD();
+    $db->beginTransaction();
+    try {
+        $filas = executeQuery($db, "
+            SELECT e.id, e.fin, e.deleted_at, e.enviado_empaquetado, e.ensamblaje_id_referido, e.proveniente,
+                   p.codigo AS producto_codigo,
+                   e.js_producto_emsamblado, e.js_historial, cm.nombre AS categoria_material_nombre,
+                   " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
+                   GREATEST(0, COALESCE(e.cantidad_peso_kg, 0)
+                     - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                         FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev
+                         JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                         WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true'
+                           AND eus.deleted_at IS NULL), 0)
+                     - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric)
+                         FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m
+                         WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) AS disponible,
+                   EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_ext
+                           WHERE ev_ext->>'tipo' = 'envio_componente_externo'
+                             AND COALESCE(ev_ext->>'anulado','false') <> 'true') AS ya_enviado,
+                   EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_local
+                           WHERE ev_local->>'tipo' = 'ruta_componente_local'
+                             AND COALESCE(ev_local->>'anulado','false') <> 'true') AS ya_local
+            FROM ensamblaje e
+            LEFT JOIN producto p ON p.id = e.producto_id
+            LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
+            WHERE e.id = :id
+            FOR UPDATE OF e
+        ", ['id' => $id]);
+        if (!$filas) throw new RuntimeException('No se encontró el ensamblaje.');
+        $e = $filas[0];
+        if (esOperarioSesion()) verificarPropiedadEnsamblaje($db, $id);
+        if (!empty($e['deleted_at'])) throw new RuntimeException('No puedes enviar un ensamblaje inactivo.');
+        if (($e['proveniente'] ?? '') === 'externo') throw new RuntimeException('Solo puedes enviar al exterior un componente que fue ensamblado localmente.');
+        if (empty($e['fin'])) throw new RuntimeException('Primero debes finalizar el ensamblaje local.');
+        if (stripos((string)($e['categoria_material_nombre'] ?? ''), 'primera') === false) {
+            throw new RuntimeException('Solo los componentes de primera categoría pueden enviarse como parte de otro armado.');
+        }
+        if (valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false) || !empty($e['enviado_empaquetado'])) {
+            throw new RuntimeException('Este ensamblaje ya es un producto terminado independiente y no se puede enviar como componente.');
+        }
+        if (!empty($e['ensamblaje_id_referido'])) throw new RuntimeException('Este ensamblaje ya está reservado como componente de otro armado.');
+        if (!empty($e['js_producto_emsamblado']) && strtoupper((string)($e['producto_codigo'] ?? '')) !== 'PI') throw new RuntimeException('Este ensamblaje ya está reservado para la ruta de componente local.');
+        if (valorBooleanoEnsamblaje($e['ya_enviado'] ?? false)) throw new RuntimeException('Este ensamblaje ya fue marcado para servicio externo.');
+        if (valorBooleanoEnsamblaje($e['ya_local'] ?? false)) throw new RuntimeException('Este ensamblaje ya quedó seleccionado para la ruta local.');
+        if ((float)($e['disponible'] ?? 0) <= 0) throw new RuntimeException('Este ensamblaje no tiene saldo disponible para enviar.');
+
+        $cambio = obtenerMovimientoSesion('envio_componente_externo', [[
+            'campo' => 'Componente enviado al exterior',
+            'valor_antes' => '(disponible local)',
+            'valor_despues' => $destinatario . ' · ' . number_format((float)$e['disponible'], 3, '.', '') . ' unidad(es)',
+        ]]);
+        $evento = array_merge($cambio, [
+            'tipo' => 'envio_componente_externo',
+            'fecha' => date('c'),
+            'enviado_a' => $destinatario,
+            'cantidad_enviada' => (float)$e['disponible'],
+        ]);
+        $jsonEvento = json_encode($evento, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        executeNonQuery($db, "
+            UPDATE ensamblaje
+            SET js_historial = COALESCE(js_historial, '[]'::jsonb) || CAST(:evento AS jsonb),
+                js_usuario = CAST(:usuario AS jsonb), update_at = NOW()
+            WHERE id = :id
+        ", ['evento' => $jsonEvento, 'usuario' => $jsonEvento, 'id' => $id]);
+        $db->commit();
+        responder(true, 'Componente marcado para enviarse al exterior. Ya estará disponible solo en ensamblajes externos compatibles.');
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
+/** Registra la decisión local de Pinza Palanita sin asignarla a un producto específico. */
+function seleccionarComponenteEnsambladoLocal(): void
+{
+    if (!esAdministradorSesionEnsamblaje() && !esOperarioSesion()) {
+        responderAcceso(403, 'Solo un administrador o el operario asignado puede seleccionar la ruta local.');
+    }
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id <= 0) responder(false, 'ID de ensamblaje inválido.');
+
+    $db = conectar_oll_BD();
+    $db->beginTransaction();
+    try {
+        $filas = executeQuery($db, "
+            SELECT e.id, e.fin, e.deleted_at, e.enviado_empaquetado, e.ensamblaje_id_referido,
+                   e.proveniente, e.cantidad_peso_kg, p.codigo AS producto_codigo,
+                   cm.nombre AS categoria_material_nombre,
+                   " . sqlEsMultiMoldeCompleto('e', 'p') . " AS es_multi_molde_completo,
+                   GREATEST(0, COALESCE(e.cantidad_peso_kg, 0)
+                     - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+                         FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev
+                         JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                         WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true'
+                           AND eus.deleted_at IS NULL), 0)
+                     - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric)
+                         FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m
+                         WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) AS disponible,
+                   EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_ext
+                           WHERE ev_ext->>'tipo' = 'envio_componente_externo'
+                             AND COALESCE(ev_ext->>'anulado','false') <> 'true') AS ya_enviado,
+                   EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_local
+                           WHERE ev_local->>'tipo' = 'ruta_componente_local'
+                             AND COALESCE(ev_local->>'anulado','false') <> 'true') AS ya_local
+            FROM ensamblaje e
+            LEFT JOIN producto p ON p.id = e.producto_id
+            LEFT JOIN categoria_material cm ON cm.id = e.categoria_material_id
+            WHERE e.id = :id
+            FOR UPDATE OF e
+        ", ['id' => $id]);
+        if (!$filas) throw new RuntimeException('No se encontró el ensamblaje.');
+        $e = $filas[0];
+        if (esOperarioSesion()) verificarPropiedadEnsamblaje($db, $id);
+        if (!empty($e['deleted_at'])) throw new RuntimeException('No puedes seleccionar la ruta de un ensamblaje inactivo.');
+        if (($e['proveniente'] ?? '') === 'externo') throw new RuntimeException('Este ensamblaje proviene de un servicio externo.');
+        if (empty($e['fin'])) throw new RuntimeException('Primero debes finalizar el ensamblaje.');
+        if (strtoupper((string)($e['producto_codigo'] ?? '')) !== 'PI') throw new RuntimeException('Esta selección de ruta local está habilitada para Pinza Palanita.');
+        if (stripos((string)($e['categoria_material_nombre'] ?? ''), 'primera') === false) throw new RuntimeException('Solo Pinza Palanita de primera categoría puede quedar como componente local.');
+        if (valorBooleanoEnsamblaje($e['es_multi_molde_completo'] ?? false) || !empty($e['enviado_empaquetado'])) throw new RuntimeException('Este ensamblaje ya está completo para empaquetado.');
+        if (!empty($e['ensamblaje_id_referido'])) throw new RuntimeException('Este ensamblaje ya está reservado en otro armado.');
+        if (valorBooleanoEnsamblaje($e['ya_enviado'] ?? false)) throw new RuntimeException('Este ensamblaje ya fue enviado al exterior.');
+        if (valorBooleanoEnsamblaje($e['ya_local'] ?? false)) throw new RuntimeException('La ruta local ya fue seleccionada para este ensamblaje.');
+        if ((float)($e['disponible'] ?? 0) <= 0) throw new RuntimeException('Este ensamblaje ya no tiene saldo disponible.');
+
+        $movimiento = obtenerMovimientoSesion('ruta_componente_local', [[
+            'campo' => 'Ruta de Pinza Palanita',
+            'valor_antes' => 'Sin seleccionar',
+            'valor_despues' => 'Local · disponible para Osito y Ovalado según sus recetas',
+        ]]);
+        $evento = array_merge($movimiento, [
+            'tipo' => 'ruta_componente_local',
+            'fecha' => date('c'),
+            'cantidad_disponible' => (float)$e['disponible'],
+        ]);
+        $json = json_encode($evento, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        executeNonQuery($db, "
+            UPDATE ensamblaje
+            SET js_historial = COALESCE(js_historial, '[]'::jsonb) || CAST(:evento AS jsonb),
+                js_usuario = CAST(:usuario AS jsonb), update_at = NOW()
+            WHERE id = :id
+        ", ['evento' => $json, 'usuario' => $json, 'id' => $id]);
+        $db->commit();
+        responder(true, 'Ruta local seleccionada. La Pinza queda disponible para los productos compatibles y cada armado consumirá lo que indique su receta.');
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        responder(false, $e->getMessage());
+    }
 }
 // Envía un ensamblaje YA FINALIZADO directo a Empaquetado, como producto
 // terminado independiente, SIN pasar por COMPLEMENTAR. Mutuamente

@@ -38,7 +38,7 @@ include 'header.php';
     <h2 class="h5 m-0">Detalle de envíos externos</h2><span class="text-muted" id="rseConteo"></span>
   </div>
   <div class="rse-table-wrap"><table class="rse-table">
-    <thead><tr><th>Enviado</th><th>Destinatario</th><th>Componente</th><th>Producción</th><th>Cantidad enviada</th><th>Producto armado recibido</th><th>Usado</th><th>Merma</th><th>Sobrante bueno</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Enviado</th><th>Destinatario</th><th>Componente</th><th>Origen</th><th>Cantidad enviada</th><th>Producto armado recibido</th><th>Usado</th><th>Merma</th><th>Sobrante bueno</th><th>Estado</th></tr></thead>
     <tbody id="rseFilas"><tr><td colspan="10" class="rse-empty">Consulta para ver los envíos externos.</td></tr></tbody>
   </table></div>
 </section>
@@ -95,7 +95,7 @@ function rseRender(data) {
             <td>${rseEsc(rseFecha(f.fecha_envio))}</td>
             <td>${rseEsc(f.enviado_a || '—')}</td>
             <td><b>${rseEsc(f.componente)}</b>${f.color ? `<br><small>${rseEsc(f.color)}</small>` : ''}</td>
-            <td>#${rseEsc(f.produccion_id)} · Pasada ${rseEsc(f.pasada ?? '—')}</td>
+            <td>${f.tipo_envio === 'componente_ensamblado' ? `Ensamblaje local #${rseEsc(f.ensamblaje_componente_id)}` : `Producción #${rseEsc(f.produccion_id)} · Pasada ${rseEsc(f.pasada ?? '—')}`}</td>
             <td>${rseEsc(rseQty(f.cantidad_enviada))} ${rseEsc(f.unidad_componente)}</td>
             <td>${f.estado === 'recibido' ? `${rseEsc(rseQty(f.cantidad_producto_armado))} ${rseEsc(f.unidad_producto)}<br><small>${rseEsc(f.producto_armado_codigo || '')} ${rseEsc(f.producto_armado || '')} · #${rseEsc(f.ensamblaje_id)}</small>` : '—'}</td>
             <td>${f.estado === 'recibido' ? `${rseEsc(rseQty(f.cantidad_utilizada))} ${rseEsc(f.unidad_componente)}` : '—'}</td>
@@ -105,8 +105,8 @@ function rseRender(data) {
         </tr>`).join('') : '<tr><td colspan="10" class="rse-empty">No hay envíos externos con esos filtros.</td></tr>';
 }
 function rseExportar() {
-    const cols = ['Fecha de envío','Destinatario','Componente','Producción','Pasada','Cantidad enviada','Unidad','Producto armado recibido','Cantidad armada','Unidad producto','Usado','Merma','Motivo de merma','Sobrante bueno','Estado'];
-    const rows = rseFilasActuales.map(f => [f.fecha_envio,f.enviado_a,f.componente,f.produccion_id,f.pasada,f.cantidad_enviada,f.unidad_componente,f.producto_armado,f.cantidad_producto_armado,f.unidad_producto,f.cantidad_utilizada,f.cantidad_merma,f.motivo_merma,f.cantidad_sobrante,f.estado]);
+    const cols = ['Fecha de envío','Destinatario','Componente','Origen','Pasada','Cantidad enviada','Unidad','Producto armado recibido','Cantidad armada','Unidad producto','Usado','Merma','Motivo de merma','Sobrante bueno','Estado'];
+    const rows = rseFilasActuales.map(f => [f.fecha_envio,f.enviado_a,f.componente,f.tipo_envio === 'componente_ensamblado' ? `Ensamblaje #${f.ensamblaje_componente_id}` : `Producción #${f.produccion_id}`,f.pasada,f.cantidad_enviada,f.unidad_componente,f.producto_armado,f.cantidad_producto_armado,f.unidad_producto,f.cantidad_utilizada,f.cantidad_merma,f.motivo_merma,f.cantidad_sobrante,f.estado]);
     const csv = '\ufeff' + [cols, ...rows].map(row => row.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(';')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'}));
     const a = document.createElement('a'); a.href = url; a.download = 'reporte-servicios-externos.csv'; a.click(); URL.revokeObjectURL(url);

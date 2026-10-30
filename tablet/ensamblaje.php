@@ -972,9 +972,20 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const puedeIniciar   = !e.deleted_at && !e.inicio;
     const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
-    const esDeSegunda = (e.categoria_material_nombre ?? '').trim().toLowerCase() === 'de segunda';
+    const categoriaMaterial = (e.categoria_material_nombre ?? '').trim().toLowerCase();
+    const esDeSegunda = categoriaMaterial.includes('segunda');
+    const esDePrimera = categoriaMaterial.includes('primera');
+    const esPinzaPalanita = String(e.producto_codigo ?? '').trim().toUpperCase() === 'PI';
     const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
     const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const historialComponente = parseJsonColumna(e.js_historial);
+    const eventoActivoComponente = h => !['true', 't', '1'].includes(String(h.anulado).toLowerCase());
+    const envioComponenteExt = historialComponente.find(h => h.tipo === 'envio_componente_externo' && eventoActivoComponente(h));
+    const rutaComponenteLocal = historialComponente.find(h => h.tipo === 'ruta_componente_local' && eventoActivoComponente(h));
+    const disponibleComoComponenteLocal = !e.deleted_at && e.proveniente !== 'externo' && e.fin && esDePrimera && !esMultiMoldeCompleto && !e.ensamblaje_id_referido && !e.enviado_empaquetado && !envioComponenteExt;
+    const puedeSeleccionarRutaLocal = esPinzaPalanita && disponibleComoComponenteLocal && !rutaComponenteLocal;
+    const puedeElegirRutaComponente = disponibleComoComponenteLocal && !rutaComponenteLocal && (esPinzaPalanita || !productoEmsamblado);
+    const puedeMarcarLocalEspecifico = puedeElegirRutaComponente && !esPinzaPalanita;
     const complementoUsado = !!e.ensamblaje_id_referido;
 
     // NUEVO: nombres de lo que compone este armado (moldes de producción +
@@ -1000,8 +1011,10 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
 
     const tags = [];
     if (e.categoria_material_nombre) tags.push(e.categoria_material_nombre);
+    if (envioComponenteExt) tags.push({ texto: `Enviado al exterior · ${envioComponenteExt.enviado_a || 'destinatario pendiente'}`, clase: 'empaquetado' });
+    else if (esPinzaPalanita && disponibleComoComponenteLocal) tags.push({ texto: rutaComponenteLocal ? 'Ruta local · consumo según receta' : 'Elige ruta: local o exterior', clase: 'libre' });
     if (esMultiMoldeCompleto) tags.push({ texto: 'Multi-molde completo · listo para empaquetado', clase: 'empaquetado' });
-    if (productoEmsamblado && !esMultiMoldeCompleto) {
+    if (productoEmsamblado && !esMultiMoldeCompleto && !esPinzaPalanita) {
         tags.push({ texto: `Complementa a ${productoEmsamblado.codigo ?? ''}`, clase: 'complemento' });
         tags.push({ texto: complementoUsado ? `Usado en #${e.ensamblaje_id_referido}` : 'Disponible para vincular', clase: complementoUsado ? 'usado' : 'libre' });
     }
@@ -1039,6 +1052,9 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
         <div class="pc-ens-card-foot">
             ${puedeIniciar ? `<button type="button" class="pc-ens-ghost-btn success" onclick="iniciarEnsamblajeAccion(${e.ensamblaje_id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeFinalizar ? `<button type="button" class="pc-ens-ghost-btn warn" onclick="finalizarEnsamblajeAccion(${e.ensamblaje_id})"><i class="fa-solid fa-flag-checkered"></i> Finalizar</button>` : ''}
+            ${puedeMarcarLocalEspecifico ? `<button type="button" class="pc-ens-ghost-btn teal" onclick="marcarComplementoAccion(${e.ensamblaje_id})"><i class="fa-solid fa-puzzle-piece"></i> Usar local</button>` : ''}
+            ${puedeSeleccionarRutaLocal ? `<button type="button" class="pc-ens-ghost-btn teal" onclick="seleccionarComponenteLocalAccion(${e.ensamblaje_id})"><i class="fa-solid fa-house"></i> Local</button>` : ''}
+            ${puedeElegirRutaComponente ? `<button type="button" class="pc-ens-ghost-btn warn" onclick="enviarComponenteExteriorAccion(${e.ensamblaje_id})"><i class="fa-solid fa-truck-fast"></i> Exterior</button>` : ''}
             ${puedeDecidirDestino ? `<button type="button" class="pc-ens-ghost-btn teal" onclick="pasarAEmpaquetadoAccion(${e.ensamblaje_id})"><i class="fa-solid fa-box"></i> A Empaquetado</button>` : ''}
         </div>
     </div>`;
@@ -1178,6 +1194,40 @@ async function marcarComplementoAccion(id) {
         cantidad_ensamblada: cantidadEnsamblada,
     });
     if (json.success) { Swal.fire('Listo', json.message, 'success'); cargarEnsamblajes(); }
+    else { Swal.fire('Error', json.message, 'error'); }
+}
+
+async function seleccionarComponenteLocalAccion(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Dejar la Pinza Palanita en local?',
+        text: 'Quedará disponible para los productos que la tengan en su receta. Cada ensamblaje consumirá su cantidad y el saldo restante podrá usarse en otro producto compatible.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Seleccionar local',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+    const json = await llamarEnsamblaje('SELECCIONARRUTACOMPONENTELOCAL', { id });
+    if (json.success) { Swal.fire('Ruta local seleccionada', json.message, 'success'); cargarEnsamblajes(); }
+    else { Swal.fire('Error', json.message, 'error'); }
+}
+
+async function enviarComponenteExteriorAccion(id) {
+    const { value: enviadoA } = await Swal.fire({
+        title: 'Enviar componente al exterior',
+        html: 'Elige esta opción si la Pinza Palanita de primera se usará fuera de la fábrica. Luego podrá vincularse a un ensamblaje externo compatible.',
+        input: 'text',
+        inputLabel: '¿A quién se envía?',
+        inputPlaceholder: 'Nombre de la persona o taller',
+        inputAttributes: { maxlength: 160, autocomplete: 'off' },
+        showCancelButton: true,
+        confirmButtonText: 'Registrar envío',
+        cancelButtonText: 'Cancelar',
+        inputValidator: value => !value?.trim() ? 'Indica a quién se envía.' : undefined
+    });
+    if (!enviadoA) return;
+    const json = await llamarEnsamblaje('ENVIARCOMPONENTEEXTERNO', { id, enviado_a: enviadoA.trim() });
+    if (json.success) { Swal.fire('Envío registrado', json.message, 'success'); cargarEnsamblajes(); }
     else { Swal.fire('Error', json.message, 'error'); }
 }
 
