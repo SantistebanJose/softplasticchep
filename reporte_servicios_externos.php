@@ -1,6 +1,10 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) session_start();
-if (empty($_SESSION['usuario_id']) || strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) !== 'administrador') {
+if (empty($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
+if (strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) !== 'administrador') {
     http_response_code(403);
     exit('No tienes permiso para ver este reporte.');
 }
