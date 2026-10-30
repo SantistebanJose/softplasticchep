@@ -592,6 +592,11 @@ function seleccionarTabColorEns(color) {
 }
 
 function estadoArmadoTexto(e) {
+    if (e.proveniente === 'externo') {
+        return e.fin
+            ? `<span class="pc-corrida-fin">Retorno recibido: ${formatearFechaHoraLegibleEns(e.fin)}</span>`
+            : '<span class="pc-corrida-sin">Pendiente de recepción</span>';
+    }
     if (!e.inicio) {
         return '<span class="pc-corrida-sin">Sin iniciar</span>';
     }
@@ -739,8 +744,10 @@ function tarjetaEnsamblajeHtml(e) {
     const producciones = e.producciones_count ?? parseJsonColumna(e.js_moldes_utilizados).length;
     const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
     const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
-    const puedeIniciar   = !e.deleted_at && !e.inicio;
-    const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
+    const esRetornoExterno = e.proveniente === 'externo';
+    const puedeIniciar   = !esRetornoExterno && !e.deleted_at && !e.inicio;
+    const puedeFinalizar = !esRetornoExterno && !e.deleted_at && e.inicio && !e.fin;
+    const puedeRegistrarRetorno = puedeRegistrarExternoEns && esRetornoExterno && !e.deleted_at && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const puedeFusionar = !e.deleted_at && !e.enviado_empaquetado && !productoEmsamblado && !e.ensamblaje_id_referido;
     const categoriaMaterial = (e.categoria_material_nombre ?? '').trim().toLowerCase();
@@ -884,6 +891,11 @@ function tarjetaEnsamblajeHtml(e) {
             ${puedeFinalizar
                 ? `<button type="button" class="pc-btn-finalizar" onclick="finalizarEnsamblajeAccion(${e.ensamblaje_id})" title="Finalizar armado">
                     <i class="fa-solid fa-flag-checkered"></i> Finalizar</button>`
+                : ''
+            }
+            ${puedeRegistrarRetorno
+                ? `<button type="button" class="pc-btn-finalizar" onclick="registrarRetornoExternoAccion(${e.ensamblaje_id})" title="Registrar lo recibido del servicio externo">
+                    <i class="fa-solid fa-box-open"></i> Registrar recibido</button>`
                 : ''
             }
             ${puedeDecidirDestino ? `
@@ -1241,7 +1253,7 @@ async function renderGridDetalle() {
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
+                <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${p.destino_ensamblaje === 'externo' ? 'Enviado' : 'Disponible'}: <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</b></span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
                 ${p.destino_ensamblaje === 'externo' ? `<span class="meta text-warning-emphasis"><b>Externo · enviado a ${p.enviado_a || 'destinatario sin dato'}</b></span>` : ''}
@@ -1395,7 +1407,8 @@ async function agregarLineaDetalle(tipo, datos) {
             if (!cantidadRecibida) return;
             cantidadRecibidaNum = parseFloat(cantidadRecibida);
         }
-        const coincide = Math.abs(cantidadRecibidaNum - cantidadProducida) < 0.0001;
+        const coincide = datos.destino_ensamblaje !== 'externo'
+            && Math.abs(cantidadRecibidaNum - cantidadProducida) < 0.0001;
         const recetaMeta = datos.cantidad_por_unidad_armada
             ? ` · Receta: ${formatearCantidadEns(datos.cantidad_por_unidad_armada)} ${datos.unidad_componente_configurada || ''} por unidad armada`
             : '';
@@ -1414,7 +1427,8 @@ async function agregarLineaDetalle(tipo, datos) {
             color_nombre: datos.color_nombre,
             meta: `#${datos.produccion_id}`
                 + (datos.pasada ? ` · Pasada ${datos.pasada}` : '')
-            + ` · Color: ${datos.color_nombre || '-'} · Disponible: ${formatearCantidadEns(cantidadProducida)} ${unidad} · Se usará: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}`
+            + ` · Color: ${datos.color_nombre || '-'} · ${datos.destino_ensamblaje === 'externo' ? 'Enviado' : 'Disponible'}: ${formatearCantidadEns(cantidadProducida)} ${unidad}`
+            + (datos.destino_ensamblaje === 'externo' ? ' · Consumo y sobrante se calculan al registrar el retorno' : ` · Se usará: ${formatearCantidadEns(cantidadRecibidaNum)} ${unidad}`)
             + (coincide ? ' <span style="color:#16A34A;">✓ se usa todo</span>' : ' <span style="color:#D97706;">↳ quedará saldo</span>')
             + recetaMeta
                 + (datos.destino_ensamblaje === 'externo' ? ` · <b style="color:#a16207;">Externo · enviado a ${datos.enviado_a || 'sin destinatario'}</b>` : '')
@@ -1971,14 +1985,14 @@ function finalizarEnsamblajeAccion(id) {
     const filasMerma = filasMermaProduccion + filasMermaComplemento;
 
     Swal.fire({
-        title: '¿Finalizar el armado?',
-        html: `Indica la cantidad de salida (<b>${unidadCodigo}</b> · ${unidadNombre}) de este armado.${esRetornoExterno ? `<hr><p class="text-start mb-2"><b>Merma por componente</b><br><small>Indica lo dañado o quebrado. El sobrante restante volverá disponible.</small></p>${filasMerma || '<p>No hay componentes vinculados para registrar merma.</p>'}` : ''}`,
+        title: esRetornoExterno ? 'Registrar retorno recibido' : '¿Finalizar el armado?',
+        html: `${esRetornoExterno ? 'Ingresa la cantidad total de producto armado que regresó' : 'Indica la cantidad de salida de este armado'} (<b>${unidadCodigo}</b> · ${unidadNombre}).${esRetornoExterno ? `<hr><p class="text-start mb-2"><b>Merma por componente</b><br><small>Indica lo dañado o quebrado. El sobrante restante volverá disponible.</small></p>${filasMerma || '<p>No hay componentes vinculados para registrar merma.</p>'}` : ''}`,
         icon: 'question',
         input: 'number',
         inputAttributes: { min: 0, step: '0.01' },
         inputPlaceholder: `Cantidad en ${unidadCodigo}`,
         showCancelButton: true,
-        confirmButtonText: 'Sí, finalizar',
+        confirmButtonText: esRetornoExterno ? 'Confirmar recepción' : 'Sí, finalizar',
         cancelButtonText: 'Cancelar',
         inputValidator: (value) => {
             if (!value || parseFloat(value) <= 0) {
@@ -2019,6 +2033,10 @@ function finalizarEnsamblajeAccion(id) {
             Swal.fire('Error', json.message, 'error');
         }
     });
+}
+
+function registrarRetornoExternoAccion(id) {
+    finalizarEnsamblajeAccion(id);
 }
 </script>
 

@@ -969,8 +969,9 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
     const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
 
-    const puedeIniciar   = !e.deleted_at && !e.inicio;
-    const puedeFinalizar = !e.deleted_at && e.inicio && !e.fin;
+    const esRetornoExterno = e.proveniente === 'externo';
+    const puedeIniciar   = !esRetornoExterno && !e.deleted_at && !e.inicio;
+    const puedeFinalizar = !esRetornoExterno && !e.deleted_at && e.inicio && !e.fin;
     const productoEmsamblado = parseJsonObjetoColumna(e.js_producto_emsamblado);
     const categoriaMaterial = (e.categoria_material_nombre ?? '').trim().toLowerCase();
     const esDeSegunda = categoriaMaterial.includes('segunda');
@@ -1021,11 +1022,16 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
     else if (complementoUsado) tags.push({ texto: `Usado como complemento en armado #${e.ensamblaje_id_referido}`, clase: 'usado' });
     if (e.enviado_empaquetado) tags.push({ texto: `Empaquetado ${formatearFechaCortaEns(e.fecha_envio_empaquetado)}`, clase: 'empaquetado' });
 
-    const textoEstadoMap = { sin: 'Sin iniciar', curso: 'En curso', fin: 'Finalizado' };
+    const textoEstadoMap = {
+        sin: esRetornoExterno ? 'Pendiente de recepción' : 'Sin iniciar',
+        curso: 'En curso',
+        fin: esRetornoExterno ? 'Retorno recibido' : 'Finalizado',
+    };
 
-    let lineaCorrida = 'Armado sin iniciar';
-    if (e.inicio && !e.fin) lineaCorrida = `Iniciado · <b>${formatearFechaHoraLegibleEns(e.inicio)}</b>`;
-    else if (e.inicio && e.fin) lineaCorrida = `Inicio <b>${formatearFechaHoraLegibleEns(e.inicio)}</b> — Fin <b>${formatearFechaHoraLegibleEns(e.fin)}</b>`;
+    let lineaCorrida = esRetornoExterno ? 'Pendiente de recepción' : 'Armado sin iniciar';
+    if (esRetornoExterno && e.fin) lineaCorrida = `Retorno recibido · <b>${formatearFechaHoraLegibleEns(e.fin)}</b>`;
+    else if (!esRetornoExterno && e.inicio && !e.fin) lineaCorrida = `Iniciado · <b>${formatearFechaHoraLegibleEns(e.inicio)}</b>`;
+    else if (!esRetornoExterno && e.inicio && e.fin) lineaCorrida = `Inicio <b>${formatearFechaHoraLegibleEns(e.inicio)}</b> — Fin <b>${formatearFechaHoraLegibleEns(e.fin)}</b>`;
 
     return `
     <div class="pc-ens-card estado-${estado} ${cambioDeEstado ? 'pc-flash' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
@@ -1315,7 +1321,7 @@ async function renderGridDetalle() {
             })})'>
                 <span class="pellet"><i class="fa-solid fa-industry"></i></span>
                 <span class="nombre">${p.molde_nombre ?? ('Producción #' + p.produccion_id)}</span>
-                <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</span>
+                <span class="meta">#${p.produccion_id}${p.pasada ? ` · Pasada ${p.pasada}` : ''} · ${p.destino_ensamblaje === 'externo' ? 'Enviado' : 'Disponible'}: <b>${formatearCantidadEns(p.cantidad_kg ?? p.cantidad)} ${p.unidad_produccion_codigo || 'KG'}</b></span>
                 <span class="meta">Color: <span class="ens-color-dot" style="background:${colorRgb}" aria-label="Color ${colorNombre || 'sin nombre'}"></span><b>${colorNombre || '-'}</b></span>
                 <span class="meta">Categoría: <b>${p.categoria_material_nombre_verif || 'Sin categoría'}</b></span>
                 ${p.destino_ensamblaje === 'externo' ? `<span class="meta text-warning-emphasis"><b>Externo · enviado a ${p.enviado_a || 'destinatario sin dato'}</b></span>` : ''}

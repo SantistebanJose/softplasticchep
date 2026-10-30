@@ -2878,6 +2878,9 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
 });
 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
+    // El manejador de captura cancela el submit cuando el botón solo debe
+    // avanzar al siguiente paso. No enviar el avance hasta llegar al último.
+    if (e.defaultPrevented) return;
     e.preventDefault();
 
     const completaRaw = document.getElementById('produccion_completo').checked ? 'true' : 'false';

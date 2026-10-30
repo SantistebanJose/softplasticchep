@@ -959,7 +959,13 @@ function buscarProduccionesDisponibles()
         ) rep ON TRUE
         LEFT JOIN ensamblaje ep ON ep.id = rep.ensamblaje_id AND ep.deleted_at IS NULL
         LEFT JOIN LATERAL (
-            SELECT COALESCE(SUM(COALESCE(rep_usado.cantidad_entrada_produccion, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_usado.cantidad_producida_kg, 0)), 0) AS cantidad_usada
+            SELECT COALESCE(SUM(COALESCE(rep_usado.cantidad_entrada_produccion, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_usado.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_usado.cantidad_producida_kg, 0)), 0)
+                 + COALESCE((
+                    SELECT SUM(COALESCE(NULLIF(envio->'recepcion'->>'cantidad_merma', '')::numeric, 0))
+                    FROM jsonb_array_elements(COALESCE(t1.js_realizado_por_fuera, '[]'::jsonb)) envio
+                    WHERE envio->>'pasada' IS NOT DISTINCT FROM pase.item->>'pasada'
+                      AND envio->>'destino' = 'externo'
+                 ), 0) AS cantidad_usada
             FROM rel_ensamblaje_producto rep_usado
             JOIN ensamblaje e_usado ON e_usado.id = rep_usado.ensamblaje_id
             JOIN produccion pd_usado ON pd_usado.id = rep_usado.molde_produccion_id
@@ -1783,7 +1789,11 @@ function guardarEnsamblaje()
                         }
                     }
                     $otrosConsumos = executeQuery($conectar, "
-                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0)
+                         + COALESCE(MAX((SELECT SUM(COALESCE(NULLIF(envio->'recepcion'->>'cantidad_merma', '')::numeric, 0))
+                             FROM jsonb_array_elements(COALESCE(pd_u.js_realizado_por_fuera, '[]'::jsonb)) envio
+                             WHERE envio->>'pasada' IS NOT DISTINCT FROM :pasada
+                               AND envio->>'destino' = 'externo')), 0) AS cantidad
                     FROM rel_ensamblaje_producto rep_u
                         JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
                     JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
@@ -1936,7 +1946,11 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 $baseDisponible = (float)($relacionPendiente[0]['cantidad_entrada_produccion']
                     ?? $snapshotOrigen['cantidad_kg'] ?? $snapshotOrigen['cantidad'] ?? $snapshotOrigen['cantidad_kg'] ?? 0);
                 $consumido = executeQuery($conectar, "
-                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                    SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0)
+                         + COALESCE(MAX((SELECT SUM(COALESCE(NULLIF(envio->'recepcion'->>'cantidad_merma', '')::numeric, 0))
+                             FROM jsonb_array_elements(COALESCE(pd_u.js_realizado_por_fuera, '[]'::jsonb)) envio
+                             WHERE envio->>'pasada' IS NOT DISTINCT FROM :pasada
+                               AND envio->>'destino' = 'externo')), 0) AS cantidad
                     FROM rel_ensamblaje_producto rep_u
                     JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
                     JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
@@ -2091,7 +2105,11 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
 
             $cantidadBase = (float)($salidaSolicitada['cantidad'] ?? $salidaSolicitada['cantidad_kg'] ?? $prod[0]['cantidad_producida_kg'] ?? 0);
             $consumoExistente = executeQuery($conectar, "
-                SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0) AS cantidad
+                SELECT COALESCE(SUM(COALESCE(rep_u.cantidad_entrada_produccion, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad_kg', '')::numeric, NULLIF(rep_u.js_query_consulta_produccion->>'cantidad', '')::numeric, pd_u.cantidad_producida_kg, 0)), 0)
+                     + COALESCE(MAX((SELECT SUM(COALESCE(NULLIF(envio->'recepcion'->>'cantidad_merma', '')::numeric, 0))
+                         FROM jsonb_array_elements(COALESCE(pd_u.js_realizado_por_fuera, '[]'::jsonb)) envio
+                         WHERE envio->>'pasada' IS NOT DISTINCT FROM :pasada
+                           AND envio->>'destino' = 'externo')), 0) AS cantidad
                 FROM rel_ensamblaje_producto rep_u
                 JOIN ensamblaje e_u ON e_u.id = rep_u.ensamblaje_id
                 JOIN produccion pd_u ON pd_u.id = rep_u.molde_produccion_id
@@ -3159,7 +3177,7 @@ function finalizarEnsamblaje(int $id)
     }
 
     if (!empty($ensamblaje['deleted_at'])) responder(false, 'No puedes finalizar un ensamblaje inactivo.');
-    if (empty($ensamblaje['inicio'])) responder(false, 'Primero debes iniciar el ensamblaje.');
+    if (!$esRecepcionExterna && empty($ensamblaje['inicio'])) responder(false, 'Primero debes iniciar el ensamblaje.');
     if (!empty($ensamblaje['fin'])) responder(false, 'Este ensamblaje ya fue finalizado.');
     if ($cantidadSalida === null || $cantidadSalida <= 0) {
         responder(false, "Debes indicar la cantidad de salida ($unidadLabel) de este armado para poder finalizarlo.");
@@ -3168,9 +3186,9 @@ function finalizarEnsamblaje(int $id)
     $conectar->beginTransaction();
     try {
         $cambios = [[
-            'campo' => 'Fin de ensamblaje',
-            'valor_antes' => '(en curso)',
-            'valor_despues' => "Finalizado ahora · {$cantidadSalida} {$unidadLabel}",
+            'campo' => $esRecepcionExterna ? 'Retorno externo recibido' : 'Fin de ensamblaje',
+            'valor_antes' => $esRecepcionExterna ? '(pendiente de recepción)' : '(en curso)',
+            'valor_despues' => ($esRecepcionExterna ? 'Recibido ahora' : 'Finalizado ahora') . " · {$cantidadSalida} {$unidadLabel}",
         ]];
         if ($enviarAutomaticamenteEmpaquetado) {
             $cambios[] = ['campo' => 'Envío a empaquetado', 'valor_antes' => '(no enviado)', 'valor_despues' => 'Enviado automáticamente al finalizar el colgador multi-molde'];
@@ -3178,7 +3196,7 @@ function finalizarEnsamblaje(int $id)
                 $cambios[] = ['campo' => 'Complemento', 'valor_antes' => 'Marcado como complemento', 'valor_despues' => 'Liberado para empaquetado como colgador multi-molde completo'];
             }
         }
-        $movimiento   = obtenerMovimientoSesion('finalizar_ensamblaje', $cambios);
+        $movimiento   = obtenerMovimientoSesion($esRecepcionExterna ? 'registrar_retorno_externo' : 'finalizar_ensamblaje', $cambios);
         $js_session   = json_encode($movimiento, JSON_UNESCAPED_UNICODE);
         $js_historial = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
@@ -3217,9 +3235,11 @@ function finalizarEnsamblaje(int $id)
         ]);
 
         $conectar->commit();
-        responder(true, $enviarAutomaticamenteEmpaquetado
-            ? 'Ensamblaje finalizado y enviado automáticamente a Empaquetado.'
-            : 'Ensamblaje finalizado.');
+        responder(true, $esRecepcionExterna
+            ? 'Retorno externo registrado y enviado automáticamente a Empaquetado.'
+            : ($enviarAutomaticamenteEmpaquetado
+                ? 'Ensamblaje finalizado y enviado automáticamente a Empaquetado.'
+                : 'Ensamblaje finalizado.'));
     } catch (Throwable $e) {
         $conectar->rollBack();
         error_log("Error finalizando ensamblaje: " . $e->getMessage());
