@@ -10,68 +10,26 @@ include("header.php");
 .pc-dv-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
 .pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:220px; flex:1; min-width:160px; }
 
-/* ── Tabs por producto (con miniatura) ── */
-.pc-dv-tabs{ display:flex; align-items:center; gap:6px; overflow-x:auto; border-bottom:1px solid #eee7db; margin-bottom:16px; padding-bottom:2px; scrollbar-width:thin; -webkit-overflow-scrolling:touch; }
-.pc-dv-tab{
-    display:flex; align-items:center; gap:8px; padding:8px 12px 10px; white-space:nowrap;
-    border:none; background:transparent; font-size:.86em; font-weight:600; color:#8a8578;
-    border-bottom:2px solid transparent; cursor:pointer; transition:.12s ease; flex-shrink:0;
-}
-.pc-dv-tab:hover{ color:#3a3730; }
-.pc-dv-tab.activo{ color:#1f2937; border-bottom-color:#2F6FED; }
-.pc-dv-tab .thumb{ width:24px; height:24px; border-radius:7px; object-fit:cover; flex-shrink:0; background:#f1efe9; }
-.pc-dv-tab .thumb-empty{ width:24px; height:24px; border-radius:7px; background:#f1efe9; display:flex; align-items:center; justify-content:center; color:#c8c3b3; font-size:.65em; flex-shrink:0; }
-.pc-dv-tab .cnt{ background:#f1efe9; color:#8a8578; border-radius:999px; font-size:.76em; font-weight:700; padding:1px 8px; min-width:20px; text-align:center; }
-.pc-dv-tab.activo .cnt{ background:#1f2937; color:#fff; }
-.pc-dv-tab .warn{ color:#c9482a; }
-
-/* ── Header del producto activo (foto + stats) ── */
-.pc-dv-header{
-    display:flex; gap:18px; align-items:center;
-    background:#fff; border:1px solid #eee2c8; border-radius:16px; padding:16px; margin-bottom:18px;
-}
-.pc-dv-header .foto{
-    width:clamp(76px, 12vw, 112px); height:clamp(76px, 12vw, 112px);
-    border-radius:14px; overflow:hidden; flex-shrink:0; background:#f4f2ea;
-    display:flex; align-items:center; justify-content:center;
-}
-.pc-dv-header .foto img{ width:100%; height:100%; object-fit:cover; display:block; }
-.pc-dv-header .foto .sin-foto{ color:#c8c3b3; font-size:1.8em; display:flex; }
-.pc-dv-header .info{ flex:1; min-width:0; }
-.pc-dv-header .nombre{ font-size:1.1em; font-weight:800; color:#3a3730; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.pc-dv-header .stats{ display:flex; gap:clamp(14px,4vw,28px); flex-wrap:wrap; }
-.pc-dv-header .stat .valor{ font-size:1.4em; font-weight:800; color:#2F6FED; line-height:1.1; }
-.pc-dv-header .stat .valor small{ font-size:.5em; font-weight:700; color:#5c85e8; }
-.pc-dv-header .stat.sin-config .valor{ font-size:.95em; font-weight:700; color:#9a9585; font-style:italic; }
-.pc-dv-header .stat .label{ font-size:.72em; color:#9a9585; text-transform:uppercase; letter-spacing:.03em; font-weight:700; margin-top:3px; }
-
-@media (max-width:640px){
-    .pc-dv-header{ flex-direction:column; text-align:center; }
-    .pc-dv-header .stats{ justify-content:center; }
-    .pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:none; width:100%; }
-}
-
-/* ── Grid de cards por color/mezcla/legado ── */
-.pc-dv-cards-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:14px; }
-@media (max-width:480px){ .pc-dv-cards-grid{ grid-template-columns:repeat(auto-fill, minmax(148px,1fr)); gap:10px; } }
-
-.pc-dv-card{ border:1px solid #eee2c8; border-radius:14px; padding:14px 16px; background:#fff; position:relative; overflow:hidden; }
-.pc-dv-card .franja{ position:absolute; top:0; left:0; right:0; height:6px; background:#ccc; }
-.pc-dv-card .franja.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 3px, #fff 3px, #fff 6px); }
-.pc-dv-card .franja.mezcla{ background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg); }
-.pc-dv-card .color-nombre{ display:flex; align-items:center; gap:7px; font-weight:700; font-size:.94em; color:#3a3730; margin:10px 0 10px; }
-.pc-dv-card .color-dot{ display:inline-block; width:11px; height:11px; border-radius:50%; background:#ccc; flex-shrink:0; border:1px solid rgba(0,0,0,.06); }
-.pc-dv-card .color-dot.sin-color{ background:repeating-linear-gradient(45deg, #ccc, #ccc 2px, #fff 2px, #fff 4px); border:1px solid #bbb; }
-.pc-dv-card .color-dot.mezcla{ background: conic-gradient(#2F6FED 0deg 90deg, #E0574C 90deg 180deg, #F0B429 180deg 270deg, #2FB170 270deg 360deg); }
-.pc-dv-card .paquetes{ font-size:1.55em; font-weight:800; color:#2F6FED; line-height:1.1; }
-.pc-dv-card .paquetes small{ font-size:.5em; font-weight:700; color:#5c85e8; }
-.pc-dv-card .sin-config{ color:#9a9585; font-style:italic; font-size:.88em; }
-.pc-dv-card .bolsas{ color:#9a9585; font-size:.82em; margin-top:6px; }
-.pc-dv-card .registros{ position:absolute; top:12px; right:14px; background:#f1efe9; color:#8a8578; border-radius:999px; font-size:.72em; font-weight:700; padding:2px 9px; }
-.pc-dv-card .warn-mix{ color:#c9822a; margin-left:4px; cursor:help; }
-.pc-dv-legado .color-nombre{ font-style:italic; color:#9a9585; }
-
-.pc-dv-empty{ text-align:center; color:#9a9585; padding:40px 12px; grid-column:1/-1; }
+.pc-dv-filtros select, .pc-dv-filtros input[type="text"]{ max-width:320px; flex:1; min-width:180px; }
+.pc-dv-table-wrap{overflow-x:auto;border:1px solid #e1e6ef;border-radius:12px;background:#fff;}
+.pc-dv-table{width:100%;min-width:680px;border-collapse:collapse;margin:0;}
+.pc-dv-table th{padding:11px 14px;background:#f4f6fa;color:#64748b;font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+.pc-dv-table td{padding:10px 14px;border-top:1px solid #edf0f5;vertical-align:middle;color:#263247;}
+.pc-dv-table tbody tr:hover{background:#f8faff;}
+.pc-dv-product{display:flex;align-items:center;gap:10px;min-width:240px;}
+.pc-dv-thumb{width:42px;height:42px;border-radius:9px;object-fit:cover;background:#f1f3f6;flex:none;}
+.pc-dv-thumb-empty{display:flex;align-items:center;justify-content:center;color:#9aa4b2;font-size:1.1rem;}
+.pc-dv-name{font-weight:700;line-height:1.25;}
+.pc-dv-code{font-size:.78rem;color:#7b8798;margin-top:3px;}
+.pc-dv-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.pc-dv-stock{font-size:1rem;font-weight:800;color:#2563eb;}
+.pc-dv-unit{font-size:.8rem;font-weight:700;color:#64748b;margin-left:4px;}
+.pc-dv-badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#e9f8ef;color:#16804a;white-space:nowrap;}
+.pc-dv-badge.bajo{background:#fff4db;color:#a56800;}
+.pc-dv-badge-agotado{background:#eef1f5;color:#64748b;}
+.pc-dv-empty{text-align:center;color:#7b8798;padding:28px 12px;}
+.pc-card-header h2{font-size:1.15rem;margin:0;}
+@media(max-width:640px){.pc-dv-filtros select,.pc-dv-filtros input[type="text"]{max-width:none;width:100%;}}
 </style>
 
 <div class="pc-card">
@@ -87,46 +45,21 @@ include("header.php");
         </div>
     </div>
 
-    <div class="pc-dv-tabs" id="dvTabs">
-        <span class="text-muted" style="padding:12px 0;">Cargando productos...</span>
-    </div>
-
-    <div class="pc-dv-header" id="dvHeader" style="display:none;"></div>
-
-    <div class="pc-dv-cards-grid" id="dvCardsGrid">
-        <div class="pc-dv-empty">Cargando...</div>
+    <div class="pc-dv-table-wrap">
+        <table class="pc-dv-table">
+            <thead><tr><th>Producto</th><th class="text-end">Stock actual</th><th class="text-end">Mínimo</th><th class="text-end">Máximo</th><th>Estado</th></tr></thead>
+            <tbody id="dvTableBody"><tr><td colspan="5" class="pc-dv-empty">Cargando productos...</td></tr></tbody>
+        </table>
     </div>
 </div>
 
 <script>
 const CONTROLADOR_DV = 'controllers/clssDisponibilidadVenta.php';
 
-let dvGrupos = [];
-let dvTabActivo = null;
-
-const PALETA_COLOR_FALLBACK_DV = {
-    'VERDE': '#639922', 'AZUL': '#378ADD', 'CELESTE': '#5DB8E8', 'ROJO': '#E24B4A',
-    'AMARILLO': '#EF9F27', 'NARANJA': '#D85A30', 'MORADO': '#7F77DD', 'VIOLETA': '#7F77DD',
-    'ROSADO': '#D4537E', 'ROSA': '#D4537E', 'NEGRO': '#2C2C2A', 'BLANCO': '#D3D1C7',
-    'GRIS': '#888780', 'MARRON': '#712B13', 'CAFE': '#712B13', 'TURQUESA': '#1D9E75',
-    'PLOMO': '#5F5E5A', 'BEIGE': '#B4B2A9',
-};
-function colorHexParaDV(colorNombre, colorHexBD) {
-    if (colorHexBD) return colorHexBD.startsWith('#') ? colorHexBD : `#${colorHexBD}`;
-    const clave = String(colorNombre ?? '').trim().toUpperCase();
-    if (PALETA_COLOR_FALLBACK_DV[clave]) return PALETA_COLOR_FALLBACK_DV[clave];
-    let hash = 0;
-    for (let i = 0; i < clave.length; i++) hash = clave.charCodeAt(i) + ((hash << 5) - hash);
-    const hue = Math.abs(hash) % 360;
-    return `hsl(${hue}, 45%, 55%)`;
+function escaparHTMLDV(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
-// img_ruta ya guarda URL completa de Cloudinary; se deja por si algún
-// producto viejo aún tuviera ruta relativa (antes de migrar a Cloudinary).
-function resolverImagenDV(ruta) {
-    if (!ruta) return null;
-    return ruta.startsWith('http') ? ruta : ruta;
-}
+function resolverImagenDV(ruta) { return ruta || null; }
 
 async function llamarDV(accion, params = {}) {
     const body = new URLSearchParams({ accion, ...params });
@@ -149,38 +82,9 @@ function formatearNumeroDV(n, decimales = 2) {
     return Number(n).toLocaleString('es-PE', { maximumFractionDigits: decimales });
 }
 
-async function cargarColoresDV() {
-    const json = await llamarDV('BUSCARCOLORESDV');
-    const sel = document.getElementById('dv_color_id');
-    if (json.success) {
-        sel.innerHTML = '<option value="">Todos los colores</option>' +
-            json.colores.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-    }
-}
-
-function agruparPorProductoDV(filas) {
-    const grupos = [];
-    let actual = null;
-    filas.forEach(f => {
-        if (!actual || actual.producto_id !== f.producto_id) {
-            actual = {
-                producto_id: f.producto_id,
-                producto_codigo: f.producto_codigo,
-                producto: f.producto,
-                producto_imagen: f.producto_imagen,
-                config_venta_inconsistente: f.config_venta_inconsistente === true || f.config_venta_inconsistente === 't',
-                filas: [],
-            };
-            grupos.push(actual);
-        }
-        actual.filas.push(f);
-    });
-    return grupos;
-}
-
 async function cargarDisponibilidadVenta() {
-    const grid = document.getElementById('dvCardsGrid');
-    grid.innerHTML = '<div class="pc-dv-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</div>';
+    const tbody = document.getElementById('dvTableBody');
+    tbody.innerHTML = '<tr><td colspan="5" class="pc-dv-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cargando...</td></tr>';
 
     const params = {
         texto: document.getElementById('dv_texto').value.trim(),
@@ -189,151 +93,34 @@ async function cargarDisponibilidadVenta() {
     const json = await llamarDV('LISTARDISPONIBILIDADVENTA', params);
 
     if (!json.success) {
-        document.getElementById('dvTabs').innerHTML = '';
-        document.getElementById('dvHeader').style.display = 'none';
-        grid.innerHTML = `<div class="pc-dv-empty text-danger">${json.message}</div>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="pc-dv-empty text-danger">${json.message}</td></tr>`;
         return;
     }
-
-    dvGrupos = agruparPorProductoDV(json.disponibilidad || []);
-
-    if (dvTabActivo !== null && !dvGrupos.some(g => g.producto_id === dvTabActivo)) {
-        dvTabActivo = null;
-    }
-    if (dvTabActivo === null && dvGrupos.length > 0) {
-        dvTabActivo = dvGrupos[0].producto_id;
-    }
-
-    renderTabsDV();
-    renderPanelProductoDV();
-}
-
-function renderTabsDV() {
-    const cont = document.getElementById('dvTabs');
-
-    if (dvGrupos.length === 0) {
-        cont.innerHTML = '<span class="text-muted" style="padding:12px 0;">No hay productos con stock disponible.</span>';
+    const filas = json.disponibilidad || [];
+    if (!filas.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="pc-dv-empty">No hay productos que coincidan con la búsqueda.</td></tr>';
         return;
     }
-
-    cont.innerHTML = dvGrupos.map(g => {
-        const totalPaquetes = g.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
-        const warn = g.config_venta_inconsistente
-            ? `<i class="fa-solid fa-triangle-exclamation warn" title="Configuración de venta inconsistente para este producto."></i>`
-            : '';
-        const imagen = resolverImagenDV(g.producto_imagen);
+    tbody.innerHTML = filas.map(f => {
+        const stock = Number(f.paquetes_disponibles || 0);
+        const minimo = Number(f.stock_minimo || 0);
+        const maximo = Number(f.stock_maximo || 0);
+        const bajo = minimo > 0 && stock < minimo;
+        const agotado = stock <= 0;
+        const unidad = f.unidad_venta_corto || '';
+        const imagen = resolverImagenDV(f.producto_imagen);
         const thumb = imagen
-            ? `<img class="thumb" src="${imagen}" loading="lazy" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-empty',innerHTML:'<i class=\\'fa-regular fa-image\\'></i>'}))">`
-            : `<div class="thumb-empty"><i class="fa-regular fa-image"></i></div>`;
-        return `
-        <button type="button" class="pc-dv-tab ${dvTabActivo === g.producto_id ? 'activo' : ''}"
-                onclick="seleccionarTabDV(${g.producto_id})" title="${(g.producto_codigo ?? '') + ' - ' + (g.producto ?? '')}">
-            ${thumb}
-            <span>${g.producto_codigo ?? ''} - ${g.producto ?? 'Sin nombre'}</span>
-            ${warn}
-            <span class="cnt">${formatearNumeroDV(totalPaquetes)}</span>
-        </button>`;
+            ? `<img class="pc-dv-thumb" src="${escaparHTMLDV(imagen)}" loading="lazy" alt="" onerror="this.style.visibility='hidden'">`
+            : '<span class="pc-dv-thumb pc-dv-thumb-empty"><i class="fa-regular fa-image"></i></span>';
+        const estado = agotado ? '<span class="pc-dv-badge pc-dv-badge-agotado">Agotado</span>' : bajo ? '<span class="pc-dv-badge bajo">Bajo mínimo</span>' : '<span class="pc-dv-badge">Disponible</span>';
+        return `<tr>
+            <td><div class="pc-dv-product">${thumb}<div><div class="pc-dv-name">${escaparHTMLDV(f.producto || 'Sin nombre')}</div><div class="pc-dv-code">${escaparHTMLDV(f.producto_codigo || '')}</div></div></div></td>
+            <td class="pc-dv-number"><span class="pc-dv-stock">${formatearNumeroDV(stock)}</span><span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span></td>
+            <td class="pc-dv-number">${formatearNumeroDV(minimo)} <span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span></td>
+            <td class="pc-dv-number">${maximo > 0 ? `${formatearNumeroDV(maximo)} <span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span>` : '—'}</td>
+            <td>${estado}</td>
+        </tr>`;
     }).join('');
-}
-
-function seleccionarTabDV(productoId) {
-    dvTabActivo = productoId;
-    renderTabsDV();
-    renderPanelProductoDV();
-}
-function calcularDesgloseTotalDV(filas) {
-    const validas = filas.filter(f => !f.paquetes_venta_sin_configurar);
-    if (validas.length === 0) return null;
-
-    const capacidades  = [...new Set(validas.map(f => Number(f.capacidad_paquete_venta_base)))];
-    const bolsaEquivs   = [...new Set(validas.map(f => Number(f.unidad_bolsa_equivalencia || 0)))];
-    const unidadesBolsa = [...new Set(validas.map(f => f.unidad_bolsa_corto).filter(Boolean))];
-    const unidadVenta   = validas[0].unidad_venta_corto ?? '';
-
-    if (capacidades.length !== 1 || !capacidades[0]) return null;
-
-    const totalBase = validas.reduce((acc, f) => acc + Number(f.cantidad_base_total || 0), 0);
-    const capacidad = capacidades[0];
-    const paquetes  = Math.floor((totalBase + 0.0001) / capacidad);
-    const restante  = totalBase - paquetes * capacidad;
-
-    const partes = [];
-    if (paquetes > 0) partes.push(`${paquetes} ${unidadVenta}`.trim());
-
-    if (restante > 0.0001 && bolsaEquivs.length === 1 && bolsaEquivs[0] > 0 && unidadesBolsa.length === 1) {
-        const bolsas = Math.round((restante / bolsaEquivs[0]) * 100) / 100;
-        if (bolsas > 0) partes.push(`${bolsas} ${unidadesBolsa[0]}`.trim());
-    }
-
-    if (partes.length === 0) return null;
-    if (partes.length === 1) return partes[0];
-    const ultimo = partes.pop();
-    return partes.join(', ') + ' y ' + ultimo;
-}
-function celdaPaquetesTextoDV(f) {
-    if (f.paquetes_venta_sin_configurar) {
-        return `<span class="sin-config" title="Este producto no tiene configurada su unidad de venta (cant_equivale / unidad_equivale_id). Configúrala en Productos.">Sin config. de venta</span>`;
-    }
-    if (f.desglose_paquetes_texto) {
-        return `<span class="paquetes">${f.desglose_paquetes_texto}</span>`;
-    }
-    return `<span class="paquetes">${formatearNumeroDV(f.paquetes_disponibles)} <small>${f.unidad_venta_corto ?? ''}</small></span>`;
-}
-
-function cardHtmlDV(f) {
-    const stock = Number(f.paquetes_disponibles || 0);
-    const minimo = Number(f.stock_minimo || 0);
-    const bajoMinimo = minimo > 0 && stock < minimo;
-    return `
-    <div class="pc-dv-card">
-        <div class="franja" style="background:${bajoMinimo ? '#e5a11a' : '#2F6FED'}"></div>
-        <div class="color-nombre">Stock actual</div>
-        <div class="paquetes">${formatearNumeroDV(stock)} <small>${f.unidad_venta_corto ?? ''}</small></div>
-        <div class="bolsas">Mínimo: ${formatearNumeroDV(minimo)} ${f.unidad_venta_corto ?? ''}</div>
-        ${Number(f.stock_maximo || 0) > 0 ? `<div class="bolsas">Máximo: ${formatearNumeroDV(f.stock_maximo)} ${f.unidad_venta_corto ?? ''}</div>` : ''}
-        ${bajoMinimo ? '<div class="text-warning fw-semibold mt-2">Stock bajo el mínimo</div>' : ''}
-    </div>`;
-}
-
-function renderPanelProductoDV() {
-    const grid = document.getElementById('dvCardsGrid');
-    const header = document.getElementById('dvHeader');
-
-    const grupo = dvGrupos.find(g => g.producto_id === dvTabActivo);
-    if (!grupo) {
-        header.style.display = 'none';
-        grid.innerHTML = '<div class="pc-dv-empty">No hay stock disponible con estos filtros.</div>';
-        return;
-    }
-
-    const totalPaquetes  = grupo.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
-    const unidadesVenta  = [...new Set(grupo.filas.map(f => f.unidad_venta_corto).filter(Boolean))];
-    const sufijoPaquete  = unidadesVenta.length === 1 ? ` <small>${unidadesVenta[0]}</small>` : '';
-    const filaProducto = grupo.filas[0];
-
-    const imagen = resolverImagenDV(grupo.producto_imagen);
-    const fotoHtml = imagen
-        ? `<img src="${imagen}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=&quot;sin-foto&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>'">`
-        : `<div class="sin-foto"><i class="fa-regular fa-image"></i></div>`;
-
-    header.style.display = 'flex';
-    header.innerHTML = `
-        <div class="foto">${fotoHtml}</div>
-        <div class="info">
-            <div class="nombre">${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''}</div>
-            <div class="stats">
-                <div class="stat"><div class="valor">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</div><div class="label">Stock actual</div></div>
-                <div class="stat"><div class="valor">${formatearNumeroDV(filaProducto.stock_minimo)}</div><div class="label">Stock mínimo</div></div>
-                <div class="stat"><div class="valor">${Number(filaProducto.stock_maximo || 0) > 0 ? formatearNumeroDV(filaProducto.stock_maximo) : '—'}</div><div class="label">Stock máximo</div></div>
-            </div>
-        </div>
-    `;
-
-    if (grupo.filas.length === 0) {
-        grid.innerHTML = '<div class="pc-dv-empty">No hay stock disponible con estos filtros.</div>';
-        return;
-    }
-    grid.innerHTML = grupo.filas.map(cardHtmlDV).join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
