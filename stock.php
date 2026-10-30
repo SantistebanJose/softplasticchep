@@ -1,6 +1,6 @@
 <?php
 $pageTitle    = 'Stock de productos';
-$pageSubtitle = 'Stock empaquetado disponible, por producto y color';
+$pageSubtitle = 'Existencias actuales por producto en su unidad de venta';
 $activePage   = 'disponibilidad_venta';
 
 include("header.php");
@@ -81,12 +81,9 @@ include("header.php");
 
     <div class="pc-dv-filtros">
         <input type="text" id="dv_texto" class="form-control" placeholder="Buscar por producto...">
-        <select class="form-select" id="dv_color_id">
-            <option value="">Todos los colores</option>
-        </select>
         <div class="form-check d-flex align-items-center gap-2">
             <input class="form-check-input" type="checkbox" id="dv_incluir_vendidos">
-            <label class="form-check-label" for="dv_incluir_vendidos" style="font-size:.85em;">Incluir ya vendidos</label>
+            <label class="form-check-label" for="dv_incluir_vendidos" style="font-size:.85em;">Incluir agotados</label>
         </div>
     </div>
 
@@ -187,7 +184,6 @@ async function cargarDisponibilidadVenta() {
 
     const params = {
         texto: document.getElementById('dv_texto').value.trim(),
-        color_id: document.getElementById('dv_color_id').value,
         incluir_vendidos: document.getElementById('dv_incluir_vendidos').checked ? '1' : '0',
     };
     const json = await llamarDV('LISTARDISPONIBILIDADVENTA', params);
@@ -285,34 +281,17 @@ function celdaPaquetesTextoDV(f) {
 }
 
 function cardHtmlDV(f) {
-    const esLegado = f.color_id === null || f.color_id === undefined;
-    const esMezcla = f.color_id === -1;
-
-    let franjaClase = 'franja';
-    let dotStyle = '';
-    const colorTexto = f.color ?? '-';
-
-    if (esLegado) {
-        franjaClase += ' sin-color';
-    } else if (esMezcla) {
-        franjaClase += ' mezcla';
-    } else {
-        const hex = colorHexParaDV(f.color, f.color_hex);
-        dotStyle = `style="background:${hex};"`;
-    }
-    const dotClase = 'color-dot' + (esLegado ? ' sin-color' : esMezcla ? ' mezcla' : '');
-
-    const warnBolsas = f.unidades_bolsa_distintas
-        ? `<span class="warn-mix" title="Este grupo mezcla registros con distinta unidad de empaquetado. La suma de bolsas es aproximada.">⚠️</span>`
-        : '';
-
+    const stock = Number(f.paquetes_disponibles || 0);
+    const minimo = Number(f.stock_minimo || 0);
+    const bajoMinimo = minimo > 0 && stock < minimo;
     return `
-    <div class="pc-dv-card ${esLegado ? 'pc-dv-legado' : ''}">
-        <div class="${franjaClase}"></div>
-        <span class="registros" title="Registros de empaquetado en este grupo">${f.registros_count ?? 0} reg.</span>
-        <div class="color-nombre"><span class="${dotClase}" ${dotStyle}></span>${colorTexto}</div>
-        ${celdaPaquetesTextoDV(f)}
-        <div class="bolsas">${formatearNumeroDV(f.bolsas_disponibles)} ${f.unidad_bolsa_corto ?? ''} empaquetadas ${warnBolsas}</div>
+    <div class="pc-dv-card">
+        <div class="franja" style="background:${bajoMinimo ? '#e5a11a' : '#2F6FED'}"></div>
+        <div class="color-nombre">Stock actual</div>
+        <div class="paquetes">${formatearNumeroDV(stock)} <small>${f.unidad_venta_corto ?? ''}</small></div>
+        <div class="bolsas">Mínimo: ${formatearNumeroDV(minimo)} ${f.unidad_venta_corto ?? ''}</div>
+        ${Number(f.stock_maximo || 0) > 0 ? `<div class="bolsas">Máximo: ${formatearNumeroDV(f.stock_maximo)} ${f.unidad_venta_corto ?? ''}</div>` : ''}
+        ${bajoMinimo ? '<div class="text-warning fw-semibold mt-2">Stock bajo el mínimo</div>' : ''}
     </div>`;
 }
 
@@ -327,38 +306,25 @@ function renderPanelProductoDV() {
         return;
     }
 
-    const tieneSinConfig = grupo.filas.some(f => f.paquetes_venta_sin_configurar);
     const totalPaquetes  = grupo.filas.reduce((acc, f) => acc + Number(f.paquetes_disponibles || 0), 0);
-    const totalBolsas    = grupo.filas.reduce((acc, f) => acc + Number(f.bolsas_disponibles || 0), 0);
     const unidadesVenta  = [...new Set(grupo.filas.map(f => f.unidad_venta_corto).filter(Boolean))];
-    const unidadesBolsa  = [...new Set(grupo.filas.map(f => f.unidad_bolsa_corto).filter(Boolean))];
     const sufijoPaquete  = unidadesVenta.length === 1 ? ` <small>${unidadesVenta[0]}</small>` : '';
-    const sufijoBolsa    = unidadesBolsa.length === 1 ? ` ${unidadesBolsa[0]}` : '';
-
-    const warn = grupo.config_venta_inconsistente
-        ? `<i class="fa-solid fa-triangle-exclamation" style="color:#c9482a;" title="La unidad de venta configurada en 'Productos' no coincide con la de 'Configuración de empaquetado'."></i>`
-        : '';
+    const filaProducto = grupo.filas[0];
 
     const imagen = resolverImagenDV(grupo.producto_imagen);
     const fotoHtml = imagen
         ? `<img src="${imagen}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=&quot;sin-foto&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>'">`
         : `<div class="sin-foto"><i class="fa-regular fa-image"></i></div>`;
 
-    const desgloseTotal = calcularDesgloseTotalDV(grupo.filas);
-    const statPaquetesHtml = tieneSinConfig
-        ? `<div class="stat sin-config"><div class="valor">Sin config.</div><div class="label">Paquetes disponibles</div></div>`
-        : desgloseTotal
-            ? `<div class="stat"><div class="valor">${desgloseTotal}</div><div class="label">Paquetes disponibles</div></div>`
-            : `<div class="stat"><div class="valor">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</div><div class="label">Paquetes disponibles</div></div>`;
     header.style.display = 'flex';
     header.innerHTML = `
         <div class="foto">${fotoHtml}</div>
         <div class="info">
-            <div class="nombre">${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''} ${warn}</div>
+            <div class="nombre">${grupo.producto_codigo ?? ''} - ${grupo.producto ?? ''}</div>
             <div class="stats">
-                ${statPaquetesHtml}
-                <div class="stat"><div class="valor">${formatearNumeroDV(totalBolsas)}${sufijoBolsa}</div><div class="label">Bolsas empaquetadas</div></div>
-                <div class="stat"><div class="valor">${grupo.filas.length}</div><div class="label">Grupos de color</div></div>
+                <div class="stat"><div class="valor">${formatearNumeroDV(totalPaquetes)}${sufijoPaquete}</div><div class="label">Stock actual</div></div>
+                <div class="stat"><div class="valor">${formatearNumeroDV(filaProducto.stock_minimo)}</div><div class="label">Stock mínimo</div></div>
+                <div class="stat"><div class="valor">${Number(filaProducto.stock_maximo || 0) > 0 ? formatearNumeroDV(filaProducto.stock_maximo) : '—'}</div><div class="label">Stock máximo</div></div>
             </div>
         </div>
     `;
@@ -371,7 +337,6 @@ function renderPanelProductoDV() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    cargarColoresDV();
     cargarDisponibilidadVenta();
 
     let debounceTimer = null;
@@ -379,7 +344,6 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(cargarDisponibilidadVenta, 350);
     });
-    document.getElementById('dv_color_id').addEventListener('change', cargarDisponibilidadVenta);
     document.getElementById('dv_incluir_vendidos').addEventListener('change', cargarDisponibilidadVenta);
 });
 </script>

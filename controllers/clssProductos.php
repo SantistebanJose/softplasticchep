@@ -45,6 +45,7 @@ function controladorProductos(string $accion): void
         'REACTIVARPRODUCTO',
         'GUARDARCONFIGPRODUCTO',
         'GUARDARCONFIGARMADO',
+        'AJUSTARSTOCKPRODUCTO',
     ];
 
     if (in_array($accion, $accionesLectura, true)) {
@@ -91,6 +92,9 @@ function controladorProductos(string $accion): void
             break;
         case 'GUARDARCONFIGARMADO':
             guardarConfigArmadoProducto();
+            break;
+        case 'AJUSTARSTOCKPRODUCTO':
+            ajustarStockProducto();
             break;
     }
 }
@@ -297,6 +301,76 @@ function subirImagenProducto(): ?string
 
     $subida = subirImagenACloudinary($archivo['tmp_name'], $archivo['name'], 'productos');
     return $subida['url'];
+}
+
+/** Ajusta conteo físico y límites de stock dejando el cambio en el kardex. */
+function ajustarStockProducto(): void
+{
+    $productoId = (int)($_POST['producto_id'] ?? 0);
+    $stockActualInput = trim((string)($_POST['stock'] ?? ''));
+    $stockMinimoInput = trim((string)($_POST['stock_minimo'] ?? ''));
+    $stockMaximoInput = trim((string)($_POST['stock_maximo'] ?? ''));
+
+    if ($productoId <= 0) responder(false, 'Producto inválido.');
+    foreach (['stock' => $stockActualInput, 'stock_minimo' => $stockMinimoInput, 'stock_maximo' => $stockMaximoInput] as $campo => $valor) {
+        if ($valor === '' || !is_numeric($valor) || !is_finite((float)$valor) || (float)$valor < 0 || (float)$valor > 999999.99) {
+            responder(false, 'Ingresa cantidades válidas entre 0 y 999999.99.');
+        }
+    }
+
+    $stockNuevo = round((float)$stockActualInput, 2);
+    $stockMinimo = round((float)$stockMinimoInput, 2);
+    $stockMaximo = round((float)$stockMaximoInput, 2);
+    if ($stockMaximo > 0 && $stockMaximo < $stockMinimo) {
+        responder(false, 'El stock máximo debe ser mayor o igual al mínimo, o 0 para no definir máximo.');
+    }
+
+    $conectar = conectar_oll_BD();
+    try {
+        $conectar->beginTransaction();
+        $stmt = $conectar->prepare('SELECT id, stock FROM producto WHERE id = :id FOR UPDATE');
+        $stmt->execute(['id' => $productoId]);
+        $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$producto) throw new RuntimeException('Producto no encontrado.');
+
+        $stockAnterior = round((float)($producto['stock'] ?? 0), 2);
+        $diferencia = round($stockNuevo - $stockAnterior, 2);
+        $actualizar = $conectar->prepare('
+            UPDATE producto
+            SET stock = :stock, stock_minimo = :minimo, stock_maximo = :maximo, updated_at = NOW()
+            WHERE id = :id
+        ');
+        $actualizar->execute([
+            'stock' => $stockNuevo,
+            'minimo' => $stockMinimo,
+            'maximo' => $stockMaximo,
+            'id' => $productoId,
+        ]);
+
+        if (abs($diferencia) >= 0.005) {
+            $tipo = $diferencia > 0 ? 'ENTRADA' : 'SALIDA';
+            $movimiento = $conectar->prepare('
+                INSERT INTO movimiento_inventario
+                    (producto_id, fecha, tipo, es_traslado, cantidad, cantidad_anterior, cantidad_posterior, created_at)
+                VALUES
+                    (:producto_id, CURRENT_DATE, :tipo, FALSE, :cantidad, :anterior, :posterior, NOW())
+            ');
+            $movimiento->execute([
+                'producto_id' => $productoId,
+                'tipo' => $tipo,
+                'cantidad' => abs($diferencia),
+                'anterior' => $stockAnterior,
+                'posterior' => $stockNuevo,
+            ]);
+        }
+
+        $conectar->commit();
+        responder(true, 'Stock y límites actualizados correctamente.');
+    } catch (Throwable $e) {
+        if ($conectar->inTransaction()) $conectar->rollBack();
+        error_log('Error ajustando stock de producto: ' . $e->getMessage());
+        responder(false, $e instanceof RuntimeException ? $e->getMessage() : 'No se pudo guardar el stock.');
+    }
 }
 
 function borrarImagenProductoArchivo(?string $url): void

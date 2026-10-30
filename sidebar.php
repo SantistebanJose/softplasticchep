@@ -46,7 +46,7 @@ $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
 $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
-$administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'inventario_inicial'];
+$administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
@@ -175,11 +175,6 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="compras.php" class="<?= pc_sub_class('compras', $activePage) ?>">
                 <span class="dot"></span> Compras
             </a>
-            <?php if (strtoupper(trim($_SESSION['rol_usuario'] ?? '')) === 'ADMINISTRADOR'): ?>
-                <a href="inventario_inicial.php" class="<?= pc_sub_class('inventario_inicial', $activePage) ?>">
-                    <span class="dot"></span> Inventario inicial
-                </a>
-            <?php endif; ?>
             <a href="ayuda_videos.php" class="<?= pc_sub_class('ayuda_videos', $activePage) ?>">
                 <span class="dot"></span> Videos de ayuda
             </a>

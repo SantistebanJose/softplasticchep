@@ -252,13 +252,16 @@ include("header.php");
                     <th>Descripción</th>
                     <th>U. Medida</th>
                     <th>Equivale</th>
+                    <th>Stock actual</th>
+                    <th>Mínimo</th>
+                    <th>Máximo</th>
                     <th>Peso unit. (g)</th>
                     <th>Estado</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
             <tbody id="tbodyProductos">
-                <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
+                <tr><td colspan="11" style="text-align:center;">Cargando...</td></tr>
             </tbody>
         </table>
     </div>
@@ -349,6 +352,60 @@ include("header.php");
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de stock y límites -->
+<div class="modal fade" id="modalStockProducto" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="formStockProducto">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="fa-solid fa-boxes-stacked me-2"></i>Stock del producto</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="stock_producto_id">
+          <input type="hidden" id="stock_producto_factor" value="0">
+          <input type="hidden" id="stock_producto_unidad_venta" value="">
+          <div class="fw-semibold mb-3" id="stock_producto_nombre"></div>
+          <div class="alert alert-info py-2">Ingresa el conteo físico final. Si cambia el saldo, se registrará una entrada o salida en el kardex.</div>
+          <div class="mb-3">
+            <label class="form-label" for="stock_producto_actual">Stock actual <span id="stock_producto_unidad" class="text-muted"></span></label>
+            <div id="stock_actual_simple">
+              <input class="form-control" id="stock_producto_actual" type="number" min="0" max="999999.99" step="0.01" required>
+            </div>
+            <div id="stock_actual_compuesto" class="row g-2" hidden>
+              <div class="col-6">
+                <label class="form-label" for="stock_producto_paquetes">Paquetes completos</label>
+                <input class="form-control" id="stock_producto_paquetes" type="number" min="0" step="1" value="0">
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="stock_producto_sueltas">Unidades sueltas <span id="stock_producto_unidad_suelta"></span></label>
+                <input class="form-control" id="stock_producto_sueltas" type="number" min="0" step="1" value="0">
+              </div>
+              <div class="col-12 small text-muted" id="stock_producto_conversion"></div>
+              <div class="col-12 fw-semibold" id="stock_producto_preview"></div>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label" for="stock_producto_minimo">Stock mínimo <span class="text-muted" id="stock_producto_unidad_minimo"></span></label>
+              <input class="form-control" id="stock_producto_minimo" type="number" min="0" max="999999.99" step="0.01" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label" for="stock_producto_maximo">Stock máximo <span class="text-muted" id="stock_producto_unidad_maximo"></span></label>
+              <input class="form-control" id="stock_producto_maximo" type="number" min="0" max="999999.99" step="0.01" required>
+              <small class="text-muted">0 = sin máximo</small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnGuardarStockProducto">Guardar stock</button>
         </div>
       </form>
     </div>
@@ -505,6 +562,7 @@ const CONTROLADOR_MOLDES = 'controllers/clssMoldes.php';
 const llamarProductos = (accion, params = {}) => llamar(CONTROLADOR, accion, params);
 const llamarMoldes    = (accion, params = {}) => llamar(CONTROLADOR_MOLDES, accion, params);
 const modalProducto        = new bootstrap.Modal(document.getElementById('modalProducto'));
+const modalStockProducto   = new bootstrap.Modal(document.getElementById('modalStockProducto'));
 const modalConfigProducto  = new bootstrap.Modal(document.getElementById('modalConfigProducto'));
 const modalVerFotoProducto = new bootstrap.Modal(document.getElementById('modalVerFotoProducto'));
 const modalConfigArmadoProducto = new bootstrap.Modal(document.getElementById('modalConfigArmadoProducto'));
@@ -522,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(err => {
             console.error('Error cargando datos iniciales:', err);
             document.getElementById('tbodyProductos').innerHTML =
-                `<tr><td colspan="8" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+                `<tr><td colspan="11" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
         });
 
     // ── Filtrado automático ──────────────────────────────────────────────
@@ -671,7 +729,7 @@ async function cargarProductos() {
     const tbody = document.getElementById('tbodyProductos');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">${json.message}</td></tr>`;
         productosCache = [];
         return;
     }
@@ -680,7 +738,7 @@ async function cargarProductos() {
     productosCache = productos; // se guarda para el export
 
     if (productos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8"><div class="pc-empty-state"><i class="fa-solid fa-box-open fa-2x mb-2"></i><br>No hay productos registrados.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11"><div class="pc-empty-state"><i class="fa-solid fa-box-open fa-2x mb-2"></i><br>No hay productos registrados.</div></td></tr>';
         return;
     }
 
@@ -694,6 +752,9 @@ async function cargarProductos() {
             <td>${p.descripcion}</td>
             <td>${p.unidad_venta_codigo ?? '-'}</td>
             <td>${p.cant_equivale ? p.cant_equivale + ' ' + (p.unidad_equivale_codigo ?? '') : '-'}</td>
+            <td>${Number(p.stock ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 2 })} ${p.unidad_venta_codigo ?? ''}</td>
+            <td>${Number(p.stock_minimo ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 2 })}</td>
+            <td>${Number(p.stock_maximo ?? 0) > 0 ? Number(p.stock_maximo).toLocaleString('es-PE', { maximumFractionDigits: 2 }) : '—'}</td>
             <td>${p.peso_unitario_g ?? '-'}</td>
             <td>${p.activo
                 ? '<span class="pc-badge-estado bg-success text-white">Activo</span>'
@@ -702,6 +763,9 @@ async function cargarProductos() {
             <td>
                 <button class="pc-icon-btn" onclick="abrirModalEditar(${p.id})" title="Editar">
                     <i class="fa-solid fa-pen"></i>
+                </button>
+                <button class="pc-icon-btn" onclick="abrirModalStockProducto(${p.id})" title="Stock y mínimos/máximos">
+                    <i class="fa-solid fa-boxes-stacked"></i>
                 </button>
                 <button class="pc-icon-btn" onclick="abrirModalConfiguracion(${p.id}, '${escapeAttr(p.descripcion)}')" title="Configurar">
                     <i class="fa-solid fa-gear"></i>
@@ -738,6 +802,9 @@ function exportarExcel() {
         'U. Medida'         : p.unidad_venta_codigo ?? '',
         'Cant. Equivale'    : p.cant_equivale ?? '',
         'U. Equivale'       : p.unidad_equivale_codigo ?? '',
+        'Stock actual'      : p.stock ?? 0,
+        'Stock mínimo'      : p.stock_minimo ?? 0,
+        'Stock máximo'      : p.stock_maximo ?? 0,
         'Peso unitario (g)' : p.peso_unitario_g ?? '',
         'Estado'            : p.activo ? 'Activo' : 'Inactivo',
     }));
@@ -751,6 +818,9 @@ function exportarExcel() {
         { wch: 12 }, // U. Medida
         { wch: 14 }, // Cant. Equivale
         { wch: 12 }, // U. Equivale
+        { wch: 15 }, // Stock actual
+        { wch: 14 }, // Stock mínimo
+        { wch: 14 }, // Stock máximo
         { wch: 16 }, // Peso unitario
         { wch: 10 }, // Estado
     ];
@@ -809,6 +879,101 @@ document.getElementById('formProducto').addEventListener('submit', async functio
         Swal.fire('Error', json.message, 'error');
     }
 });
+
+function abrirModalStockProducto(id) {
+    const p = productosCache.find(item => String(item.id) === String(id));
+    if (!p) {
+        Swal.fire('No se pudo abrir', 'Vuelve a cargar el listado de productos.', 'warning');
+        return;
+    }
+    document.getElementById('stock_producto_id').value = p.id;
+    document.getElementById('stock_producto_nombre').textContent = `${p.codigo ?? ''} — ${p.descripcion ?? ''}`;
+    document.getElementById('stock_producto_unidad_venta').value = p.unidad_venta_codigo ?? '';
+    document.getElementById('stock_producto_unidad').textContent = `(${p.unidad_venta_codigo ?? 'unidad de venta'})`;
+    const factorEquivalencia = Number(p.cant_equivale ?? 0);
+    const esStockCompuesto = Number.isInteger(factorEquivalencia)
+        && factorEquivalencia > 1
+        && Number(p.unidad_equivale_id ?? 0) > 0
+        && Boolean(p.unidad_equivale_codigo);
+    document.getElementById('stock_producto_factor').value = esStockCompuesto ? factorEquivalencia : 0;
+    const stock = Number(p.stock ?? 0);
+    const cajaSimple = document.getElementById('stock_actual_simple');
+    const cajaCompuesta = document.getElementById('stock_actual_compuesto');
+    cajaSimple.hidden = esStockCompuesto;
+    cajaCompuesta.hidden = !esStockCompuesto;
+    document.getElementById('stock_producto_actual').required = !esStockCompuesto;
+    document.getElementById('stock_producto_paquetes').required = esStockCompuesto;
+    document.getElementById('stock_producto_sueltas').required = esStockCompuesto;
+    if (esStockCompuesto) {
+        const paquetes = Math.floor(stock + 0.000001);
+        let sueltas = Math.round((stock - paquetes) * factorEquivalencia);
+        const paquetesFinales = sueltas >= factorEquivalencia ? paquetes + 1 : paquetes;
+        if (sueltas >= factorEquivalencia) sueltas = 0;
+        document.getElementById('stock_producto_paquetes').value = paquetesFinales;
+        document.getElementById('stock_producto_sueltas').value = sueltas;
+        document.getElementById('stock_producto_sueltas').max = String(factorEquivalencia - 1);
+        document.getElementById('stock_producto_unidad_suelta').textContent = p.unidad_equivale_codigo;
+        document.getElementById('stock_producto_conversion').textContent = `1 ${p.unidad_venta_codigo} = ${factorEquivalencia} ${p.unidad_equivale_codigo}`;
+        document.getElementById('stock_producto_unidad').textContent = `(${p.unidad_venta_codigo} + ${p.unidad_equivale_codigo})`;
+        document.getElementById('stock_producto_preview').textContent = '';
+    } else {
+        document.getElementById('stock_producto_actual').value = stock.toFixed(2);
+        document.getElementById('stock_producto_preview').textContent = '';
+    }
+    if (esStockCompuesto) actualizarPreviewStockCompuesto();
+    document.getElementById('stock_producto_unidad_minimo').textContent = p.unidad_venta_codigo ? `(${p.unidad_venta_codigo})` : '';
+    document.getElementById('stock_producto_unidad_maximo').textContent = p.unidad_venta_codigo ? `(${p.unidad_venta_codigo})` : '';
+    document.getElementById('stock_producto_minimo').value = Number(p.stock_minimo ?? 0).toFixed(2);
+    document.getElementById('stock_producto_maximo').value = Number(p.stock_maximo ?? 0).toFixed(2);
+    modalStockProducto.show();
+}
+
+function actualizarPreviewStockCompuesto() {
+    const factor = Number(document.getElementById('stock_producto_factor').value);
+    if (!factor) return;
+    const paquetes = Number(document.getElementById('stock_producto_paquetes').value || 0);
+    const sueltas = Number(document.getElementById('stock_producto_sueltas').value || 0);
+    const stockVenta = (paquetes + sueltas / factor).toFixed(2);
+    const unidadVenta = document.getElementById('stock_producto_unidad_venta').value;
+    const unidadSuelta = document.getElementById('stock_producto_unidad_suelta').textContent;
+    document.getElementById('stock_producto_preview').textContent = `${paquetes} paquetes + ${sueltas} ${unidadSuelta} = ${stockVenta} ${unidadVenta}`;
+}
+['stock_producto_paquetes', 'stock_producto_sueltas'].forEach(id => {
+    document.getElementById(id).addEventListener('input', actualizarPreviewStockCompuesto);
+});
+
+document.getElementById('formStockProducto').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const boton = document.getElementById('btnGuardarStockProducto');
+    boton.disabled = true;
+    try {
+        let stockNuevo = document.getElementById('stock_producto_actual').value;
+        if (!document.getElementById('stock_actual_compuesto').hidden) {
+            const factor = Number(document.getElementById('stock_producto_factor').value);
+            const paquetes = Number(document.getElementById('stock_producto_paquetes').value);
+            const sueltas = Number(document.getElementById('stock_producto_sueltas').value);
+            if (!Number.isInteger(paquetes) || paquetes < 0 || !Number.isInteger(sueltas) || sueltas < 0 || sueltas >= factor) {
+                throw new Error(`Ingresa paquetes completos y entre 0 y ${factor - 1} unidades sueltas.`);
+            }
+            stockNuevo = (paquetes + sueltas / factor).toFixed(2);
+        }
+        const json = await llamarProductos('AJUSTARSTOCKPRODUCTO', {
+            producto_id: document.getElementById('stock_producto_id').value,
+            stock: stockNuevo,
+            stock_minimo: document.getElementById('stock_producto_minimo').value,
+            stock_maximo: document.getElementById('stock_producto_maximo').value,
+        });
+        if (!json.success) throw new Error(json.message || 'No se pudo actualizar el stock.');
+        modalStockProducto.hide();
+        await Swal.fire('Listo', json.message, 'success');
+        await cargarProductos();
+    } catch (error) {
+        Swal.fire('Error', error.message || 'No se pudo actualizar el stock.', 'error');
+    } finally {
+        boton.disabled = false;
+    }
+});
+
 // ── Eliminar / Reactivar ─────────────────────────────────────────────────────
 function eliminarProducto(id) {
     Swal.fire({

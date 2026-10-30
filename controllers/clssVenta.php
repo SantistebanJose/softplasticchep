@@ -310,62 +310,28 @@ function buscarDisponiblesVenta()
 {
     $conectar = conectar_oll_BD();
     $texto = trim($_POST['texto'] ?? '');
-
-    $whereDetalle = ["1=1"];
     $params = [];
-
+    $where = ["p.activo IS TRUE", "COALESCE(p.stock, 0) >= 1"];
     if ($texto !== '') {
-        $whereDetalle[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
-
-    $sql = "
-        WITH detalle AS (
-            SELECT
-                emp.id AS empaquetado_id,
-                emp.producto_id,
-                -- CAMBIO: cantidad_disponible_tmp es el disponible real para
-                -- venta (cantidad_tota es histórico inmutable de lo armado).
-                -- COALESCE por si algún registro no tiene backfill todavía.
-                COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) * COALESCE(um.equivalencia, 1) AS cantidad_base
-            FROM empaquetado emp
-            JOIN unidad_medida um ON um.id = emp.unidad_medida
-            WHERE emp.deleted_at IS NULL
-              AND COALESCE(emp.cantidad_disponible_tmp, emp.cantidad_tota) > 0.0001
-        ),
-        producto_venta AS (
-            SELECT
-                p.id AS producto_id,
-                uv.nombre_corto AS unidad_venta_corto,
-                p.cant_equivale * COALESCE(ue.equivalencia, 1) AS capacidad_paquete_venta_base
-            FROM producto p
-            LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
-            LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
-            WHERE p.cant_equivale IS NOT NULL AND p.unidad_equivale_id IS NOT NULL
-        )
-        SELECT
-            dc.producto_id,
-            p.codigo AS producto_codigo,
-            p.descripcion AS producto,
-            p.img_ruta AS producto_imagen,
-            NULL::integer AS color_id,
-            'Todos los colores' AS color,
-            NULL::text AS color_hex,
-            FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) AS paquetes_disponibles,
-            pv.unidad_venta_corto
-        FROM detalle dc
-        JOIN producto p ON p.id = dc.producto_id
-        JOIN producto_venta pv ON pv.producto_id = dc.producto_id
-                                AND pv.capacidad_paquete_venta_base > 0
-        WHERE " . implode(' AND ', $whereDetalle) . "
-        GROUP BY dc.producto_id, p.codigo, p.descripcion, p.img_ruta,
-                 pv.unidad_venta_corto, pv.capacidad_paquete_venta_base
-        HAVING FLOOR(SUM(dc.cantidad_base) / pv.capacidad_paquete_venta_base) > 0
+    $result = executeQuery($conectar, "
+        SELECT p.id AS producto_id,
+               p.codigo AS producto_codigo,
+               p.descripcion AS producto,
+               p.img_ruta AS producto_imagen,
+               NULL::integer AS color_id,
+               'Todos los colores' AS color,
+               NULL::text AS color_hex,
+               FLOOR(COALESCE(p.stock, 0)) AS paquetes_disponibles,
+               uv.nombre_corto AS unidad_venta_corto
+        FROM producto p
+        JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+        WHERE " . implode(' AND ', $where) . "
         ORDER BY p.descripcion
         LIMIT 30
-    ";
-
-    $result = executeQuery($conectar, $sql, $params);
+    ", $params);
     responderVenta(true, 'OK', ['disponibles' => $result]);
 }
 // =============================================================================
@@ -465,6 +431,52 @@ function restaurarStockVenta($conectar, array $consumo): void
         ");
         $upd->execute(['cantidad' => $nuevaCantidad, 'id' => $c['empaquetado_id']]);
     }
+}
+
+/** Descuenta unidades de venta directamente del saldo maestro del producto. */
+function descontarStockProductoVenta($conectar, int $productoId, float $cantidad): array
+{
+    $stmt = $conectar->prepare("SELECT id, codigo, descripcion, stock FROM producto WHERE id = :id AND activo IS TRUE FOR UPDATE");
+    $stmt->execute(['id' => $productoId]);
+    $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$producto) throw new RuntimeException('El producto ya no existe o está inactivo.');
+
+    $stockAnterior = round((float)($producto['stock'] ?? 0), 2);
+    if ($cantidad > $stockAnterior + 0.0001) {
+        throw new RuntimeException(sprintf(
+            'Stock insuficiente de %s. Disponible: %s; solicitado: %s %s.',
+            $producto['descripcion'],
+            number_format($stockAnterior, 2, '.', ''),
+            number_format($cantidad, 0, '.', ''),
+            'unidad(es) de venta'
+        ));
+    }
+
+    $stockPosterior = round($stockAnterior - $cantidad, 2);
+    if ($stockPosterior < 0 && $stockPosterior > -0.0001) $stockPosterior = 0;
+    $actualizar = $conectar->prepare('UPDATE producto SET stock = :stock, updated_at = NOW() WHERE id = :id');
+    $actualizar->execute(['stock' => $stockPosterior, 'id' => $productoId]);
+
+    return ['stock_anterior' => $stockAnterior, 'stock_posterior' => $stockPosterior];
+}
+
+/** Registra salida o reversa de venta en el kardex global del producto. */
+function registrarMovimientoVentaProducto($conectar, int $productoId, int $ventaId, string $tipo, float $cantidad, float $anterior, float $posterior): void
+{
+    $stmt = $conectar->prepare("
+        INSERT INTO movimiento_inventario
+            (producto_id, venta_id, fecha, tipo, es_traslado, cantidad, cantidad_anterior, cantidad_posterior, created_at)
+        VALUES
+            (:producto_id, :venta_id, CURRENT_DATE, :tipo, FALSE, :cantidad, :anterior, :posterior, NOW())
+    ");
+    $stmt->execute([
+        'producto_id' => $productoId,
+        'venta_id' => $ventaId,
+        'tipo' => $tipo,
+        'cantidad' => $cantidad,
+        'anterior' => $anterior,
+        'posterior' => $posterior,
+    ]);
 }
 // =============================================================================
 // VENTAS
@@ -718,9 +730,10 @@ function reporteVentasPorVendedorCliente(): void
     )
         SELECT vendedor_usuario_id, vendedor, medio_pago,
                CASE
-                   WHEN medio_pago IN ('yape', 'plin') THEN 'Billetera del vendedor'
                    WHEN medio_pago = 'efectivo' THEN 'Caja / efectivo'
-                   ELSE COALESCE(cuenta, 'Cuenta no disponible')
+                   WHEN cuenta IS NOT NULL THEN cuenta
+                   WHEN medio_pago IN ('yape', 'plin') THEN 'Billetera del vendedor'
+                   ELSE 'Cuenta no disponible'
                END AS destino,
                ROUND(SUM(monto), 2) AS importe_total,
                COUNT(*) AS pagos
@@ -1034,10 +1047,11 @@ function guardarVenta()
         if ($requiereCuenta && $cuentaId <= 0) {
             responderVenta(false, 'Selecciona la cuenta receptora del depósito o transferencia.');
         }
+        $permiteCuenta = in_array($medio, ['deposito', 'transferencia', 'yape', 'plin'], true);
         $pagos[] = [
             'medio_pago' => $medio,
-            // Yape/Plin llegan al vendedor elegido; el vendedor queda registrado en venta.
-            'cuenta_receptora_id' => $requiereCuenta ? $cuentaId : null,
+            // Yape/Plin pueden ir al vendedor (sin cuenta) o a una billetera de empresa.
+            'cuenta_receptora_id' => $permiteCuenta && $cuentaId > 0 ? $cuentaId : null,
             'monto' => $monto,
             'referencia' => $referencia !== '' ? $referencia : null,
         ];
@@ -1106,7 +1120,7 @@ function guardarVenta()
             $info['color'] = 'Todos los colores';
             $cantidadBaseNecesaria = round($cantidadPaquetes * $capacidadVenta['capacidad_base'], 4);
 
-            $consumo  = consumirStockFIFOVenta($conectar, $productoId, $cantidadBaseNecesaria);
+            $stockMovimiento = descontarStockProductoVenta($conectar, $productoId, $cantidadPaquetes);
             $subtotalMoneda = round($cantidadPaquetes * $precioMoneda, 2);
             $precio = round($precioMoneda, 4);
             $subtotal = $subtotalMoneda;
@@ -1128,7 +1142,10 @@ function guardarVenta()
                 'tipo_cambio_aplicado' => $tipoCambioAplicado,
                 'precio_unitario_moneda' => $precio,
                 'subtotal_moneda'     => $subtotal,
-                'js_consumo'          => $consumo,
+                'inventario_producto_stock' => true,
+                'stock_anterior'      => $stockMovimiento['stock_anterior'],
+                'stock_posterior'     => $stockMovimiento['stock_posterior'],
+                'js_consumo'          => [],
             ];
         }
 
@@ -1222,9 +1239,21 @@ function guardarVenta()
             ]);
         }
 
-        // NUEVO: registrar en empaquetado.js_venta qué venta consumió cada
-        // registro y cuánto. Recién acá tenemos $ventaId/$codigo, por eso
-        // va después del INSERT y no dentro de consumirStockFIFOVenta().
+        foreach ($itemsFinal as $item) {
+            registrarMovimientoVentaProducto(
+                $conectar,
+                (int)$item['producto_id'],
+                $ventaId,
+                'SALIDA',
+                (float)$item['cantidad'],
+                (float)$item['stock_anterior'],
+                (float)$item['stock_posterior']
+            );
+        }
+
+        // Las ventas nuevas descuentan el saldo global del producto. Los
+        // registros FIFO históricos de empaquetado se conservan para auditar
+        // ventas antiguas y no se consumen dos veces.
         foreach ($itemsFinal as $item) {
             foreach ($item['js_consumo'] as $c) {
                 agregarRegistroJsVentaEmpaquetado($conectar, $c['empaquetado_id'], [
@@ -1267,6 +1296,23 @@ function anularVenta(int $id)
 
         $items = json_decode($venta['js_items'], true) ?: [];
         foreach ($items as $item) {
+            if (!empty($item['inventario_producto_stock'])) {
+                $productoId = (int)($item['producto_id'] ?? 0);
+                $cantidad = round((float)($item['cantidad'] ?? 0), 2);
+                if ($productoId <= 0 || $cantidad <= 0) continue;
+
+                $stmtStock = $conectar->prepare('SELECT stock FROM producto WHERE id = :id FOR UPDATE');
+                $stmtStock->execute(['id' => $productoId]);
+                $stockActual = $stmtStock->fetchColumn();
+                if ($stockActual === false) throw new RuntimeException('No se encontró el producto para devolver el stock de la venta.');
+                $anterior = round((float)($stockActual ?? 0), 2);
+                $posterior = round($anterior + $cantidad, 2);
+                $stmtActualizarStock = $conectar->prepare('UPDATE producto SET stock = :stock, updated_at = NOW() WHERE id = :id');
+                $stmtActualizarStock->execute(['stock' => $posterior, 'id' => $productoId]);
+                registrarMovimientoVentaProducto($conectar, $productoId, $id, 'ENTRADA', $cantidad, $anterior, $posterior);
+                continue;
+            }
+
             $consumo = $item['js_consumo'] ?? [];
             if (!empty($consumo)) {
                 restaurarStockVenta($conectar, $consumo);

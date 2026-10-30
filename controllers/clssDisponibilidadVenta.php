@@ -2,8 +2,8 @@
 
 /**
  * controllers/clssDisponibilidadVenta.php
- * Reporte de Disponibilidad de Venta: stock empaquetado y aún no vendido,
- * agrupado por producto + color.
+ * Reporte de Disponibilidad de Venta: saldo maestro en producto.stock,
+ * expresado en la unidad de venta de cada producto.
  *
  * REESCRITO (2026-08-19): el color YA NO se deriva del historial de
  * producción del producto (producto_color vía `produccion`). Ese enfoque
@@ -78,7 +78,7 @@ function controladorDisponibilidadVenta($accion)
     }
 }
 
-// Filtro auxiliar para el <select> de color.
+// Se conserva el endpoint auxiliar por compatibilidad con páginas antiguas.
 function buscarColoresDV()
 {
     $conectar = conectar_oll_BD();
@@ -88,6 +88,50 @@ function buscarColoresDV()
 }
 
 function listarDisponibilidadVenta()
+{
+    $conectar = conectar_oll_BD();
+    $texto = trim($_POST['texto'] ?? '');
+    $incluirAgotados = ($_POST['incluir_vendidos'] ?? '0') === '1';
+    $where = ['p.activo IS TRUE'];
+    $params = [];
+    if (!$incluirAgotados) $where[] = 'COALESCE(p.stock, 0) > 0';
+    if ($texto !== '') {
+        $where[] = '(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))';
+        $params['texto'] = '%' . $texto . '%';
+    }
+
+    $result = executeQuery($conectar, "
+        SELECT p.id AS producto_id,
+               p.codigo AS producto_codigo,
+               p.descripcion AS producto,
+               p.img_ruta AS producto_imagen,
+               0::integer AS color_id,
+               'Stock general'::text AS color,
+               '#246bfe'::text AS color_hex,
+               1::integer AS registros_count,
+               COALESCE(p.stock, 0) AS paquetes_disponibles,
+               uv.nombre_corto AS unidad_venta_corto,
+               NULL::numeric AS capacidad_paquete_venta_base,
+               FALSE AS paquetes_venta_sin_configurar,
+               FALSE AS config_venta_inconsistente,
+               COALESCE(p.stock, 0) AS bolsas_disponibles,
+               uv.nombre_corto AS unidad_bolsa_corto,
+               FALSE AS unidades_bolsa_distintas,
+               COALESCE(p.stock, 0) AS cantidad_base_total,
+               1::numeric AS unidad_bolsa_equivalencia,
+               COALESCE(p.stock_minimo, 0) AS stock_minimo,
+               COALESCE(p.stock_maximo, 0) AS stock_maximo
+        FROM producto p
+        LEFT JOIN unidad_medida uv ON uv.id = p.unidad_venta_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY p.descripcion
+    ", $params);
+    responderDV(true, 'OK', ['disponibilidad' => $result]);
+}
+
+// Consulta antigua basada en saldo de empaquetados; se conserva únicamente
+// como referencia histórica. Las ventas y la vista de stock usan producto.stock.
+function listarDisponibilidadVentaLegacyEmpaquetado()
 {
     $conectar        = conectar_oll_BD();
     $texto           = trim($_POST['texto'] ?? '');

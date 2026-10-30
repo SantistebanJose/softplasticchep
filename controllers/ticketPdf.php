@@ -696,7 +696,7 @@ $nombresMedioPago = [
 foreach ($pagos as $indicePago => $pago) {
     $medio = $nombresMedioPago[$pago['medio_pago']] ?? ucfirst((string)$pago['medio_pago']);
     $destino = trim((string)($pago['cuenta_nombre'] ?? ''));
-    if (in_array($pago['medio_pago'], ['yape', 'plin'], true)) {
+    if ($destino === '' && in_array($pago['medio_pago'], ['yape', 'plin'], true)) {
         $destino = 'del vendedor';
     }
     $pagoMoneda = strtoupper((string)($pagosMonedaVenta[$indicePago]['moneda'] ?? $monedaCobro));

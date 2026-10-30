@@ -581,7 +581,7 @@ function listarEmpaquetadosPorOrigen(int $ensamblajeId, int $produccionId)
     $result = executeQuery($conectar, "
         SELECT
             emp.id, emp.producto_id, emp.emsamblaje_id, emp.produccion_id, emp.unidad_medida,
-            emp.cantidad_tota, emp.js_cantidades, emp.fuente_inventario, emp.fecha_inventario,
+            emp.cantidad_tota, emp.js_cantidades,
             emp.operario_id, emp.js_operarios, emp.pasado_venta, emp.venta_id_ref,
             emp.created_at, emp.update_at,
             um.nombre AS unidad_nombre, um.nombre_corto AS unidad_corto,
@@ -748,8 +748,7 @@ function listarTodosEmpaquetados()
                 END
                 FROM rel_empaquetado_origen reo
                 WHERE reo.empaquetado_id = emp.id AND reo.deleted_at IS NULL
-            ), CASE WHEN emp.fuente_inventario = 'INVENTARIO_INICIAL' THEN 'inventario_inicial'
-                    WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
+            ), CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
                     WHEN emp.produccion_id IS NOT NULL THEN 'produccion'
                     ELSE NULL END) AS origen_tipo
         FROM empaquetado emp
@@ -789,8 +788,8 @@ function reporteEmpaquetadoDashboard(): void
             responder(false, 'El rango de fechas no es válido.');
         }
     }
-    if ($desde !== '') { $where[] = 'COALESCE(emp.fecha_inventario::timestamp, emp.created_at) >= :desde'; $params['desde'] = $desde . ' 00:00:00'; }
-    if ($hasta !== '') { $where[] = 'COALESCE(emp.fecha_inventario::timestamp, emp.created_at) < :hasta'; $params['hasta'] = date('Y-m-d', strtotime($hasta . ' +1 day')) . ' 00:00:00'; }
+    if ($desde !== '') { $where[] = 'emp.created_at >= :desde'; $params['desde'] = $desde . ' 00:00:00'; }
+    if ($hasta !== '') { $where[] = 'emp.created_at < :hasta'; $params['hasta'] = date('Y-m-d', strtotime($hasta . ' +1 day')) . ' 00:00:00'; }
     if ($texto !== '') {
         $where[] = "(LOWER(p.codigo) LIKE LOWER(:texto) OR LOWER(p.descripcion) LIKE LOWER(:texto))";
         $params['texto'] = '%' . $texto . '%';
@@ -811,10 +810,8 @@ function reporteEmpaquetadoDashboard(): void
                    emp.cantidad_tota, emp.js_cantidades, emp.js_operarios,
                    emp.operario_id, op.nombre_completo AS operario_nombre,
                    su.nombre AS sucursal_nombre, emp.pasado_venta, emp.created_at,
-                   emp.fuente_inventario, emp.fecha_inventario,
                    um.nombre_corto AS unidad_corto,
-                   CASE WHEN emp.fuente_inventario = 'INVENTARIO_INICIAL' THEN 'inventario_inicial'
-                        WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
+                   CASE WHEN emp.emsamblaje_id IS NOT NULL THEN 'ensamblaje'
                         WHEN emp.produccion_id IS NOT NULL THEN 'produccion' ELSE NULL END AS origen_tipo
             FROM empaquetado emp
             LEFT JOIN producto p ON p.id = emp.producto_id
@@ -1128,6 +1125,8 @@ function crearEmpaquetado()
         $empaquetadoId = $nuevo[0]['id'] ?? null;
         if (!$empaquetadoId) throw new Exception('No se pudo crear el registro de empaquetado.');
 
+        registrarEntradaStockProducto($conectar, $productoId, $empaquetadoId, $unidadMedida, $cantidadTotalEnUnidad);
+
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);
             executeNonQuery($conectar, "
@@ -1270,6 +1269,8 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
         ]);
         $empaquetadoId = $nuevo[0]['id'] ?? null;
         if (!$empaquetadoId) throw new Exception('No se pudo crear el registro de empaquetado.');
+
+        registrarEntradaStockProducto($conectar, $productoId, $empaquetadoId, $unidadMedida, $bolsasProducidas);
 
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);
@@ -1716,6 +1717,72 @@ function obtenerUnidadEmpaquetadoProducto($conectar, int $productoId): ?array
     ", ['id' => $rows[0]['unidad_id']]);
     return $unidad[0] ?? null;
 }
+
+/**
+ * Suma a producto.stock lo empaquetado, expresado en la unidad de venta
+ * configurada para ese producto, y registra el movimiento en la misma
+ * transacción que crea el empaquetado.
+ */
+function registrarEntradaStockProducto($conectar, int $productoId, int $empaquetadoId, int $unidadEmpaquetadoId, float $cantidadEmpaquetada): void
+{
+    $stmt = $conectar->prepare("
+        SELECT p.stock, p.unidad_venta_id, p.cant_equivale, p.unidad_equivale_id,
+               ue.equivalencia AS equivalencia_unidad_equivale,
+               ue.unidad_base_id AS base_unidad_equivale,
+               uemp.equivalencia AS equivalencia_unidad_empaquetado,
+               uemp.unidad_base_id AS base_unidad_empaquetado
+        FROM producto p
+        JOIN unidad_medida uemp ON uemp.id = :unidad_empaquetado_id
+        LEFT JOIN unidad_medida ue ON ue.id = p.unidad_equivale_id
+        WHERE p.id = :producto_id AND p.activo IS TRUE
+        FOR UPDATE OF p
+    ");
+    $stmt->execute([
+        'unidad_empaquetado_id' => $unidadEmpaquetadoId,
+        'producto_id' => $productoId,
+    ]);
+    $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$producto) throw new RuntimeException('No se pudo resolver el producto o la unidad del empaquetado.');
+
+    $cantEquivale = (float)($producto['cant_equivale'] ?? 0);
+    $equivalenciaEquivale = (float)($producto['equivalencia_unidad_equivale'] ?? 0);
+    $equivalenciaEmpaquetado = (float)($producto['equivalencia_unidad_empaquetado'] ?? 0);
+    if ((int)$producto['unidad_venta_id'] <= 0 || (int)$producto['unidad_equivale_id'] <= 0
+        || $cantEquivale <= 0 || $equivalenciaEquivale <= 0 || $equivalenciaEmpaquetado <= 0) {
+        throw new RuntimeException('Configura la unidad de venta y su equivalencia antes de registrar empaquetado.');
+    }
+
+    $baseEmpaquetado = $producto['base_unidad_empaquetado'] !== null ? (int)$producto['base_unidad_empaquetado'] : null;
+    $baseEquivale = $producto['base_unidad_equivale'] !== null ? (int)$producto['base_unidad_equivale'] : null;
+    if ($unidadEmpaquetadoId !== (int)$producto['unidad_equivale_id']
+        && ($baseEmpaquetado === null || $baseEquivale === null || $baseEmpaquetado !== $baseEquivale)) {
+        throw new RuntimeException('La unidad de empaquetado y la unidad equivalente del producto no comparten una unidad base compatible.');
+    }
+
+    $capacidadUnidadVenta = $cantEquivale * $equivalenciaEquivale;
+    $cantidadStock = round($cantidadEmpaquetada * $equivalenciaEmpaquetado / $capacidadUnidadVenta, 2);
+    if ($cantidadStock <= 0) throw new RuntimeException('La cantidad empaquetada es menor a la precisión admitida para el stock (0.01 unidad de venta).');
+
+    $stockAnterior = round((float)($producto['stock'] ?? 0), 2);
+    $stockPosterior = round($stockAnterior + $cantidadStock, 2);
+    $actualizar = $conectar->prepare("UPDATE producto SET stock = :stock, updated_at = NOW() WHERE id = :id");
+    $actualizar->execute(['stock' => $stockPosterior, 'id' => $productoId]);
+
+    $movimiento = $conectar->prepare("
+        INSERT INTO movimiento_inventario
+            (producto_id, empaquetado_id, fecha, tipo, es_traslado, cantidad, cantidad_anterior, cantidad_posterior, created_at)
+        VALUES
+            (:producto_id, :empaquetado_id, CURRENT_DATE, 'ENTRADA', FALSE, :cantidad, :anterior, :posterior, NOW())
+    ");
+    $movimiento->execute([
+        'producto_id' => $productoId,
+        'empaquetado_id' => $empaquetadoId,
+        'cantidad' => $cantidadStock,
+        'anterior' => $stockAnterior,
+        'posterior' => $stockPosterior,
+    ]);
+}
+
 // Reglas de empaquetado configuradas por producto (ver clssProductos.php ->
 // guardarConfigProducto()). Viven en el mismo js_configuracion_empaquetado.
 function obtenerReglasEmpaquetadoProducto($conectar, int $productoId): array

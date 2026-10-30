@@ -584,23 +584,31 @@ function totalCobroPV() {
 function renderPagosPV() {
     const contenedor = document.getElementById('pv_pagos_lista');
     if (!contenedor) return;
-    const opcionesCuentas = '<option value="">Selecciona cuenta receptora</option>' + cuentasPV.map(c =>
+    const opcionesCuentasDeposito = '<option value="">Selecciona cuenta receptora</option>' + cuentasPV.map(c =>
+        `<option value="${Number(c.id)}">${escaparHtmlPV(c.nombre)}</option>`
+    ).join('');
+    const opcionesCuentasDigital = '<option value="">Billetera del vendedor</option>' + cuentasPV.map(c =>
         `<option value="${Number(c.id)}">${escaparHtmlPV(c.nombre)}</option>`
     ).join('');
     contenedor.innerHTML = pagosPV.map(pago => {
         const requiereCuenta = ['deposito', 'transferencia'].includes(pago.medio_pago);
         const esDigital = ['yape', 'plin'].includes(pago.medio_pago);
+        const permiteDestinoCuenta = requiereCuenta || esDigital;
         const vendedorSeleccionado = vendedoresPV.find(v => Number(v.id) === Number(document.getElementById('pv_vendedor').value));
+        const cuentaSeleccionada = cuentasPV.find(c => Number(c.id) === Number(pago.cuenta_receptora_id));
         const opcionesMedios = Object.entries(MEDIOS_PAGO_PV).map(([valor, texto]) =>
             `<option value="${valor}" ${pago.medio_pago === valor ? 'selected' : ''}>${texto}</option>`
         ).join('');
-        return `<div class="pv-pago-row ${requiereCuenta ? '' : 'sin-cuenta'}" data-pago="${pago.uid}">
+        const notaDestinoDigital = cuentaSeleccionada
+            ? `Se recibirá en la cuenta de la empresa: ${escaparHtmlPV(cuentaSeleccionada.nombre)}`
+            : `Se abonará al vendedor: ${escaparHtmlPV(vendedorSeleccionado?.nombre_completo || 'selecciona un vendedor')}`;
+        return `<div class="pv-pago-row ${permiteDestinoCuenta ? '' : 'sin-cuenta'}" data-pago="${pago.uid}">
             <select class="form-select pv-medio" aria-label="Medio de pago">${opcionesMedios}</select>
-            ${requiereCuenta ? `<select class="form-select pv-cuenta-select" aria-label="Cuenta receptora">${opcionesCuentas}</select>` : ''}
+            ${permiteDestinoCuenta ? `<select class="form-select pv-cuenta-select" aria-label="${esDigital ? 'Destino de billetera digital' : 'Cuenta receptora'}">${esDigital ? opcionesCuentasDigital : opcionesCuentasDeposito}</select>` : ''}
             <input class="form-control pv-monto" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Monto ${monedaVentaPV}" value="${pago.monto ? Number(pago.monto).toFixed(2) : ''}" aria-label="Monto en ${monedaVentaPV}">
             <button type="button" class="btn btn-outline-danger" onclick="quitarPagoPV(${pago.uid})" title="Quitar pago" ${pagosPV.length === 1 ? 'disabled' : ''}><i class="fa-solid fa-trash"></i></button>
-            ${requiereCuenta ? `<input class="form-control pv-referencia" maxlength="100" placeholder="Referencia (opcional)" value="${escaparHtmlPV(pago.referencia)}" aria-label="Referencia">` : ''}
-            ${esDigital ? `<small class="pv-receptor-note text-muted">Se abonará al vendedor: ${escaparHtmlPV(vendedorSeleccionado?.nombre_completo || 'selecciona un vendedor')}</small>` : ''}
+            ${permiteDestinoCuenta ? `<input class="form-control pv-referencia" maxlength="100" placeholder="Referencia (opcional)" value="${escaparHtmlPV(pago.referencia)}" aria-label="Referencia">` : ''}
+            ${esDigital ? `<small class="pv-receptor-note text-muted">${notaDestinoDigital}</small>` : ''}
         </div>`;
     }).join('');
     pagosPV.forEach(pago => {
@@ -653,11 +661,17 @@ document.getElementById('pv_pagos_lista').addEventListener('change', event => {
     if (!pago) return;
     if (event.target.classList.contains('pv-medio')) {
         pago.medio_pago = event.target.value;
-        if (!['deposito', 'transferencia'].includes(pago.medio_pago)) pago.cuenta_receptora_id = '';
+        pago.cuenta_receptora_id = '';
         renderPagosPV();
         return;
     }
-    if (event.target.classList.contains('pv-cuenta-select')) pago.cuenta_receptora_id = event.target.value;
+    if (event.target.classList.contains('pv-cuenta-select')) {
+        pago.cuenta_receptora_id = event.target.value;
+        if (['yape', 'plin'].includes(pago.medio_pago)) {
+            renderPagosPV();
+            return;
+        }
+    }
     if (event.target.classList.contains('pv-monto')) { pago.monto = Number(event.target.value) || 0; pago.automatico = false; }
     if (event.target.classList.contains('pv-referencia')) pago.referencia = event.target.value;
     ajustarPagoAutomaticoPV(pago.uid);
@@ -736,7 +750,7 @@ function validarDatosVentaPV() {
     if (!pagosPV.length) throw new Error('Agrega al menos una forma de pago.');
     const pagos = pagosPV.map(pago => ({
         medio_pago: pago.medio_pago,
-        cuenta_receptora_id: ['deposito', 'transferencia'].includes(pago.medio_pago) ? (Number(pago.cuenta_receptora_id) || null) : null,
+        cuenta_receptora_id: ['deposito', 'transferencia', 'yape', 'plin'].includes(pago.medio_pago) ? (Number(pago.cuenta_receptora_id) || null) : null,
         monto: Math.round((Number(pago.monto) || 0) * 100) / 100,
         referencia: pago.referencia.trim()
     }));
