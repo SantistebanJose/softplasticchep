@@ -1147,7 +1147,7 @@ function crearEmpaquetado()
     } catch (Throwable $e) {
         $conectar->rollBack();
         error_log("Error creando empaquetado: " . $e->getMessage());
-        responder(false, 'No se pudo guardar: ' . $e->getMessage());
+        responder(false, 'No se pudo guardar -----: ' . $e->getMessage());
     }
 }
 
@@ -1752,12 +1752,16 @@ function registrarEntradaStockProducto($conectar, int $productoId, int $empaquet
         throw new RuntimeException('Configura la unidad de venta y su equivalencia antes de registrar empaquetado.');
     }
 
+    
+    /*
     $baseEmpaquetado = $producto['base_unidad_empaquetado'] !== null ? (int)$producto['base_unidad_empaquetado'] : null;
     $baseEquivale = $producto['base_unidad_equivale'] !== null ? (int)$producto['base_unidad_equivale'] : null;
     if ($unidadEmpaquetadoId !== (int)$producto['unidad_equivale_id']
         && ($baseEmpaquetado === null || $baseEquivale === null || $baseEmpaquetado !== $baseEquivale)) {
         throw new RuntimeException('La unidad de empaquetado y la unidad equivalente del producto no comparten una unidad base compatible.');
     }
+    */
+    
 
     $capacidadUnidadVenta = $cantEquivale * $equivalenciaEquivale;
     $cantidadStock = round($cantidadEmpaquetada * $equivalenciaEmpaquetado / $capacidadUnidadVenta, 2);
