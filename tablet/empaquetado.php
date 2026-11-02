@@ -1184,7 +1184,7 @@ async function cargarSelectsEstacion() {
         : '<option value="">(sin unidades disponibles - revisar consola)</option>';
 
     const sMaquina = document.getElementById('est_maquina_id');
-    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.alias || m.nombre}</option>`).join('');
 
     const yoEstoyEnLista = (operarios || []).some(o => o.id == OPERARIO_ID);
     estOperariosSeleccionados = yoEstoyEnLista ? [Number(OPERARIO_ID)] : [];

@@ -1822,7 +1822,7 @@ function buscarMaquinasEmpaquetado(): void
 {
     $conectar = conectar_oll_BD();
     $maquinas = executeQuery($conectar, "
-        SELECT id, nombre
+        SELECT id, nombre, alias
         FROM maquina
         WHERE deleted_at IS NULL
         ORDER BY nombre

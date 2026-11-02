@@ -865,7 +865,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     productosGridDataEns = productos || [];
     maquinasEnsamblajeCache = maquinasResp.success ? maquinasResp.maquinas : [];
     const maquinaSelect = document.getElementById('ens_maquina_id');
-    maquinaSelect.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
+    maquinaSelect.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.alias || m.nombre}</option>`).join('');
     if (seleccion.producto_id) {
         productoSeleccionadoEns = { producto_id: String(seleccion.producto_id), color_id: seleccion.color_id != null ? String(seleccion.color_id) : null };
     }

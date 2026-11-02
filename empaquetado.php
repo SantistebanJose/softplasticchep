@@ -856,7 +856,7 @@ async function cargarSelectsEstacion() {
     sSuc.innerHTML = '<option value="">Selecciona...</option>' + (sucursales || []).map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 
     const sMaquina = document.getElementById('est_maquina_id');
-    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinas.map(m => `<option value="${m.id}">${m.alias || m.nombre}</option>`).join('');
 
     estOperariosSeleccionados = [];
     renderOperariosChips('est_operarios_chips', estOperariosSeleccionados, 'toggleOperarioEstacion');

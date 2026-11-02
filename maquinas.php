@@ -35,6 +35,7 @@ include("header.php");
         <thead>
             <tr>
                 <th>Nombre</th>
+                <th>Alias</th>
                 <th>Descripción</th>
                 <th>Sucursal</th>
                 <th>Estado</th>
@@ -43,7 +44,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyMaquinas">
-            <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="7" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -64,6 +65,11 @@ include("header.php");
           <div class="mb-2">
             <label class="form-label">Nombre *</label>
             <input type="text" class="form-control" name="nombre" id="maquina_nombre" required>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Alias</label>
+            <input type="text" class="form-control" name="alias" id="maquina_alias" maxlength="100" placeholder="Nombre corto o identificación interna">
           </div>
 
           <div class="mb-2">
@@ -110,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarMaquinas().catch(err => {
         console.error('Error cargando datos iniciales:', err);
         document.getElementById('tbodyMaquinas').innerHTML =
-            `<tr><td colspan="6" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="7" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     });
 
     // ── Búsqueda automática ──────────────────────────────────────────────────
@@ -162,19 +168,20 @@ async function cargarMaquinas() {
     const tbody = document.getElementById('tbodyMaquinas');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const maquinas = json.maquinas || [];
     if (maquinas.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay máquinas registradas.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay máquinas registradas.</td></tr>';
         return;
     }
 
     tbody.innerHTML = maquinas.map(m => `
     <tr id="fila-maquina-${m.id}">
         <td data-label="Nombre">${m.nombre}</td>
+        <td data-label="Alias">${m.alias ?? '-'}</td>
         <td data-label="Descripción">${m.descripcion ?? '-'}</td>
         <td data-label="Sucursal">${m.sucursal_nombre ?? '-'}</td>
         <td data-label="Estado">${textoEstado(m.estado)}</td>
@@ -201,6 +208,7 @@ async function cargarMaquinas() {
 function abrirModalCrearMaquina() {
     document.getElementById('formMaquina').reset();
     document.getElementById('maquina_id').value = '';
+    document.getElementById('maquina_alias').value = '';
     document.getElementById('maquina_estado').value = 'A';
     document.getElementById('maquina_sucursal_id').value = '';
     document.getElementById('modalMaquinaTitulo').textContent = 'Nueva máquina';
@@ -215,6 +223,7 @@ async function abrirModalEditarMaquina(id) {
     document.getElementById('modalMaquinaTitulo').textContent = 'Editar máquina';
     document.getElementById('maquina_id').value = m.id;
     document.getElementById('maquina_nombre').value = m.nombre ?? '';
+    document.getElementById('maquina_alias').value = m.alias ?? '';
     document.getElementById('maquina_descripcion').value = m.descripcion ?? '';
     document.getElementById('maquina_estado').value = m.estado ?? 'A';
     document.getElementById('maquina_sucursal_id').value = m.sucursal_id ?? '';

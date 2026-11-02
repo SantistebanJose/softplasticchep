@@ -693,7 +693,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     actualizarEtiquetaColorEnsamblaje(seleccion.color_nombre || '');
     maquinasEnsamblajeCache = maquinasResp.success ? maquinasResp.maquinas : [];
     const sMaquina = document.getElementById('ens_maquina_id');
-    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
+    sMaquina.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.alias || m.nombre}</option>`).join('');
     if (seleccion.producto_id) {
         sProd.value = String(seleccion.producto_id);
     }

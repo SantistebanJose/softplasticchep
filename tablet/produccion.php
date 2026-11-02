@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/../controllers/feature_flags.php';
 require __DIR__ . '/../controllers_tablet/clssAuthOperario.php';
 
 
@@ -798,7 +799,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         </div>
                     </div>
                     <div class="px-3 pb-3">
-                        <label for="produccion_destino_ensamblaje" class="form-label">Destino *</label>
+                        <label for="produccion_destino_ensamblaje" class="form-label">Destino</label>
                         <select id="produccion_destino_ensamblaje" class="form-select form-select-lg">
                             <option value="local">Local · continúa la ruta actual</option>
                             <option value="externo">Externo · se registra su retorno armado</option>
@@ -938,6 +939,7 @@ const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
 const CONTROLADOR_PRODUCCION = '../controllers/clssProduccion.php';
+const HABILITAR_ENSAMBLAJE_EXTERNO = <?= HABILITAR_ENSAMBLAJE_EXTERNO ? 'true' : 'false' ?>;
 const CONTROLADOR_MOLDES     = '../controllers/clssMoldes.php';
 const CONTROLADOR_COLOR      = '../controllers/clssColor.php';
 const CONTROLADOR_SUCURSAL   = '../controllers/clssSucursal.php';
@@ -1043,12 +1045,14 @@ function abrirSelectorGenerico(tipo) {
 
 function renderSelectorGenericoGrid(filtro) {
     const cfg = SELECTOR_CONFIG[selectorGenericoContexto];
+    const etiqueta = it => selectorGenericoContexto === 'maquina'
+        ? (it.alias || it.nombre) : it.nombre;
     const items = [{ id: '', nombre: 'Ninguna' }, ...(cfg.cache() || [])]
-        .filter(it => it.nombre.toLowerCase().includes(filtro.toLowerCase()));
+        .filter(it => `${it.nombre || ''} ${it.alias || ''}`.toLowerCase().includes(filtro.toLowerCase()));
 
     const configGrid = {
         getId: it => it.id,
-        getLabel: it => it.nombre,
+        getLabel: etiqueta,
         getIcon: it => (it.id === '' ? 'fa-ban' : cfg.icon()),
         seleccionadoId: selEstado[cfg.estadoKey],
         onSeleccionar: 'seleccionarDesdeSelectorGenerico',
@@ -1589,7 +1593,7 @@ function pintarBloqueMaquina(maquinas) {
 function seleccionarMaquina(id) {
     selEstado.maquina_id = id;
     const m = (maquinasProdCache || []).find(x => String(x.id) === String(id));
-    selEstado.maquina_nombre = m ? m.nombre : '';
+    selEstado.maquina_nombre = m ? (m.alias || m.nombre) : '';
 }
 
 // ---- Categoría de material (opcional) ----
@@ -1667,7 +1671,7 @@ async function cargarSelectoresModal(seleccion = {}) {
     };
 
     const maq = maquinasProdCache.find(x => String(x.id) === String(selEstado.maquina_id));
-    if (maq) selEstado.maquina_nombre = maq.nombre;
+    if (maq) selEstado.maquina_nombre = maq.alias || maq.nombre;
     const color = coloresProdCache.find(x => String(x.id) === String(selEstado.color_id));
     if (color) { selEstado.color_nombre = color.nombre; selEstado.color_rgb = color.rgb; }
     const cat = (categorias || []).find(x => String(x.id) === String(selEstado.categoria_material_id));
@@ -1801,6 +1805,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
     const resumenMerma = resumenMermasPorUnidad(mermas);
     if (resumenMerma) tags.push(`Merma: ${resumenMerma}`);
     const salidas = Array.isArray(p.js_cantidades_salientes) ? p.js_cantidades_salientes : [];
+    const eventoPausa = p.ultimo_evento_pausa;
     if (salidas.length) tags.push(`Pasadas: ${salidas.length}${p.pases_finalizados ? ' · finalizadas' : ' · pendientes'}`);
     if (p.realizado_por_fuera && Array.isArray(p.js_realizado_por_fuera)) {
         p.js_realizado_por_fuera.forEach(envio => {
@@ -1843,6 +1848,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         <div class="pc-prod-corrida-line"><i class="fa-regular fa-clock"></i> ${estadoCorridaTexto(p)}</div>
         ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
         ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Origen: producción #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
+        ${estado === 'pausada' && eventoPausa ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-pause"></i> Paro: ${escaparResumenProd(eventoPausa.motivo_detalle || ({cambio_turno:'Cambio de turno', emergencia_molde:'Cambio de molde'}[eventoPausa.motivo] || 'Otro motivo'))}${eventoPausa.comentario ? ` · ${escaparResumenProd(eventoPausa.comentario)}` : ''}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="#" onclick="event.preventDefault(); abrirFotoPesaje('${encodeURIComponent(String(foto.url || ''))}')">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
@@ -2509,6 +2515,7 @@ let indicePasoAvanceTablet = 0;
 function obtenerPasosAvanceTablet() {
     const p = produccionesCache.find(x => Number(x.id) === Number(produccionIdParaEnsamblaje));
     return pasosAvanceTablet.filter(id => {
+        if (id === 'bloqueDestinoExterno' && !HABILITAR_ENSAMBLAJE_EXTERNO) return false;
         if (id === 'bloque_ultima_pasada' && document.getElementById('produccion_completo').checked) return false;
         if (id === 'bloqueDestinoExterno' && !necesitaEnsamblaje(p)) return false;
         return true;
@@ -2546,7 +2553,7 @@ function abrirModalCantidadParaEnsamblaje(produccionId) {
     document.getElementById('produccion_destino_ensamblaje').value = 'local';
     document.getElementById('bloqueDestinatarioExterno').style.display = 'none';
     document.getElementById('produccion_enviado_a').required = false;
-    document.getElementById('bloqueDestinoExterno').style.display = necesitaEnsamblaje(produccionesCache.find(x => x.id == produccionId)) ? '' : 'none';
+    document.getElementById('bloqueDestinoExterno').style.display = HABILITAR_ENSAMBLAJE_EXTERNO && necesitaEnsamblaje(produccionesCache.find(x => x.id == produccionId)) ? '' : 'none';
     archivosFotosPesaje.forEach(foto => URL.revokeObjectURL(foto.previewUrl));
     archivosFotosPesaje = [];
     capturaPendienteFotoPesaje = false;
@@ -2604,14 +2611,19 @@ document.getElementById('produccion_pausar').addEventListener('change', async fu
     const panel = document.getElementById('pausa_materiales_contenido');
     if (!this.checked) { panel.style.display = 'none'; return; }
     panel.style.display = '';
-    panel.innerHTML = `<div class="alert alert-warning">El avance actual quedará guardado antes de detener la producción.</div><label class="form-label">Motivo de la detención</label><select class="form-select form-select-lg" id="pausa-motivo"><option value="cambio_turno">Cambio de turno</option><option value="emergencia_molde">Emergencia: cambio de molde</option></select><div id="pausa-detalle-condicional" class="mt-3"></div>`;
+    panel.innerHTML = `<div class="alert alert-warning">El avance actual quedará guardado antes de detener la producción.</div><label class="form-label">Motivo del paro</label><select class="form-select form-select-lg" id="pausa-motivo"><option value="cambio_turno">Cambio de turno</option><option value="emergencia_molde">Emergencia: cambio de molde</option><option value="otro">Otro motivo de paro</option></select><div id="pausa-detalle-condicional" class="mt-3"></div><label class="form-label mt-3" for="pausa-observaciones">Observaciones</label><textarea class="form-control" id="pausa-observaciones" rows="2" maxlength="1000" placeholder="Detalle adicional del paro (opcional)"></textarea>`;
     document.getElementById('pausa-motivo').addEventListener('change', renderDetallePausaTablet);
     await renderDetallePausaTablet();
 });
 
 async function renderDetallePausaTablet() {
     const panel = document.getElementById('pausa-detalle-condicional');
-    if (document.getElementById('pausa-motivo')?.value !== 'emergencia_molde') {
+    const motivo = document.getElementById('pausa-motivo')?.value;
+    if (motivo === 'otro') {
+        panel.innerHTML = '<label class="form-label" for="pausa-motivo-detalle">Especifica el motivo *</label><input class="form-control form-control-lg" id="pausa-motivo-detalle" maxlength="160" required placeholder="Ej.: mantenimiento, falta de material">';
+        return;
+    }
+    if (motivo !== 'emergencia_molde') {
         panel.innerHTML = '<div class="form-text">El material queda reservado para esta misma producción. Al reanudar, el operario entrante registrará sus propios avances.</div>';
         return;
     }
@@ -2888,6 +2900,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const pausarDespues = document.getElementById('produccion_pausar').checked;
     const motivoDetencion = document.getElementById('pausa-motivo')?.value || 'cambio_turno';
     if (pausarDespues && motivoDetencion === 'cambio_turno' && ultimaPasada) { Swal.fire('Revisa el avance', 'No puedes marcarlo como última pasada y detenerlo por cambio de turno a la vez.', 'warning'); return; }
+    if (pausarDespues && motivoDetencion === 'otro' && !document.getElementById('pausa-motivo-detalle')?.value.trim()) { Swal.fire('Indica el motivo', 'Especifica el motivo de este paro.', 'warning'); return; }
     if (pausarDespues && motivoDetencion === 'emergencia_molde' && (!document.getElementById('pausa-producto-destino')?.value || !document.getElementById('pausa-molde-destino')?.value)) { Swal.fire('Selecciona producto y molde', 'Para cerrar por emergencia, elige el producto y el molde de la nueva producción.', 'warning'); return; }
 
     if (archivosFotosPesaje.length < 1) {
@@ -2906,7 +2919,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     }
 
     const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
-    const destinoEnsamblaje = necesitaEnsamblaje(p) ? document.getElementById('produccion_destino_ensamblaje').value : 'local';
+    const destinoEnsamblaje = HABILITAR_ENSAMBLAJE_EXTERNO && necesitaEnsamblaje(p) ? document.getElementById('produccion_destino_ensamblaje').value : 'local';
     const enviadoA = destinoEnsamblaje === 'externo' ? document.getElementById('produccion_enviado_a').value.trim() : '';
     if (destinoEnsamblaje === 'externo' && !enviadoA) {
         Swal.fire('Falta el destinatario', 'Indica a quién se enviará esta pasada externa.', 'warning');
@@ -2949,6 +2962,8 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     if (pausarDespues) {
         const motivo = motivoDetencion;
         formData.append('motivo_pausa', motivo);
+        formData.append('motivo_pausa_detalle', document.getElementById('pausa-motivo-detalle')?.value.trim() || '');
+        formData.append('comentario_pausa', document.getElementById('pausa-observaciones')?.value.trim() || '');
         if (motivo === 'emergencia_molde') {
             formData.append('pausa_materiales', '[]');
             formData.append('producto_destino_id', document.getElementById('pausa-producto-destino')?.value || '0');

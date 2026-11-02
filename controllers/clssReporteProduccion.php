@@ -114,7 +114,7 @@ function buscarOperariosReporte()
 function buscarMaquinasReporte()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre FROM maquina WHERE deleted_at IS NULL ORDER BY nombre";
+    $sql = "SELECT id, COALESCE(NULLIF(alias, ''), nombre) AS nombre FROM maquina WHERE deleted_at IS NULL ORDER BY nombre";
     $result = executeQuery($conectar, $sql, []);
     responder(true, 'OK', ['maquinas' => $result]);
 }
@@ -358,7 +358,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
     // ── Distribución por máquina, separada por unidad ──
     $sqlPorMaquina = "
         SELECT
-            COALESCE(ma.nombre, 'Sin máquina') AS maquina,
+            COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina,
             $unidadSql AS unidad,
             COUNT(pd.id) AS avances,
             COALESCE(SUM($producidoOperario), 0) AS cantidad,
@@ -367,7 +367,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         $joinOperario
         LEFT JOIN maquina ma ON ma.id = pd.maquina_id
         WHERE $condicionBase
-        GROUP BY ma.nombre, 2
+        GROUP BY COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina'), 2
         ORDER BY unidad, cantidad DESC
     ";
     $porMaquina = executeQuery($conectar, $sqlPorMaquina, $params);
@@ -402,7 +402,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             $turnoCase AS turno,
             mo.nombre AS molde_nombre,
             pr.descripcion AS producto_descripcion,
-            COALESCE(ma.nombre, 'Sin máquina') AS maquina_nombre,
+            COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina_nombre,
             co.nombre AS color_nombre,
             pd.cantidad AS kg_insertado,
             $producidoOperario AS kg_producido,

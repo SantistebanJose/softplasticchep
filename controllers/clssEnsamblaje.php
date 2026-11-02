@@ -426,7 +426,7 @@ function buscarColoresEnsamblaje(): void
 function buscarMaquinasEnsamblaje(): void
 {
     $conectar = conectar_oll_BD();
-    $result = executeQuery($conectar, "SELECT id, nombre FROM maquina WHERE deleted_at IS NULL ORDER BY nombre");
+    $result = executeQuery($conectar, "SELECT id, nombre, alias FROM maquina WHERE deleted_at IS NULL ORDER BY nombre");
     responder(true, 'OK', ['maquinas' => $result]);
 }
 
@@ -1277,7 +1277,7 @@ function listarEnsamblajes()
         e.id AS ensamblaje_id,
         e.producto_id,
         e.maquina_id,
-        maq.nombre AS maquina_nombre,
+        COALESCE(NULLIF(maq.alias, ''), maq.nombre) AS maquina_nombre,
         p.codigo AS producto_codigo,
         p.descripcion AS producto_descripcion,
         COALESCE(e.color_id, (

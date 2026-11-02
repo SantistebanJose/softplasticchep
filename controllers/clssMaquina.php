@@ -3,7 +3,7 @@
 /**
  * controllers/clssMaquina.php
  * Controlador del módulo de Máquinas
- * Tabla real: maquina (id, nombre, descripcion, estado, js_session, js_historial,
+ * Tabla real: maquina (id, nombre, alias, descripcion, estado, js_session, js_historial,
  *             created_at, update_at, deleted_at, sucursal_id)
  * estado: 'A' = Activa | 'M' = Mantenimiento
  * Soft delete vía deleted_at.
@@ -103,7 +103,7 @@ function listarMaquinas()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "LOWER(m.nombre) LIKE LOWER(:texto)";
+        $where[] = "(LOWER(m.nombre) LIKE LOWER(:texto) OR LOWER(COALESCE(m.alias, '')) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($estado === 'activa') {
@@ -224,12 +224,14 @@ function guardarMaquina()
     $conectar    = conectar_oll_BD();
     $id          = intval($_POST['id'] ?? 0);
     $nombre      = trim($_POST['nombre'] ?? '');
+    $alias       = trim($_POST['alias'] ?? '');
     $descripcion = trim($_POST['descripcion'] ?? '');
     $estado      = trim($_POST['estado'] ?? 'A');
     $sucursalId  = !empty($_POST['sucursal_id']) ? intval($_POST['sucursal_id']) : null;
 
     // ── Validaciones ──────────────────────────────────────────────────────────
     if (empty($nombre)) responder(false, 'El nombre es obligatorio.');
+    if (mb_strlen($alias) > 100) responder(false, 'El alias no puede superar 100 caracteres.');
     if (!in_array($estado, ['A', 'M'], true)) {
         responder(false, 'El estado debe ser Activa (A) o Mantenimiento (M).');
     }
@@ -251,6 +253,7 @@ function guardarMaquina()
     // Mapa de campos editables → etiqueta legible para el historial
     $mapaCampos = [
         'nombre'          => 'Nombre',
+        'alias'           => 'Alias',
         'descripcion'     => 'Descripción',
         'estado_legible'  => 'Estado de la máquina',
         'sucursal_legible'=> 'Sucursal',
@@ -258,6 +261,7 @@ function guardarMaquina()
 
     $datosNuevos = [
         'nombre'           => $nombre,
+        'alias'            => $alias !== '' ? $alias : null,
         'descripcion'      => $descripcion !== '' ? $descripcion : null,
         'estado_legible'   => textoEstadoMaquina($estado),
         'sucursal_legible' => obtenerNombreSucursal($conectar, $sucursalId),
@@ -272,11 +276,12 @@ function guardarMaquina()
         $js_historial_nuevo  = json_encode([$movimiento], JSON_UNESCAPED_UNICODE);
 
         $result = executeQuery($conectar, "
-            INSERT INTO maquina (nombre, descripcion, estado, sucursal_id, created_at, js_session, js_historial)
-            VALUES (:nombre, :descripcion, :estado, :sucursal_id, NOW(), :js_session, :js_historial)
+            INSERT INTO maquina (nombre, alias, descripcion, estado, sucursal_id, created_at, js_session, js_historial)
+            VALUES (:nombre, :alias, :descripcion, :estado, :sucursal_id, NOW(), :js_session, :js_historial)
             RETURNING id
         ", [
             'nombre'       => $nombre,
+            'alias'        => $alias !== '' ? $alias : null,
             'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'estado'       => $estado,
             'sucursal_id'  => $sucursalId,
@@ -304,6 +309,7 @@ function guardarMaquina()
         executeQuery($conectar, "
             UPDATE maquina SET
                 nombre       = :nombre,
+                alias        = :alias,
                 descripcion  = :descripcion,
                 estado       = :estado,
                 sucursal_id  = :sucursal_id,
@@ -313,6 +319,7 @@ function guardarMaquina()
             WHERE id = :id
         ", [
             'nombre'       => $nombre,
+            'alias'        => $alias !== '' ? $alias : null,
             'descripcion'  => $descripcion !== '' ? $descripcion : null,
             'estado'       => $estado,
             'sucursal_id'  => $sucursalId,

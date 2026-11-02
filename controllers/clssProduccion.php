@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/feature_flags.php';
 
 /**
  * controllers/clssProduccion.php
@@ -346,7 +347,7 @@ function buscarOperarios()
 function buscarMaquinas()
 {
     $conectar = conectar_oll_BD();
-    $sql = "SELECT id, nombre FROM maquina WHERE deleted_at IS NULL ORDER BY nombre";
+    $sql = "SELECT id, nombre, alias FROM maquina WHERE deleted_at IS NULL ORDER BY nombre";
     $result = executeQuery($conectar, $sql, []);
     responder(true, 'OK', ['maquinas' => $result]);
 }
@@ -927,6 +928,8 @@ function listarProducciones()
             (SELECT evt FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'cierre_cambio_molde' ORDER BY ord DESC LIMIT 1) AS cierre_cambio_molde,
             (SELECT evt FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
+             WHERE evt->>'tipo' IN ('pausa', 'cierre_cambio_molde') ORDER BY ord DESC LIMIT 1) AS ultimo_evento_pausa,
+            (SELECT evt FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'produccion_por_cambio_molde' ORDER BY ord DESC LIMIT 1) AS origen_cambio_molde_evento,
             (SELECT evt->>'produccion_destino_id' FROM unnest(COALESCE(pd.js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
              WHERE evt->>'tipo' = 'vinculo_cambio_molde' ORDER BY ord DESC LIMIT 1) AS produccion_destino_cambio_molde,
@@ -935,7 +938,8 @@ function listarProducciones()
             pd.cantidad_producida_kg, pd.js_configuracion_moment, pd.js_images,
             pd.unico_molde_producto, pd.molde_producto,
             op.nombre_completo AS operario_nombre,
-            ma.nombre AS maquina_nombre,
+            COALESCE(NULLIF(ma.alias, ''), ma.nombre) AS maquina_nombre,
+            ma.alias AS maquina_alias,
             mo.nombre AS molde_nombre,
             co.nombre AS color_nombre,
             co.rgb AS color_rgb,
@@ -993,6 +997,8 @@ function listarProducciones()
                 : [];
             $fila['cierre_cambio_molde'] = !empty($fila['cierre_cambio_molde'])
                 ? (json_decode($fila['cierre_cambio_molde'], true) ?: null) : null;
+            $fila['ultimo_evento_pausa'] = !empty($fila['ultimo_evento_pausa'])
+                ? (json_decode($fila['ultimo_evento_pausa'], true) ?: null) : null;
             $fila['origen_cambio_molde_evento'] = !empty($fila['origen_cambio_molde_evento'])
                 ? (json_decode($fila['origen_cambio_molde_evento'], true) ?: null) : null;
             $fila['produccion_destino_cambio_molde'] = !empty($fila['produccion_destino_cambio_molde'])
@@ -1094,7 +1100,8 @@ function obtenerProduccion($id)
     $produccion = executeQuery(
         $conectar,
         "SELECT pd.*,
-                op.nombre_completo AS operario_nombre, ma.nombre AS maquina_nombre,
+                op.nombre_completo AS operario_nombre, COALESCE(NULLIF(ma.alias, ''), ma.nombre) AS maquina_nombre,
+                ma.alias AS maquina_alias,
                 mo.nombre AS molde_nombre,
                 co.nombre AS color_nombre, co.rgb AS color_rgb,
                 cm.nombre AS categoria_material_nombre,
@@ -2174,7 +2181,7 @@ function enviarAEnsamblaje()
     if (!in_array($realizadoPorFueraRaw, ['true', 'false', '1', '0'], true)) {
         responder(false, 'Indica si esta pasada se enviará a un servicio externo.');
     }
-    $realizadoPorFuera = in_array($realizadoPorFueraRaw, ['true', '1'], true);
+    $realizadoPorFuera = HABILITAR_ENSAMBLAJE_EXTERNO && in_array($realizadoPorFueraRaw, ['true', '1'], true);
     $enviadoA = trim((string)($_POST['enviado_a'] ?? ''));
     if ($realizadoPorFuera && $enviadoA === '') {
         responder(false, 'Indica a quién se enviará esta pasada externa.');
@@ -2192,8 +2199,16 @@ function enviarAEnsamblaje()
     $ultimaPasada = $completo || in_array($ultimaPasadaRaw, ['true', '1'], true);
     $pausarDespues = in_array(strtolower(trim($_POST['pausar_despues'] ?? 'false')), ['true', '1'], true);
     $motivoPausa = trim($_POST['motivo_pausa'] ?? 'cambio_turno');
-    if ($pausarDespues && !in_array($motivoPausa, ['cambio_turno', 'emergencia_molde'], true)) {
+    if ($pausarDespues && !in_array($motivoPausa, ['cambio_turno', 'emergencia_molde', 'otro'], true)) {
         responder(false, 'Selecciona un motivo válido para detener la producción.');
+    }
+    $motivoPausaDetalle = trim((string)($_POST['motivo_pausa_detalle'] ?? ''));
+    $observacionesPausa = trim((string)($_POST['comentario_pausa'] ?? ''));
+    if ($pausarDespues && $motivoPausa === 'otro' && $motivoPausaDetalle === '') {
+        responder(false, 'Especifica el motivo del paro.');
+    }
+    if (mb_strlen($motivoPausaDetalle) > 160 || mb_strlen($observacionesPausa) > 1000) {
+        responder(false, 'El motivo u observaciones del paro superan la longitud permitida.');
     }
     $pausaDetalleRaw = json_decode($_POST['pausa_materiales'] ?? '[]', true);
     if ($pausarDespues && $motivoPausa === 'cambio_turno' && ($completo || $ultimaPasada)) {
@@ -2358,6 +2373,7 @@ function enviarAEnsamblaje()
         $eventoPausa = [
             'evento_id' => bin2hex(random_bytes(12)), 'tipo' => $cierrePorCambioMolde ? 'cierre_cambio_molde' : 'pausa',
             'motivo' => $motivoPausa,
+            'motivo_detalle' => $motivoPausaDetalle ?: null,
             'fecha' => date('Y-m-d H:i:s'), 'detener' => !$cierrePorCambioMolde,
             'pasa_otro_molde' => $destinoMolde > 0,
             'molde_id' => $destinoMolde ?: null,
@@ -2365,7 +2381,7 @@ function enviarAEnsamblaje()
             'molde_destino_id' => $destinoMolde ?: null,
             'producto_destino_id' => $productoDestinoId ?? null,
             'remanente' => $cierrePorCambioMolde ? ['estado' => 'no_medido', 'cantidad' => null, 'unidad' => null] : null,
-            'comentario' => trim($_POST['comentario_pausa'] ?? ''),
+            'comentario' => $observacionesPausa,
             'maquina_id' => (int)$existe[0]['maquina_id'],
             // La sesión rápida del operario no tiene user_id ni nombre_completo:
             // su identidad válida es operario_id / operario_nombre.
@@ -2615,7 +2631,9 @@ function enviarAEnsamblaje()
         $mensajeEnvio = $pausarDespues
             ? ($motivoPausa === 'cambio_turno'
                 ? "Avance registrado y disponible para $destino. La producción quedó detenida por cambio de turno y puede reanudarla el siguiente operario."
-                : "Avance registrado y enviado a $destino. La producción anterior quedó finalizada por cambio de molde; su remanente quedó registrado como no medido. Registra una producción nueva para el molde de emergencia.")
+                : ($cierrePorCambioMolde
+                    ? "Avance registrado y enviado a $destino. La producción anterior quedó finalizada por cambio de molde; su remanente quedó registrado como no medido. Registra una producción nueva para el molde de emergencia."
+                    : "Avance registrado y disponible para $destino. La producción quedó detenida por el motivo indicado."))
             : ($ultimaPasada
             ? "Avance " . count($salidasActualizadas) . " registrado y producción finalizada para $destino."
             : "Avance " . count($salidasActualizadas) . " registrado. La producción sigue en curso; puedes registrar otro avance.");
@@ -2752,7 +2770,7 @@ function reanudarProduccion(): void
     $fila = executeQuery($conectar, "SELECT * FROM produccion WHERE id = :id", ['id' => $id]);
     if (empty($fila) || !empty($fila[0]['deleted_at'])) responder(false, 'Producción inexistente o inactiva.');
     if (empty($fila[0]['detenido'])) responder(false, 'La producción no está pausada.');
-    $maq = executeQuery($conectar, "SELECT id, nombre FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
+    $maq = executeQuery($conectar, "SELECT id, COALESCE(NULLIF(alias, ''), nombre) AS nombre FROM maquina WHERE id = :id AND deleted_at IS NULL", ['id' => $maquinaId]);
     if (empty($maq)) responder(false, 'Selecciona una máquina activa.');
     $ids = array_values(array_unique(array_filter(array_map('intval', $operariosRaw), static fn($v) => $v > 0)));
     if (!$ids) responder(false, 'Selecciona al menos un operario para continuar.');
