@@ -5,7 +5,8 @@ $activePage = 'ensamblaje';
 
 include("header.php");
 $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
-    && strtolower(trim((string)$_SESSION['rol_usuario'])) === 'administrador'
+    && (strtolower(trim((string)$_SESSION['rol_usuario'])) === 'administrador'
+        || in_array('ADMINISTRADOR', array_map('strtoupper', (array)($_SESSION['roles_permitidos'] ?? [])), true))
     && empty($_SESSION['operario_id']);
 ?>
 

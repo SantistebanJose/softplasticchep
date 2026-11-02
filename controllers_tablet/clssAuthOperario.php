@@ -277,7 +277,8 @@ function guardarSesionOperario(array $usuario, array $etapas = []): void
         $_SESSION['user_usuario'],
         $_SESSION['rol_usuario'],
         $_SESSION['perfiles'],
-        $_SESSION['mostrar_bienvenida']
+        $_SESSION['mostrar_bienvenida'],
+        $_SESSION['operario_dispositivo']
     );
 
     $rolPerfiles = decodificarRolPerfiles($usuario['rol_y_perfiles']);
@@ -297,7 +298,8 @@ function cerrarSesionOperario(): void
         $_SESSION['operario_dni'],
         $_SESSION['operario_nombre'],
         $_SESSION['operario_rol'],
-        $_SESSION['operario_etapas']
+        $_SESSION['operario_etapas'],
+        $_SESSION['operario_dispositivo']
     );
 }
 

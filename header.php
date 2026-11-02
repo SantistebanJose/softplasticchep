@@ -17,6 +17,22 @@ if (empty($_SESSION['usuario_id'])) {
     header('Location: login.php');
     exit;
 }
+if (strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'operario') {
+    http_response_code(403);
+    ?>
+    <!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Acceso de Operario</title><body style="font-family:Arial,sans-serif;background:#f3f5f9;display:grid;place-items:center;min-height:100vh;margin:0;color:#17233a">
+    <main style="background:white;padding:32px;border-radius:16px;max-width:480px;text-align:center;box-shadow:0 8px 30px #14213d18">
+    <h1 style="font-size:1.4rem">Acceso no disponible</h1><p>Las cuentas de Operario deben ingresar desde el acceso de operarios.</p>
+    <a href="tablet/loginoperarios.php">Ir al acceso de operarios</a><br><br><a href="logout.php">Cerrar esta sesión</a></main></body></html>
+    <?php
+    exit;
+}
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+$usuarioMenu = exigirSesion();
+$puedeVerVentasMenu = usuarioTieneRol($usuarioMenu, 'administrador', 'ventas')
+    || usuarioTieneRol($usuarioMenu, 'ventas', 'ventas')
+    || usuarioTieneRol($usuarioMenu, 'consulta', 'ventas');
 ?>
 <!DOCTYPE html>
 <html lang="es">

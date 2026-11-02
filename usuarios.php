@@ -18,9 +18,31 @@ if (empty($_SESSION['usuario_id'])) {
 
 // El módulo de usuarios es exclusivo para administradores.
 $usuarioSesion = exigirSesion();
-exigirRol($usuarioSesion, ['administrador']);
+exigirRol($usuarioSesion, ['administrador'], 'usuarios');
+$esAdministradorReal = strtolower(trim((string)($usuarioSesion['rol'] ?? ''))) === 'administrador';
 
 $pdo = conectar_oll_BD();
+$rolesPersonalizados = [];
+foreach ($pdo->query("SELECT rol_y_perfiles FROM usuario ORDER BY id")->fetchAll(PDO::FETCH_COLUMN) as $rolesJson) {
+    $rolesData = is_array($rolesJson) ? $rolesJson : json_decode((string)$rolesJson, true);
+    if (is_array($rolesData) && is_array($rolesData['catalogo_roles'] ?? null)) {
+        $rolesPersonalizados = array_values(array_filter($rolesData['catalogo_roles'], static fn($r) => !empty($r['activo']) && !in_array($r['codigo'] ?? '', ['operario','conductor','administrador'], true)));
+        break;
+    }
+}
+if (!$rolesPersonalizados) {
+    $codigosExistentes = [];
+    foreach ($pdo->query("SELECT rol_y_perfiles FROM usuario WHERE deleted_at IS NULL ORDER BY id")->fetchAll(PDO::FETCH_COLUMN) as $rolesJson) {
+        $rolesData = is_array($rolesJson) ? $rolesJson : json_decode((string)$rolesJson, true);
+        $codigo = strtolower(trim((string)($rolesData['rol'] ?? '')));
+        if ($codigo !== '' && !in_array($codigo, ['operario','conductor','administrador'], true)) {
+            $codigosExistentes[$codigo] = ['codigo'=>$codigo, 'nombre'=>mb_convert_case(str_replace(['_', '-'], ' ', $codigo), MB_CASE_TITLE, 'UTF-8')];
+        }
+    }
+    $rolesPersonalizados = array_values($codigosExistentes);
+}
+$etiquetasRoles = ['operario'=>'Operario', 'conductor'=>'Conductor', 'administrador'=>'Administrador'];
+foreach ($rolesPersonalizados as $rolPersonalizado) $etiquetasRoles[$rolPersonalizado['codigo']] = $rolPersonalizado['nombre'];
 
 $activePage   = 'usuarios';
 $pageTitle    = 'Usuarios';
@@ -49,6 +71,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 // En creación el input hidden id llega como cadena vacía.
                 $id = trim((string) ($_POST['id'] ?? ''));
 
+                $rolSeleccionado = trim((string)($_POST['rol'] ?? 'operario'));
+                if ($rolSeleccionado === 'administrador' && !$esAdministradorReal) {
+                    echo json_encode(['ok'=>false, 'msg'=>'Solo un Administrador puede asignar el rol Administrador.']);
+                    exit;
+                }
+                $rolesFijos = ['operario', 'conductor', 'administrador'];
+                if (!in_array($rolSeleccionado, $rolesFijos, true)
+                    && !in_array($rolSeleccionado, array_column($rolesPersonalizados, 'codigo'), true)) {
+                    echo json_encode(['ok'=>false, 'msg'=>'El rol seleccionado no existe o está desactivado.']);
+                    exit;
+                }
+                $rolPersonalizadoSeleccionado = null;
+                foreach ($rolesPersonalizados as $rolCatalogo) {
+                    if (($rolCatalogo['codigo'] ?? '') === $rolSeleccionado) { $rolPersonalizadoSeleccionado = $rolCatalogo; break; }
+                }
+                if (!$esAdministradorReal && in_array('administrador', (array)($rolPersonalizadoSeleccionado['permisos'] ?? []), true)
+                    && $rolSeleccionado !== strtolower(trim((string)($usuarioSesion['rol'] ?? '')))) {
+                    echo json_encode(['ok'=>false, 'msg'=>'Solo un Administrador puede asignar perfiles con acceso general.']);
+                    exit;
+                }
+                if (!$esAdministradorReal && $id !== '') {
+                    $usuarioEditado = $controller->getById((int)$id);
+                    $rolEditado = is_array($usuarioEditado['rol_y_perfiles'] ?? null)
+                        ? ($usuarioEditado['rol_y_perfiles']['rol'] ?? '')
+                        : ((json_decode((string)($usuarioEditado['rol_y_perfiles'] ?? ''), true)['rol'] ?? ''));
+                    if (strtolower((string)$rolEditado) === 'administrador') {
+                        echo json_encode(['ok'=>false, 'msg'=>'Solo un Administrador puede modificar cuentas de Administrador.']);
+                        exit;
+                    }
+                }
                 $data = [
                     'id'              => $id === '' ? null : (int) $id,
                     'user_'           => trim($_POST['user_'] ?? ''),
@@ -57,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     'confirm_password'=> (string) ($_POST['confirm_password'] ?? ''),
                     'nombre_completo' => trim($_POST['nombre_completo'] ?? ''),
                     'rol_y_perfiles'  => [
-                        'rol'      => $_POST['rol'] ?? 'operario',
+                        'rol'      => $rolSeleccionado,
                         'perfiles' => [],
                     ],
                 ];
@@ -119,6 +171,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     ]);
                     exit;
                 }
+                if (!$esAdministradorReal) {
+                    $usuarioObjetivo = $controller->getById($id);
+                    $rolObjetivo = json_decode((string)($usuarioObjetivo['rol_y_perfiles'] ?? ''), true)['rol'] ?? '';
+                    if (strtolower((string)$rolObjetivo) === 'administrador') {
+                        echo json_encode(['ok'=>false, 'msg'=>'Solo un Administrador puede desactivar cuentas de Administrador.']);
+                        exit;
+                    }
+                }
 
                 echo json_encode($controller->deleteUser($id));
                 exit;
@@ -128,6 +188,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if ($id <= 0) {
                     echo json_encode(['ok' => false, 'msg' => 'ID inválido.']);
                     exit;
+                }
+                if (!$esAdministradorReal) {
+                    $usuarioObjetivo = $controller->getById($id);
+                    $rolObjetivo = json_decode((string)($usuarioObjetivo['rol_y_perfiles'] ?? ''), true)['rol'] ?? '';
+                    if (strtolower((string)$rolObjetivo) === 'administrador') {
+                        echo json_encode(['ok'=>false, 'msg'=>'Solo un Administrador puede reactivar cuentas de Administrador.']);
+                        exit;
+                    }
                 }
                 echo json_encode($controller->reactivateUser($id));
                 exit;
@@ -283,6 +351,9 @@ require __DIR__ . '/header.php';
                                 <option value="operario">Operario</option>
                                 <option value="conductor">Conductor</option>
                                 <option value="administrador">Administrador</option>
+                                <?php foreach ($rolesPersonalizados as $rolPersonalizado): ?>
+                                    <option value="<?= htmlspecialchars($rolPersonalizado['codigo'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($rolPersonalizado['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
 
@@ -346,6 +417,7 @@ require __DIR__ . '/header.php';
 const elementoModalUsuario = document.getElementById('modalUsuario');
 const modalUsuario = new bootstrap.Modal(elementoModalUsuario);
 const errorFormularioUsuario = document.getElementById('errorFormularioUsuario');
+const ETIQUETAS_ROLES = <?= json_encode($etiquetasRoles, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
 
 function escaparHtml(valor) {
     const elemento = document.createElement('div');
@@ -356,10 +428,16 @@ function escaparHtml(valor) {
 function obtenerRol(rolYPerfiles) {
     try {
         const datos = JSON.parse(rolYPerfiles || '{}');
-        return datos.rol || 'operario';
+        const rol = datos.rol || 'operario';
+        return ETIQUETAS_ROLES[rol] || rol;
     } catch {
         return 'operario';
     }
+}
+
+function obtenerCodigoRol(rolYPerfiles) {
+    try { return JSON.parse(rolYPerfiles || '{}').rol || 'operario'; }
+    catch { return 'operario'; }
 }
 
 function ocultarErrorFormulario() {
@@ -581,7 +659,7 @@ async function abrirModalEditar(id) {
         }
 
         const usuario = json.data;
-        const rol = obtenerRol(usuario.rol_y_perfiles);
+        const rol = obtenerCodigoRol(usuario.rol_y_perfiles);
 
         document.getElementById('modalUsuarioTitulo').textContent = 'Editar usuario';
         document.getElementById('usu_id').value = usuario.id || '';

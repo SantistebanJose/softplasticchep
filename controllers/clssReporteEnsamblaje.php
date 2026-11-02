@@ -30,7 +30,8 @@ ob_start();
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
-session_start();
+require_once __DIR__ . '/clssVerificarSession.php';
+iniciarSesionSegura();
 
 if (isset($_POST["accion"])) {
     try {
@@ -46,6 +47,15 @@ if (isset($_POST["accion"])) {
 
 function controladorReporteEnsamblaje($accion)
 {
+    if ($accion === 'MISENSAMBLAJESOPERARIO') {
+        if (empty($_SESSION['operario_id']) || !empty($_SESSION['usuario_id'])) {
+            responderAcceso(401, 'Debes ingresar desde el acceso de operarios.');
+        }
+    } else {
+        $usuario = exigirSesion();
+        exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+    }
+
     switch ($accion) {
         case 'BUSCAROPERARIOSREPORTEENSAMBLAJE':
             buscarOperariosReporteEnsamblaje();

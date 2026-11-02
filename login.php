@@ -8,6 +8,7 @@ if (!empty($_SESSION['usuario_id'])) {
 }
 
 $error = '';
+$esAccesoOperario = false;
 $user_ = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -21,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     } else {
         $error = $result['error'];
+        $esAccesoOperario = str_contains($error, 'acceso de operarios');
     }
 }
 ?>
@@ -46,6 +48,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if ($error): ?>
             <div class="pc-login-error"><i class="fa-solid fa-circle-exclamation"></i> <?= htmlspecialchars($error) ?></div>
+            <?php if ($esAccesoOperario): ?>
+                <a class="pc-btn pc-btn-primary pc-login-btn" href="tablet/loginoperarios.php" style="display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:12px;">
+                    <i class="fa-solid fa-tablet-screen-button"></i> Ir al acceso de operarios
+                </a>
+            <?php endif; ?>
         <?php endif; ?>
 
         <form method="post" action="login.php" autocomplete="off">

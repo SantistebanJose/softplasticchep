@@ -95,7 +95,16 @@ class UserController
             return ['ok' => false, 'msg' => 'Ya existe un usuario con ese login.'];
         }
 
-        $rolYPerfiles = json_encode($data['rol_y_perfiles'] ?? ['rol' => 'operario', 'perfiles' => []]);
+        $rolData = $data['rol_y_perfiles'] ?? ['rol' => 'operario', 'perfiles' => []];
+        if (!is_array($rolData)) $rolData = ['rol' => 'operario', 'perfiles' => []];
+        $catalogoRoles = [];
+        $catalogoStmt = $this->pdo->query("SELECT rol_y_perfiles FROM usuario ORDER BY id");
+        foreach ($catalogoStmt->fetchAll(PDO::FETCH_COLUMN) as $rolesJson) {
+            $rolesExistentes = is_array($rolesJson) ? $rolesJson : (json_decode((string)$rolesJson, true) ?: []);
+            if (is_array($rolesExistentes['catalogo_roles'] ?? null)) { $catalogoRoles = $rolesExistentes['catalogo_roles']; break; }
+        }
+        if ($catalogoRoles) $rolData['catalogo_roles'] = $catalogoRoles;
+        $rolYPerfiles = json_encode($rolData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         if ($isEditing) {
             $params = [

@@ -2,6 +2,8 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+bloquearOperarioEnSistemaWeb();
 
 require __DIR__ . '/controllers/bd.php';
 require __DIR__ . '/controllers/UserController.php';

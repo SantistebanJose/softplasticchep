@@ -17,10 +17,12 @@
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
+require_once __DIR__ . '/clssVerificarSession.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+bloquearOperarioEnSistemaWeb();
 
 function controladorKardex($accion)
 {

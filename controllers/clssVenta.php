@@ -96,13 +96,13 @@ function controladorVenta(string $accion): void
     ];
 
     if (in_array($accion, $accionesLectura, true)) {
-        exigirRol($usuario, ['administrador', 'ventas', 'consulta']);
+        exigirRol($usuario, ['administrador', 'ventas', 'consulta'], 'ventas');
 
     } elseif (in_array($accion, $accionesVentas, true)) {
-        exigirRol($usuario, ['administrador', 'ventas']);
+        exigirRol($usuario, ['administrador', 'ventas'], 'ventas');
 
     } elseif (in_array($accion, $accionesSoloAdmin, true)) {
-        exigirRol($usuario, ['administrador']);
+        exigirRol($usuario, ['administrador'], 'ventas');
 
     } else {
         responderAcceso(400, 'Acción no reconocida.');
@@ -816,7 +816,15 @@ function listarVendedoresVenta(): void
         FROM usuario
         WHERE deleted_at IS NULL
           AND operario_id IS NULL
-          AND UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+          AND (
+              UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+              OR EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(COALESCE(usuario.rol_y_perfiles->'catalogo_roles', '[]'::jsonb)) AS catalogo(perfil)
+                  WHERE catalogo.perfil->>'codigo' = usuario.rol_y_perfiles->>'rol'
+                    AND catalogo.perfil->>'activo' = 'true' AND catalogo.perfil->'permisos' ? 'ventas'
+              )
+          )
         ORDER BY nombre_completo
     ");
     responderVenta(true, 'OK', ['vendedores' => $vendedores]);
@@ -1029,7 +1037,15 @@ function guardarVenta()
         WHERE id = :id
           AND deleted_at IS NULL
           AND operario_id IS NULL
-          AND UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+          AND (
+              UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
+              OR EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(COALESCE(usuario.rol_y_perfiles->'catalogo_roles', '[]'::jsonb)) AS catalogo(perfil)
+                  WHERE catalogo.perfil->>'codigo' = usuario.rol_y_perfiles->>'rol'
+                    AND catalogo.perfil->>'activo' = 'true' AND catalogo.perfil->'permisos' ? 'ventas'
+              )
+          )
     ", ['id' => $vendedorId]);
     if (empty($vendedorValido)) responderVenta(false, 'El vendedor seleccionado no está activo o no puede registrar ventas.');
 

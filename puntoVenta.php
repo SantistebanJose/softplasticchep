@@ -1,9 +1,13 @@
 <?php
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+$usuarioPagina = exigirSesion();
+exigirRol($usuarioPagina, ['administrador', 'ventas'], 'ventas');
 $pageTitle    = 'Venta Rápida';
 $pageSubtitle = 'Registra una venta de stock disponible';
 $activePage   = 'punto_venta';
 include("header.php");
-$esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADMINISTRADOR';
+$esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADMINISTRADOR'
+    || in_array('ADMINISTRADOR', array_map('strtoupper', (array)($_SESSION['roles_permitidos'] ?? [])), true);
 ?>
 
 <style>

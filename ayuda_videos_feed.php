@@ -1,8 +1,10 @@
 <?php
 require __DIR__ . '/controllers/bd.php';
 require_once __DIR__ . '/controllers/clssAyudaVideo.php';
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
+bloquearOperarioEnSistemaWeb();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!empty($_SESSION['operario_id'])) {
@@ -10,6 +12,9 @@ if (!empty($_SESSION['operario_id'])) {
     if ($rol !== 'conductor') $rol = 'operario';
 } elseif (!empty($_SESSION['usuario_id'])) {
     $rol = strtolower(trim((string)($_SESSION['rol_usuario'] ?? '')));
+    if ($rol !== 'administrador' && in_array('ADMINISTRADOR', array_map('strtoupper', (array)($_SESSION['roles_permitidos'] ?? [])), true)) {
+        $rol = 'administrador';
+    }
 } else {
     http_response_code(401);
     echo json_encode(['ok' => false, 'msg' => 'Inicia sesión para ver los videos.']);

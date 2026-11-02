@@ -37,7 +37,8 @@ ob_start();
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';   
-session_start();
+require_once __DIR__ . '/clssVerificarSession.php';
+iniciarSesionSegura();
 
 if (isset($_POST["accion"])) {
     try {
@@ -53,6 +54,9 @@ if (isset($_POST["accion"])) {
 
 function controladorReportePaseEnsamblaje($accion)
 {
+    $usuario = exigirSesion();
+    exigirRol($usuario, ['administrador', 'produccion', 'consulta']);
+
     switch ($accion) {
         case 'BUSCARMOLDESREPORTEPASE':
             buscarMoldesReportePase();

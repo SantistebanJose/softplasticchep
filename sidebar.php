@@ -46,7 +46,7 @@ $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
 $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
-$administracionPages = ['usuarios', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos'];
+$administracionPages = ['usuarios', 'roles', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
@@ -91,6 +91,7 @@ $reportesOpen       = in_array($activePage, $reportesPages);
     </details>
 
     <!-- Ventas -->
+    <?php if ($puedeVerVentasMenu): ?>
     <details class="pc-nav-group" <?= $ventasOpen ? 'open' : '' ?>>
         <summary class="<?= pc_group_summary_class($ventasOpen) ?>">
             <span class="pc-nav-icon"><i class="fa-solid fa-cart-shopping"></i></span>
@@ -105,6 +106,7 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             </a>
         </div>
     </details>
+    <?php endif; ?>
 
     <!-- Personal: la gente que ejecuta el flujo -->
     <details class="pc-nav-group" <?= $personalOpen ? 'open' : '' ?>>
@@ -166,6 +168,11 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="usuarios.php" class="<?= pc_sub_class('usuarios', $activePage) ?>">
                 <span class="dot"></span> Usuarios
             </a>
+            <?php if (usuarioTieneRol($usuarioMenu, 'administrador', 'roles')): ?>
+            <a href="roles.php" class="<?= pc_sub_class('roles', $activePage) ?>">
+                <span class="dot"></span> Roles y permisos
+            </a>
+            <?php endif; ?>
             <a href="sucursal.php" class="<?= pc_sub_class('sucursal', $activePage) ?>">
                 <span class="dot"></span> Sucursales
             </a>
@@ -201,10 +208,10 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="reporte_pase_ensamblaje.php" class="<?= pc_sub_class('reporte_pase_ensamblaje', $activePage) ?>">
                 <span class="dot"></span> Pase a Ensamblaje
             </a>
-            <a href="reporte_ventas_productos.php" class="<?= pc_sub_class('reporte_ventas_productos', $activePage) ?>">
+            <?php if ($puedeVerVentasMenu): ?><a href="reporte_ventas_productos.php" class="<?= pc_sub_class('reporte_ventas_productos', $activePage) ?>">
                 <span class="dot"></span> Reporte de Ventas
-            </a>
-            <?php if (strtoupper(trim($_SESSION['rol_usuario'] ?? '')) === 'ADMINISTRADOR'): ?>
+            </a><?php endif; ?>
+            <?php if (usuarioTieneRol($usuarioMenu, 'administrador')): ?>
                 <a href="reporte_servicios_externos.php" class="<?= pc_sub_class('reporte_servicios_externos', $activePage) ?>">
                     <span class="dot"></span> Servicios Externos
                 </a>

@@ -6,6 +6,8 @@
  * ($_SESSION['usuario_id']), NO la sesión de operario de tablet.
  */
 session_start();
+require_once __DIR__ . '/clssVerificarSession.php';
+bloquearOperarioEnSistemaWeb();
 header('Content-Type: application/json');
 
 

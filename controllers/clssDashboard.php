@@ -37,7 +37,9 @@ function enviarResumenDashboard(array $usuario): void
     $hastaExclusivo = $hoy->modify('+1 day');
     $paramsPeriodo = ['desde' => $desde->format('Y-m-d'), 'hasta' => $hastaExclusivo->format('Y-m-d')];
 
-    $puedeVerVentas = in_array(strtolower(trim((string)($usuario['rol'] ?? ''))), ['administrador', 'ventas', 'consulta'], true);
+    $puedeVerVentas = usuarioTieneRol($usuario, 'administrador', 'ventas')
+        || usuarioTieneRol($usuario, 'ventas', 'ventas')
+        || usuarioTieneRol($usuario, 'consulta', 'ventas');
     $ventas = $puedeVerVentas ? executeQuery($db, "
         WITH ventas_periodo AS (
             SELECT v.id, v.monto_total, v.js_session

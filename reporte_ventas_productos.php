@@ -1,4 +1,7 @@
 <?php
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+$usuarioPagina = exigirSesion();
+exigirRol($usuarioPagina, ['administrador', 'ventas', 'consulta'], 'ventas');
 $pageTitle = 'Reportes de Ventas';
 $pageSubtitle = 'Analiza las ventas por producto, vendedor y cliente.';
 $activePage = 'reporte_ventas_productos';

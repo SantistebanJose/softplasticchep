@@ -2,16 +2,25 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+$usuarioDashboard = exigirSesion();
+$puedeVerVentasDashboard = usuarioTieneRol($usuarioDashboard, 'administrador', 'ventas')
+    || usuarioTieneRol($usuarioDashboard, 'ventas', 'ventas')
+    || usuarioTieneRol($usuarioDashboard, 'consulta', 'ventas');
+$puedeVerAdminDashboard = usuarioTieneRol($usuarioDashboard, 'administrador');
 
 $activePage   = 'dashboard';
 $pageTitle    = 'Dashboard de operaciones';
-$pageSubtitle = 'Ventas, inventario y trabajo pendiente en un solo lugar.';
+$pageSubtitle = $puedeVerVentasDashboard
+    ? 'Ventas, inventario y trabajo pendiente en un solo lugar.'
+    : 'Inventario y trabajo pendiente en un solo lugar.';
 
 // Bandera de bienvenida (seteada por clssAuth.php al hacer login exitoso)
 $mostrarBienvenida = !empty($_SESSION['mostrar_bienvenida']);
 unset($_SESSION['mostrar_bienvenida']); // se muestra una sola vez
 $nombreUsuario = $_SESSION['nombre_usuario'] ?? 'Usuario';
 $ayudaVideosRol = strtolower(trim((string)($_SESSION['rol_usuario'] ?? 'administrador')));
+if ($puedeVerAdminDashboard) $ayudaVideosRol = 'administrador';
 
 require __DIR__ . '/controllers/bd.php';
 $pdo = conectar_oll_BD();
@@ -127,6 +136,7 @@ window.addEventListener('load', function () {
 @media(max-width:390px){.dash-flow-grid{grid-template-columns:1fr}.dash-shortcut-grid{grid-template-columns:1fr 1fr;gap:8px}.dash-periodos{width:100%}.dash-periodos button{flex:1;padding:7px 8px}}
 </style>
 
+<?php if ($puedeVerVentasDashboard): ?>
 <div class="dash-toolbar">
     <div class="dash-periodos" role="group" aria-label="Periodo de ventas">
         <button type="button" data-dash-periodo="dia">Hoy</button>
@@ -143,16 +153,17 @@ window.addEventListener('load', function () {
     <div class="dash-card money-usd"><div class="label">Recibido en dólares</div><div class="value">—</div><div class="note">Pagos en USD</div></div>
     <div class="dash-card money-eur"><div class="label">Recibido en euros</div><div class="value">—</div><div class="note">Pagos en EUR</div></div>
 </section>
+<?php endif; ?>
 
 <section class="dash-section">
     <h2><i class="fa-solid fa-bolt me-2 text-primary"></i>Accesos rápidos</h2>
     <div class="dash-shortcut-grid">
-        <a class="dash-shortcut venta" href="puntoVenta.php"><i class="fa-solid fa-cash-register"></i><span>Venta rápida</span></a>
+        <?php if ($puedeVerVentasDashboard): ?><a class="dash-shortcut venta" href="puntoVenta.php"><i class="fa-solid fa-cash-register"></i><span>Venta rápida</span></a><?php endif; ?>
         <a class="dash-shortcut produccion" href="produccion.php"><i class="fa-solid fa-industry"></i><span>Registrar producción</span></a>
         <a class="dash-shortcut ensamblaje" href="ensamblaje.php"><i class="fa-solid fa-puzzle-piece"></i><span>Registrar ensamblaje</span></a>
         <a class="dash-shortcut empaquetado" href="empaquetado.php"><i class="fa-solid fa-box-open"></i><span>Registrar empaquetado</span></a>
         <a class="dash-shortcut stock" href="stock.php"><i class="fa-solid fa-boxes-stacked"></i><span>Consultar stock</span></a>
-        <?php if (strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADMINISTRADOR'): ?>
+        <?php if ($puedeVerAdminDashboard): ?>
         <a class="dash-shortcut externos" href="reporte_servicios_externos.php"><i class="fa-solid fa-truck-ramp-box"></i><span>Servicios externos</span></a>
         <?php endif; ?>
     </div>
@@ -164,7 +175,7 @@ window.addEventListener('load', function () {
         <a class="dash-flow" href="produccion.php"><span class="icon"><i class="fa-solid fa-industry"></i></span><span><span class="count">—</span><span class="title d-block">Producciones en curso</span><span class="sub">— pausadas</span></span></a>
         <a class="dash-flow" href="ensamblaje.php"><span class="icon"><i class="fa-solid fa-puzzle-piece"></i></span><span><span class="count">—</span><span class="title d-block">Por ensamblar</span><span class="sub">Lotes con saldo local</span></span></a>
         <a class="dash-flow" href="empaquetado.php"><span class="icon"><i class="fa-solid fa-box-open"></i></span><span><span class="count">—</span><span class="title d-block">Por empaquetar</span><span class="sub">Fuentes con saldo disponible</span></span></a>
-        <?php if (strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADMINISTRADOR'): ?>
+        <?php if ($puedeVerAdminDashboard): ?>
         <a class="dash-flow" href="reporte_servicios_externos.php"><span class="icon"><i class="fa-solid fa-truck-ramp-box"></i></span><span><span class="count">—</span><span class="title d-block">Servicios externos</span><span class="sub">Envíos sin retorno</span></span></a>
         <?php endif; ?>
     </div>
@@ -202,15 +213,16 @@ async function cargarDashboard() {
         const data = await response.json();
         if (!data.success) throw new Error(data.message || 'No se pudo cargar el dashboard.');
         const v = data.ventas || {};
-        document.getElementById('dashPeriodoLabel').textContent = `${data.periodo.etiqueta} · ${dashFecha(data.periodo.desde)} — ${dashFecha(data.periodo.hasta)}`;
         const resumenVentas = document.getElementById('dashVentas');
-        resumenVentas.hidden = !data.ventas_visibles;
-        resumenVentas.innerHTML = data.ventas_visibles ? `
+        if (resumenVentas) {
+            resumenVentas.hidden = !data.ventas_visibles;
+            resumenVentas.innerHTML = data.ventas_visibles ? `
             <div class="dash-card"><div class="label">Ventas completadas</div><div class="value">${Number(v.ventas || 0).toLocaleString('es-PE')}</div><div class="note">Del periodo seleccionado</div></div>
             <div class="dash-card"><div class="label">Equivalente en soles</div><div class="value">${dashDinero(v.total_pen)}</div><div class="note">Importe contable de las ventas</div></div>
             <div class="dash-card money-pen"><div class="label">Recibido en soles</div><div class="value">${dashDinero(v.ingresos_pen, 'PEN')}</div><div class="note">Pagos en PEN</div></div>
             <div class="dash-card money-usd"><div class="label">Recibido en dólares</div><div class="value">${dashDinero(v.ingresos_usd, 'USD')}</div><div class="note">Pagos en USD</div></div>
             <div class="dash-card money-eur"><div class="label">Recibido en euros</div><div class="value">${dashDinero(v.ingresos_eur, 'EUR')}</div><div class="note">Pagos en EUR</div></div>` : '';
+        }
         const p = data.produccion || {};
         const flujo = document.getElementById('dashFlujo');
         const valores = [
@@ -228,8 +240,10 @@ async function cargarDashboard() {
         document.getElementById('dashMateriales').innerHTML = materiales.length ? materiales.map(m => `
             <tr><td><strong>${dashEsc(m.nombre)}</strong></td><td class="num">${Number(m.stock_actual || 0).toLocaleString('es-PE')} ${dashEsc(m.unidad || '')}</td><td class="num">${Number(m.stock_minimo || 0).toLocaleString('es-PE')} ${dashEsc(m.unidad || '')}</td></tr>`).join('') : '<tr><td colspan="3" class="dash-empty">No hay materiales por debajo del mínimo configurado.</td></tr>';
     } catch (error) {
-        document.getElementById('dashPeriodoLabel').textContent = error.message || 'No se pudo cargar el dashboard.';
-        document.getElementById('dashVentas').innerHTML = `<div class="dash-section text-danger">${dashEsc(error.message || 'Error de conexión.')}</div>`;
+        const periodoLabel = document.getElementById('dashPeriodoLabel');
+        if (periodoLabel) periodoLabel.textContent = error.message || 'No se pudo cargar el dashboard.';
+        const resumenVentas = document.getElementById('dashVentas');
+        if (resumenVentas) resumenVentas.innerHTML = `<div class="dash-section text-danger">${dashEsc(error.message || 'Error de conexión.')}</div>`;
         document.getElementById('dashMateriales').innerHTML = `<tr><td colspan="3" class="dash-empty text-danger">${dashEsc(error.message || 'No se pudieron cargar las alertas.')}</td></tr>`;
     }
 }

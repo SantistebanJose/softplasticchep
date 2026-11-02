@@ -1,4 +1,7 @@
 <?php
+require_once __DIR__ . '/controllers/clssVerificarSession.php';
+$usuarioPagina = exigirSesion();
+exigirRol($usuarioPagina, ['administrador', 'ventas', 'consulta'], 'ventas');
 $pageTitle    = 'Listado de Ventas';
 $pageSubtitle = 'Historial de ventas registradas';
 $activePage   = 'listado_ventas';

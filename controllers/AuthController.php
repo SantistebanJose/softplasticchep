@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/../includes/config.php';
+require_once __DIR__ . '/executeQuery.php';
+require_once __DIR__ . '/roles_helper.php';
 
 class AuthController
 {
@@ -45,6 +47,13 @@ class AuthController
             return ['ok' => false, 'msg' => 'Este usuario está desactivado. Contacta a un administrador.'];
         }
 
+        $rolPerfilesLogin = is_array($usuario['rol_y_perfiles'] ?? null)
+            ? $usuario['rol_y_perfiles']
+            : (json_decode((string)($usuario['rol_y_perfiles'] ?? ''), true) ?: []);
+        if (strtolower(trim((string)($rolPerfilesLogin['rol'] ?? ''))) === 'operario') {
+            return ['ok' => false, 'msg' => 'Las cuentas de Operario deben ingresar desde el acceso de operarios.'];
+        }
+
         if ($needsRehash) {
             $newHash = password_hash($password, PASSWORD_DEFAULT);
             if ($newHash !== false) {
@@ -61,6 +70,8 @@ class AuthController
         $_SESSION['nombre_usuario'] = $usuario['nombre_completo'];
         $_SESSION['user_usuario']   = $usuario['user_'];
         $_SESSION['rol_usuario']    = $rolPerfiles['rol'] ?? null;
+        $_SESSION['roles_permitidos'] = obtenerRolesBaseCatalogo($this->pdo, strtolower((string)$_SESSION['rol_usuario']));
+        $_SESSION['restricciones_rol'] = obtenerExclusionesRolCatalogo($this->pdo, strtolower((string)$_SESSION['rol_usuario']));
         $_SESSION['perfiles']       = $rolPerfiles['perfiles'] ?? [];
 
         return ['ok' => true];

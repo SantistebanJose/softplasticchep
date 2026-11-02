@@ -42,6 +42,14 @@ include("header.php");
     .rep-filtros-top input {
         min-width: 140px;
     }
+    .rep-fecha-ayuda {
+        display: block;
+        color: rgba(255,255,255,.78);
+        font-size: 11px;
+        margin-top: 5px;
+        max-width: 220px;
+        line-height: 1.3;
+    }
     .rep-badge-total {
         background: rgba(255,255,255,.12);
         border: 1px solid rgba(255,255,255,.25);
@@ -229,8 +237,9 @@ include("header.php");
             </select>
         </div>
         <div id="rep_wrap_fecha">
-            <label>Fecha</label>
+            <label id="rep_label_fecha" for="rep_fecha">Fecha</label>
             <input type="date" id="rep_fecha" class="form-control">
+            <small class="rep-fecha-ayuda" id="rep_fecha_ayuda"></small>
         </div>
         <div id="rep_wrap_rango" style="display:none;">
             <label>Desde</label>
@@ -337,7 +346,10 @@ document.addEventListener('DOMContentLoaded', () => {
     actualizarVisibilidadFechas();
 
     ['rep_fecha', 'rep_fecha_desde', 'rep_fecha_hasta', 'rep_turno', 'rep_maquina', 'rep_sucursal']
-        .forEach(id => document.getElementById(id).addEventListener('change', recargarSiHayOperario));
+        .forEach(id => document.getElementById(id).addEventListener('change', () => {
+            if (id === 'rep_fecha') actualizarVisibilidadFechas();
+            recargarSiHayOperario();
+        }));
 
     const input = document.getElementById('rep_buscar_operario');
     input.addEventListener('input', () => renderDropdownOperarios(input.value));
@@ -363,6 +375,29 @@ function recargarSiHayOperario() {
 function actualizarVisibilidadFechas() {
     const modo = document.getElementById('rep_modo').value;
     const esRango = modo === 'rango';
+    const fecha = document.getElementById('rep_fecha');
+    const labelFecha = document.getElementById('rep_label_fecha');
+    const ayudaFecha = document.getElementById('rep_fecha_ayuda');
+    const eraMes = fecha.type === 'month';
+    if (modo === 'mes') {
+        if (!eraMes) {
+            const valorAnterior = fecha.value;
+            fecha.type = 'month';
+            fecha.value = valorAnterior ? valorAnterior.slice(0, 7) : hoyISO().slice(0, 7);
+        }
+        labelFecha.textContent = 'Mes de consulta';
+        ayudaFecha.textContent = 'Se incluirán todos los días del mes seleccionado.';
+    } else {
+        if (eraMes) {
+            const mesAnterior = fecha.value;
+            fecha.type = 'date';
+            fecha.value = mesAnterior ? `${mesAnterior}-01` : hoyISO();
+        }
+        labelFecha.textContent = modo === 'semana' ? 'Elige una fecha de esa semana' : 'Fecha del reporte';
+        ayudaFecha.textContent = modo === 'semana'
+            ? descripcionSemana(fecha.value)
+            : 'Se consultará únicamente este día.';
+    }
     document.getElementById('rep_wrap_fecha').style.display = esRango ? 'none' : 'block';
     document.getElementById('rep_wrap_rango').style.display = esRango ? 'block' : 'none';
     document.getElementById('rep_wrap_rango_hasta').style.display = esRango ? 'block' : 'none';
@@ -373,6 +408,20 @@ function actualizarVisibilidadFechas() {
         if (!desde.value) desde.value = hoyISO();
         if (!hasta.value) hasta.value = hoyISO();
     }
+}
+
+function descripcionSemana(fechaISO) {
+    if (!fechaISO) return 'El reporte incluye semanas de lunes a domingo.';
+    const fecha = new Date(`${fechaISO}T12:00:00`);
+    const dia = (fecha.getDay() + 6) % 7; // lunes = 0, domingo = 6
+    const lunes = new Date(fecha);
+    lunes.setDate(fecha.getDate() - dia);
+    const domingo = new Date(lunes);
+    domingo.setDate(lunes.getDate() + 6);
+    const formato = valor => valor.toLocaleDateString('es-PE', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+    return `Incluye desde el lunes ${formato(lunes)} hasta el domingo ${formato(domingo)}.`;
 }
 
 // ── Llamada genérica ─────────────────────────────────────────────────────────
@@ -494,7 +543,9 @@ async function generarReporteOperario() {
     const params = {
         operario_id: operarioSeleccionado.id,
         modo,
-        fecha: document.getElementById('rep_fecha').value || hoyISO(),
+        fecha: (modo === 'mes' && document.getElementById('rep_fecha').value)
+            ? `${document.getElementById('rep_fecha').value}-01`
+            : (document.getElementById('rep_fecha').value || hoyISO()),
         fecha_desde: document.getElementById('rep_fecha_desde').value,
         fecha_hasta: document.getElementById('rep_fecha_hasta').value,
         turno: document.getElementById('rep_turno').value,

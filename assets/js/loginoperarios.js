@@ -110,6 +110,50 @@
     setTimeout(() => pinModal.classList.remove('pc-op-shake'), 350);
   }
 
+  function obtenerUbicacionGPS() {
+    if (!navigator.geolocation) return Promise.resolve(null);
+    return new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        posicion => resolve({
+          lat: posicion.coords.latitude,
+          lon: posicion.coords.longitude,
+          precision_m: posicion.coords.accuracy
+        }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+      );
+    });
+  }
+
+  async function registrarContextoSesion() {
+    // Llamar geolocation antes de otros awaits para que el navegador pueda
+    // asociar la solicitud al gesto reciente del usuario.
+    const gpsPendiente = obtenerUbicacionGPS();
+    let deviceId = 'N/A';
+    let deviceNombre = 'N/A';
+    let modelo = navigator.userAgent || 'N/A';
+    try {
+      deviceId = DeviceTracking.getDeviceId();
+      deviceNombre = DeviceTracking.getDeviceNombre();
+      modelo = await DeviceTracking.getDeviceModelo();
+    } catch (e) { /* continuar con el agente del navegador si falla el almacenamiento local */ }
+    const gps = await gpsPendiente;
+    const datos = new URLSearchParams({
+      device_id: deviceId,
+      device_nombre: deviceNombre,
+      device_modelo: modelo,
+      gps_lat: gps ? String(gps.lat) : '',
+      gps_lon: gps ? String(gps.lon) : '',
+      gps_precision_m: gps ? String(gps.precision_m) : ''
+    });
+    const respuesta = await fetch('ajax_registrar_contexto_sesion.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: datos
+    });
+    if (!respuesta.ok) throw new Error('No se pudo registrar el dispositivo.');
+  }
+
   function abrirModalPin() {
     pin = '';
     pinNombreEl.textContent = nombreOperario;
@@ -156,8 +200,11 @@
       body: 'dni=' + encodeURIComponent(dni) + '&pin=' + encodeURIComponent(pin)
     })
       .then(res => res.json())
-      .then(data => {
+      .then(async data => {
         if (data.success) {
+          btnIngresarPin.disabled = true;
+          showMsgPin('Registrando el dispositivo…');
+          try { await registrarContextoSesion(); } catch (e) { /* el GPS es opcional; no impedir el ingreso */ }
           window.location.href = 'panel.php';
         } else {
           showMsgPin(data.error || 'PIN incorrecto.');

@@ -68,6 +68,7 @@ if (!empty($_SESSION['operario_id'])) {
     <div class="pc-op-pin-icon">🔒</div>
     <h2 class="pc-op-pin-title">Ingresa tu PIN</h2>
     <p class="pc-op-pin-sub">Hola, <strong id="pcOpPinNombre"></strong>. Ingresa tu PIN de 4 dígitos para continuar.</p>
+    <p class="pc-op-pin-sub">Al ingresar solicitaremos permiso para guardar la ubicación GPS del dispositivo. Si no lo autorizas, podrás continuar sin GPS.</p>
 
     <div class="pc-op-pin-boxes" id="pcOpPinBoxes">
       <div class="pc-op-pin-box" data-idx="0"></div>
@@ -104,6 +105,7 @@ if (!empty($_SESSION['operario_id'])) {
   </div>
 </div>
 
+<script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/loginoperarios.js"></script>
 </body>
 </html>

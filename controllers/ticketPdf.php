@@ -21,7 +21,10 @@
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';
-session_start();
+require_once __DIR__ . '/clssVerificarSession.php';
+iniciarSesionSegura();
+$usuarioTicket = exigirSesion();
+exigirRol($usuarioTicket, ['administrador', 'ventas'], 'ventas');
 
 // Evita que notices/warnings accidentales se mezclen con los bytes del PDF.
 ob_start();

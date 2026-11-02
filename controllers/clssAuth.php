@@ -15,6 +15,7 @@ require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/clssVerificarSession.php';
+require_once __DIR__ . '/roles_helper.php';
 
 /**
  * Intenta autenticar un usuario.
@@ -75,6 +76,15 @@ function intentarLogin(string $user_, string $password): array
         ];
     }
 
+    $rolPerfilesLogin = $usuario['rol_y_perfiles'] ?? [];
+    if (is_string($rolPerfilesLogin)) $rolPerfilesLogin = json_decode($rolPerfilesLogin, true) ?: [];
+    if (strtolower(trim((string)($rolPerfilesLogin['rol'] ?? ''))) === 'operario') {
+        return [
+            'success' => false,
+            'error'   => 'Las cuentas de Operario deben ingresar desde el acceso de operarios.',
+        ];
+    }
+
     // Evita fijación de sesión tras un login exitoso.
     session_regenerate_id(true);
 
@@ -83,7 +93,7 @@ function intentarLogin(string $user_, string $password): array
         actualizarHashUsuario($conectar, (int) $usuario['id'], $password);
     }
 
-    guardarSesionUsuario($usuario);
+    guardarSesionUsuario($usuario, $conectar);
 
     return [
         'success' => true,
@@ -149,7 +159,7 @@ function actualizarHashUsuario($conectar, int $usuarioId, string $password): voi
 /**
  * Registra la identidad del usuario autenticado en la sesión.
  */
-function guardarSesionUsuario(array $usuario): void
+function guardarSesionUsuario(array $usuario, $conectar): void
 {
     // La cuenta administrativa y la sesión rápida de tablet no deben compartir
     // identidades: una sesión de operario previa puede limitar listados admin.
@@ -175,6 +185,8 @@ function guardarSesionUsuario(array $usuario): void
     $_SESSION['nombre_usuario']      = (string) ($usuario['nombre_completo'] ?? '');
     $_SESSION['user_usuario']        = (string) ($usuario['user_'] ?? '');
     $_SESSION['rol_usuario']         = (string) ($rolPerfiles['rol'] ?? '');
+    $_SESSION['roles_permitidos']    = obtenerRolesBaseCatalogo($conectar, strtolower($_SESSION['rol_usuario']));
+    $_SESSION['restricciones_rol']   = obtenerExclusionesRolCatalogo($conectar, strtolower($_SESSION['rol_usuario']));
     $_SESSION['perfiles']            = is_array($rolPerfiles['perfiles'] ?? null)
         ? $rolPerfiles['perfiles']
         : [];

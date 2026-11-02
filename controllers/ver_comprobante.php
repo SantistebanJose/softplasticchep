@@ -25,6 +25,8 @@
  */
 
 session_start();
+require_once __DIR__ . '/clssVerificarSession.php';
+bloquearOperarioEnSistemaWeb();
 require_once __DIR__ . '/bd.php';
 require_once __DIR__ . '/executeQuery.php';
 

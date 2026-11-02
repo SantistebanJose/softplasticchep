@@ -324,8 +324,7 @@ function esOperarioSesion(): bool
 
 function esAdministradorSesionEnsamblaje(): bool
 {
-    return !esOperarioSesion()
-        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
+    return !esOperarioSesion() && usuarioTieneRol(exigirSesion(), 'administrador');
 }
 
 /** Busca el registro de envío externo correspondiente a una pasada. */
@@ -806,8 +805,7 @@ function buscarProduccionesDisponibles()
     $texto         = trim($_POST['texto'] ?? '');
     $destinoFiltro = strtolower(trim((string)($_POST['destino_ensamblaje'] ?? 'local')));
     if (!in_array($destinoFiltro, ['local', 'externo'], true)) $destinoFiltro = 'local';
-    $esAdminExterno = !esOperarioSesion()
-        && strtolower(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'administrador';
+    $esAdminExterno = !esOperarioSesion() && usuarioTieneRol(exigirSesion(), 'administrador');
     if ($destinoFiltro === 'externo' && !$esAdminExterno) {
         responder(false, 'Solo un administrador puede consultar producciones enviadas a externo.');
     }
