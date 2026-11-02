@@ -522,6 +522,7 @@ function guardarConfigProducto()
     if (!is_array($configuracionEmpaquetado)) responder(false, 'Formato de configuración de empaquetado inválido.');
     $configuracionEmpaquetado['requiere_maquina_ensamblaje']  = !empty($configuracionEmpaquetado['requiere_maquina_ensamblaje']);
     $configuracionEmpaquetado['requiere_maquina_empaquetado'] = !empty($configuracionEmpaquetado['requiere_maquina_empaquetado']);
+    $configuracionEmpaquetado['permitir_colores_mixtos_ensamblaje'] = !empty($configuracionEmpaquetado['permitir_colores_mixtos_ensamblaje']);
 
     $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');

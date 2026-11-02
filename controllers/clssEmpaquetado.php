@@ -257,7 +257,23 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             LEFT JOIN producto pr_ens ON pr_ens.id = e.producto_id
             LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
             LEFT JOIN LATERAL (
-                SELECT COALESCE(e.color_id, own.color_id) AS color_id, co.nombre AS color_nombre, co.rgb AS color_hex
+                SELECT COALESCE(e.color_id, own.color_id) AS color_id,
+                       CASE WHEN COALESCE((pr_ens.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE)
+                                  AND (SELECT COUNT(DISTINCT pdm.color_id) FROM rel_ensamblaje_producto repm
+                                       JOIN produccion pdm ON pdm.id = repm.molde_produccion_id
+                                       JOIN molde mm ON mm.id = pdm.molde_id
+                                       LEFT JOIN color cm ON cm.id = pdm.color_id
+                                       WHERE repm.ensamblaje_id = e.id AND repm.deleted_at IS NULL
+                                         AND NOT (UPPER(COALESCE(mm.nombre, '')) LIKE '%CADENITA%' AND UPPER(COALESCE(cm.nombre, '')) = 'BLANCO')) > 1
+                            THEN 'Multicolor' ELSE co.nombre END AS color_nombre,
+                       CASE WHEN COALESCE((pr_ens.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE)
+                                  AND (SELECT COUNT(DISTINCT pdm.color_id) FROM rel_ensamblaje_producto repm
+                                       JOIN produccion pdm ON pdm.id = repm.molde_produccion_id
+                                       JOIN molde mm ON mm.id = pdm.molde_id
+                                       LEFT JOIN color cm ON cm.id = pdm.color_id
+                                       WHERE repm.ensamblaje_id = e.id AND repm.deleted_at IS NULL
+                                         AND NOT (UPPER(COALESCE(mm.nombre, '')) LIKE '%CADENITA%' AND UPPER(COALESCE(cm.nombre, '')) = 'BLANCO')) > 1
+                            THEN '#7c3aed' ELSE co.rgb END AS color_hex
                 FROM (SELECT 1) seed
                 LEFT JOIN LATERAL (
                     SELECT pd.color_id

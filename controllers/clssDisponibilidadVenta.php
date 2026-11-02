@@ -107,6 +107,8 @@ function listarDisponibilidadVenta()
                p.codigo AS producto_codigo,
                p.descripcion AS producto,
                p.img_ruta AS producto_imagen,
+               CASE WHEN COALESCE((p.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE)
+                    THEN 'Multicolor'::text ELSE NULL::text END AS color_final_label,
                0::integer AS color_id,
                'Stock general'::text AS color,
                '#246bfe'::text AS color_hex,

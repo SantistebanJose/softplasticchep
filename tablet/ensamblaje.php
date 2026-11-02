@@ -722,7 +722,8 @@ function renderProductoGridEns() {
 }
 
 function seleccionarProductoEns(productoId) {
-    productoSeleccionadoEns = { producto_id: productoId, color_id: null };
+    const producto = productosGridDataEns.find(p => String(p.producto_id) === String(productoId));
+    productoSeleccionadoEns = { producto_id: productoId, color_id: null, permitir_colores_mixtos_ensamblaje: producto?.permitir_colores_mixtos_ensamblaje };
     ticketDetalleEns = [];
     document.getElementById('ens_color_id').value = '';
     renderTicketDetalle();
@@ -746,9 +747,13 @@ function esColorNeutroEns(datos) {
 function recalcularColorFinalEnsamblaje() {
     const fuente = ticketDetalleEns.find(l => l.tipo === 'complemento' && l.color_id)
         || ticketDetalleEns.find(l => l.tipo === 'produccion' && l.color_id && !esColorNeutroEns(l));
-    const colorId = fuente?.color_id ? String(fuente.color_id) : '';
+    const colores = [...new Set(ticketDetalleEns.filter(l => l.tipo === 'produccion' && l.color_id && !esColorNeutroEns(l)).map(l => String(l.color_id)))];
+    const permiteMezcla = ['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
+    const esMulticolor = permiteMezcla && colores.length > 1;
+    const colorId = esMulticolor ? String(fuente?.color_id || colores[0]) : (fuente?.color_id ? String(fuente.color_id) : '');
     document.getElementById('ens_color_id').value = colorId;
     productoSeleccionadoEns.color_id = colorId || null;
+    productoSeleccionadoEns.es_multicolor = esMulticolor;
 }
 
 function actualizarCampoMaquinaEnsamblaje() {
@@ -867,7 +872,12 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     const maquinaSelect = document.getElementById('ens_maquina_id');
     maquinaSelect.innerHTML = '<option value="">Selecciona una máquina...</option>' + maquinasEnsamblajeCache.map(m => `<option value="${m.id}">${m.alias || m.nombre}</option>`).join('');
     if (seleccion.producto_id) {
-        productoSeleccionadoEns = { producto_id: String(seleccion.producto_id), color_id: seleccion.color_id != null ? String(seleccion.color_id) : null };
+        const productoSeleccionado = productosGridDataEns.find(p => String(p.producto_id) === String(seleccion.producto_id));
+        productoSeleccionadoEns = {
+            producto_id: String(seleccion.producto_id),
+            color_id: seleccion.color_id != null ? String(seleccion.color_id) : null,
+            permitir_colores_mixtos_ensamblaje: productoSeleccionado?.permitir_colores_mixtos_ensamblaje
+        };
     }
     document.getElementById('ens_color_id').value = seleccion.color_id ? String(seleccion.color_id) : '';
     maquinaSelect.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
@@ -1280,7 +1290,8 @@ async function renderGridDetalle() {
     if (tabDetalleActiva === 'produccion') {
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const categoriaFiltro = categoriaMaterialTicketActual();
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId, categoria_material_id: categoriaFiltro || '', texto });
+        const permiteMezcla = ['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: permiteMezcla ? '' : colorId, categoria_material_id: categoriaFiltro || '', texto });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
@@ -1554,7 +1565,7 @@ function dibujarResumenEnsamblaje() {
     const detalle = ticketDetalleEns.length
         ? `<ul class="pc-ens-summary-items">${ticketDetalleEns.map(item => `<li><b>${escaparResumenEnsamblaje(item.nombre)}</b>${item.meta ? ` · ${escaparResumenEnsamblaje(item.meta)}` : ''}</li>`).join('')}</ul>`
         : 'Sin elementos vinculados';
-    const color = ticketDetalleEns.find(item => item.color_nombre)?.color_nombre || 'Pendiente';
+    const color = productoSeleccionadoEns.es_multicolor ? 'Multicolor' : (ticketDetalleEns.find(item => item.color_nombre)?.color_nombre || 'Pendiente');
 
     document.getElementById('ens_resumen_contenido').innerHTML = `
         <div class="pc-ens-summary-row"><span class="pc-ens-summary-label">Sucursal</span><span class="pc-ens-summary-value">${escaparResumenEnsamblaje(sucursal?.nombre || '—')}</span></div>
@@ -1743,6 +1754,7 @@ async function abrirModalEditarEnsamblaje(id) {
         document.getElementById('ens_color_id').value = String(fuenteColorEdicion.color_id);
         productoSeleccionadoEns.color_id = String(fuenteColorEdicion.color_id);
     }
+    recalcularColorFinalEnsamblaje();
 
     renderTicketDetalle();
     await renderGridDetalle();

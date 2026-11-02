@@ -21,6 +21,7 @@ include("header.php");
 .pc-dv-thumb-empty{display:flex;align-items:center;justify-content:center;color:#9aa4b2;font-size:1.1rem;}
 .pc-dv-name{font-weight:700;line-height:1.25;}
 .pc-dv-code{font-size:.78rem;color:#7b8798;margin-top:3px;}
+.pc-dv-color{display:inline-block;margin-left:7px;padding:2px 7px;border-radius:999px;background:#f3e8ff;color:#6b21a8;font-size:.7rem;font-weight:700;vertical-align:middle;}
 .pc-dv-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .pc-dv-stock{font-size:1rem;font-weight:800;color:#2563eb;}
 .pc-dv-unit{font-size:.8rem;font-weight:700;color:#64748b;margin-left:4px;}
@@ -114,7 +115,7 @@ async function cargarDisponibilidadVenta() {
             : '<span class="pc-dv-thumb pc-dv-thumb-empty"><i class="fa-regular fa-image"></i></span>';
         const estado = agotado ? '<span class="pc-dv-badge pc-dv-badge-agotado">Agotado</span>' : bajo ? '<span class="pc-dv-badge bajo">Bajo mínimo</span>' : '<span class="pc-dv-badge">Disponible</span>';
         return `<tr>
-            <td><div class="pc-dv-product">${thumb}<div><div class="pc-dv-name">${escaparHTMLDV(f.producto || 'Sin nombre')}</div><div class="pc-dv-code">${escaparHTMLDV(f.producto_codigo || '')}</div></div></div></td>
+            <td><div class="pc-dv-product">${thumb}<div><div class="pc-dv-name">${escaparHTMLDV(f.producto || 'Sin nombre')}</div><div class="pc-dv-code">${escaparHTMLDV(f.producto_codigo || '')}${f.color_final_label ? `<span class="pc-dv-color">${escaparHTMLDV(f.color_final_label)}</span>` : ''}</div></div></div></td>
             <td class="pc-dv-number"><span class="pc-dv-stock">${formatearNumeroDV(stock)}</span><span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span></td>
             <td class="pc-dv-number">${formatearNumeroDV(minimo)} <span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span></td>
             <td class="pc-dv-number">${maximo > 0 ? `${formatearNumeroDV(maximo)} <span class="pc-dv-unit">${escaparHTMLDV(unidad)}</span>` : '—'}</td>

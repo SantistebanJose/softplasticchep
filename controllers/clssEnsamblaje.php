@@ -394,7 +394,8 @@ function buscarProductosConfiguradosEnsamblaje(): void
     $conectar = conectar_oll_BD();
     $result = executeQuery($conectar, "
         SELECT DISTINCT p.id AS producto_id, p.codigo, p.descripcion,
-            CASE WHEN p.js_configuracion_empaquetado->>'requiere_maquina_ensamblaje' = 'true' THEN 1 ELSE 0 END AS requiere_maquina_ensamblaje
+            CASE WHEN p.js_configuracion_empaquetado->>'requiere_maquina_ensamblaje' = 'true' THEN 1 ELSE 0 END AS requiere_maquina_ensamblaje,
+            CASE WHEN p.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje' = 'true' THEN 1 ELSE 0 END AS permitir_colores_mixtos_ensamblaje
         FROM producto p
         LEFT JOIN LATERAL jsonb_array_elements(COALESCE(p.js_configuracion, '[]'::jsonb)) cfg(item) ON TRUE
         LEFT JOIN molde m ON m.id = NULLIF(cfg.item->>'molde_id', '')::bigint
@@ -875,7 +876,15 @@ function buscarProduccionesDisponibles()
             $params['target_producto'] = $productoId;
         }
     }
-    if ($colorId > 0) {
+    $permiteColoresMixtos = false;
+    if ($productoId > 0) {
+        $configColor = executeQuery($conectar, "
+            SELECT COALESCE((js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE) AS permite
+            FROM producto WHERE id = :id AND activo = TRUE
+        ", ['id' => $productoId]);
+        $permiteColoresMixtos = !empty($configColor) && valorBooleanoEnsamblaje($configColor[0]['permite'] ?? false);
+    }
+    if ($colorId > 0 && !$permiteColoresMixtos) {
         // Componentes compartidos conservan su color de producción;
         // solo las cadenitas blancas son compatibles con cualquier color final.
         $where[] = "(t1.color_id = :color_id OR (
@@ -1283,12 +1292,20 @@ function listarEnsamblajes()
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
             WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
         )) AS color_id_actual,
-        COALESCE(co.nombre, (
+        CASE WHEN COALESCE((p.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE)
+                  AND (SELECT COUNT(DISTINCT pdm.color_id) FROM rel_ensamblaje_producto repm
+                       JOIN produccion pdm ON pdm.id = repm.molde_produccion_id
+                       JOIN molde mm ON mm.id = pdm.molde_id
+                       LEFT JOIN color cm ON cm.id = pdm.color_id
+                       WHERE repm.ensamblaje_id = e.id AND repm.deleted_at IS NULL
+                         AND NOT (UPPER(COALESCE(mm.nombre, '')) LIKE '%CADENITA%' AND UPPER(COALESCE(cm.nombre, '')) = 'BLANCO')) > 1
+             THEN 'Multicolor'
+             ELSE COALESCE(co.nombre, (
             SELECT co2.nombre FROM rel_ensamblaje_producto rep
             JOIN produccion pd ON pd.id = rep.molde_produccion_id
             LEFT JOIN color co2 ON co2.id = pd.color_id
             WHERE rep.ensamblaje_id = e.id AND rep.deleted_at IS NULL LIMIT 1
-        )) AS color_nombre_actual,
+        )) END AS color_nombre_actual,
         e.operario_ortorgado AS operario_id,
         e.js_operarios,
         o.nombre_completo AS operario_nombre,

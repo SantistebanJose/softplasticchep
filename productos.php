@@ -477,6 +477,16 @@ include("header.php");
         </div>
 
         <div class="config-venta-block">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="config_permitir_colores_mixtos_ensamblaje">
+                <label class="form-check-label" for="config_permitir_colores_mixtos_ensamblaje">
+                    Permitir combinar moldes de distintos colores en Ensamblaje
+                </label>
+            </div>
+            <small class="text-muted">El producto terminado se mostrará como Multicolor en stock y empaquetado.</small>
+        </div>
+
+        <div class="config-venta-block">
             <label class="form-label mb-1">Distribución de colores por bulto</label>
             <select class="form-select" id="config_modo_distribucion_color" required>
                 <option value="libre">Libre (el operario decide las cantidades)</option>
@@ -1057,6 +1067,7 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
     document.getElementById('config_conversion_peso_a_unidad').checked = !!configVentaActual.conversion_peso_a_unidad;
     document.getElementById('config_requiere_maquina_ensamblaje').checked = !!configVentaActual.requiere_maquina_ensamblaje;
     document.getElementById('config_requiere_maquina_empaquetado').checked = !!configVentaActual.requiere_maquina_empaquetado;
+    document.getElementById('config_permitir_colores_mixtos_ensamblaje').checked = !!configVentaActual.permitir_colores_mixtos_ensamblaje;
     actualizarAvisoPesoUnitario();
 
     construirTabsConfiguracion(moldesDelProducto, configActual);
@@ -1328,6 +1339,7 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     configuracionVenta.conversion_peso_a_unidad = requiereConversion;
     configuracionVenta.requiere_maquina_ensamblaje = document.getElementById('config_requiere_maquina_ensamblaje').checked;
     configuracionVenta.requiere_maquina_empaquetado = document.getElementById('config_requiere_maquina_empaquetado').checked;
+    configuracionVenta.permitir_colores_mixtos_ensamblaje = document.getElementById('config_permitir_colores_mixtos_ensamblaje').checked;
     // ── Configuración por molde ──────────────────────────────────────────
     const panes = document.querySelectorAll('#configTabContent .tab-pane');
     const configuraciones = [];
