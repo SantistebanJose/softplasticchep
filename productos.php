@@ -480,10 +480,10 @@ include("header.php");
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="config_permitir_colores_mixtos_ensamblaje">
                 <label class="form-check-label" for="config_permitir_colores_mixtos_ensamblaje">
-                    Permitir combinar moldes de distintos colores en Ensamblaje
+                    Permitir combinar moldes de distintos colores o categorías en Ensamblaje
                 </label>
             </div>
-            <small class="text-muted">El producto terminado se mostrará como Multicolor en stock y empaquetado.</small>
+            <small class="text-muted">El armado se mostrará como Multicolor; si combina categorías, no tendrá una categoría única. Cada molde conserva su categoría en el detalle.</small>
         </div>
 
         <div class="config-venta-block">

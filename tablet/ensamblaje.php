@@ -436,6 +436,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                 <i class="fa-solid fa-puzzle-piece"></i> Complemento
                             </button>
                         </div>
+                        <div class="alert alert-info py-2 px-3 mb-2" id="ens_aviso_colores_mixtos" hidden>
+                            <i class="fa-solid fa-palette"></i>
+                            Este producto permite combinar moldes de distintos colores o categorías; el armado se identificará como <b>Multicolor</b>.
+                        </div>
                         <div class="pc-panel-search">
                             <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
                         </div>
@@ -726,9 +730,16 @@ function seleccionarProductoEns(productoId) {
     productoSeleccionadoEns = { producto_id: productoId, color_id: null, permitir_colores_mixtos_ensamblaje: producto?.permitir_colores_mixtos_ensamblaje };
     ticketDetalleEns = [];
     document.getElementById('ens_color_id').value = '';
+    actualizarAvisoColoresMixtosEns();
     renderTicketDetalle();
     renderProductoGridEns();
     cambioProductoEnsamblaje();
+}
+
+function actualizarAvisoColoresMixtosEns() {
+    const aviso = document.getElementById('ens_aviso_colores_mixtos');
+    if (!aviso) return;
+    aviso.hidden = !['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
 }
 
 function obtenerProductoIdSeleccionadoEns() {
@@ -879,6 +890,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
             permitir_colores_mixtos_ensamblaje: productoSeleccionado?.permitir_colores_mixtos_ensamblaje
         };
     }
+    actualizarAvisoColoresMixtosEns();
     document.getElementById('ens_color_id').value = seleccion.color_id ? String(seleccion.color_id) : '';
     maquinaSelect.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
     renderProductoGridEns();
@@ -1291,7 +1303,7 @@ async function renderGridDetalle() {
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const categoriaFiltro = categoriaMaterialTicketActual();
         const permiteMezcla = ['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: permiteMezcla ? '' : colorId, categoria_material_id: categoriaFiltro || '', texto });
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: permiteMezcla ? '' : colorId, categoria_material_id: permiteMezcla ? '' : (categoriaFiltro || ''), texto });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
@@ -1422,7 +1434,8 @@ async function agregarLineaDetalle(tipo, datos) {
 
     if (tipo === 'produccion') {
         const categoriaActual = categoriaMaterialTicketActual();
-        if (categoriaActual && datos.categoria_material_id && String(categoriaActual) !== String(datos.categoria_material_id)) {
+        const permiteMezcla = ['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
+        if (!permiteMezcla && categoriaActual && datos.categoria_material_id && String(categoriaActual) !== String(datos.categoria_material_id)) {
             alert('No se pueden mezclar producciones de Primera y Segunda Categoría en el mismo armado.');
             return;
         }

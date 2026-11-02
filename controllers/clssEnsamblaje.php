@@ -395,7 +395,7 @@ function buscarProductosConfiguradosEnsamblaje(): void
     $result = executeQuery($conectar, "
         SELECT DISTINCT p.id AS producto_id, p.codigo, p.descripcion,
             CASE WHEN p.js_configuracion_empaquetado->>'requiere_maquina_ensamblaje' = 'true' THEN 1 ELSE 0 END AS requiere_maquina_ensamblaje,
-            CASE WHEN p.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje' = 'true' THEN 1 ELSE 0 END AS permitir_colores_mixtos_ensamblaje
+            CASE WHEN COALESCE((p.js_configuracion_empaquetado->>'permitir_colores_mixtos_ensamblaje')::boolean, FALSE) THEN 1 ELSE 0 END AS permitir_colores_mixtos_ensamblaje
         FROM producto p
         LEFT JOIN LATERAL jsonb_array_elements(COALESCE(p.js_configuracion, '[]'::jsonb)) cfg(item) ON TRUE
         LEFT JOIN molde m ON m.id = NULLIF(cfg.item->>'molde_id', '')::bigint
@@ -895,7 +895,7 @@ function buscarProduccionesDisponibles()
         ))";
         $params['color_id'] = $colorId;
     }
-    if ($categoriaMaterialId > 0) {
+    if ($categoriaMaterialId > 0 && !$permiteColoresMixtos) {
         $where[] = "t1.categoria_material_id = :categoria_material_id";
         $params['categoria_material_id'] = $categoriaMaterialId;
     }
