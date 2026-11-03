@@ -506,12 +506,23 @@ include("header.php");
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="config_conversion_peso_a_unidad">
                 <label class="form-check-label" for="config_conversion_peso_a_unidad">
-                    Requiere conversión de peso (kg) a unidad al empaquetar
+                    Empaquetar este producto por bolsas contadas
                 </label>
             </div>
             <small class="text-muted" id="avisoPesoUnitarioFaltante" style="display:none; color:#c94a4a !important;">
                 ⚠ Este producto no tiene "Peso unitario (g)" configurado. Edítalo en los datos generales antes de activar esta opción.
             </small>
+            <small class="text-muted d-block">Actívalo solo para productos que se registran por bolsas, como la Pinza Palanita.</small>
+            <div class="row g-2 mt-1" id="config_bolsas_detalle" style="display:none;">
+                <div class="col-6">
+                    <label class="form-label mb-1" for="config_unidades_por_bolsa">Unidades por bolsa</label>
+                    <input class="form-control" type="number" min="1" step="1" id="config_unidades_por_bolsa" value="144">
+                </div>
+                <div class="col-6">
+                    <label class="form-label mb-1" for="config_bolsas_por_paquete">Bolsas por paquete</label>
+                    <input class="form-control" type="number" min="1" step="1" id="config_bolsas_por_paquete" value="24">
+                </div>
+            </div>
         </div>
 
 
@@ -607,6 +618,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 document.getElementById('config_conversion_peso_a_unidad').addEventListener('change', actualizarAvisoPesoUnitario);
+document.getElementById('config_conversion_peso_a_unidad').addEventListener('change', () => {
+    document.getElementById('config_bolsas_detalle').style.display = document.getElementById('config_conversion_peso_a_unidad').checked ? '' : 'none';
+});
 
 // ── Foto del producto: cámara / galería, vista previa y "quitar" ────────────
 const inputImagenProducto        = document.getElementById('prod_imagen');         // el que se manda en el form (name="imagen")
@@ -1065,6 +1079,9 @@ async function abrirModalConfiguracion(productoId, productoDescripcion) {
     document.getElementById('config_modo_distribucion_color').value = configVentaActual.modo_distribucion_color || 'libre';
     document.getElementById('config_granularidad_color').value = configVentaActual.granularidad_color || 1;
     document.getElementById('config_conversion_peso_a_unidad').checked = !!configVentaActual.conversion_peso_a_unidad;
+    document.getElementById('config_unidades_por_bolsa').value = configVentaActual.unidades_por_bolsa || 144;
+    document.getElementById('config_bolsas_por_paquete').value = configVentaActual.bolsas_por_paquete || 24;
+    document.getElementById('config_bolsas_detalle').style.display = configVentaActual.conversion_peso_a_unidad ? '' : 'none';
     document.getElementById('config_requiere_maquina_ensamblaje').checked = !!configVentaActual.requiere_maquina_ensamblaje;
     document.getElementById('config_requiere_maquina_empaquetado').checked = !!configVentaActual.requiere_maquina_empaquetado;
     document.getElementById('config_permitir_colores_mixtos_ensamblaje').checked = !!configVentaActual.permitir_colores_mixtos_ensamblaje;
@@ -1337,6 +1354,16 @@ document.getElementById('formConfigProducto').addEventListener('submit', async f
     configuracionVenta.modo_distribucion_color = document.getElementById('config_modo_distribucion_color').value;
     configuracionVenta.granularidad_color = parseInt(document.getElementById('config_granularidad_color').value, 10);
     configuracionVenta.conversion_peso_a_unidad = requiereConversion;
+    if (requiereConversion) {
+        const unidadesPorBolsa = parseInt(document.getElementById('config_unidades_por_bolsa').value, 10);
+        const bolsasPorPaquete = parseInt(document.getElementById('config_bolsas_por_paquete').value, 10);
+        if (!Number.isInteger(unidadesPorBolsa) || unidadesPorBolsa <= 0 || !Number.isInteger(bolsasPorPaquete) || bolsasPorPaquete <= 0) {
+            Swal.fire('Falta información', 'Indica cuántas unidades lleva cada bolsa y cuántas bolsas forman un paquete.', 'warning');
+            return;
+        }
+        configuracionVenta.unidades_por_bolsa = unidadesPorBolsa;
+        configuracionVenta.bolsas_por_paquete = bolsasPorPaquete;
+    }
     configuracionVenta.requiere_maquina_ensamblaje = document.getElementById('config_requiere_maquina_ensamblaje').checked;
     configuracionVenta.requiere_maquina_empaquetado = document.getElementById('config_requiere_maquina_empaquetado').checked;
     configuracionVenta.permitir_colores_mixtos_ensamblaje = document.getElementById('config_permitir_colores_mixtos_ensamblaje').checked;

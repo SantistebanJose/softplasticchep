@@ -516,7 +516,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                         <b id="mezclaKgTotal">0</b>
                                     </div>
                                     <div class="fila mt-2">
-                                        <label class="form-label mb-0">Bolsas producidas (144 und c/u) *</label>
+                                        <label class="form-label mb-0">Bolsas producidas (<span id="mezclaUnidadesPorBolsa">144</span> und c/u) *</label>
                                         <input type="number" min="1" step="1" class="form-control form-control-sm" style="max-width:120px; min-height:44px;"
                                             id="mezclaBolsasProducidas" oninput="actualizarBolsasProducidas(this.value)" placeholder="Ej. 50">
                                     </div>
@@ -525,12 +525,12 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                         <span><b id="mezclaBolsasTeoricas">-</b> bolsas <span id="mezclaDiferenciaBadge" class="badge" style="display:none; margin-left:6px;"></span></span>
                                     </div>
                                     <div class="fila mt-2" style="font-size:.8em; color:#9a9585;">
-                                        <span>Paquete de 24 bolsas</span>
+                                        <span>Paquete de <span id="mezclaBolsasPorPaquete">24</span> bolsas</span>
                                         <span id="mezclaPaqueteFrac">0 / 24</span>
                                     </div>
                                     <div class="pc-paquete-barra"><div id="mezclaPaqueteBarra" style="width:0%;"></div></div>
                                     <div class="text-muted mt-1" style="font-size:.78em;">
-                                        ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de 24 bolsas (solo referencia para transporte)
+                                        ≈ <span id="mezclaPaquetesEstimados">0</span> paquete(s) de <span id="mezclaBolsasPorPaqueteHint">24</span> bolsas (solo referencia para transporte)
                                     </div>
                                 </div>
                             </div>
@@ -1042,6 +1042,7 @@ async function cargarOrigenesDisponibles(productoId, miToken) {
     reglasEmpaquetadoActuales = json.success ? (json.reglas_empaquetado || null) : null;
     capacidadEnUnidadOrigenActual = json.success ? (json.capacidad_en_unidad_origen ?? null) : null;
     aplicarMaquinaEmpaquetado();
+    actualizarEtiquetasMezcla();
 }
 
 function aplicarMaquinaEmpaquetado() {
@@ -1204,6 +1205,7 @@ async function refrescarOrigenesSilencioso() {
     reglasEmpaquetadoActuales = json.reglas_empaquetado || null;
     capacidadEnUnidadOrigenActual = json.capacidad_en_unidad_origen ?? null;
     aplicarMaquinaEmpaquetado();
+    actualizarEtiquetasMezcla();
     if (esModoMezcla()) renderMezcla(); else renderBultos();
 }
 
@@ -1256,6 +1258,14 @@ function agregarBulto() {
 
 function esModoMezcla() {
     return !!(reglasEmpaquetadoActuales && reglasEmpaquetadoActuales.conversion_peso_a_unidad);
+}
+
+function actualizarEtiquetasMezcla() {
+    const unidades = Math.max(1, Number(reglasEmpaquetadoActuales?.unidades_por_bolsa) || 144);
+    const bolsas = Math.max(1, Number(reglasEmpaquetadoActuales?.bolsas_por_paquete) || 24);
+    document.getElementById('mezclaUnidadesPorBolsa').textContent = unidades;
+    document.getElementById('mezclaBolsasPorPaquete').textContent = bolsas;
+    document.getElementById('mezclaBolsasPorPaqueteHint').textContent = bolsas;
 }
 
 function agregarOrigenMezcla() {
@@ -1374,15 +1384,17 @@ function actualizarResumenMezcla() {
     const elDiff = document.getElementById('mezclaDiferenciaBadge');
     const elPaquetes = document.getElementById('mezclaPaquetesEstimados');
 
-    elPaquetes.textContent = formatearCantidadEmp((parseFloat(bolsasProducidasValor) || 0) / 24);
+    const bolsasPorPaquete = Math.max(1, Number(reglasEmpaquetadoActuales?.bolsas_por_paquete) || 24);
+    const unidadesPorBolsa = Math.max(1, Number(reglasEmpaquetadoActuales?.unidades_por_bolsa) || 144);
+    elPaquetes.textContent = formatearCantidadEmp((parseFloat(bolsasProducidasValor) || 0) / bolsasPorPaquete);
 
     const bolsas = parseFloat(bolsasProducidasValor) || 0;
-    const frac = Math.min(bolsas, 24);
-    document.getElementById('mezclaPaqueteFrac').textContent = `${Math.round(frac)} / 24`;
-    document.getElementById('mezclaPaqueteBarra').style.width = ((frac / 24) * 100) + '%';
+    const frac = Math.min(bolsas, bolsasPorPaquete);
+    document.getElementById('mezclaPaqueteFrac').textContent = `${Math.round(frac)} / ${bolsasPorPaquete}`;
+    document.getElementById('mezclaPaqueteBarra').style.width = ((frac / bolsasPorPaquete) * 100) + '%';
 
     if (pesoUnitG && kgTotal > 0) {
-        const bolsasTeoricas = (kgTotal * 1000) / pesoUnitG / 144;
+        const bolsasTeoricas = (kgTotal * 1000) / pesoUnitG / unidadesPorBolsa;
         elTeorico.textContent = formatearCantidadEmp(bolsasTeoricas);
         const declarado = parseFloat(bolsasProducidasValor) || 0;
         if (declarado > 0 && bolsasTeoricas > 0) {

@@ -523,6 +523,14 @@ function guardarConfigProducto()
     $configuracionEmpaquetado['requiere_maquina_ensamblaje']  = !empty($configuracionEmpaquetado['requiere_maquina_ensamblaje']);
     $configuracionEmpaquetado['requiere_maquina_empaquetado'] = !empty($configuracionEmpaquetado['requiere_maquina_empaquetado']);
     $configuracionEmpaquetado['permitir_colores_mixtos_ensamblaje'] = !empty($configuracionEmpaquetado['permitir_colores_mixtos_ensamblaje']);
+    $configuracionEmpaquetado['conversion_peso_a_unidad'] = !empty($configuracionEmpaquetado['conversion_peso_a_unidad']);
+    if ($configuracionEmpaquetado['conversion_peso_a_unidad']) {
+        $configuracionEmpaquetado['unidades_por_bolsa'] = intval($configuracionEmpaquetado['unidades_por_bolsa'] ?? 0);
+        $configuracionEmpaquetado['bolsas_por_paquete'] = intval($configuracionEmpaquetado['bolsas_por_paquete'] ?? 0);
+        if ($configuracionEmpaquetado['unidades_por_bolsa'] <= 0 || $configuracionEmpaquetado['bolsas_por_paquete'] <= 0) {
+            responder(false, 'Configura las unidades por bolsa y las bolsas por paquete.');
+        }
+    }
 
     $existe = executeQuery($conectar, "SELECT id FROM producto WHERE id = :id", ['id' => $producto_id]);
     if (empty($existe)) responder(false, 'Producto no encontrado.');

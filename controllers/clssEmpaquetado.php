@@ -1241,7 +1241,8 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
         // Cálculo teórico (informativo, no bloqueante): sirve para
         // detectar mermas anormales de la máquina, no para invalidar el registro.
         $unidadesTeoricas = ($kgTotal * 1000) / $reglas['peso_unitario_g'];
-        $bolsasTeoricas   = $unidadesTeoricas / 144;
+        $unidadesPorBolsa = max(1, (int)($reglas['unidades_por_bolsa'] ?? 144));
+        $bolsasTeoricas   = $unidadesTeoricas / $unidadesPorBolsa;
         $diferenciaPct    = $bolsasTeoricas > 0 ? abs($bolsasProducidas - $bolsasTeoricas) / $bolsasTeoricas * 100 : null;
 
         $operariosTexto = implode(', ', array_column($operariosResueltos, 'nombre_completo'));
@@ -1827,6 +1828,8 @@ function obtenerReglasEmpaquetadoProducto($conectar, int $productoId): array
         'modo_distribucion_color'             => $cfg['modo_distribucion_color'] ?? 'libre',
         'granularidad_color'                  => intval($cfg['granularidad_color'] ?? 1),
         'conversion_peso_a_unidad'             => !empty($cfg['conversion_peso_a_unidad']),
+        'unidades_por_bolsa'                   => max(1, intval($cfg['unidades_por_bolsa'] ?? 144)),
+        'bolsas_por_paquete'                   => max(1, intval($cfg['bolsas_por_paquete'] ?? 24)),
         'requiere_maquina_empaquetado'          => !empty($cfg['requiere_maquina_empaquetado']),
         'peso_unitario_g'                     => !empty($rows[0]['peso_unitario_g']) ? floatval($rows[0]['peso_unitario_g']) : null,
         'unidad_minima_desglose_id'            => $unidadMinimaId,
