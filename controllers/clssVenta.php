@@ -820,9 +820,13 @@ function listarVendedoresVenta(): void
               UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
               OR EXISTS (
                   SELECT 1
-                  FROM jsonb_array_elements(COALESCE(usuario.rol_y_perfiles->'catalogo_roles', '[]'::jsonb)) AS catalogo(perfil)
+                  FROM jsonb_array_elements(
+                      CASE WHEN jsonb_typeof(usuario.rol_y_perfiles->'catalogo_roles') = 'array'
+                           THEN usuario.rol_y_perfiles->'catalogo_roles' ELSE '[]'::jsonb END
+                  ) AS catalogo(perfil)
                   WHERE catalogo.perfil->>'codigo' = usuario.rol_y_perfiles->>'rol'
-                    AND catalogo.perfil->>'activo' = 'true' AND catalogo.perfil->'permisos' ? 'ventas'
+                    AND catalogo.perfil->>'activo' = 'true'
+                    AND jsonb_exists(catalogo.perfil->'permisos', 'ventas')
               )
           )
         ORDER BY nombre_completo
@@ -1041,9 +1045,13 @@ function guardarVenta()
               UPPER(COALESCE(rol_y_perfiles->>'rol', '')) IN ('ADMINISTRADOR', 'VENTAS')
               OR EXISTS (
                   SELECT 1
-                  FROM jsonb_array_elements(COALESCE(usuario.rol_y_perfiles->'catalogo_roles', '[]'::jsonb)) AS catalogo(perfil)
+                  FROM jsonb_array_elements(
+                      CASE WHEN jsonb_typeof(usuario.rol_y_perfiles->'catalogo_roles') = 'array'
+                           THEN usuario.rol_y_perfiles->'catalogo_roles' ELSE '[]'::jsonb END
+                  ) AS catalogo(perfil)
                   WHERE catalogo.perfil->>'codigo' = usuario.rol_y_perfiles->>'rol'
-                    AND catalogo.perfil->>'activo' = 'true' AND catalogo.perfil->'permisos' ? 'ventas'
+                    AND catalogo.perfil->>'activo' = 'true'
+                    AND jsonb_exists(catalogo.perfil->'permisos', 'ventas')
               )
           )
     ", ['id' => $vendedorId]);

@@ -209,6 +209,7 @@ $esAdminPV = strtoupper(trim((string)($_SESSION['rol_usuario'] ?? ''))) === 'ADM
                     <div class="mb-3">
                         <label class="form-label fw-semibold" for="pv_vendedor">Vendedor *</label>
                         <select id="pv_vendedor" class="form-select"><option value="">Cargando vendedores...</option></select>
+                        <small id="pv_vendedor_error" class="text-danger d-block mt-1"></small>
                         <small class="text-muted">Se selecciona inicialmente el usuario que inició sesión.</small>
                     </div>
                     <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
@@ -545,6 +546,8 @@ let carritoVenta = [];
 let contadorCarrito = 0;
 let vendedoresPV = [];
 let cuentasPV = [];
+let errorVendedoresPV = '';
+let errorCuentasPV = '';
 let pagosPV = [{ uid: 1, medio_pago: 'efectivo', cuenta_receptora_id: '', monto: 0, referencia: '', automatico: true }];
 let contadorPagoPV = 1;
 
@@ -554,26 +557,32 @@ const MEDIOS_PAGO_PV = {
 
 async function cargarCatalogosPagoPV() {
     const vendedorSelect = document.getElementById('pv_vendedor');
-    try {
-        const [jsonVendedores, jsonCuentas] = await Promise.all([
-            llamarVenta('LISTARVENDEDORESVENTA'),
-            llamarVenta('LISTARCUENTASRECEPTORAS')
-        ]);
-        if (!jsonVendedores.success) throw new Error(jsonVendedores.message || 'No se pudieron cargar los vendedores.');
-        if (!jsonCuentas.success) throw new Error(jsonCuentas.message || 'No se pudieron cargar las cuentas receptoras.');
-        vendedoresPV = jsonVendedores.vendedores || [];
-        cuentasPV = jsonCuentas.cuentas || [];
-        vendedorSelect.innerHTML = '<option value="">Selecciona un vendedor</option>' + vendedoresPV.map(v =>
+    const [resultadoVendedores, resultadoCuentas] = await Promise.allSettled([
+        llamarVenta('LISTARVENDEDORESVENTA'),
+        llamarVenta('LISTARCUENTASRECEPTORAS')
+    ]);
+
+    const jsonVendedores = resultadoVendedores.status === 'fulfilled' ? resultadoVendedores.value : null;
+    const jsonCuentas = resultadoCuentas.status === 'fulfilled' ? resultadoCuentas.value : null;
+    errorVendedoresPV = resultadoVendedores.status === 'rejected'
+        ? resultadoVendedores.reason?.message || 'No se pudieron cargar los vendedores.'
+        : (!jsonVendedores?.success ? jsonVendedores?.message || 'No se pudieron cargar los vendedores.' : '');
+    errorCuentasPV = resultadoCuentas.status === 'rejected'
+        ? resultadoCuentas.reason?.message || 'No se pudieron cargar las cuentas receptoras.'
+        : (!jsonCuentas?.success ? jsonCuentas?.message || 'No se pudieron cargar las cuentas receptoras.' : '');
+
+    vendedoresPV = errorVendedoresPV ? [] : (jsonVendedores.vendedores || []);
+    cuentasPV = errorCuentasPV ? [] : (jsonCuentas.cuentas || []);
+    vendedorSelect.innerHTML = errorVendedoresPV
+        ? '<option value="">No se pudieron cargar los vendedores</option>'
+        : '<option value="">Selecciona un vendedor</option>' + vendedoresPV.map(v =>
             `<option value="${Number(v.id)}">${escaparHtmlPV(v.nombre_completo)}</option>`
         ).join('');
-        if (vendedoresPV.some(v => Number(v.id) === USUARIO_ID_ACTUAL_PV)) vendedorSelect.value = String(USUARIO_ID_ACTUAL_PV);
-        if (!vendedoresPV.length) vendedorSelect.innerHTML = '<option value="">No hay usuarios habilitados como vendedores</option>';
-        renderPagosPV();
-        actualizarResumenPagosPV();
-    } catch (error) {
-        vendedorSelect.innerHTML = '<option value="">No se pudieron cargar los vendedores</option>';
-        document.getElementById('pv_pagos_lista').innerHTML = `<div class="text-danger small mt-2">${escaparHtmlPV(error.message)}</div>`;
-    }
+    if (!errorVendedoresPV && vendedoresPV.some(v => Number(v.id) === USUARIO_ID_ACTUAL_PV)) vendedorSelect.value = String(USUARIO_ID_ACTUAL_PV);
+    if (!errorVendedoresPV && !vendedoresPV.length) vendedorSelect.innerHTML = '<option value="">No hay usuarios habilitados como vendedores</option>';
+    document.getElementById('pv_vendedor_error').textContent = errorVendedoresPV ? `No se pudieron cargar los vendedores: ${errorVendedoresPV}` : '';
+    renderPagosPV();
+    actualizarResumenPagosPV();
 }
 
 function totalCarritoPV() {
@@ -615,6 +624,9 @@ function renderPagosPV() {
             ${esDigital ? `<small class="pv-receptor-note text-muted">${notaDestinoDigital}</small>` : ''}
         </div>`;
     }).join('');
+    if (errorCuentasPV) {
+        contenedor.insertAdjacentHTML('beforeend', `<div class="text-danger small mt-2">No se pudieron cargar las cuentas receptoras: ${escaparHtmlPV(errorCuentasPV)}</div>`);
+    }
     pagosPV.forEach(pago => {
         const fila = contenedor.querySelector(`[data-pago="${pago.uid}"]`);
         const cuentaSelect = fila?.querySelector('.pv-cuenta-select');

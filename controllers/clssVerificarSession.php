@@ -8,9 +8,15 @@ function iniciarSesionSegura(): void
         return;
     }
 
+    // En desarrollo local suele usarse HTTP; marcar la cookie como Secure
+    // en ese caso hace que el navegador no la envíe y la sesión parezca perdida.
+    // En producción detrás de un proxy (p. ej. Render) se respeta X-Forwarded-Proto.
+    $esHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+        || strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0])) === 'https';
+
     session_set_cookie_params([
         'path'     => '/',
-        'secure'   => true, // Tu sitio usa HTTPS
+        'secure'   => $esHttps,
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
@@ -57,6 +63,19 @@ function exigirSesion(): array
     iniciarSesionSegura();
 
     if (empty($_SESSION['usuario_id'])) {
+        // Al abrir una página desde el navegador, lleva al login en vez de
+        // dejar el JSON de error visible como si fuera el contenido de la página.
+        $aceptaHtml = str_contains(strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? '')), 'text/html')
+            && strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET';
+        if ($aceptaHtml) {
+            $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+            $segmentos = array_values(array_filter(explode('/', trim(dirname($script), '/'))));
+            // El primer segmento es la carpeta raíz de la aplicación (si existe).
+            $profundidad = max(0, count($segmentos) - 1);
+            $login = str_repeat('../', $profundidad) . 'login.php';
+            header('Location: ' . $login);
+            exit;
+        }
         responderAcceso(401, 'Debes iniciar sesión para acceder a este recurso.');
     }
 
