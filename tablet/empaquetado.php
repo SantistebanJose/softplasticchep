@@ -1018,6 +1018,8 @@ async function cargarEstacionParaProducto(productoId) {
     bultosState = [];
     mezclaOrigenes = [];
     bolsasProducidasValor = '';
+    const campoBolsasProducidas = document.getElementById('mezclaBolsasProducidas');
+    if (campoBolsasProducidas) campoBolsasProducidas.value = '';
 
     await Promise.all([
         cargarSelectsEstacion(),
