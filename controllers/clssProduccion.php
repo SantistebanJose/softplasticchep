@@ -137,6 +137,8 @@ function controladorProduccion(string $accion): void
         'GUARDARPRODUCCION',
         'AGREGARMATERIALPRODUCCION',
         'REGISTRARMERMA',
+        'EDITARMERMA',
+        'ELIMINARMERMA',
         'INICIARCORRIDA',
         'FINALIZARCORRIDA',
         'ENVIARAENSAMBLAJE',
@@ -201,6 +203,14 @@ function controladorProduccion(string $accion): void
 
         case 'REGISTRARMERMA':
             registrarMerma();
+            break;
+
+        case 'EDITARMERMA':
+            editarMerma();
+            break;
+
+        case 'ELIMINARMERMA':
+            eliminarMerma();
             break;
 
         case 'BUSCAROPERARIOS':
@@ -2758,6 +2768,140 @@ function registrarMerma()
         responder(false, 'No se pudo registrar la merma: ' . $e->getMessage());
     }
 }
+
+function obtenerColoresMermaSeleccionados(PDO $conectar, array $coloresIds): array
+{
+    if (!$coloresIds) return [];
+    $placeholders = [];
+    $params = [];
+    foreach ($coloresIds as $i => $cid) {
+        $key = "color_$i";
+        $placeholders[] = ":$key";
+        $params[$key] = $cid;
+    }
+    $filas = executeQuery($conectar,
+        "SELECT id, nombre, rgb FROM color WHERE id IN (" . implode(',', $placeholders) . ") AND deleted_at IS NULL",
+        $params
+    );
+    if (count($filas) !== count($coloresIds)) {
+        responder(false, 'Uno o más colores seleccionados no existen o están inactivos.');
+    }
+    return array_map(static fn($f) => [
+        'color_id' => (int)$f['id'], 'nombre' => $f['nombre'], 'rgb' => $f['rgb'],
+    ], $filas);
+}
+
+function validarDatosEdicionMerma(PDO $conectar): array
+{
+    $id = (int)($_POST['id'] ?? 0);
+    $mermaId = (int)($_POST['merma_id'] ?? 0);
+    $cantidad = (float)($_POST['cantidad_merma'] ?? 0);
+    $coloresRaw = json_decode($_POST['colores'] ?? '[]', true);
+    $coloresIds = is_array($coloresRaw) ? array_values(array_unique(array_filter(array_map('intval', $coloresRaw), static fn($v) => $v > 0))) : [];
+    $nota = trim((string)($_POST['nota'] ?? ''));
+    if ($id <= 0 || $mermaId <= 0) responder(false, 'No se identificó la merma que quieres modificar.');
+    $item = obtenerItemConfigProduccion($conectar, $id);
+    $unidad = obtenerUnidadEtapa($item, 'salida_merma');
+    if ($cantidad <= 0) responder(false, 'La cantidad de merma debe ser mayor a 0.');
+    if ($unidad !== 'KG' && floor($cantidad) != $cantidad) {
+        responder(false, "La cantidad debe ser un número entero (unidad configurada: $unidad).");
+    }
+    if (!$coloresIds && $nota === '') responder(false, 'Selecciona al menos un color o describe la merma.');
+    return [$id, $mermaId, $cantidad, $unidad, $coloresIds, $nota];
+}
+
+function editarMerma(): void
+{
+    $conectar = conectar_oll_BD();
+    [$id, $mermaId, $cantidad, $unidad, $coloresIds, $nota] = validarDatosEdicionMerma($conectar);
+    verificarPropietarioOperario($conectar, $id);
+    verificarNoEnviadoParaOperario($conectar, $id);
+    $colores = obtenerColoresMermaSeleccionados($conectar, $coloresIds);
+    $colorRef = $colores ? implode(', ', array_column($colores, 'nombre')) : 'Sin color definido';
+    if ($nota !== '') $colorRef .= " — $nota";
+
+    $conectar->beginTransaction();
+    try {
+        $filas = executeQuery($conectar, "SELECT id, js_cantidades_merma, deleted_at, enviado_ensamblaje FROM produccion WHERE id = :id FOR UPDATE", ['id' => $id]);
+        if (!$filas || !empty($filas[0]['deleted_at'])) throw new RuntimeException('El avance no está activo.');
+        if (!empty($_SESSION['operario_id']) && !empty($filas[0]['enviado_ensamblaje'])) {
+            throw new RuntimeException('Esta producción ya pasó a la siguiente etapa. Solo un administrador puede corregir su merma.');
+        }
+        $mermas = json_decode($filas[0]['js_cantidades_merma'] ?? '[]', true) ?: [];
+        $idx = null;
+        foreach ($mermas as $i => $m) if ((int)($m['id'] ?? 0) === $mermaId) { $idx = $i; break; }
+        if ($idx === null) throw new RuntimeException('La merma ya no existe en este avance.');
+        $antes = $mermas[$idx];
+        $actualizada = array_merge($antes, [
+            'merma' => $nota !== '' ? $nota : null,
+            'cantidad' => $cantidad,
+            'unidad_medida' => $unidad,
+            'colores' => $colores,
+            'fecha_edicion' => date('Y-m-d H:i:s'),
+            'usuario_edicion' => $_SESSION['nombre_usuario'] ?? ($_SESSION['operario_nombre'] ?? 'Operario'),
+        ]);
+        $mermas[$idx] = $actualizada;
+        $jsMerma = json_encode($actualizada, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $mermaActualizada = executeNonQuery($conectar, "UPDATE merma SET color_ref = :color_ref, cantidad = :cantidad, js_merma = :js_merma, update_at = NOW() WHERE id = :merma_id AND producion_id = :id",
+            ['color_ref' => $colorRef, 'cantidad' => $cantidad, 'js_merma' => $jsMerma, 'merma_id' => $mermaId, 'id' => $id]);
+        if ($mermaActualizada !== 1) throw new RuntimeException('No se encontró el registro de merma que intentas editar.');
+        $cambios = [[
+            'campo' => 'Merma editada',
+            'valor_antes' => (string)($antes['cantidad'] ?? '') . ' ' . ($antes['unidad_medida'] ?? $unidad) . ' — ' . ($antes['merma'] ?? implode(', ', array_column($antes['colores'] ?? [], 'nombre'))),
+            'valor_despues' => $cantidad . ' ' . $unidad . ' — ' . ($nota ?: implode(', ', array_column($colores, 'nombre'))),
+        ]];
+        $mov = obtenerMovimientoSesion('editar_merma', $cambios);
+        $jsSesion = json_encode($mov, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $jsHistorial = json_encode([$mov], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        executeNonQuery($conectar, "UPDATE produccion SET js_cantidades_merma = :mermas::jsonb, updated_at = NOW(), js_session = :js_session, js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb WHERE id = :id",
+            ['mermas' => json_encode(array_values($mermas), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), 'js_session' => $jsSesion, 'js_historial' => $jsHistorial, 'id' => $id]);
+        $conectar->commit();
+        responder(true, 'Merma actualizada correctamente.', ['merma' => $actualizada]);
+    } catch (Throwable $e) {
+        if ($conectar->inTransaction()) $conectar->rollBack();
+        responder(false, 'No se pudo actualizar la merma: ' . $e->getMessage());
+    }
+}
+
+function eliminarMerma(): void
+{
+    $conectar = conectar_oll_BD();
+    $id = (int)($_POST['id'] ?? 0);
+    $mermaId = (int)($_POST['merma_id'] ?? 0);
+    if ($id <= 0 || $mermaId <= 0) responder(false, 'No se identificó la merma que quieres eliminar.');
+    verificarPropietarioOperario($conectar, $id);
+    verificarNoEnviadoParaOperario($conectar, $id);
+    $conectar->beginTransaction();
+    try {
+        $filas = executeQuery($conectar, "SELECT id, js_cantidades_merma, deleted_at, enviado_ensamblaje FROM produccion WHERE id = :id FOR UPDATE", ['id' => $id]);
+        if (!$filas || !empty($filas[0]['deleted_at'])) throw new RuntimeException('El avance no está activo.');
+        if (!empty($_SESSION['operario_id']) && !empty($filas[0]['enviado_ensamblaje'])) {
+            throw new RuntimeException('Esta producción ya pasó a la siguiente etapa. Solo un administrador puede corregir su merma.');
+        }
+        $mermas = json_decode($filas[0]['js_cantidades_merma'] ?? '[]', true) ?: [];
+        $idx = null;
+        foreach ($mermas as $i => $m) if ((int)($m['id'] ?? 0) === $mermaId) { $idx = $i; break; }
+        if ($idx === null) throw new RuntimeException('La merma ya fue eliminada.');
+        $eliminada = $mermas[$idx];
+        array_splice($mermas, $idx, 1);
+        executeNonQuery($conectar, "DELETE FROM merma WHERE id = :merma_id AND producion_id = :id", ['merma_id' => $mermaId, 'id' => $id]);
+        $mov = obtenerMovimientoSesion('eliminar_merma', [[
+            'campo' => 'Merma eliminada',
+            'valor_antes' => (string)($eliminada['cantidad'] ?? '') . ' ' . ($eliminada['unidad_medida'] ?? 'KG') . ' — ' . ($eliminada['merma'] ?? implode(', ', array_column($eliminada['colores'] ?? [], 'nombre'))),
+            'valor_despues' => 'Eliminada',
+        ]]);
+        $jsSesion = json_encode($mov, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $jsHistorial = json_encode([$mov], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        executeNonQuery($conectar, "UPDATE produccion SET js_cantidades_merma = :mermas::jsonb, updated_at = NOW(), js_session = :js_session, js_historial = COALESCE(js_historial, '[]'::jsonb) || :js_historial::jsonb WHERE id = :id",
+            ['mermas' => json_encode(array_values($mermas), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), 'js_session' => $jsSesion, 'js_historial' => $jsHistorial, 'id' => $id]);
+        $conectar->commit();
+        responder(true, 'Merma eliminada correctamente.', ['mermas' => array_values($mermas)]);
+    } catch (Throwable $e) {
+        if ($conectar->inTransaction()) $conectar->rollBack();
+        responder(false, 'No se pudo eliminar la merma: ' . $e->getMessage());
+    }
+}
+
 // Marca el inicio real de la corrida con la hora del servidor (no la del
 // navegador, para que todos los operarios queden sincronizados igual).
 function reanudarProduccion(): void

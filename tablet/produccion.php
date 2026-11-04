@@ -874,9 +874,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             </div>
                         </div>
 
-                        <button type="button" class="pc-merma-add-btn" id="btnRegistrarMerma">
+        <button type="button" class="pc-merma-add-btn" id="btnRegistrarMerma">
                             <i class="fa-solid fa-plus"></i> Registrar merma
                         </button>
+        <button type="button" class="btn btn-outline-secondary mt-2" id="btnCancelarEdicionMerma" style="display:none">Cancelar edición</button>
                     </div>
                 </div>
 
@@ -1239,9 +1240,10 @@ function renderListaMermas(p) {
     cont.innerHTML = mermas.map(m => {
         const colores = m.colores || (m.color_nombre ? [{ nombre: m.color_nombre, rgb: m.color_rgb }] : []);
         const dots = colores.map(c => `<span class="pc-color-dot" style="background:${c.rgb || '#ccc'}"></span>`).join('');
-        return `<div class="pc-merma-item"><span class="dots">${dots}</span><span class="cant">${formatearCantidadProd(m.cantidad)} ${m.unidad_medida || 'KG'}</span><span class="nota">${m.merma || (colores.map(c => c.nombre).join(', ') || 'Sin descripción')}</span></div>`;
+        return `<div class="pc-merma-item"><span class="dots">${dots}</span><span class="cant">${formatearCantidadProd(m.cantidad)} ${m.unidad_medida || 'KG'}</span><span class="nota">${escaparHtmlMerma(m.merma || (colores.map(c => c.nombre).join(', ') || 'Sin descripción'))}</span><button type="button" class="btn btn-sm btn-outline-primary" onclick="editarMermaUI(${Number(m.id)})" aria-label="Editar merma"><i class="fa-solid fa-pen"></i></button><button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarMermaUI(${Number(m.id)})" aria-label="Eliminar merma"><i class="fa-solid fa-trash"></i></button></div>`;
     }).join('');
 }
+function escaparHtmlMerma(valor) { return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function formatearCantidadProd(n) { return Number(n ?? 0).toLocaleString('es-PE', { maximumFractionDigits: 4 }); }
 
 function abrirFotoPesaje(rutaCodificada) {
@@ -2540,6 +2542,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', e =
 let produccionIdParaEnsamblaje = null;
 let coloresMermaCache = null;
 let mermaColoresSeleccionados = [];
+let mermaEditandoId = null;
 let archivosFotosPesaje = [];
 let capturaPendienteFotoPesaje = false;
 let streamCamaraPesaje = null;
@@ -2845,6 +2848,7 @@ function renderChipsColorMerma() {
 }
 
 async function renderInfoMermaModal(p) {
+    if (mermaEditandoId) cancelarEdicionMerma();
     const cont = document.getElementById('merma_colores_chips');
     const notaInput = document.getElementById('merma_nota');
     document.getElementById('cantidad_merma_kg').value = '';
@@ -2862,6 +2866,44 @@ async function renderInfoMermaModal(p) {
     renderListaMermas(p);
 }
 
+function cancelarEdicionMerma() {
+    mermaEditandoId = null;
+    document.getElementById('cantidad_merma_kg').value = '';
+    document.getElementById('merma_nota').value = '';
+    document.getElementById('btnRegistrarMerma').innerHTML = '<i class="fa-solid fa-plus"></i> Registrar merma';
+    document.getElementById('btnCancelarEdicionMerma').style.display = 'none';
+    const p = produccionesCache.find(x => Number(x.id) === Number(produccionIdParaEnsamblaje));
+    mermaColoresSeleccionados = p?.color_id ? [Number(p.color_id)] : [];
+    renderChipsColorMerma();
+}
+
+function editarMermaUI(mermaId) {
+    const p = produccionesCache.find(x => Number(x.id) === Number(produccionIdParaEnsamblaje));
+    const merma = (p?.js_cantidades_merma || []).find(m => Number(m.id) === Number(mermaId));
+    if (!merma) return;
+    mermaEditandoId = Number(mermaId);
+    document.getElementById('cantidad_merma_kg').value = merma.cantidad;
+    document.getElementById('merma_nota').value = merma.merma || '';
+    mermaColoresSeleccionados = (merma.colores || []).map(c => Number(c.color_id || c.id)).filter(Boolean);
+    document.getElementById('btnRegistrarMerma').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Guardar cambios';
+    document.getElementById('btnCancelarEdicionMerma').style.display = '';
+    renderChipsColorMerma();
+    document.getElementById('cantidad_merma_kg').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function eliminarMermaUI(mermaId) {
+    const confirmacion = await Swal.fire({ title: '¿Eliminar esta merma?', text: 'Se quitará del avance y de los totales de merma.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, eliminar', cancelButtonText: 'Cancelar', confirmButtonColor: '#dc3545' });
+    if (!confirmacion.isConfirmed) return;
+    const json = await llamarProduccion('ELIMINARMERMA', { id: produccionIdParaEnsamblaje, merma_id: mermaId });
+    if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
+    const p = produccionesCache.find(x => Number(x.id) === Number(produccionIdParaEnsamblaje));
+    if (p) p.js_cantidades_merma = json.mermas || [];
+    if (Number(mermaEditandoId) === Number(mermaId)) cancelarEdicionMerma();
+    renderListaMermas(p);
+    actualizarResumenEnsamblaje();
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: json.message, showConfirmButton: false, timer: 1600 });
+}
+
 document.getElementById('btnRegistrarMerma').addEventListener('click', async () => {
     const inputMerma = document.getElementById('cantidad_merma_kg');
     const unidadMerma = inputMerma.dataset.unidad || 'kg';
@@ -2874,20 +2916,31 @@ document.getElementById('btnRegistrarMerma').addEventListener('click', async () 
         return;
     }
 
-    const json = await llamarProduccion('REGISTRARMERMA', { id: produccionIdParaEnsamblaje, cantidad_merma: valor, colores: JSON.stringify(mermaColoresSeleccionados), nota: nota });
+    const json = await llamarProduccion(mermaEditandoId ? 'EDITARMERMA' : 'REGISTRARMERMA', { id: produccionIdParaEnsamblaje, merma_id: mermaEditandoId, cantidad_merma: valor, colores: JSON.stringify(mermaColoresSeleccionados), nota: nota });
     if (!json.success) { Swal.fire('Error', json.message, 'error'); return; }
 
     const p = produccionesCache.find(x => x.id == produccionIdParaEnsamblaje);
-    if (p) { p.js_cantidades_merma = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : []; p.js_cantidades_merma.push(json.merma); }
+    if (p) {
+        p.js_cantidades_merma = Array.isArray(p.js_cantidades_merma) ? p.js_cantidades_merma : [];
+        if (mermaEditandoId) {
+            const idx = p.js_cantidades_merma.findIndex(m => Number(m.id) === Number(mermaEditandoId));
+            if (idx >= 0) p.js_cantidades_merma[idx] = json.merma;
+        } else p.js_cantidades_merma.push(json.merma);
+    }
+    const fueEdicion = Boolean(mermaEditandoId);
+    if (fueEdicion) cancelarEdicionMerma();
 
     document.getElementById('cantidad_merma_kg').value = '';
     document.getElementById('merma_nota').value = '';
     mermaColoresSeleccionados = p && p.color_id ? [Number(p.color_id)] : [];
     renderChipsColorMerma();
     renderListaMermas(p);
+    actualizarResumenEnsamblaje();
 
-    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Merma registrada', showConfirmButton: false, timer: 1500 });
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: fueEdicion ? 'Merma actualizada' : 'Merma registrada', showConfirmButton: false, timer: 1500 });
 });
+
+document.getElementById('btnCancelarEdicionMerma').addEventListener('click', cancelarEdicionMerma);
 
 document.getElementById('formCantidadEnsamblaje').addEventListener('submit', async function (e) {
     // El manejador de captura cancela el submit cuando el botón solo debe
