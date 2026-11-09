@@ -418,7 +418,8 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             $producidoOperario AS kg_producido,
             CASE WHEN $confirmadoOperario THEN 1 ELSE 0 END AS confirmado,
             $unidadSql AS unidad,
-            pd.observaciones
+            pd.observaciones,
+            pd.js_cantidades_salientes
         FROM produccion pd
         $joinOperario
         LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -429,6 +430,58 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         ORDER BY pd.fecha DESC
     ";
     $detalle = executeQuery($conectar, $sqlDetalle, $params);
+
+    // Las cantidades y fotos se almacenan dentro de cada salida/pasada.
+    // Se exponen aparte del total producido para permitir compararlas desde
+    // el detalle del reporte.
+    foreach ($detalle as &$filaDetalle) {
+        $salidas = !empty($filaDetalle['js_cantidades_salientes'])
+            ? json_decode((string)$filaDetalle['js_cantidades_salientes'], true) : [];
+        $filaDetalle['pasadas'] = [];
+        if (!is_array($salidas)) $salidas = [];
+        foreach ($salidas as $salida) {
+            if (!is_array($salida)) continue;
+            $cantidadPasada = $salida['cantidad'] ?? $salida['cantidad_kg'] ?? null;
+            if ($cantidadPasada === null) continue;
+
+            $desglose = is_array($salida['desglose_operarios'] ?? null)
+                ? $salida['desglose_operarios'] : [];
+            $cantidadOperario = null;
+            if ($desglose) {
+                foreach ($desglose as $aporte) {
+                    if ((int)($aporte['operario_id'] ?? 0) === $operarioId) {
+                        $cantidadOperario = (float)($aporte['cantidad'] ?? 0);
+                        break;
+                    }
+                }
+                // La pasada fue desglosada por persona y este operario no
+                // participó en ella: no mostrarla en su reporte.
+                if ($cantidadOperario === null) continue;
+            }
+
+            $fotos = [];
+            foreach ((array)($salida['fotos_pesaje'] ?? []) as $foto) {
+                if (!is_array($foto)) continue;
+                $ruta = trim((string)($foto['ruta'] ?? $foto['url'] ?? ''));
+                if ($ruta === '') continue;
+                $ruta = preg_replace('#^https?://res\.cloudinary\.com/#i', '', $ruta);
+                $fotos[] = [
+                    'url' => ltrim($ruta, '/'),
+                    'nombre' => (string)($foto['nombre'] ?? 'Foto de la pasada'),
+                ];
+            }
+
+            $filaDetalle['pasadas'][] = [
+                'numero' => (int)($salida['pasada'] ?? count($filaDetalle['pasadas']) + 1),
+                'fecha' => $salida['fecha'] ?? null,
+                'cantidad' => (float)$cantidadPasada,
+                'cantidad_operario' => $cantidadOperario,
+                'unidad' => strtoupper((string)($salida['unidad'] ?? $filaDetalle['unidad'] ?? 'KG')),
+                'fotos' => $fotos,
+            ];
+        }
+    }
+    unset($filaDetalle);
  
     return [
         'operario' => $operario[0],

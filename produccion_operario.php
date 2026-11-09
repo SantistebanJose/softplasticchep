@@ -11,26 +11,26 @@ include("header.php");
         background: linear-gradient(135deg, var(--pc-navy, #1f2937), #3016d5);
         color: #fff;
         border-radius: 14px;
-        padding: 22px 24px;
-        margin-bottom: 18px;
+        padding: 16px 20px;
+        margin-bottom: 12px;
     }
     .rep-buscador h2 {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
-        margin: 0 0 2px;
+        margin: 0 0 1px;
         color: #fff;
     }
     .rep-buscador p {
-        margin: 0 0 16px;
-        font-size: 13px;
+        margin: 0 0 10px;
+        font-size: 12px;
         opacity: .75;
     }
     .rep-filtros-top {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: minmax(130px, .8fr) minmax(190px, 1.2fr) minmax(175px, 1fr) minmax(120px, .7fr) minmax(130px, .8fr) auto;
+        gap: 10px;
         align-items: flex-end;
-        margin-bottom: 14px;
+        margin-bottom: 10px;
     }
     .rep-filtros-top label {
         display: block;
@@ -40,22 +40,25 @@ include("header.php");
     }
     .rep-filtros-top select,
     .rep-filtros-top input {
-        min-width: 140px;
+        width: 100%;
+        min-width: 0;
+        min-height: 40px;
     }
     .rep-fecha-ayuda {
         display: block;
         color: rgba(255,255,255,.78);
         font-size: 11px;
-        margin-top: 5px;
-        max-width: 220px;
-        line-height: 1.3;
+        margin-top: 3px;
+        max-width: none;
+        line-height: 1.15;
+        white-space: nowrap;
     }
     .rep-badge-total {
         background: rgba(255,255,255,.12);
         border: 1px solid rgba(255,255,255,.25);
         color: #fff;
         border-radius: 20px;
-        padding: 6px 14px;
+        padding: 6px 11px;
         font-size: 13px;
         white-space: nowrap;
         height: 38px;
@@ -65,7 +68,8 @@ include("header.php");
     }
     .rep-buscar-wrap {
         position: relative;
-        margin-bottom: 10px;
+        margin-bottom: 0;
+        min-width: 0;
     }
     .rep-buscar-wrap input {
         width: 100%;
@@ -73,7 +77,14 @@ include("header.php");
         border: 1px solid rgba(255,255,255,.2);
         color: #fff;
         border-radius: 10px;
-        padding: 10px 14px;
+        padding: 9px 12px;
+        min-height: 40px;
+    }
+    .rep-buscador-bottom {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) auto;
+        align-items: start;
+        gap: 10px;
     }
     .rep-buscar-wrap input::placeholder { color: rgba(255,255,255,.55); }
     .rep-buscar-dropdown {
@@ -129,6 +140,8 @@ include("header.php");
         margin-left: 6px;
     }
     .rep-chip-operario .quitar:hover { opacity: 1; }
+    .rep-buscador .rep-chip-operario { padding: 5px 10px; gap: 8px; }
+    .rep-buscador .rep-chip-operario .avatar { width: 30px; height: 30px; }
 
     .rep-vacio-estado {
         text-align: center;
@@ -150,44 +163,46 @@ include("header.php");
 
     .rep-stats {
         display: flex;
-        gap: 12px;
+        gap: 8px;
         flex-wrap: wrap;
-        margin-bottom: 16px;
+        margin-bottom: 10px;
     }
     .rep-stat-card {
-        flex: 1 1 170px;
+        flex: 1 1 145px;
+        min-width: 0;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-top: 3px solid var(--pc-red, #c0392b);
         border-radius: 10px;
-        padding: 14px 16px;
+        padding: 9px 10px;
         text-align: center;
     }
     .rep-stat-card .rep-stat-valor {
-        font-size: 22px;
+        font-size: 20px;
         font-weight: 700;
         color: var(--pc-navy, #1f2937);
     }
     .rep-stat-card .rep-stat-label {
-        font-size: 11px;
+        font-size: 10px;
         text-transform: uppercase;
         letter-spacing: .03em;
         color: #6b7280;
         margin-top: 2px;
+        line-height: 1.25;
     }
 
     .rep-donas {
         display: flex;
-        gap: 16px;
+        gap: 10px;
         flex-wrap: wrap;
-        margin-bottom: 16px;
+        margin-bottom: 10px;
     }
     .rep-dona-card {
         flex: 1 1 320px;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 10px;
-        padding: 16px;
+        padding: 12px;
     }
     .rep-dona-card h4 {
         font-size: 14px;
@@ -196,9 +211,9 @@ include("header.php");
         align-items: center;
         gap: 8px;
     }
-    .rep-dona-canvas-wrap { max-width: 260px; margin: 0 auto; }
+    .rep-dona-canvas-wrap { max-width: 220px; height: 190px; margin: 0 auto; }
 
-    .rep-top5-item { margin-bottom: 14px; }
+    .rep-top5-item { margin-bottom: 10px; }
     .rep-top5-item:last-child { margin-bottom: 0; }
     .rep-top5-item .fila {
         display: flex;
@@ -220,6 +235,24 @@ include("header.php");
     }
 
     .rep-vacio-tabla { text-align: center; color: #6b7280; padding: 18px 0; }
+    .rep-pasadas { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; width: 132px; max-width: 132px; min-width: 0; }
+    .rep-pasada { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; white-space: nowrap; }
+    .rep-pasada-titulo { font-size: 10px; font-weight: 700; letter-spacing: -.02em; }
+    .rep-pasada-aporte { color: #6b7280; font-size: 9px; }
+    .rep-pasada-fotos { display: inline-flex; align-items: center; gap: 1px; }
+    .rep-foto-pasada { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #2458b8; font-size: 10px; cursor: pointer; }
+    .rep-foto-pasada:hover { background: #eaf0fe; }
+    @media (max-width: 1200px) {
+        .rep-filtros-top { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
+    }
+    @media (max-width: 700px) {
+        .rep-buscador { padding: 14px; }
+        .rep-filtros-top { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .rep-buscador-bottom { grid-template-columns: 1fr; }
+        .rep-chip-operario { justify-self: start; }
+        .rep-fecha-ayuda { white-space: normal; }
+        .rep-stat-card { flex-basis: calc(50% - 8px); }
+    }
 </style>
 
 <div class="rep-buscador">
@@ -276,13 +309,14 @@ include("header.php");
         </div>
     </div>
 
-    <div class="rep-buscar-wrap">
-        <input type="text" id="rep_buscar_operario" autocomplete="off"
-               placeholder="Buscar operario por nombre...">
-        <div class="rep-buscar-dropdown" id="rep_buscar_dropdown"></div>
+    <div class="rep-buscador-bottom">
+        <div class="rep-buscar-wrap">
+            <input type="text" id="rep_buscar_operario" autocomplete="off"
+                   placeholder="Buscar operario por nombre...">
+            <div class="rep-buscar-dropdown" id="rep_buscar_dropdown"></div>
+        </div>
+        <div id="rep_chip_wrap"></div>
     </div>
-
-    <div id="rep_chip_wrap"></div>
 </div>
 
 <div id="rep_contenido">
@@ -605,17 +639,11 @@ function pintarReporteOperario(json) {
             ${cardsUnidad}
         </div>
 
-        <div id="rep_donas_wrap"></div>
-    </div>
-
-    <div class="pc-card">
-        <div class="pc-card-header"><h2><i class="fa-solid fa-trophy" style="color:#c9a227"></i> Top 5 moldes trabajados</h2></div>
-        <div id="rep_top5_wrap"></div>
     </div>
 
     <div class="pc-card">
         <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <h2><i class="fa-solid fa-table"></i> Detalle completo</h2>
+            <h2><i class="fa-solid fa-table"></i> Detalle de producción</h2>
             <span class="text-muted">${detalle.length} avance${detalle.length === 1 ? '' : 's'}</span>
         </div>
         <div class="pc-table-wrap pc-table-responsive-cards">
@@ -631,12 +659,23 @@ function pintarReporteOperario(json) {
                         <th>Color</th>
                         <th>Kg insertado</th>
                         <th>Cant. producida</th>
+                        <th>Pasadas / fotos</th>
                         <th>Obs.</th>
                     </tr>
                 </thead>
                 <tbody id="rep_tbody_detalle"></tbody>
             </table>
         </div>
+    </div>
+
+    <div class="pc-card">
+        <div class="pc-card-header"><h2><i class="fa-solid fa-trophy" style="color:#c9a227"></i> Top 5 moldes trabajados</h2></div>
+        <div id="rep_top5_wrap"></div>
+    </div>
+
+    <div class="pc-card">
+        <div class="pc-card-header"><h2><i class="fa-solid fa-chart-pie"></i> Resumen visual</h2></div>
+        <div id="rep_donas_wrap"></div>
     </div>
     `;
 
@@ -687,7 +726,7 @@ function formatearCantidad(valor, unidad) {
 function pintarTablaDetalle(detalle) {
     const tbody = document.getElementById('rep_tbody_detalle');
     if (detalle.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="rep-vacio-tabla">No hay avances en este periodo.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="rep-vacio-tabla">No hay avances en este periodo.</td></tr>';
         return;
     }
     tbody.innerHTML = detalle.map(d => `
@@ -701,6 +740,7 @@ function pintarTablaDetalle(detalle) {
             <td data-label="Color">${d.color_nombre ?? '-'}</td>
             <td data-label="Kg insertado">${formatearKg(d.kg_insertado)}</td>
             <td data-label="Cant. producida">${Number(d.confirmado) === 1 ? formatearCantidad(d.kg_producido, d.unidad) : '<span class="badge text-bg-warning">Pendiente de desglose</span>'}</td>
+            <td data-label="Pasadas / fotos">${renderPasadasReporte(d.pasadas)}</td>
             <td data-label="Obs.">
                 ${d.observaciones
                     ? `<button class="pc-icon-btn" title="Ver observación" onclick="verObservacion('${escaparComillas(d.observaciones)}')"><i class="fa-solid fa-note-sticky"></i></button>`
@@ -708,6 +748,56 @@ function pintarTablaDetalle(detalle) {
             </td>
         </tr>
     `).join('');
+    tbody.querySelectorAll('.rep-foto-pasada').forEach(boton => {
+        boton.addEventListener('click', () => verFotoPasada(boton.dataset.ruta || '', boton.dataset.nombre || 'Foto de la pasada'));
+    });
+}
+
+function escaparHtmlReporte(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderPasadasReporte(pasadas) {
+    if (!Array.isArray(pasadas) || pasadas.length === 0) return '-';
+    return `<div class="rep-pasadas">${pasadas.map(p => {
+        const unidad = p.unidad || 'KG';
+        const fotos = Array.isArray(p.fotos) ? p.fotos : [];
+        const tieneAporteDistinto = p.cantidad_operario !== null && p.cantidad_operario !== undefined
+            && Math.abs(Number(p.cantidad_operario) - Number(p.cantidad)) > 0.0001;
+        const tooltipAporte = p.cantidad_operario !== null && p.cantidad_operario !== undefined
+            ? `Aporte del operario: ${formatearCantidad(p.cantidad_operario, unidad)}`
+            : 'Cantidad total de la pasada';
+        return `<div class="rep-pasada">
+            <span class="rep-pasada-titulo" title="${escaparHtmlReporte(tooltipAporte)}">P${Number(p.numero) || '?'} ${escaparHtmlReporte(formatearCantidad(p.cantidad, unidad).replace(/\s+/g, ''))}</span>
+            ${tieneAporteDistinto ? `<span class="rep-pasada-aporte" title="${escaparHtmlReporte(tooltipAporte)}">Op. ${formatearCantidad(p.cantidad_operario, unidad)}</span>` : ''}
+            ${fotos.length ? `<span class="rep-pasada-fotos">${fotos.map((foto, i) => `<button type="button" class="rep-foto-pasada" title="Ver foto ${i + 1}" aria-label="Ver foto ${i + 1}" data-ruta="${escaparHtmlReporte(encodeURIComponent(String(foto.url || '')))}" data-nombre="${escaparHtmlReporte(foto.nombre || `Foto ${i + 1}`)}"><i class="fa-solid fa-camera"></i>${fotos.length > 1 ? `<span>${i + 1}</span>` : ''}</button>`).join('')}</span>` : ''}
+        </div>`;
+    }).join('')}</div>`;
+}
+
+function verFotoPasada(rutaCodificada, nombre = 'Foto de la pasada') {
+    let ruta = String(rutaCodificada || '');
+    try { ruta = decodeURIComponent(ruta); } catch (_) { /* usa la ruta sin decodificar */ }
+    ruta = ruta.replace(/^\/+/, '');
+    const url = /^https:\/\/res\.cloudinary\.com\//i.test(ruta)
+        ? ruta
+        : `https://res.cloudinary.com/${ruta}`;
+    Swal.fire({
+        title: escaparHtmlReporte(nombre),
+        imageUrl: url,
+        imageAlt: escaparHtmlReporte(nombre),
+        showCloseButton: true,
+        showConfirmButton: false,
+        didOpen: () => {
+            const imagen = document.querySelector('.swal2-image');
+            if (imagen) {
+                imagen.style.maxWidth = '100%';
+                imagen.style.maxHeight = '72vh';
+                imagen.style.width = 'auto';
+                imagen.style.objectFit = 'contain';
+            }
+        }
+    });
 }
 
 function verObservacion(texto) {
@@ -744,15 +834,18 @@ function pintarDonasPorUnidad(porTurno, porMaquina) {
     `).join('');
 
     unidades.forEach(u => {
-        const filasTurno = porTurno.filter(f => etiquetaUnidad(f.unidad) === u);
+        const filasTurno = agruparFilasGrafico(
+            porTurno.filter(f => etiquetaUnidad(f.unidad) === u),
+            f => TURNO_LABEL[String(f.turno || '').trim().toLowerCase()] ?? String(f.turno || 'Sin turno').trim()
+        );
         if (filasTurno.length > 0) {
             chartsPorUnidad[`turno_${u}`] = new Chart(document.getElementById(`rep_chart_turno_${u}`), {
                 type: 'doughnut',
                 data: {
-                    labels: filasTurno.map(f => TURNO_LABEL[f.turno] ?? f.turno),
+                    labels: filasTurno.map(f => f.etiqueta),
                     datasets: [{
-                        data: filasTurno.map(f => parseFloat(f.cantidad) || 0),
-                        backgroundColor: filasTurno.map(f => TURNO_COLOR[f.turno] ?? '#9ca3af'),
+                        data: filasTurno.map(f => f.cantidad),
+                        backgroundColor: filasTurno.map(f => TURNO_COLOR[String(f.turno || '').trim().toLowerCase()] ?? '#9ca3af'),
                         borderWidth: 0,
                     }]
                 },
@@ -765,14 +858,17 @@ function pintarDonasPorUnidad(porTurno, porMaquina) {
             });
         }
 
-        const filasMaquina = porMaquina.filter(f => etiquetaUnidad(f.unidad) === u);
+        const filasMaquina = agruparFilasGrafico(
+            porMaquina.filter(f => etiquetaUnidad(f.unidad) === u),
+            f => String(f.maquina || 'Sin máquina').trim() || 'Sin máquina'
+        );
         if (filasMaquina.length > 0) {
             chartsPorUnidad[`maquina_${u}`] = new Chart(document.getElementById(`rep_chart_maquina_${u}`), {
                 type: 'doughnut',
                 data: {
-                    labels: filasMaquina.map(f => f.maquina),
+                    labels: filasMaquina.map(f => f.etiqueta),
                     datasets: [{
-                        data: filasMaquina.map(f => parseFloat(f.cantidad) || 0),
+                        data: filasMaquina.map(f => f.cantidad),
                         backgroundColor: filasMaquina.map((_, i) => PALETA_MAQUINAS[i % PALETA_MAQUINAS.length]),
                         borderWidth: 0,
                     }]
@@ -786,6 +882,18 @@ function pintarDonasPorUnidad(porTurno, porMaquina) {
             });
         }
     });
+}
+
+function agruparFilasGrafico(filas, etiquetaFn) {
+    const grupos = new Map();
+    filas.forEach(fila => {
+        const etiqueta = etiquetaFn(fila);
+        const clave = String(etiqueta).trim().toLocaleLowerCase('es-PE');
+        if (!clave) return;
+        if (!grupos.has(clave)) grupos.set(clave, { etiqueta: String(etiqueta).trim(), cantidad: 0, turno: fila.turno });
+        grupos.get(clave).cantidad += parseFloat(fila.cantidad) || 0;
+    });
+    return [...grupos.values()];
 }
 
 
