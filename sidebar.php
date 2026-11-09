@@ -46,7 +46,7 @@ $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
 $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
-$administracionPages = ['usuarios', 'roles', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos'];
+$administracionPages = ['usuarios', 'roles', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'helpdesk'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
@@ -185,6 +185,11 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="ayuda_videos.php" class="<?= pc_sub_class('ayuda_videos', $activePage) ?>">
                 <span class="dot"></span> Videos de ayuda
             </a>
+            <?php if (usuarioTieneRol($usuarioMenu, 'administrador')): ?>
+            <a href="helpdesk.php" class="<?= pc_sub_class('helpdesk', $activePage) ?>">
+                <span class="dot"></span> Consultas de operarios
+            </a>
+            <?php endif; ?>
             
         </div>
     </details>

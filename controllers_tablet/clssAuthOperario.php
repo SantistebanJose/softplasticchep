@@ -278,6 +278,7 @@ function guardarSesionOperario(array $usuario, array $etapas = []): void
         $_SESSION['rol_usuario'],
         $_SESSION['perfiles'],
         $_SESSION['mostrar_bienvenida'],
+        $_SESSION['mostrar_bienvenida_soporte'],
         $_SESSION['operario_dispositivo']
     );
 
@@ -289,6 +290,7 @@ function guardarSesionOperario(array $usuario, array $etapas = []): void
     $_SESSION['operario_nombre'] = $usuario['nombre_completo'];
     $_SESSION['operario_rol']    = $rolPerfiles['rol'] ?? null;
     $_SESSION['operario_etapas'] = $etapas;
+    $_SESSION['mostrar_bienvenida_soporte'] = strtolower(trim((string)($rolPerfiles['rol'] ?? ''))) === 'operario';
 }
 
 function cerrarSesionOperario(): void
@@ -299,6 +301,7 @@ function cerrarSesionOperario(): void
         $_SESSION['operario_nombre'],
         $_SESSION['operario_rol'],
         $_SESSION['operario_etapas'],
+        $_SESSION['mostrar_bienvenida_soporte'],
         $_SESSION['operario_dispositivo']
     );
 }

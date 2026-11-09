@@ -9,6 +9,8 @@ if (empty($_SESSION['operario_id'])) {
 
 $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
+$mostrarBienvenidaSoporte = !empty($_SESSION['mostrar_bienvenida_soporte']);
+unset($_SESSION['mostrar_bienvenida_soporte']);
 
 $puedeProduccion  = operarioTieneEtapa('PRODUC');
 $puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
@@ -33,6 +35,12 @@ else                 $saludo = 'Buenas noches';
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/panel_operario.css">
+    <style>
+        .hd-wave-figure{display:flex;justify-content:center;align-items:center;gap:8px;margin:4px auto 12px;font-size:58px;line-height:1.2}
+        .hd-wave-hand{display:inline-block;transform-origin:75% 75%;animation:hd-wave 1s ease-in-out infinite}
+        @keyframes hd-wave{0%,60%,100%{transform:rotate(0)}10%,30%,50%{transform:rotate(18deg)}20%,40%{transform:rotate(-10deg)}}
+        .hd-welcome-copy{font-size:1rem;line-height:1.5;color:#5d6472}
+    </style>
 </head>
 <body>
 <div class="pc-op-panel-shell">
@@ -107,6 +115,13 @@ else                 $saludo = 'Buenas noches';
         </a>
         <?php endif; ?>
 
+        <a href="soporte.php" class="pc-op-panel-btn q-blue">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-headset"></i></div>
+            <span class="pc-op-panel-label">Ayuda y soporte</span>
+            <span class="pc-op-panel-sub">Envía una consulta al administrador</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+
         <?php if ($esConductor): ?>
         <a href="compras.php" class="pc-op-panel-btn q-amber">
             <div class="pc-op-panel-icon"><i class="fa-solid fa-truck-ramp-box"></i></div>
@@ -127,5 +142,25 @@ else                 $saludo = 'Buenas noches';
     <?php require __DIR__ . '/../components/ayuda_videos.php'; ?>
 
 </div>
+<?php if ($mostrarBienvenidaSoporte): ?>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    if (!window.Swal) return;
+    const nombre = <?= json_encode($primerNombre, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const resultado = await Swal.fire({
+        title: `¡Hola, ${nombre}!`,
+        html: '<div class="hd-wave-figure" aria-hidden="true"><span>🧑‍🏭</span><span class="hd-wave-hand">👋</span></div><div class="hd-welcome-copy">Ahora puedes hacer tus consultas desde el mismo sistema. Si tienes dudas al registrar producción, ensamblaje u otra operación, escríbenos desde <strong>Ayuda y soporte</strong>.</div>',
+        confirmButtonText: 'Hacer una consulta',
+        cancelButtonText: 'Ahora no',
+        showCancelButton: true,
+        confirmButtonColor: '#2563eb',
+        focusCancel: true,
+        allowOutsideClick: false
+    });
+    if (resultado.isConfirmed) window.location.href = 'soporte.php';
+});
+</script>
+<?php endif; ?>
 </body>
 </html>

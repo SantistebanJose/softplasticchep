@@ -61,12 +61,19 @@ function subirImagenACloudinary(string $rutaTmp, string $nombreOriginal, string 
         responder(false, 'Cloudinary no está configurado. Revisa includes/config.php o las variables de entorno CLOUDINARY_* del servidor.');
     }
 
+    $mime = function_exists('mime_content_type') ? mime_content_type($rutaTmp) : false;
+    if (!$mime && function_exists('getimagesize')) {
+        $infoImagen = @getimagesize($rutaTmp);
+        $mime = is_array($infoImagen) ? ($infoImagen['mime'] ?? false) : false;
+    }
+    $mime = $mime ?: 'application/octet-stream';
+
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => "https://api.cloudinary.com/v1_1/" . CLOUDINARY_CLOUD_NAME . "/image/upload",
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => [
-            'file'          => new CURLFile($rutaTmp, mime_content_type($rutaTmp), $nombreOriginal),
+            'file'          => new CURLFile($rutaTmp, $mime, $nombreOriginal),
             'upload_preset' => CLOUDINARY_UPLOAD_PRESET,
             'folder'        => $carpeta,
         ],
