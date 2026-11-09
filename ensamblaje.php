@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/controllers/featureFlags.php';
 $pageTitle    = 'Ensamblaje';
 $pageSubtitle = 'Armado de productos finales';
 $activePage = 'ensamblaje';
@@ -324,8 +325,17 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
         </div>
         <div class="modal-body">
 
+        <div class="mb-3 p-3 rounded border" id="ens_modo_habilitacion_wrap">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="fw-semibold me-2">Tipo de registro</span>
+                <button type="button" class="btn btn-sm btn-primary" id="ens_modo_producto" onclick="cambiarModoRegistroEns(false)">Ensamblar producto</button>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="ens_modo_habilitacion" onclick="cambiarModoRegistroEns(true)"><i class="fa-solid fa-link"></i> Habilitar gancho + cadenita</button>
+                <span class="small text-muted" id="ens_modo_habilitacion_ayuda">La habilitación queda disponible por color para incorporarla después a un ovalado u osito.</span>
+            </div>
+        </div>
+
         <div class="row">
-            <div class="col-md-3 mb-2">
+            <div class="col-md-3 mb-2" id="ens_producto_wrap">
                 <label class="form-label">Producto a ensamblar *</label>
                 <select class="form-select" id="ens_producto_id" required onchange="cambioProductoEnsamblaje()">
                     <option value="">Selecciona un producto...</option>
@@ -368,8 +378,8 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
           <hr>
 
           <div class="mb-1 d-flex justify-content-between align-items-center">
-            <label class="form-label mb-0">Vinculados a este armado *</label>
-            <span class="form-text mb-0">Al menos una producción finalizada, un derivado o un complemento.</span>
+            <label class="form-label mb-0" id="ens_detalle_titulo">Vinculados a este armado *</label>
+            <span class="form-text mb-0" id="ens_detalle_ayuda">Al menos una producción finalizada, un derivado o un complemento.</span>
           </div>
 
           <div class="pc-mat-layout">
@@ -386,6 +396,9 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
                     </div>
                     <div class="pc-tab-detalle" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
                         <i class="fa-solid fa-puzzle-piece"></i> Complemento
+                    </div>
+                    <div class="pc-tab-detalle" id="tab_habilitaciones" onclick="cambiarTabDetalle('habilitacion')">
+                        <i class="fa-solid fa-link"></i> Habilitaciones
                     </div>
                 </div>
                 <div class="pc-mat-search">
@@ -431,6 +444,7 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
 <script>
+const FEATURE_RUTA_EXTERIOR_PINZA_PALANITA = <?= FEATURE_RUTA_EXTERIOR_PINZA_PALANITA ? 'true' : 'false' ?>;
 const CONTROLADOR_ENSAMBLAJE = 'controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = 'controllers/clssSucursal.php';
 // SweetAlert de cantidad se abre sobre este modal; desactivar el focus trap
@@ -441,6 +455,7 @@ const llamarEnsamblaje = (accion, params = {}) => llamar(CONTROLADOR_ENSAMBLAJE,
 const llamarSucursal   = (accion, params = {}) => llamar(CONTROLADOR_SUCURSAL, accion, params);
 const puedeRegistrarExternoEns = <?= $puedeRegistrarExternoEns ? 'true' : 'false' ?>;
 let modoEdicionEnsamblaje = false;
+let modoHabilitacionEns = false;
 let ensamblajeIdActual = 0;
 let productosEnsCache = null;   // cache de productos para selects/filtro
 let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento'
@@ -502,6 +517,34 @@ function badgeRegistroEns(deletedAt) {
 function formatearCantidadEns(n) {
     if (n === null || n === undefined || n === '') return '-';
     return Number(n).toLocaleString('es-PE', { maximumFractionDigits: 4 });
+}
+
+function escaparHtmlEns(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderAvancesOperariosEns(e) {
+    const avances = parseJsonColumna(e.js_avances_operarios);
+    if (!avances.length) return '';
+    const pasadas = avances.filter(a => a.tipo === 'avance_peso');
+    const habilitaciones = avances.filter(a => a.tipo !== 'producto_terminado' && a.tipo !== 'avance_peso');
+    const terminados = avances.filter(a => a.tipo === 'producto_terminado');
+    const htmlPasadas = pasadas.length ? `<span class="lbl">Pasadas</span><span class="val">${pasadas.map(a => {
+        const operadores = Array.isArray(a.operarios) ? a.operarios.map(o => escaparHtmlEns(o.nombre_completo)).join(', ') : '';
+        const fecha = a.fecha_hora ? new Date(a.fecha_hora).toLocaleString('es-PE') : '';
+        const unidad = escaparHtmlEns(a.unidad_salida_codigo || 'kg');
+        return `<span class="badge-complemento" style="display:block;margin:3px 0;white-space:normal"><b>P${Number(a.secuencia || 0)}: ${formatearCantidadEns(a.cantidad_salida)} ${unidad}</b>${fecha ? ` · ${escaparHtmlEns(fecha)}` : ''}${operadores ? ` · ${operadores}` : ''}</span>`;
+    }).join('')}</span>` : '';
+    const htmlHabilitaciones = habilitaciones.length ? `<span class="lbl ${pasadas.length ? 'mt-2' : ''}">Habilitación por etapa</span><span class="val">${habilitaciones.map(a => {
+        const operadores = Array.isArray(a.operarios) ? a.operarios.map(o => escaparHtmlEns(o.nombre_completo)).join(', ') : '';
+        const fecha = a.fecha_hora ? new Date(a.fecha_hora).toLocaleString('es-PE') : `Avance ${a.secuencia || ''}`;
+        const consumos = (a.componentes_consumidos || []).map(c => `${escaparHtmlEns(c.componente_nombre)}: ${formatearCantidadEns(c.cantidad)} ${escaparHtmlEns(c.unidad_codigo)}`).join(' · ');
+        const usado = avances.reduce((s, siguiente) => s + (siguiente.componentes_consumidos || []).filter(c => c.source_key === `a:${a.secuencia}`).reduce((n, c) => n + Number(c.cantidad || 0), 0), 0);
+        const saldo = Math.max(0, Number(a.cantidad_salida || 0) - usado);
+        const unidad = escaparHtmlEns(a.unidad_salida_codigo || 'kg');
+        return `<span class="badge-complemento" style="display:block;margin:3px 0;white-space:normal"><b>#${Number(a.secuencia || 0)}</b> · ${escaparHtmlEns(fecha)} · ${formatearCantidadEns(a.cantidad_salida)} ${unidad} · saldo prearmado ${formatearCantidadEns(saldo)} ${unidad}${consumos ? `<small class="d-block">Descontó: ${consumos}</small>` : ''}${operadores ? ` · ${operadores}` : ''}</span>`;
+    }).join('')}</span>` : '';
+    return `<div class="pc-ens-field span-2">${htmlPasadas}${htmlHabilitaciones}${terminados.length ? `<span class="lbl mt-2">Unidades terminadas por persona y color</span><span class="val">${terminados.map(a => { const op = a.operarios?.[0]?.nombre_completo || ''; const fecha = a.fecha_hora ? new Date(a.fecha_hora).toLocaleString('es-PE') : a.fecha || ''; return `<span class="badge-complemento" style="display:block;margin:3px 0;white-space:normal">${escaparHtmlEns(fecha)} · ${formatearCantidadEns(a.cantidad_salida)} UND${op ? ` · ${escaparHtmlEns(op)}` : ''}</span>`; }).join('')}</span>` : ''}</div>`;
 }
 
 function formatearFechaHoraLocalEns(fechaIso) {
@@ -688,7 +731,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
 
     const sProd = document.getElementById('ens_producto_id');
     sProd.innerHTML = '<option value="">Selecciona un producto...</option>' +
-        productos.map(p => `<option value="${p.producto_id}" data-requiere-maquina="${p.requiere_maquina_ensamblaje === true || p.requiere_maquina_ensamblaje === 1 || p.requiere_maquina_ensamblaje === '1' ? '1' : '0'}">${p.codigo} - ${p.descripcion}</option>`).join('');
+        productos.map(p => `<option value="${p.producto_id}" data-codigo="${escaparHtmlEns(p.codigo)}" data-requiere-maquina="${p.requiere_maquina_ensamblaje === true || p.requiere_maquina_ensamblaje === 1 || p.requiere_maquina_ensamblaje === '1' ? '1' : '0'}">${escaparHtmlEns(p.codigo)} - ${escaparHtmlEns(p.descripcion)}</option>`).join('');
     const colorId = seleccion.color_id ? String(seleccion.color_id) : '';
     document.getElementById('ens_color_id').value = colorId;
     actualizarEtiquetaColorEnsamblaje(seleccion.color_nombre || '');
@@ -717,6 +760,53 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     }
 }
 
+function cambiarModoRegistroEns(esHabilitacion) {
+    const producto = document.getElementById('ens_producto_id');
+    if (esHabilitacion) {
+        const pinza = producto.querySelector('option[data-codigo="PI"]');
+        if (!pinza) {
+            Swal.fire('Pinza no disponible', 'No se encontró Pinza Palanita entre los productos habilitados para ensamblaje.', 'warning');
+            return;
+        }
+        producto.value = pinza.value;
+        producto.disabled = true;
+        const destino = document.getElementById('ens_destino');
+        if (destino) { destino.value = 'local'; destino.disabled = true; }
+        const destinoWrap = document.getElementById('ens_destino_wrap');
+        if (destinoWrap) destinoWrap.style.display = 'none';
+        document.getElementById('ens_modo_producto').className = 'btn btn-sm btn-outline-primary';
+        document.getElementById('ens_modo_habilitacion').className = 'btn btn-sm btn-primary';
+        document.getElementById('ens_modo_habilitacion_ayuda').textContent = 'Unión intermedia, no es producto final y no requiere máquina. El color lo determina la pinza.';
+        document.getElementById('ens_detalle_titulo').textContent = 'Componentes de la habilitación *';
+        document.getElementById('ens_detalle_ayuda').textContent = 'Vincula una Pinza Palanita completa de primera (gancho + clip) y una producción de cadenita chica de primera.';
+        modoHabilitacionEns = true;
+        document.getElementById('ens_producto_wrap').style.display = 'none';
+        document.getElementById('ens_maquina_wrap').style.display = 'none';
+        document.getElementById('ens_maquina_id').required = false;
+        document.getElementById('tab_derivados').style.display = 'none';
+        document.getElementById('tab_habilitaciones').style.display = 'none';
+        document.getElementById('tab_complementos').innerHTML = '<i class="fa-solid fa-link"></i> Pinza ya armada';
+    } else {
+        producto.disabled = false;
+        const destino = document.getElementById('ens_destino');
+        if (destino) destino.disabled = false;
+        const destinoWrap = document.getElementById('ens_destino_wrap');
+        if (destinoWrap) destinoWrap.style.display = '';
+        document.getElementById('ens_modo_producto').className = 'btn btn-sm btn-primary';
+        document.getElementById('ens_modo_habilitacion').className = 'btn btn-sm btn-outline-primary';
+        document.getElementById('ens_modo_habilitacion_ayuda').textContent = 'La habilitación queda disponible por color para incorporarla después a un ovalado u osito.';
+        document.getElementById('ens_detalle_titulo').textContent = 'Vinculados a este armado *';
+        document.getElementById('ens_detalle_ayuda').textContent = 'Al menos una producción finalizada, un derivado o un complemento.';
+        modoHabilitacionEns = false;
+        document.getElementById('ens_producto_wrap').style.display = '';
+        document.getElementById('ens_maquina_wrap').style.display = '';
+        document.getElementById('tab_derivados').style.display = '';
+        document.getElementById('tab_habilitaciones').style.display = '';
+        document.getElementById('tab_complementos').innerHTML = '<i class="fa-solid fa-puzzle-piece"></i> Complemento';
+    }
+    cambioProductoEnsamblaje();
+}
+
 
 function obtenerProductoIdSeleccionadoEns() {
     return document.getElementById('ens_producto_id').value || '';
@@ -729,7 +819,8 @@ function actualizarEtiquetaColorEnsamblaje(nombre = '') {
 }
 
 function esProduccionColorNeutroEns(datos) {
-    return /CADENITA/i.test(datos.molde_nombre || datos.nombre || '') && /^BLANCO$/i.test((datos.color_nombre || '').trim());
+    return ['true', 't', '1'].includes(String(datos.es_color_neutro).toLowerCase())
+        || (/CADENITA/i.test(datos.molde_nombre || datos.nombre || '') && /^BLANCO$/i.test((datos.color_nombre || '').trim()));
 }
 
 function recalcularColorFinalEnsamblaje() {
@@ -746,6 +837,8 @@ function tarjetaEnsamblajeHtml(e) {
     const derivadosCount = e.derivados_count ?? parseJsonColumna(e.js_derivados_utilizados).length;
     const complementosCount = e.complementos_count ?? parseJsonColumna(e.js_complementos_utilizados).length;
     const esRetornoExterno = e.proveniente === 'externo';
+    const salidaCodigo = String(e.producto_unidad_ensamblaje_codigo || '').toUpperCase();
+    const salidaEnUnidades = ['UND', 'UNID', 'UNIDAD', 'UNIDADES', 'PZA', 'PIEZA'].includes(salidaCodigo);
     const puedeIniciar   = !esRetornoExterno && !e.deleted_at && !e.inicio;
     const puedeFinalizar = !esRetornoExterno && !e.deleted_at && e.inicio && !e.fin;
     const puedeRegistrarRetorno = puedeRegistrarExternoEns && esRetornoExterno && !e.deleted_at && !e.fin;
@@ -755,25 +848,27 @@ function tarjetaEnsamblajeHtml(e) {
     const esDeSegunda = categoriaMaterial.includes('segunda');
     const esDePrimera = categoriaMaterial.includes('primera');
     const esPinzaPalanita = String(e.producto_codigo ?? '').trim().toUpperCase() === 'PI';
+    const esHabilitacionGancho = e.proveniente === 'habilitacion_gancho';
     const esMultiMoldeCompleto = e.es_multi_molde_completo === true || ['1', 't', 'true'].includes(String(e.es_multi_molde_completo).toLowerCase());
-    const puedeDecidirDestino = !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
+    const puedeDecidirDestino = !esHabilitacionGancho && !e.deleted_at && e.fin && esDeSegunda && !esMultiMoldeCompleto && !productoEmsamblado && !e.ensamblaje_id_referido && !e.enviado_empaquetado;
     const historialComponente = parseJsonColumna(e.js_historial);
     const eventoActivoComponente = h => !['true', 't', '1'].includes(String(h.anulado).toLowerCase());
     const envioComponenteExt = historialComponente.find(h => h.tipo === 'envio_componente_externo' && eventoActivoComponente(h));
     const rutaComponenteLocal = historialComponente.find(h => h.tipo === 'ruta_componente_local' && eventoActivoComponente(h));
-    const disponibleComoComponenteLocal = !e.deleted_at && e.proveniente !== 'externo' && e.fin && esDePrimera && !esMultiMoldeCompleto && !e.ensamblaje_id_referido && !e.enviado_empaquetado && !envioComponenteExt;
-    const puedeSeleccionarRutaLocal = esPinzaPalanita && disponibleComoComponenteLocal && !rutaComponenteLocal;
-    const puedeMarcarComponenteLocal = disponibleComoComponenteLocal && !esPinzaPalanita && !productoEmsamblado;
-    const puedeEnviarComponenteExt = puedeRegistrarExternoEns && disponibleComoComponenteLocal && !rutaComponenteLocal && (esPinzaPalanita || !productoEmsamblado);
+    const disponibleComoComponenteLocal = !esHabilitacionGancho && !e.deleted_at && e.proveniente !== 'externo' && e.fin && esDePrimera && !esMultiMoldeCompleto && !e.ensamblaje_id_referido && !e.enviado_empaquetado && !envioComponenteExt;
+    const puedeSeleccionarRutaLocal = FEATURE_RUTA_EXTERIOR_PINZA_PALANITA && !esHabilitacionGancho && esPinzaPalanita && disponibleComoComponenteLocal && !rutaComponenteLocal;
+    const puedeMarcarComponenteLocal = !esHabilitacionGancho && disponibleComoComponenteLocal && !esPinzaPalanita && !productoEmsamblado;
+    const puedeEnviarComponenteExt = !esHabilitacionGancho && puedeRegistrarExternoEns && disponibleComoComponenteLocal && !rutaComponenteLocal && (esPinzaPalanita ? FEATURE_RUTA_EXTERIOR_PINZA_PALANITA : !productoEmsamblado);
     const complementoUsado = !!e.ensamblaje_id_referido;
     return `
     <div class="pc-ens-card ${e.deleted_at ? 'inactiva' : ''}" id="fila-ensamblaje-${e.ensamblaje_id}">
         <div class="pc-ens-card-head">
             <div class="titulo">
                 <span class="id">#${e.ensamblaje_id}</span>
-                <span class="producto-titulo">${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'} (${e.color_nombre_actual ?? 'Sin color'})</span>
+                <span class="producto-titulo">${esHabilitacionGancho ? 'HABILITACIÓN GANCHO + CADENITA CHICA' : `${e.producto_codigo ?? ''} - ${e.producto_descripcion ?? '-'}`} (${e.color_nombre_actual ?? 'Sin color'})</span>
             </div>
             <div class="badges">
+                ${e.proveniente === 'habilitacion_gancho' ? '<span class="badge text-bg-info">Habilitación gancho + cadenita · sin producto final asignado</span>' : ''}
                 ${e.proveniente === 'externo' ? '<span class="badge text-bg-warning">Retorno externo</span>' : ''}
                 ${envioComponenteExt ? `<span class="badge text-bg-info">Componente enviado a ${envioComponenteExt.enviado_a || 'exterior'}</span>` : ''}
                 ${rutaComponenteLocal ? '<span class="badge text-bg-success">Ruta local</span>' : ''}
@@ -801,9 +896,10 @@ function tarjetaEnsamblajeHtml(e) {
                 <span class="lbl">Cantidad de salida</span>
                 <span class="val">${formatearCantidadEns(e.cantidad_peso_kg)} ${e.unidad_salida_codigo || e.producto_unidad_ensamblaje_codigo || 'kg'}</span>
             </div>
+            ${renderAvancesOperariosEns(e)}
             <div class="pc-ens-field">
                 <span class="lbl">Categoría material</span>
-                <span class="val">${e.categoria_material_nombre ?? '-'}${esMultiMoldeCompleto ? ' · Multi-molde completo, disponible en Empaquetado' : ''}${esPinzaPalanita && disponibleComoComponenteLocal ? (rutaComponenteLocal ? ' · Ruta local seleccionada; consumo según receta' : ' · Selecciona Local o Exterior') : ''}</span>
+                <span class="val">${esHabilitacionGancho ? 'Habilitación intermedia · unión de componentes' : (e.categoria_material_nombre ?? '-')}${esMultiMoldeCompleto && !esHabilitacionGancho ? ' · Multi-molde completo, disponible en Empaquetado' : ''}${FEATURE_RUTA_EXTERIOR_PINZA_PALANITA && esPinzaPalanita && disponibleComoComponenteLocal ? (rutaComponenteLocal ? ' · Ruta local seleccionada; consumo según receta' : ' · Selecciona Local o Exterior') : ''}</span>
             </div>
             <div class="pc-ens-field span-2">
                 <span class="lbl">Producciones vinculadas</span>
@@ -887,6 +983,10 @@ function tarjetaEnsamblajeHtml(e) {
             ${puedeIniciar
                 ? `<button type="button" class="pc-btn-iniciar" onclick="iniciarEnsamblajeAccion(${e.ensamblaje_id})" title="Iniciar armado">
                     <i class="fa-solid fa-play"></i> Iniciar</button>`
+                : ''
+            }
+            ${!e.deleted_at && e.inicio && !e.fin && e.proveniente !== 'externo'
+                ? `<button type="button" class="pc-btn-finalizar" onclick="registrarAvanceEnsamblajeAccion(${e.ensamblaje_id})" title="Registrar avance parcial"><i class="fa-solid fa-scale-balanced"></i> ${e.proveniente === 'habilitacion_gancho' ? 'Agregar avance' : 'Habilitación'}</button>${salidaEnUnidades ? `<button type="button" class="pc-btn-finalizar" onclick="registrarUnidadesTerminadasAccion(${e.ensamblaje_id})" title="Registrar unidades terminadas por persona"><i class="fa-solid fa-list-ol"></i> Unidades terminadas</button>` : ''}`
                 : ''
             }
             ${puedeFinalizar
@@ -1192,6 +1292,7 @@ function cambiarTabDetalle(tipo) {
     document.getElementById('tab_producciones').classList.toggle('activa', tipo === 'produccion');
     document.getElementById('tab_derivados').classList.toggle('activa', tipo === 'derivado');
     document.getElementById('tab_complementos').classList.toggle('activa', tipo === 'complemento');
+    document.getElementById('tab_habilitaciones').classList.toggle('activa', tipo === 'habilitacion');
     document.getElementById('ens_buscar_detalle').value = '';
     renderGridDetalle();
 }
@@ -1213,11 +1314,13 @@ async function renderGridDetalle() {
     if (tabDetalleActiva === 'produccion') {
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
         const categoriaFiltro = categoriaMaterialTicketActual();
-        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId || '', categoria_material_id: categoriaFiltro || '', texto, destino_ensamblaje: destinoEnsamblaje });
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId || '', categoria_material_id: categoriaFiltro || '', texto, destino_ensamblaje: destinoEnsamblaje, solo_cadenita_chica_primera: modoHabilitacionEns ? '1' : '0' });
         const producciones = json.success ? (json.producciones || []) : [];
 
         if (producciones.length === 0) {
-            grid.innerHTML = `<div class="pc-mat-empty">No hay producciones ${destinoEnsamblaje === 'externo' ? 'enviadas a externo' : 'locales'} finalizadas y libres para este producto.</div>`;
+            grid.innerHTML = modoHabilitacionEns
+                ? '<div class="pc-mat-empty">No hay producción disponible de cadenita chica de Primera.</div>'
+                : `<div class="pc-mat-empty">No hay producciones ${destinoEnsamblaje === 'externo' ? 'enviadas a externo' : 'locales'} finalizadas y libres para este producto.</div>`;
             return;
         }
 
@@ -1302,23 +1405,29 @@ async function renderGridDetalle() {
             return;
         }
         grid.innerHTML = '<div class="pc-mat-empty"><i class="fa-solid fa-spinner fa-spin"></i> Buscando...</div>';
-        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId || '', excluir_id: ensamblajeIdActual, texto, destino_ensamblaje: destinoEnsamblaje });
+        const soloHabilitaciones = tabDetalleActiva === 'habilitacion';
+        const json = await llamarEnsamblaje('BUSCARCOMPLEMENTOS', { producto_id: productoId, color_id: colorId || '', excluir_id: ensamblajeIdActual, texto, destino_ensamblaje: destinoEnsamblaje, solo_habilitaciones: soloHabilitaciones ? '1' : '0', para_habilitacion_gancho: modoHabilitacionEns ? '1' : '0' });
         const complementos = json.success ? (json.complementos || []) : [];
 
         if (complementos.length === 0) {
-            grid.innerHTML = '<div class="pc-mat-empty">No hay complementos compatibles y disponibles para este producto.</div>';
+            grid.innerHTML = soloHabilitaciones
+                ? '<div class="pc-mat-empty">No hay habilitaciones de gancho + cadenita disponibles para este color.</div>'
+                : modoHabilitacionEns
+                    ? '<div class="pc-mat-empty">No hay Pinza Palanita completa de Primera disponible como complemento.</div>'
+                    : '<div class="pc-mat-empty">No hay complementos compatibles y disponibles para este producto.</div>';
             return;
         }
 
         grid.innerHTML = complementos.map(c => {
             const nombreMostrar = c.moldes_nombres || `${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}`;
             const unidad = c.unidad_salida_codigo || 'kg';
+            const esHabilitacion = ['true', 't', '1'].includes(String(c.es_habilitacion_gancho).toLowerCase());
             const est = estiloPorNombre(nombreMostrar);
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'complemento' && l.ensamblaje_complemento_id == c.ensamblaje_id);
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
-                    onclick='agregarLineaDetalle("complemento", ${JSON.stringify({
+                    onclick='agregarLineaDetalle("${esHabilitacion ? 'habilitacion' : 'complemento'}", ${JSON.stringify({
                         ensamblaje_id: c.ensamblaje_id,
                         producto_codigo: c.producto_codigo,
                         producto_descripcion: c.producto_descripcion,
@@ -1331,9 +1440,10 @@ async function renderGridDetalle() {
                         fin: c.fin,
                         destino_ensamblaje: c.destino_ensamblaje || destinoEnsamblaje,
                         enviado_a: c.enviado_a || null,
+                        es_habilitacion_gancho: esHabilitacion,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
-                <span class="nombre">${nombreMostrar}</span>
+                <span class="nombre">${esHabilitacion ? 'HABILITACIÓN · ' : ''}${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
                 <span class="meta">De Primera · Color: <b>${c.complemento_color_nombre || '-'}</b></span>
                 <span class="meta">Armado #${c.ensamblaje_id} · Saldo: <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
@@ -1345,6 +1455,8 @@ async function renderGridDetalle() {
 }
 
 async function agregarLineaDetalle(tipo, datos) {
+    const esHabilitacion = tipo === 'habilitacion';
+    if (esHabilitacion) tipo = 'complemento';
     const destinoSeleccionado = document.getElementById('ens_destino')?.value || 'local';
     if (destinoSeleccionado === 'externo' && tipo === 'derivado') {
         Swal.fire('Retorno externo', 'Los derivados no se pueden vincular en este flujo externo.', 'info');
@@ -1385,7 +1497,7 @@ async function agregarLineaDetalle(tipo, datos) {
             return;
         }
         let cantidadRecibidaNum = cantidadProducida;
-        if (datos.componente_configuracion && datos.destino_ensamblaje !== 'externo') {
+        if ((datos.componente_configuracion || modoHabilitacionEns) && datos.destino_ensamblaje !== 'externo') {
             const { value: cantidadRecibida } = await Swal.fire({
                 title: 'Cantidad que usarás',
                 html: `Disponible: <b>${formatearCantidadEns(cantidadProducida)} ${unidad}</b><br>Indica cuánto <b>${unidad}</b> usarás en este armado. El saldo quedará disponible para otros armados.`,
@@ -1426,6 +1538,7 @@ async function agregarLineaDetalle(tipo, datos) {
             molde_nombre: datos.molde_nombre,
             color_id: datos.color_id,
             color_nombre: datos.color_nombre,
+            es_color_neutro: datos.es_color_neutro,
             meta: `#${datos.produccion_id}`
                 + (datos.pasada ? ` · Pasada ${datos.pasada}` : '')
             + ` · Color: ${datos.color_nombre || '-'} · ${datos.destino_ensamblaje === 'externo' ? 'Enviado' : 'Disponible'}: ${formatearCantidadEns(cantidadProducida)} ${unidad}`
@@ -1477,7 +1590,7 @@ async function agregarLineaDetalle(tipo, datos) {
             color_nombre: datos.color_nombre,
             categoria_material_id: datos.categoria_material_id,
             nombre: datos.nombre_mostrar || `${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''}`,
-            meta: `${destinoSeleccionado === 'externo' ? `Externo · enviado a ${datos.enviado_a || 'destinatario sin dato'} · ` : 'Complementa a '}${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''} · Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
+            meta: `${esHabilitacion || datos.es_habilitacion_gancho ? 'Habilitación gancho + cadenita · ' : (destinoSeleccionado === 'externo' ? `Externo · enviado a ${datos.enviado_a || 'destinatario sin dato'} · ` : 'Complementa a ')}${datos.producto_codigo ?? ''} - ${datos.producto_descripcion ?? ''} · Armado #${datos.ensamblaje_id} · ${formatearCantidadEns(datos.cantidad_peso_kg)} ${datos.unidad_salida_codigo || 'kg'}`,
             icono: 'fa-puzzle-piece',
             destino_ensamblaje: datos.destino_ensamblaje || 'local',
             color: est.color, bg: est.bg,
@@ -1688,7 +1801,7 @@ function cambioProductoEnsamblaje() {
 
 function actualizarCampoMaquinaEnsamblaje() {
     const productoSel = document.getElementById('ens_producto_id');
-    const requiere = productoSel.selectedOptions[0]?.dataset.requiereMaquina === '1';
+    const requiere = !modoHabilitacionEns && productoSel.selectedOptions[0]?.dataset.requiereMaquina === '1';
     const wrap = document.getElementById('ens_maquina_wrap');
     const maquinaSel = document.getElementById('ens_maquina_id');
     wrap.style.display = requiere ? '' : 'none';
@@ -1699,6 +1812,22 @@ function actualizarCampoMaquinaEnsamblaje() {
 // ── Crear / Editar ────────────────────────────────────────────────────────
 function limpiarFormularioEnsamblaje() {
     document.getElementById('formEnsamblaje').reset();
+    modoHabilitacionEns = false;
+    document.getElementById('ens_producto_id').disabled = false;
+    document.getElementById('ens_producto_wrap').style.display = '';
+    document.getElementById('ens_maquina_wrap').style.display = '';
+    document.getElementById('tab_derivados').style.display = '';
+    document.getElementById('tab_habilitaciones').style.display = '';
+    document.getElementById('tab_complementos').innerHTML = '<i class="fa-solid fa-puzzle-piece"></i> Complemento';
+    const destino = document.getElementById('ens_destino');
+    if (destino) destino.disabled = false;
+    const destinoWrap = document.getElementById('ens_destino_wrap');
+    if (destinoWrap) destinoWrap.style.display = '';
+    document.getElementById('ens_modo_producto').className = 'btn btn-sm btn-primary';
+    document.getElementById('ens_modo_habilitacion').className = 'btn btn-sm btn-outline-primary';
+    document.getElementById('ens_modo_habilitacion_ayuda').textContent = 'La habilitación queda disponible por color para incorporarla después a un ovalado u osito.';
+    document.getElementById('ens_detalle_titulo').textContent = 'Vinculados a este armado *';
+    document.getElementById('ens_detalle_ayuda').textContent = 'Al menos una producción finalizada, un derivado o un complemento.';
     document.getElementById('ens_color_id').value = '';
     actualizarEtiquetaColorEnsamblaje();
     document.getElementById('ens_maquina_id').value = '';
@@ -1711,6 +1840,7 @@ function limpiarFormularioEnsamblaje() {
     document.getElementById('tab_producciones').classList.add('activa');
     document.getElementById('tab_derivados').classList.remove('activa');
     document.getElementById('tab_complementos').classList.remove('activa');
+    document.getElementById('tab_habilitaciones').classList.remove('activa');
     renderTicketDetalle();
 }
 
@@ -1772,6 +1902,9 @@ async function abrirModalEditarEnsamblaje(id) {
         sucursal_id: e.sucursal,
         maquina_id: e.maquina_id,
     }, id);
+    cambiarModoRegistroEns(e.proveniente === 'habilitacion_gancho');
+    if (e.color_id_actual) document.getElementById('ens_color_id').value = String(e.color_id_actual);
+    actualizarEtiquetaColorEnsamblaje(e.color_nombre_actual || '');
 
     const moldes = parseJsonColumna(e.js_moldes_utilizados);
     const derivados = parseJsonColumna(e.js_derivados_utilizados);
@@ -1859,6 +1992,11 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
         return;
     }
 
+    if (modoHabilitacionEns && (!ticketDetalleEns.some(l => l.tipo === 'produccion') || !ticketDetalleEns.some(l => l.tipo === 'complemento'))) {
+        Swal.fire('Faltan componentes', 'Para habilitar gancho + cadenita, vincula una pinza de primera ya armada y una producción de cadenita.', 'warning');
+        return;
+    }
+
     const destinoSeleccionado = document.getElementById('ens_destino')?.value || 'local';
     if (destinoSeleccionado === 'local' && (!tsOperariosEns || tsOperariosEns.getValue().length === 0)) {
         Swal.fire('Falta asignar operario', 'Para un ensamblaje local, el administrador debe asignar al menos un operario.', 'warning');
@@ -1868,6 +2006,7 @@ document.getElementById('formEnsamblaje').addEventListener('submit', async funct
     const params = {
         id: ensamblajeIdActual,
         producto_id: obtenerProductoIdSeleccionadoEns(),
+        tipo_ensamblaje: modoHabilitacionEns ? 'habilitacion_gancho' : 'producto',
         color_id: document.getElementById('ens_color_id').value,
         maquina_id: document.getElementById('ens_maquina_id').value,
         destino_ensamblaje: document.getElementById('ens_destino')?.value || 'local',
@@ -1925,6 +2064,83 @@ function reactivarEnsamblaje(id) {
 }
 
 // ── Iniciar / Finalizar (acciones directas desde la card) ────────────────
+async function registrarAvanceEnsamblajeAccion(id) {
+    const e = ensamblajesCache.find(x => Number(x.ensamblaje_id) === Number(id));
+    const respuestaComponentes = await llamarEnsamblaje('BUSCARCOMPONENTESAVANCEENSAMBLAJE', { id });
+    if (!respuestaComponentes.success) { Swal.fire('Error', respuestaComponentes.message, 'error'); return; }
+    const componentes = respuestaComponentes.componentes || [];
+    const modoSimpleKg = respuestaComponentes.modo_simple_kg === true || ['1','t','true'].includes(String(respuestaComponentes.modo_simple_kg).toLowerCase());
+    if (!componentes.length && !modoSimpleKg) { Swal.fire('Sin componentes', 'Vincula producciones o complementos disponibles para registrar el avance.', 'info'); return; }
+    const respuestaOperarios = await llamarEnsamblaje('BUSCAROPERARIOS');
+    if (!respuestaOperarios.success) { Swal.fire('Error', respuestaOperarios.message, 'error'); return; }
+    const asignados = parseJsonColumna(e?.js_operarios).map(o => String(o.operario_id));
+    const opciones = (respuestaOperarios.operario || []).map(o =>
+        `<option value="${Number(o.id)}" ${asignados.includes(String(o.id)) ? 'selected' : ''}>${escaparHtmlEns(o.nombre_completo)}${o.cargo ? ` · ${escaparHtmlEns(o.cargo)}` : ''}</option>`
+    ).join('');
+    const filasComponentes = modoSimpleKg
+        ? '<p class="text-start mb-3">Registra el peso total que llevas armado en esta etapa. Puedes agregar un pesaje por cada control horario y finalizar el armado cuando corresponda.</p>'
+        : componentes.map(c => `<label class="d-flex align-items-start gap-2 text-start border rounded p-2 mb-2 ${c.disabled ? 'opacity-50' : ''}"><input class="form-check-input mt-1 ens-avance-componente" type="checkbox" value="${escaparHtmlEns(c.source_key)}" ${c.disabled ? 'disabled' : ''}><span><strong>${escaparHtmlEns(c.nombre)}</strong><small class="d-block text-muted">${escaparHtmlEns(c.detalle)} · ${Number(c.peso_g_por_unidad || 0) > 0 ? `Aporta ${formatearCantidadEns(Number(c.peso_g_por_unidad))} g por unidad de receta` : 'Sin peso configurado; disponible para avances contados en UND'}${c.motivo ? ` · ${escaparHtmlEns(c.motivo)}` : ''}</small></span></label>`).join('');
+    const { value: datos } = await Swal.fire({
+        title: 'Registrar avance de ensamblaje',
+        html: `${modoSimpleKg ? filasComponentes : `<p>Registra una persona, un color y esta medición. Para otro control horario, guarda otro avance.</p><label for="ensAvanceUnidad" class="form-label">Unidad del avance</label><select id="ensAvanceUnidad" class="form-select mb-3"><option value="KG">Kilogramos (se pesa)</option><option value="UND">Unidades (se cuenta)</option></select><div class="text-start mb-3" style="max-height:260px;overflow:auto">${filasComponentes}</div>`}<label for="ensAvanceOperarios" class="form-label">Persona</label><select id="ensAvanceOperarios" class="form-select">${opciones}</select>`,
+        input: 'number',
+        inputAttributes: { min: 0.0001, step: '0.0001' },
+        inputPlaceholder: modoSimpleKg ? 'Kilaje de este avance' : 'Cantidad registrada',
+        showCancelButton: true,
+        confirmButtonText: 'Guardar avance',
+        cancelButtonText: 'Cancelar',
+        preConfirm: cantidad => {
+            const operario = Number(document.getElementById('ensAvanceOperarios').value);
+            const componentes = modoSimpleKg ? [] : [...document.querySelectorAll('.ens-avance-componente:checked')].map(o => o.value);
+            if (!cantidad || !Number.isFinite(Number(cantidad)) || Number(cantidad) <= 0) {
+                Swal.showValidationMessage('Ingresa una cantidad mayor que cero.'); return false;
+            }
+            const unidad_avance = modoSimpleKg ? 'KG' : document.getElementById('ensAvanceUnidad').value;
+            if (unidad_avance === 'UND' && !Number.isInteger(Number(cantidad))) { Swal.showValidationMessage('La cantidad en UND debe ser un número entero.'); return false; }
+            if (!operario) { Swal.showValidationMessage('Selecciona una persona.'); return false; }
+            if (!modoSimpleKg && !componentes.length) { Swal.showValidationMessage('Selecciona al menos un componente.'); return false; }
+            return { cantidad: Number(cantidad), unidad_avance, componentes, operarios: [operario] };
+        }
+    });
+    if (!datos) return;
+    const json = await llamarEnsamblaje('REGISTRARAVANCEENSAMBLAJE', {
+        id,
+        cantidad: datos.cantidad,
+        unidad_avance: datos.unidad_avance,
+        componentes: JSON.stringify(datos.componentes),
+        operarios: JSON.stringify(datos.operarios),
+    });
+    if (json.success) {
+        await Swal.fire('Avance guardado', `Etapa #${json.avance.secuencia}: ${formatearCantidadEns(json.avance.cantidad_salida)} ${json.avance.unidad_salida_codigo}. ${json.message}`, 'success');
+        cargarEnsamblajes();
+    } else Swal.fire('Error', json.message, 'error');
+}
+
+async function registrarUnidadesTerminadasAccion(id) {
+    const e = ensamblajesCache.find(x => Number(x.ensamblaje_id) === Number(id));
+    const respuestaOperarios = await llamarEnsamblaje('BUSCAROPERARIOS');
+    if (!respuestaOperarios.success) { Swal.fire('Error', respuestaOperarios.message, 'error'); return; }
+    const asignados = parseJsonColumna(e?.js_operarios).map(o => String(o.operario_id));
+    const opciones = (respuestaOperarios.operario || []).filter(o => !asignados.length || asignados.includes(String(o.id)))
+        .map(o => `<option value="${Number(o.id)}">${escaparHtmlEns(o.nombre_completo)}</option>`).join('');
+    const { value: datos } = await Swal.fire({
+        title: 'Unidades terminadas',
+        html: `<p>Registra el conteo de hoy para esta persona y este color.</p><label class="form-label">Persona</label><select id="ensUnidadesOperario" class="form-select">${opciones}</select>`,
+        input: 'number', inputAttributes: { min: 1, step: 1 }, inputPlaceholder: 'Cantidad en UND',
+        showCancelButton: true, confirmButtonText: 'Guardar conteo', cancelButtonText: 'Cancelar',
+        preConfirm: cantidad => {
+            const operario_id = Number(document.getElementById('ensUnidadesOperario').value);
+            if (!cantidad || !Number.isInteger(Number(cantidad)) || Number(cantidad) <= 0) { Swal.showValidationMessage('Ingresa un número entero de unidades.'); return false; }
+            if (!operario_id) { Swal.showValidationMessage('Selecciona la persona.'); return false; }
+            return { cantidad: Number(cantidad), operario_id };
+        }
+    });
+    if (!datos) return;
+    const json = await llamarEnsamblaje('REGISTRARUNIDADESTERMINADASENSAMBLAJE', { id, ...datos });
+    if (json.success) { await Swal.fire('Conteo guardado', `${formatearCantidadEns(json.evento.cantidad_salida)} UND registradas para ${json.evento.operarios[0].nombre_completo}.`, 'success'); cargarEnsamblajes(); }
+    else Swal.fire('Error', json.message, 'error');
+}
+
 function iniciarEnsamblajeAccion(id) {
     Swal.fire({
         title: '¿Iniciar el armado ahora?',
@@ -1953,6 +2169,9 @@ function finalizarEnsamblajeAccion(id) {
     const e = ensamblajesCache.find(x => x.ensamblaje_id === id);
     const unidadCodigo = e?.producto_unidad_ensamblaje_codigo || 'kg';
     const unidadNombre = e?.producto_unidad_ensamblaje_nombre || 'kilogramos';
+    const avancesFinalizar = parseJsonColumna(e?.js_avances_operarios);
+    const unidadesTerminadas = avancesFinalizar.filter(a => a.tipo === 'producto_terminado').reduce((s, a) => s + Number(a.cantidad_salida || 0), 0);
+    const kgAvanceSimple = avancesFinalizar.filter(a => a.tipo === 'avance_peso' && String(a.unidad_salida_codigo || '').toUpperCase() === 'KG').reduce((s, a) => s + Number(a.cantidad_salida || 0), 0);
     const esRetornoExterno = e?.proveniente === 'externo';
     const componentes = esRetornoExterno ? parseJsonColumna(e?.js_moldes_utilizados) : [];
     const componentesArmadosExternos = esRetornoExterno
@@ -1987,11 +2206,12 @@ function finalizarEnsamblajeAccion(id) {
 
     Swal.fire({
         title: esRetornoExterno ? 'Registrar retorno recibido' : '¿Finalizar el armado?',
-        html: `${esRetornoExterno ? 'Ingresa la cantidad total de producto armado que regresó' : 'Indica la cantidad de salida de este armado'} (<b>${unidadCodigo}</b> · ${unidadNombre}).${esRetornoExterno ? `<hr><p class="text-start mb-2"><b>Merma por componente</b><br><small>Indica lo dañado o quebrado. El sobrante restante volverá disponible.</small></p>${filasMerma || '<p>No hay componentes vinculados para registrar merma.</p>'}` : ''}`,
+        html: `${esRetornoExterno ? 'Ingresa la cantidad total de producto armado que regresó' : unidadesTerminadas > 0 ? `Conteo registrado por persona y color: <b>${formatearCantidadEns(unidadesTerminadas)} UND</b>. Se usará ese total como salida.` : kgAvanceSimple > 0 ? `Ya registraste <b>${formatearCantidadEns(kgAvanceSimple)} kg</b> en avances. Ingresa el kilaje adicional desde ese control; el total final será <b>${formatearCantidadEns(kgAvanceSimple)} kg + el adicional</b>.` : 'Indica la cantidad de salida de este armado'} (<b>${unidadCodigo}</b> · ${unidadNombre}).${esRetornoExterno ? `<hr><p class="text-start mb-2"><b>Merma por componente</b><br><small>Indica lo dañado o quebrado. El sobrante restante volverá disponible.</small></p>${filasMerma || '<p>No hay componentes vinculados para registrar merma.</p>'}` : ''}`,
         icon: 'question',
         input: 'number',
         inputAttributes: { min: 0, step: '0.01' },
-        inputPlaceholder: `Cantidad en ${unidadCodigo}`,
+        inputValue: unidadesTerminadas > 0 ? unidadesTerminadas : undefined,
+        inputPlaceholder: kgAvanceSimple > 0 ? `Kg adicionales (ya avanzados: ${formatearCantidadEns(kgAvanceSimple)} kg)` : `Cantidad en ${unidadCodigo}`,
         showCancelButton: true,
         confirmButtonText: esRetornoExterno ? 'Confirmar recepción' : 'Sí, finalizar',
         cancelButtonText: 'Cancelar',
