@@ -444,7 +444,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <button type="button" class="pc-mat-tab" id="tab_complementos" onclick="cambiarTabDetalle('complemento')">
                                 <i class="fa-solid fa-puzzle-piece"></i> Complemento
                             </button>
-                            <button type="button" class="pc-mat-tab" id="tab_habilitaciones" onclick="cambiarTabDetalle('habilitacion')">
+                            <button type="button" class="pc-mat-tab" id="tab_habilitaciones" hidden onclick="cambiarTabDetalle('habilitacion')">
                                 <i class="fa-solid fa-link"></i> Habilitaciones
                             </button>
                         </div>
@@ -808,7 +808,7 @@ function cambiarModoRegistroEns(esHabilitacion) {
     document.getElementById('ens_maquina_id').required = !modoHabilitacionEns && document.getElementById('ens_maquina_id').required;
     document.getElementById('ens_producto_paso_titulo').textContent = modoHabilitacionEns ? 'Habilitación intermedia' : 'Producto a ensamblar';
     document.getElementById('tab_derivados').hidden = modoHabilitacionEns;
-    document.getElementById('tab_habilitaciones').hidden = modoHabilitacionEns;
+    actualizarVisibilidadHabilitacionesEns();
     document.getElementById('tab_complementos').innerHTML = modoHabilitacionEns
         ? '<i class="fa-solid fa-link"></i> Pinza ya armada'
         : '<i class="fa-solid fa-puzzle-piece"></i> Complemento';
@@ -830,8 +830,20 @@ function obtenerProductoIdSeleccionadoEns() {
     return productoSeleccionadoEns.producto_id || '';
 }
 
+function actualizarVisibilidadHabilitacionesEns() {
+    const producto = productosGridDataEns.find(p => String(p.producto_id) === String(productoSeleccionadoEns.producto_id));
+    const codigo = String(producto?.codigo || '').trim().toUpperCase();
+    const puedeUsarHabilitaciones = !modoHabilitacionEns && ['COS', 'COV'].includes(codigo);
+    const tab = document.getElementById('tab_habilitaciones');
+    tab.hidden = !puedeUsarHabilitaciones;
+    if (!puedeUsarHabilitaciones && tabDetalleActiva === 'habilitacion') {
+        cambiarTabDetalle('produccion');
+    }
+}
+
 function cambioProductoEnsamblaje() {
     actualizarCampoMaquinaEnsamblaje();
+    actualizarVisibilidadHabilitacionesEns();
     renderGridDetalle();
 }
 
@@ -980,6 +992,7 @@ async function cargarSelectsModalEns(seleccion = {}, incluirEnsamblajeId = 0) {
     maquinaSelect.value = seleccion.maquina_id ? String(seleccion.maquina_id) : '';
     renderProductoGridEns();
     actualizarCampoMaquinaEnsamblaje();
+    actualizarVisibilidadHabilitacionesEns();
 
     // Sucursal
     sucursalSeleccionadaEns = seleccion.sucursal_id ? String(seleccion.sucursal_id) : '';
@@ -1521,7 +1534,7 @@ async function renderGridDetalle() {
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
                 <span class="meta">De Primera · Color: <b>${c.complemento_color_nombre || '-'}</b></span>
                 <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
-                <span class="meta">${formatearFechaHoraLegibleEns(c.fin)}</span>
+                <span class="meta">${c.fin ? formatearFechaHoraLegibleEns(c.fin) : 'En curso · disponible según avances pesados'}</span>
             </button>`;
         }).join('');
     }
@@ -1797,7 +1810,7 @@ function limpiarFormularioEnsamblaje() {
     document.getElementById('tab_complementos').classList.remove('activo');
     document.getElementById('tab_habilitaciones').classList.remove('activo');
     document.getElementById('tab_derivados').hidden = false;
-    document.getElementById('tab_habilitaciones').hidden = false;
+    document.getElementById('tab_habilitaciones').hidden = true;
     document.getElementById('tab_complementos').innerHTML = '<i class="fa-solid fa-puzzle-piece"></i> Complemento';
     modoHabilitacionEns = false;
     document.getElementById('ens_modo_producto').className = 'btn btn-sm btn-primary';

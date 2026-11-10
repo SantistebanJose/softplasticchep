@@ -611,13 +611,37 @@ function buscarComplementos()
         responder(true, 'OK', ['complementos' => []]);
     }
 
+    $cantidadBaseComplementoSql = "CASE
+        WHEN e.proveniente = 'habilitacion_gancho' AND e.fin IS NULL THEN (
+            SELECT COALESCE(SUM(NULLIF(avance->>'cantidad_salida', '')::numeric), 0)
+            FROM unnest(COALESCE(e.js_avances_operarios, ARRAY[]::jsonb[])) AS habilitacion_avances(avance)
+            WHERE avance->>'tipo' = 'habilitacion'
+              AND UPPER(COALESCE(avance->>'unidad_salida_codigo', 'KG')) IN ('KG','KGS','KILOGRAMO','KILOGRAMOS')
+        )
+        ELSE COALESCE(e.cantidad_peso_kg, 0)
+    END";
+    $consumosComplementoSql = "COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric)
+        FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev
+        JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+        WHERE ev->>'tipo' = 'consumo_complemento'
+          AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0)";
+    $stockComplementoSql = "GREATEST(0, ($cantidadBaseComplementoSql) - ($consumosComplementoSql)
+        - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric)
+            FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m
+            WHERE ev_m->>'tipo' = 'merma_componente_externo'
+              AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0))";
     $where = [
         "e.deleted_at IS NULL",
-        "e.fin IS NOT NULL",
         "e.ensamblaje_id_referido IS NULL",
-        "GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0) - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) > 0",
+        "$stockComplementoSql > 0",
         "LOWER(COALESCE(cm.nombre, '')) LIKE '%primera%'",
     ];
+    $where[] = $soloHabilitaciones
+        ? "(e.fin IS NOT NULL OR (e.proveniente = 'habilitacion_gancho' AND EXISTS (
+            SELECT 1 FROM unnest(COALESCE(e.js_avances_operarios, ARRAY[]::jsonb[])) AS habilitacion_avances(av)
+            WHERE av->>'tipo' = 'habilitacion' AND UPPER(COALESCE(av->>'unidad_salida_codigo', 'KG')) IN ('KG','KGS','KILOGRAMO','KILOGRAMOS')
+        )))"
+        : "e.fin IS NOT NULL";
     if ($paraHabilitacionGancho) {
         // Fuente de la habilitación: Pinza Palanita completa de Primera.
         // La regla genérica de multi-molde no reconoce la receta propia de PI,
@@ -707,7 +731,7 @@ function buscarComplementos()
                     AND (SELECT COUNT(DISTINCT (assoc->>'producto_id')::bigint) FROM jsonb_array_elements(COALESCE(m.js_producto, '[]'::jsonb)) assoc) > 1)
                 ORDER BY rep.id LIMIT 1
             )) AS color_id,
-            GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(NULLIF(ev->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev JOIN ensamblaje eus ON eus.id = NULLIF(ev->>'ensamblaje_id', '')::bigint WHERE ev->>'tipo' = 'consumo_complemento' AND COALESCE(ev->>'anulado','false') <> 'true' AND eus.deleted_at IS NULL), 0) - COALESCE((SELECT SUM(NULLIF(ev_m->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_m WHERE ev_m->>'tipo' = 'merma_componente_externo' AND COALESCE(ev_m->>'anulado','false') <> 'true'), 0)) AS cantidad_peso_kg,
+            $stockComplementoSql AS cantidad_peso_kg,
             e.fin,
             :destino_complemento AS destino_ensamblaje,
             (SELECT ev_ext->>'enviado_a' FROM jsonb_array_elements(COALESCE(e.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado', 'false') <> 'true' ORDER BY ev_ext->>'fecha' DESC LIMIT 1) AS enviado_a,
@@ -1172,6 +1196,15 @@ function obtenerDatosProduccionParaEnsamblaje(int $produccionId)
 
 function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): string
 {
+    $cantidadBaseHabilitacionSql = "CASE
+        WHEN ec.proveniente = 'habilitacion_gancho' AND ec.fin IS NULL THEN (
+            SELECT COALESCE(SUM(NULLIF(av->>'cantidad_salida', '')::numeric), 0)
+            FROM unnest(COALESCE(ec.js_avances_operarios, ARRAY[]::jsonb[])) AS habilitacion_avances(av)
+            WHERE av->>'tipo' = 'habilitacion'
+              AND UPPER(COALESCE(av->>'unidad_salida_codigo', 'KG')) IN ('KG','KGS','KILOGRAMO','KILOGRAMOS')
+        )
+        ELSE COALESCE(ec.cantidad_peso_kg, 0)
+    END";
     return "(
         SELECT jsonb_agg(complemento.item)
         FROM (
@@ -1181,7 +1214,7 @@ function subquerySelectComplementosUtilizados(string $aliasEnsamblaje = 'e'): st
                 'color_id', COALESCE(ec.color_id, (SELECT pd.color_id FROM rel_ensamblaje_producto r0 JOIN produccion pd ON pd.id = r0.molde_produccion_id WHERE r0.ensamblaje_id = ec.id AND r0.deleted_at IS NULL LIMIT 1)),
                 'color_nombre', co.nombre, 'categoria_material_id', ec.categoria_material_id,
                 'producto_codigo', pc.codigo, 'producto_descripcion', pc.descripcion,
-                'cantidad_peso_kg', GREATEST(0, ec.cantidad_peso_kg
+                'cantidad_peso_kg', GREATEST(0, ($cantidadBaseHabilitacionSql)
                     - COALESCE((SELECT SUM(NULLIF(ev0->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev0 JOIN ensamblaje eu0 ON eu0.id = NULLIF(ev0->>'ensamblaje_id', '')::bigint WHERE ev0->>'tipo' = 'consumo_complemento' AND COALESCE(ev0->>'anulado','false') <> 'true' AND eu0.deleted_at IS NULL), 0)
                     - COALESCE((SELECT SUM(NULLIF(ev1->>'cantidad', '')::numeric) FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev1 WHERE ev1->>'tipo' = 'merma_componente_externo' AND COALESCE(ev1->>'anulado','false') <> 'true'), 0)),
                 'es_componente_externo', EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ec.js_historial, '[]'::jsonb)) ev_ext WHERE ev_ext->>'tipo' = 'envio_componente_externo' AND COALESCE(ev_ext->>'anulado','false') <> 'true'),
@@ -2569,6 +2602,7 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             $comp = executeQuery(
                 $conectar,
                 "SELECT ec.id, ec.fin, ec.deleted_at, ec.proveniente, ec.js_producto_emsamblado, ec.js_historial, ec.ensamblaje_id_referido,
+                        array_to_json(COALESCE(ec.js_avances_operarios, ARRAY[]::jsonb[])) AS avances_json,
                         pc.codigo AS producto_codigo,
                         " . sqlEsMultiMoldeCompleto('ec', 'pc') . " AS es_multi_molde_completo,
                         ec.categoria_material_id, cm.nombre AS categoria_material_nombre,
@@ -2583,7 +2617,8 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                     WHERE rep.ensamblaje_id = ec.id AND rep.deleted_at IS NULL
                     LIMIT 1
                  ) own ON true
-                 WHERE ec.id = :id",
+                 WHERE ec.id = :id
+                 FOR UPDATE OF ec",
                 ['id' => $complementoId]
             );
             if (empty($comp)) {
@@ -2592,8 +2627,30 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
             if (!empty($comp[0]['deleted_at'])) {
                 throw new Exception("El ensamblaje complemento #$complementoId está inactivo.");
             }
-            if (empty($comp[0]['fin'])) {
+            $esHabilitacionCompartida = ($comp[0]['proveniente'] ?? '') === 'habilitacion_gancho';
+            if (empty($comp[0]['fin']) && !$esHabilitacionCompartida) {
                 throw new Exception("El ensamblaje complemento #$complementoId aún no ha finalizado.");
+            }
+            if (empty($comp[0]['fin']) && $esHabilitacionCompartida) {
+                $avancesHabilitacion = json_decode((string)($comp[0]['avances_json'] ?? '[]'), true) ?: [];
+                $kgHabilitados = 0.0;
+                foreach ($avancesHabilitacion as $avanceHabilitacion) {
+                    if (($avanceHabilitacion['tipo'] ?? '') === 'habilitacion'
+                        && in_array(strtoupper((string)($avanceHabilitacion['unidad_salida_codigo'] ?? 'KG')), ['KG','KGS','KILOGRAMO','KILOGRAMOS'], true)) {
+                        $kgHabilitados += (float)($avanceHabilitacion['cantidad_salida'] ?? 0);
+                    }
+                }
+                $consumidoHabilitacion = executeQuery($conectar, "
+                    SELECT COALESCE(SUM(NULLIF(ev->>'cantidad', '')::numeric), 0) AS cantidad
+                    FROM jsonb_array_elements(COALESCE((SELECT js_historial FROM ensamblaje WHERE id = :id), '[]'::jsonb)) ev
+                    JOIN ensamblaje destino ON destino.id = NULLIF(ev->>'ensamblaje_id', '')::bigint
+                    WHERE ev->>'tipo' = 'consumo_complemento'
+                      AND COALESCE(ev->>'anulado', 'false') <> 'true' AND destino.deleted_at IS NULL
+                ", ['id' => $complementoId]);
+                $saldoHabilitacion = max(0, $kgHabilitados - (float)($consumidoHabilitacion[0]['cantidad'] ?? 0));
+                if ($saldoHabilitacion <= 0.000001) {
+                    throw new Exception("La habilitación #$complementoId aún no tiene avances pesados disponibles para usar.");
+                }
             }
             $esPinzaParaHabilitar = $esHabilitacionGancho && $productoObjetivoId > 0
                 && strtoupper((string)($comp[0]['producto_codigo'] ?? '')) === 'PI';
@@ -2637,7 +2694,6 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                     throw new Exception("El ensamblaje complemento #$complementoId está reservado para otro producto o color.");
                 }
             }
-            $esHabilitacionCompartida = ($comp[0]['proveniente'] ?? '') === 'habilitacion_gancho';
             if (!$esHabilitacionCompartida && !empty($comp[0]['ensamblaje_id_referido']) && intval($comp[0]['ensamblaje_id_referido']) !== $ensamblajeId) {
                 throw new Exception("El ensamblaje complemento #$complementoId ya está vinculado a otro armado activo.");
             }
@@ -2651,7 +2707,7 @@ function insertarLineasEnsamblaje($conectar, int $ensamblajeId, array $detalle):
                 executeNonQuery($conectar, "
                     UPDATE ensamblaje
                     SET js_historial = COALESCE(js_historial, '[]'::jsonb) || :evento::jsonb, update_at = NOW()
-                    WHERE id = :complemento_id AND deleted_at IS NULL AND fin IS NOT NULL
+                    WHERE id = :complemento_id AND deleted_at IS NULL
                 ", ['evento' => $eventoVinculo, 'complemento_id' => $complementoId]);
             } else {
                 // Para los complementos ordinarios, el puntero conserva la
@@ -3171,7 +3227,7 @@ function obtenerComponentesDisponiblesParaAvance(PDO $conectar, int $ensamblajeI
     }
 
     $complementos = executeQuery($conectar, "
-        SELECT ec.id, ec.producto_id, ec.cantidad_peso_kg, ec.unidad_salida_id,
+        SELECT ec.id, ec.producto_id, ec.cantidad_peso_kg, ec.unidad_salida_id, ec.fin,
                ec.js_historial, ec.proveniente,
                array_to_json(COALESCE(ec.js_avances_operarios, ARRAY[]::jsonb[])) AS avances_json,
                to_json(p.js_configuracion_armado) AS receta_json,
@@ -3242,7 +3298,17 @@ function obtenerComponentesDisponiblesParaAvance(PDO $conectar, int $ensamblajeI
                 $usadoTotal += (float)($eventoFuente['cantidad'] ?? 0);
                 if ($idPadreFuente === $ensamblajeId) $usadoPropio += (float)($eventoFuente['cantidad'] ?? 0);
             }
-            $disponibleHabilitacion = max(0, (float)($comp['cantidad_peso_kg'] ?? 0) - $usadoTotal);
+            $cantidadBaseHabilitacion = (float)($comp['cantidad_peso_kg'] ?? 0);
+            if (empty($comp['fin'])) {
+                $cantidadBaseHabilitacion = 0.0;
+                foreach ($avancesFuente as $avanceFuente) {
+                    if (($avanceFuente['tipo'] ?? '') === 'habilitacion'
+                        && in_array(strtoupper((string)($avanceFuente['unidad_salida_codigo'] ?? 'KG')), ['KG','KGS','KILOGRAMO','KILOGRAMOS'], true)) {
+                        $cantidadBaseHabilitacion += (float)($avanceFuente['cantidad_salida'] ?? 0);
+                    }
+                }
+            }
+            $disponibleHabilitacion = max(0, $cantidadBaseHabilitacion - $usadoTotal);
             $componentes[] = [
                 'source_key' => 'h:' . (int)$comp['id'], 'source_type' => 'habilitacion',
                 'habilitacion_id' => (int)$comp['id'], 'composicion' => $composicion,
@@ -3500,6 +3566,7 @@ function registrarAvanceEnsamblaje(int $id): void
                 $cantidadRestantePorClave[$clave] = cantidadComponenteParaAvance($ejemplo, $unidadesEquivalentes, (string)$ejemplo['unidad_codigo']);
             }
         }
+        $masaObjetivoPorClave = $masaRestantePorClave;
         foreach ($seleccionados as $componente) {
             $clave = (string)$componente['source_key'];
             $unidad = strtoupper(trim((string)($componente['unidad_codigo'] ?? 'KG')));
@@ -3513,6 +3580,21 @@ function registrarAvanceEnsamblaje(int $id): void
                     } else $cantidadConsumida = $cantidadMasa / 1000;
                 } else {
                     $cantidadConsumida = cantidadComponenteParaAvance($componente, $unidadesEquivalentes, $unidad);
+                }
+                // La lectura de balanza puede variar ligeramente. Se admite
+                // hasta 2% sobre el consumo calculado para ESTE componente,
+                // pero el inventario nunca se descuenta por encima del saldo.
+                if ($unidadAvance === 'KG'
+                    && in_array($unidad, ['KG','KGS','KILOGRAMO','KILOGRAMOS','G','GR','GRAMO','GRAMOS'], true)) {
+                    $disponibleFuente = (float)$componente['cantidad_disponible'];
+                    $exceso = $cantidadConsumida - $disponibleFuente;
+                    if ($exceso > 0) {
+                        $tolerancia = abs($cantidadConsumida) * 0.02;
+                        if ($exceso > $tolerancia + 0.000001) {
+                            throw new RuntimeException($componente['nombre'] . ': el consumo calculado supera el saldo por más de la tolerancia permitida (2%).');
+                        }
+                        $cantidadConsumida = $disponibleFuente;
+                    }
                 }
                 $composicion = array_merge($composicion, (array)($componente['composicion'] ?? []));
             } else {
@@ -3551,7 +3633,10 @@ function registrarAvanceEnsamblaje(int $id): void
             }
             $consumos[] = $uso;
         }
-        foreach ($masaRestantePorClave as $clave => $masaPendiente) if ($masaPendiente > 0.001) throw new RuntimeException('No hay suficiente producción/complemento disponible para cubrir el peso de receta de ' . $clave . '.');
+        foreach ($masaRestantePorClave as $clave => $masaPendiente) {
+            $toleranciaGramos = max(0.001, abs((float)($masaObjetivoPorClave[$clave] ?? 0)) * 0.02);
+            if ($masaPendiente > $toleranciaGramos) throw new RuntimeException('No hay suficiente producción/complemento disponible para cubrir el peso de receta de ' . $clave . '.');
+        }
         foreach ($cantidadRestantePorClave as $clave => $cantidadPendiente) if ($cantidadPendiente > 0.000001) throw new RuntimeException('No hay suficiente producción/complemento disponible para cubrir la receta de ' . $clave . '.');
         $composicion = array_values(array_unique($composicion));
         foreach ($consumos as $uso) {
@@ -3597,6 +3682,7 @@ function registrarAvanceEnsamblaje(int $id): void
             'unidades_equivalentes' => $unidadesEquivalentes,
             'composicion' => $composicion,
             'componentes_consumidos' => $consumos,
+            'tolerancia_consumo_porcentaje' => 2,
         ];
         $eventoJson = json_encode($avance, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $cambios = [[
