@@ -1509,14 +1509,17 @@ async function renderGridDetalle() {
         }
 
         grid.innerHTML = complementos.map(c => {
-            const nombreMostrar = c.moldes_nombres || `${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}`;
+            const esHabilitacion = ['true', 't', '1'].includes(String(c.es_habilitacion_gancho).toLowerCase());
+            const nombreMostrar = esHabilitacion
+                ? 'Habilitación gancho + cadenita chica'
+                : (c.moldes_nombres || `${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}`);
             const unidad = c.unidad_salida_codigo || 'kg';
             const est = estiloPorNombre(nombreMostrar);
             const yaAgregada = ticketDetalleEns.some(l => l.tipo === 'complemento' && l.ensamblaje_complemento_id == c.ensamblaje_id);
             return `
             <button type="button" class="pc-mat-card ${yaAgregada ? 'ya-agregada' : ''}" ${yaAgregada ? 'disabled' : ''}
                     style="--card-color:${est.color};--card-bg:${est.bg};"
-                    onclick='agregarLineaDetalle("${['true', 't', '1'].includes(String(c.es_habilitacion_gancho).toLowerCase()) ? 'habilitacion' : 'complemento'}", ${JSON.stringify({
+                    onclick='agregarLineaDetalle("${esHabilitacion ? 'habilitacion' : 'complemento'}", ${JSON.stringify({
                         ensamblaje_id: c.ensamblaje_id,
                         producto_codigo: c.producto_codigo,
                         producto_descripcion: c.producto_descripcion,
@@ -1527,10 +1530,10 @@ async function renderGridDetalle() {
                         unidad_salida_codigo: unidad,
                         nombre_mostrar: nombreMostrar,
                         fin: c.fin,
-                        es_habilitacion_gancho: ['true', 't', '1'].includes(String(c.es_habilitacion_gancho).toLowerCase()),
+                        es_habilitacion_gancho: esHabilitacion,
                     })})'>
                 <span class="pellet"><i class="fa-solid fa-puzzle-piece"></i></span>
-                <span class="nombre">${['true', 't', '1'].includes(String(c.es_habilitacion_gancho).toLowerCase()) ? 'HABILITACIÓN · ' : ''}${nombreMostrar}</span>
+                <span class="nombre">${nombreMostrar}</span>
                 <span class="meta">${c.producto_codigo ?? ''} - ${c.producto_descripcion ?? ''}</span>
                 <span class="meta">De Primera · Color: <b>${c.complemento_color_nombre || '-'}</b></span>
                 <span class="meta">Armado #${c.ensamblaje_id} · <b>${formatearCantidadEns(c.cantidad_peso_kg)}</b> ${unidad}</span>
