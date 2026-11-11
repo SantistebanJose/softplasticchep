@@ -225,6 +225,10 @@ function controladorEnsamblaje(string $accion): void
         }
     }
 
+    if (in_array($accion, array_merge($accionesOperacion, $accionesSoloAdmin), true)) {
+        bloquearReenvioDuplicado($accion);
+    }
+
     // Libera el bloqueo de sesión antes de las consultas y operaciones. Las
     // sesiones concurrentes de las vistas de etapas no deben quedar esperando
     // mientras una consulta a la base de datos termina.

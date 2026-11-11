@@ -65,6 +65,10 @@ function controladorSucursal(string $accion): void
         }
     }
 
+    if (in_array($accion, $accionesAdministracion, true)) {
+        bloquearReenvioDuplicado($accion);
+    }
+
     switch ($accion) {
         case 'LISTARSUCURSALES':
             listarSucursales();

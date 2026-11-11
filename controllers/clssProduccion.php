@@ -169,6 +169,10 @@ function controladorProduccion(string $accion): void
         }
     }
 
+    if (in_array($accion, array_merge($accionesOperacion, $accionesSoloAdmin), true)) {
+        bloquearReenvioDuplicado($accion);
+    }
+
     // Conserva $_SESSION en memoria para las validaciones/consultas de abajo,
     // pero libera su bloqueo antes de acceder a la base. El tablero consulta
     // periódicamente y puede coincidir con otras peticiones del mismo usuario.

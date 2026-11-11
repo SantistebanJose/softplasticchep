@@ -9,6 +9,9 @@ function fechaHoraLocalInput(fecha = new Date()) {
     return `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}T${pad(fecha.getHours())}:${pad(fecha.getMinutes())}`;
 }
 
+const solicitudesLlamarEnCurso = new Map();
+const ACCIONES_QUE_MODIFICAN_DATOS = /^(GUARDAR|CREAR|REGISTRAR|AGREGAR|EDITAR|ELIMINAR|REACTIVAR|INICIAR|FINALIZAR|ENVIAR|PASAR|COMPLEMENTAR|SELECCIONAR|ACTUALIZAR|CERRAR|ANULAR|APROBAR|RECHAZAR|ASIGNAR|DESASIGNAR)/i;
+
 async function llamar(url, accion, params = {}) {
     const body = new URLSearchParams({
         accion,
@@ -18,19 +21,48 @@ async function llamar(url, accion, params = {}) {
         ...params
     });
 
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
-    });
-
-    const texto = await resp.text();
-    try {
-        return JSON.parse(texto);
-    } catch (e) {
-        console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
-        throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
+    const esEscritura = ACCIONES_QUE_MODIFICAN_DATOS.test(String(accion));
+    const claveSolicitud = `${url}|${accion}|${body.toString()}`;
+    if (solicitudesLlamarEnCurso.has(claveSolicitud)) {
+        return solicitudesLlamarEnCurso.get(claveSolicitud);
     }
+
+    const boton = esEscritura && document.activeElement instanceof HTMLButtonElement
+        ? document.activeElement : null;
+    const botonYaDeshabilitado = boton?.disabled ?? false;
+    if (boton && !botonYaDeshabilitado) {
+        boton.disabled = true;
+        boton.dataset.enviandoSolicitud = '1';
+        boton.setAttribute('aria-busy', 'true');
+    }
+
+    const solicitud = (async () => {
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body
+            });
+
+            const texto = await resp.text();
+            try {
+                return JSON.parse(texto);
+            } catch (e) {
+                console.error(`Respuesta no es JSON válido para accion=${accion}:`, texto);
+                throw new Error(`El servidor no devolvió JSON válido (accion=${accion}). Revisa la consola.`);
+            }
+        } finally {
+            solicitudesLlamarEnCurso.delete(claveSolicitud);
+            if (boton && boton.dataset.enviandoSolicitud === '1') {
+                delete boton.dataset.enviandoSolicitud;
+                boton.removeAttribute('aria-busy');
+                if (!botonYaDeshabilitado) boton.disabled = false;
+            }
+        }
+    })();
+
+    solicitudesLlamarEnCurso.set(claveSolicitud, solicitud);
+    return solicitud;
 }
 
 // OJO: ahora es async porque getDeviceModelo() puede ser async la primera

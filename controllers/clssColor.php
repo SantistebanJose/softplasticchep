@@ -56,6 +56,10 @@ function controladorColor(string $accion): void
         }
     }
 
+    if (in_array($accion, $accionesAdministracion, true)) {
+        bloquearReenvioDuplicado($accion);
+    }
+
     switch ($accion) {
         case 'LISTARCOLORES':
             listarColores();

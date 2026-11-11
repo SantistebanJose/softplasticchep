@@ -73,6 +73,10 @@ function controladorEmpaquetado(string $accion): void
         }
     }
 
+    if (in_array($accion, array_merge($accionesOperacion, $accionesSoloAdmin), true)) {
+        bloquearReenvioDuplicado($accion);
+    }
+
     // Libera el bloqueo exclusivo de la sesión antes de ejecutar consultas.
     // La tablet hace varias llamadas AJAX concurrentes con la misma sesión;
     // si la primera tarda, las demás quedan esperando session_start() hasta
