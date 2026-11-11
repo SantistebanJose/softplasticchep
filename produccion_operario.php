@@ -240,6 +240,37 @@ include("header.php");
     .rep-pasada-titulo { font-size: 10px; font-weight: 700; letter-spacing: -.02em; }
     .rep-pasada-aporte { color: #6b7280; font-size: 9px; }
     .rep-pasada-fotos { display: inline-flex; align-items: center; gap: 1px; }
+    .rep-panel-tabs { display:flex; gap:6px; margin:0 0 10px; border-bottom:1px solid #dbe1ea; }
+    .rep-panel-tab { border:0; border-bottom:3px solid transparent; background:transparent; color:#64748b; padding:9px 13px; font-size:13px; font-weight:650; }
+    .rep-panel-tab.activo { color:var(--pc-navy,#1f2937); border-bottom-color:var(--pc-red,#c0392b); }
+    .rep-exec-title { font-size:20px; font-weight:700; margin:0; color:#17233a; }
+    .rep-exec-subtitle { color:#64748b; font-size:12px; margin-top:3px; }
+    .rep-owner-summary { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .rep-owner-pills { display:flex; gap:8px; flex-wrap:wrap; }
+    .rep-download-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+    .rep-owner-pill { background:#f4f6fa; border:1px solid #e1e6ee; border-radius:8px; padding:7px 10px; font-size:12px; color:#475569; }
+    .rep-owner-pill b { color:#17233a; }
+    .rep-week-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .rep-week-table th { text-align:left; color:#64748b; font-size:11px; text-transform:uppercase; letter-spacing:.035em; padding:9px 10px; border-bottom:1px solid #dbe1ea; }
+    .rep-week-table td { padding:9px 10px; border-bottom:1px solid #edf0f4; vertical-align:top; }
+    .rep-week-table tr:last-child td { border-bottom:0; }
+    .rep-week-op { font-weight:700; color:#17233a; }
+    .rep-week-meta { font-size:11px; color:#64748b; margin-top:2px; }
+    .rep-week-qty { font-weight:700; white-space:nowrap; color:#173a8a; }
+    .rep-week-mold { display:block; color:#334155; }
+    .rep-week-note { color:#64748b; font-size:12px; }
+    .rep-operator-block { border:1px solid #e1e6ee; border-radius:9px; overflow:hidden; margin:12px 0; }
+    .rep-operator-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 13px; background:#f2f6fc; border-bottom:1px solid #dbe3ef; }
+    .rep-operator-heading h3 { color:#173a8a; font-size:15px; font-weight:750; margin:0; }
+    .rep-operator-heading span { color:#64748b; display:block; font-size:11px; margin-top:2px; }
+    .rep-operator-heading strong { font-size:13px; color:#17233a; }
+    .rep-week-detail { min-width:1120px; }
+    .rep-week-detail td { font-size:12px; }
+    .rep-week-detail th { white-space:nowrap; }
+    .rep-pesadas-texto { min-width:100px; font-weight:650; line-height:1.65; white-space:nowrap; }
+    .rep-card-title { font-size:19px !important; margin:0 !important; }
+    .rep-contenido .pc-card-header h2 { font-size:19px !important; line-height:1.25; margin:0; }
+    .rep-contenido .pc-card { margin-bottom:10px; }
     .rep-foto-pasada { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #2458b8; font-size: 10px; cursor: pointer; }
     .rep-foto-pasada:hover { background: #eaf0fe; }
     @media (max-width: 1200px) {
@@ -263,8 +294,8 @@ include("header.php");
         <div>
             <label>Periodo</label>
             <select id="rep_modo" class="form-select">
-                <option value="dia" selected>Día</option>
-                <option value="semana">Semana</option>
+                <option value="dia">Día</option>
+                <option value="semana" selected>Semana</option>
                 <option value="mes">Mes</option>
                 <option value="rango">Rango personalizado</option>
             </select>
@@ -319,11 +350,16 @@ include("header.php");
     </div>
 </div>
 
-<div id="rep_contenido">
+<div class="rep-panel-tabs" role="tablist" aria-label="Vistas del reporte de producción">
+    <button type="button" class="rep-panel-tab activo" id="rep_tab_semanal" role="tab" aria-selected="true" onclick="cambiarVistaReporte('semanal')">Resumen por operario</button>
+    <button type="button" class="rep-panel-tab" id="rep_tab_operario" role="tab" aria-selected="false" onclick="cambiarVistaReporte('operario')">Detalle por operario</button>
+</div>
+
+<div id="rep_contenido" class="rep-contenido">
     <div class="pc-card">
         <div class="rep-vacio-estado">
-            <i class="fa-solid fa-magnifying-glass-chart"></i>
-            <p>Busca un operario arriba para ver el detalle de su producción.</p>
+            <i class="fa-solid fa-chart-column"></i>
+            <p>Cargando el resumen de producción por operario y molde.</p>
         </div>
     </div>
 </div>
@@ -360,6 +396,9 @@ let operarioSeleccionado = null; // { id, nombre_completo, cargo }
 let chartTurno = null;
 let chartMaquina = null;
 let chartsPorUnidad = {}; // ej: { turno_kg: Chart, maquina_und: Chart }
+let vistaReporteActiva = 'semanal';
+let solicitudSemanalActual = 0;
+let ultimoResumenSemanal = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('rep_fecha').value = hoyISO();
@@ -372,17 +411,18 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Error cargando filtros iniciales:', err);
         Swal.fire('Error', 'No se pudieron cargar los filtros del reporte.', 'error');
     });
+    generarReporteSemanal();
 
     document.getElementById('rep_modo').addEventListener('change', () => {
         actualizarVisibilidadFechas();
-        recargarSiHayOperario();
+        recargarVistaActiva();
     });
     actualizarVisibilidadFechas();
 
     ['rep_fecha', 'rep_fecha_desde', 'rep_fecha_hasta', 'rep_turno', 'rep_maquina', 'rep_sucursal']
         .forEach(id => document.getElementById(id).addEventListener('change', () => {
             if (id === 'rep_fecha') actualizarVisibilidadFechas();
-            recargarSiHayOperario();
+            recargarVistaActiva();
         }));
 
     const input = document.getElementById('rep_buscar_operario');
@@ -404,6 +444,151 @@ function hoyISO() {
 
 function recargarSiHayOperario() {
     if (operarioSeleccionado) generarReporteOperario();
+}
+
+function cambiarVistaReporte(vista) {
+    vistaReporteActiva = vista;
+    solicitudSemanalActual++;
+    const semanal = vista === 'semanal';
+    document.getElementById('rep_tab_semanal').classList.toggle('activo', semanal);
+    document.getElementById('rep_tab_operario').classList.toggle('activo', !semanal);
+    document.getElementById('rep_tab_semanal').setAttribute('aria-selected', String(semanal));
+    document.getElementById('rep_tab_operario').setAttribute('aria-selected', String(!semanal));
+    if (semanal) generarReporteSemanal();
+    else recargarSiHayOperario();
+}
+
+function recargarVistaActiva() {
+    if (vistaReporteActiva === 'semanal') generarReporteSemanal();
+    else recargarSiHayOperario();
+}
+
+async function generarReporteSemanal() {
+    const idSolicitud = ++solicitudSemanalActual;
+    const contenido = document.getElementById('rep_contenido');
+    const modo = document.getElementById('rep_modo').value;
+    const fecha = document.getElementById('rep_fecha').value || hoyISO();
+    const params = {
+        modo,
+        fecha: modo === 'mes' ? `${fecha}-01` : fecha,
+        fecha_desde: document.getElementById('rep_fecha_desde').value,
+        fecha_hasta: document.getElementById('rep_fecha_hasta').value,
+        turno: document.getElementById('rep_turno').value,
+        maquina_id: document.getElementById('rep_maquina').value,
+        sucursal_id: document.getElementById('rep_sucursal').value,
+    };
+    contenido.innerHTML = '<div class="pc-card"><div class="rep-vacio-estado"><i class="fa-solid fa-spinner fa-spin"></i><p>Preparando resumen de producción...</p></div></div>';
+    try {
+        const json = await llamarReporte('REPORTESEMANALOPERARIOS', params);
+        if (idSolicitud !== solicitudSemanalActual || vistaReporteActiva !== 'semanal') return;
+        if (!json.success) throw new Error(json.message || 'No se pudo cargar el resumen.');
+        pintarResumenSemanal(json);
+    } catch (error) {
+        if (idSolicitud !== solicitudSemanalActual || vistaReporteActiva !== 'semanal') return;
+        console.error(error);
+        contenido.innerHTML = `<div class="pc-card"><div class="rep-vacio-estado"><p>${escaparHtmlReporte(error.message || 'No se pudo cargar el resumen.')}</p></div></div>`;
+    }
+}
+
+function pintarResumenSemanal(json) {
+    ultimoResumenSemanal = json;
+    const filas = Array.isArray(json.detalle) ? json.detalle : [];
+    const porOperario = new Map();
+    let totalAvances = 0;
+    const totalesUnidad = new Map();
+    filas.forEach(f => {
+        const id = String(f.operario_id ?? f.operario);
+        if (!porOperario.has(id)) porOperario.set(id, { nombre: f.operario, detalle: [], avances: 0, pendientes: 0, totalUnidades: new Map() });
+        const grupo = porOperario.get(id);
+        const unidad = etiquetaUnidad(f.unidad);
+        const producido = Number(f.producido) || 0;
+        const pendientes = Number(f.pendiente) || 0;
+        grupo.detalle.push(f);
+        grupo.avances++;
+        grupo.pendientes += pendientes;
+        grupo.totalUnidades.set(unidad, (grupo.totalUnidades.get(unidad) || 0) + producido);
+        totalAvances++;
+        totalesUnidad.set(unidad, (totalesUnidad.get(unidad) || 0) + producido);
+    });
+    const totalPills = [...totalesUnidad.entries()].map(([unidad, total]) => `<span class="rep-owner-pill">Producido <b>${formatearCantidad(total, unidad)}</b></span>`).join('');
+    const cuerpo = [...porOperario.values()].map(op => {
+        const totales = [...op.totalUnidades.entries()].map(([unidad, total]) => formatearCantidad(total, unidad)).join(' · ');
+        const filasDetalle = op.detalle.map(f => `<tr>
+            <td>${escaparHtmlReporte(formatearFecha(f.fecha))}</td>
+            <td>${escaparHtmlReporte((f.hora || '').slice(0, 5))}</td>
+            <td>${escaparHtmlReporte(TURNO_LABEL[f.turno] ?? f.turno ?? '-')}</td>
+            <td>${escaparHtmlReporte(f.molde || '-')}</td>
+            <td>${escaparHtmlReporte(f.producto || '-')}</td>
+            <td>${escaparHtmlReporte(f.maquina || '-')}</td>
+            <td>${escaparHtmlReporte(f.color || '-')}</td>
+            <td>${formatearKg(f.kg_insertado)}</td>
+            <td class="rep-week-qty">${Number(f.pendiente) ? '<span class="text-warning">Pendiente</span>' : formatearCantidad(f.producido, f.unidad)}</td>
+            <td class="rep-pesadas-texto">${renderCantidadesPesadas(f.pasadas)}</td>
+            <td>${escaparHtmlReporte(f.observaciones || '-')}</td>
+        </tr>`).join('');
+        return `<section class="rep-operator-block"><div class="rep-operator-heading"><div><h3>${escaparHtmlReporte(op.nombre)}</h3><span>${op.avances} avances · ${op.pendientes} pendiente${op.pendientes === 1 ? '' : 's'}</span></div><strong>Total producido: ${totales || '0'}</strong></div>
+            <div class="pc-table-wrap"><table class="rep-week-table rep-week-detail"><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Kg insertado</th><th>Cant. producida</th><th>Pesadas</th><th>Obs.</th></tr></thead><tbody>${filasDetalle || '<tr><td colspan="11">Sin avances</td></tr>'}</tbody></table></div></section>`;
+    }).join('');
+    document.getElementById('rep_contenido').innerHTML = `
+        <div class="pc-card">
+            <div class="rep-owner-summary">
+                <div><h2 class="rep-exec-title">Resumen de producción por operario</h2><div class="rep-exec-subtitle">${escaparHtmlReporte(json.periodo?.etiqueta || '')}</div></div>
+                <div class="rep-download-actions"><div class="rep-owner-pills"><span class="rep-owner-pill"><b>${porOperario.size}</b> operarios</span><span class="rep-owner-pill"><b>${totalAvances}</b> avances</span>${totalPills}</div><button type="button" class="btn btn-primary btn-sm" onclick="imprimirResumenProduccion()"><i class="fa-solid fa-file-pdf"></i> Imprimir / Guardar PDF</button></div>
+            </div>
+            ${filas.length ? cuerpo : '<div class="rep-vacio-tabla">No hay producción registrada en este periodo con los filtros seleccionados.</div>'}
+            <div class="rep-week-note mt-2">Las pesadas muestran sus cantidades. El reporte descargado incluye esos importes y excluye las fotos.</div>
+        </div>`;
+}
+
+function renderCantidadesPesadas(pasadas) {
+    if (!Array.isArray(pasadas) || !pasadas.length) return '-';
+    return pasadas.map(p => `P${Number(p.numero) || 1}: ${formatearCantidad(p.cantidad_operario ?? p.cantidad, p.unidad)}`).join('<br>');
+}
+
+function imprimirResumenProduccion() {
+    if (!ultimoResumenSemanal) return;
+    const ventana = window.open('', '_blank');
+    if (!ventana) {
+        Swal.fire('Ventana bloqueada', 'Permite las ventanas emergentes para imprimir o guardar el reporte como PDF.', 'info');
+        return;
+    }
+    const filasPorOperario = new Map();
+    (ultimoResumenSemanal.detalle || []).forEach(f => {
+        const id = String(f.operario_id ?? f.operario);
+        if (!filasPorOperario.has(id)) filasPorOperario.set(id, { nombre: f.operario, filas: [], totales: new Map() });
+        const grupo = filasPorOperario.get(id);
+        const unidad = etiquetaUnidad(f.unidad);
+        grupo.totales.set(unidad, (grupo.totales.get(unidad) || 0) + (Number(f.producido) || 0));
+        const pesadas = renderCantidadesPesadas(f.pasadas);
+        grupo.filas.push(`<tr>
+            <td>${escaparHtmlReporte(formatearFecha(f.fecha))}</td><td>${escaparHtmlReporte((f.hora || '').slice(0, 5))}</td>
+            <td>${escaparHtmlReporte(TURNO_LABEL[f.turno] ?? f.turno ?? '-')}</td><td>${escaparHtmlReporte(f.molde || '-')}</td>
+            <td>${escaparHtmlReporte(f.producto || '-')}</td><td>${escaparHtmlReporte(f.maquina || '-')}</td>
+            <td>${escaparHtmlReporte(f.color || '-')}</td><td>${formatearKg(f.kg_insertado)}</td>
+            <td>${Number(f.pendiente) ? 'Pendiente de desglose' : formatearCantidad(f.producido, f.unidad)}</td>
+            <td>${pesadas}</td><td>${escaparHtmlReporte(f.observaciones || '-')}</td>
+        </tr>`);
+    });
+    const secciones = [...filasPorOperario.values()].map((op, indice) => {
+        const total = [...op.totales.entries()].map(([unidad, cantidad]) => formatearCantidad(cantidad, unidad)).join(' · ');
+        return `<section class="operario ${indice ? 'siguiente' : ''}"><div class="operario-titulo"><h2>${escaparHtmlReporte(op.nombre)}</h2><strong>Total producido: ${total}</strong></div>
+            <table><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Kg insertado</th><th>Cant. producida</th><th>Pesadas</th><th>Obs.</th></tr></thead><tbody>${op.filas.join('')}</tbody></table></section>`;
+    }).join('');
+    const documento = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte de producción por operario</title><style>
+        @page{size:landscape;margin:10mm}*{box-sizing:border-box}body{font:10px Arial,sans-serif;color:#17233a;margin:0}
+        header{display:flex;justify-content:space-between;align-items:end;border-bottom:2px solid #193b88;padding:0 0 8px;margin-bottom:10px}
+        h1{font-size:18px;margin:0 0 3px}header p{font-size:10px;color:#52627a;margin:0}.generado{color:#64748b;text-align:right}
+        .operario{margin:0 0 12px;break-inside:auto}.operario.siguiente{break-before:page}.operario-titulo{display:flex;justify-content:space-between;align-items:center;background:#eef3fb;border:1px solid #ccd8eb;border-bottom:0;padding:7px 9px;break-after:avoid}
+        .operario h2{font-size:13px;color:#193b88;margin:0}.operario strong{font-size:11px}
+        table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#e8edf5;color:#43516a;font-size:8px;text-transform:uppercase;text-align:left}th,td{border:1px solid #d8dee8;padding:5px 4px;vertical-align:middle;overflow-wrap:anywhere}td{font-size:9px}tbody tr{break-inside:avoid}
+        th:nth-child(1){width:7%}th:nth-child(2){width:5%}th:nth-child(3){width:6%}th:nth-child(4){width:11%}th:nth-child(5){width:10%}th:nth-child(6){width:8%}th:nth-child(7){width:8%}th:nth-child(8){width:7%}th:nth-child(9){width:8%}th:nth-child(10){width:13%}th:nth-child(11){width:7%}
+        @media screen{body{padding:16px;background:#eef1f5}.hoja{max-width:1400px;margin:0 auto;background:white;padding:18px;box-shadow:0 2px 12px #17233a22}}
+    </style></head><body><main class="hoja"><header><div><h1>Reporte de producción por operario</h1><p>${escaparHtmlReporte(ultimoResumenSemanal.periodo?.etiqueta || '')}</p></div><p class="generado">Generado: ${new Date().toLocaleString('es-PE')}</p></header>${secciones || '<p>No hay producción en el periodo seleccionado.</p>'}</main></body></html>`;
+    ventana.document.open();
+    ventana.document.write(documento);
+    ventana.document.close();
+    ventana.focus();
+    ventana.print();
 }
 
 function actualizarVisibilidadFechas() {
@@ -538,7 +723,7 @@ function seleccionarOperario(id) {
     document.getElementById('rep_buscar_operario').value = '';
     document.getElementById('rep_buscar_dropdown').classList.remove('activo');
     pintarChipOperario();
-    generarReporteOperario();
+    cambiarVistaReporte('operario');
 }
 
 function quitarOperario() {
@@ -551,6 +736,7 @@ function quitarOperario() {
                 <p>Busca un operario arriba para ver el detalle de su producción.</p>
             </div>
         </div>`;
+    cambiarVistaReporte('semanal');
 }
 
 function pintarChipOperario() {
@@ -768,7 +954,7 @@ function renderPasadasReporte(pasadas) {
             ? `Aporte del operario: ${formatearCantidad(p.cantidad_operario, unidad)}`
             : 'Cantidad total de la pasada';
         return `<div class="rep-pasada">
-            <span class="rep-pasada-titulo" title="${escaparHtmlReporte(tooltipAporte)}">P${Number(p.numero) || '?'} ${escaparHtmlReporte(formatearCantidad(p.cantidad, unidad).replace(/\s+/g, ''))}</span>
+            <span class="rep-pasada-titulo" title="${escaparHtmlReporte(tooltipAporte)}">P${Number(p.numero) || '?'}: ${escaparHtmlReporte(formatearCantidad(p.cantidad, unidad))}</span>
             ${tieneAporteDistinto ? `<span class="rep-pasada-aporte" title="${escaparHtmlReporte(tooltipAporte)}">Op. ${formatearCantidad(p.cantidad_operario, unidad)}</span>` : ''}
             ${fotos.length ? `<span class="rep-pasada-fotos">${fotos.map((foto, i) => `<button type="button" class="rep-foto-pasada" title="Ver foto ${i + 1}" aria-label="Ver foto ${i + 1}" data-ruta="${escaparHtmlReporte(encodeURIComponent(String(foto.url || '')))}" data-nombre="${escaparHtmlReporte(foto.nombre || `Foto ${i + 1}`)}"><i class="fa-solid fa-camera"></i>${fotos.length > 1 ? `<span>${i + 1}</span>` : ''}</button>`).join('')}</span>` : ''}
         </div>`;

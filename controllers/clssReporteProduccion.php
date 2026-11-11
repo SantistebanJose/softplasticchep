@@ -91,6 +91,9 @@ function controladorReporteProduccion($accion)
         case 'REPORTEOPERARIODETALLE':
             reporteOperarioDetalle();
             break;
+        case 'REPORTESEMANALOPERARIOS':
+            reporteSemanalOperarios();
+            break;
         case 'MISPRODUCCIONESOPERARIO':
             misProduccionesOperario();
             break;
@@ -163,6 +166,119 @@ function reporteOperarioDetalle()
     ]);
 
     responder(true, 'OK', $payload);
+}
+
+/** Resumen gerencial: producción semanal agrupada por operario y molde. */
+function reporteSemanalOperarios(): void
+{
+    $conectar = conectar_oll_BD();
+    $modo = trim((string) ($_POST['modo'] ?? 'semana'));
+    if (!in_array($modo, ['dia', 'semana', 'mes', 'rango'], true)) $modo = 'semana';
+    [$fechaDesde, $fechaHasta, $etiquetaPeriodo] = calcularRangoPeriodo(
+        $modo,
+        trim($_POST['fecha'] ?? date('Y-m-d')),
+        trim((string) ($_POST['fecha_desde'] ?? '')),
+        trim((string) ($_POST['fecha_hasta'] ?? ''))
+    );
+    if (!$fechaDesde || !$fechaHasta) responder(false, 'Debes indicar una fecha válida.');
+
+    $maquinaId = max(0, (int) ($_POST['maquina_id'] ?? 0));
+    $sucursalId = max(0, (int) ($_POST['sucursal_id'] ?? 0));
+    $turno = trim((string) ($_POST['turno'] ?? ''));
+    $unidadSql = unidadCaseSql('pd');
+    $turnoSql = turnoCaseSql('pd.fecha');
+    $turnoSqlAvance = turnoCaseSql('a.fecha');
+    $condiciones = ["pd.deleted_at IS NULL", "pd.fecha::date BETWEEN :desde AND :hasta"];
+    $params = ['desde' => $fechaDesde, 'hasta' => $fechaHasta];
+    if ($maquinaId > 0) {
+        $condiciones[] = 'pd.maquina_id = :maquina_id';
+        $params['maquina_id'] = $maquinaId;
+    }
+    if ($sucursalId > 0) {
+        $condiciones[] = 'pd.sucursal = :sucursal_id';
+        $params['sucursal_id'] = $sucursalId;
+    }
+    if (in_array($turno, ['dia', 'tarde', 'noche', 'madrugada'], true)) {
+        $condiciones[] = "$turnoSql = :turno";
+        $params['turno'] = $turno;
+    }
+
+    $sql = "
+        WITH avances AS (
+            SELECT pd.id, pd.operario_id, pd.molde_id, pd.unico_molde_producto,
+                   pd.fecha, pd.js_operarios, pd.cantidad_producida_kg,
+                   pd.cantidad, pd.observaciones, pd.js_cantidades_salientes,
+                   pd.maquina_id, pd.color_id, op.operario,
+                   COALESCE(
+                       NULLIF(op.operario->>'cantidad_producida', '')::numeric,
+                       CASE WHEN jsonb_array_length(COALESCE(pd.js_operarios, '[]'::jsonb)) <= 1
+                            THEN pd.cantidad_producida_kg END
+                   ) AS producido,
+                   $unidadSql AS unidad
+            FROM produccion pd
+            CROSS JOIN LATERAL (
+                SELECT participante AS operario
+                FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS participantes(participante)
+                UNION ALL
+                SELECT jsonb_build_object('operario_id', pd.operario_id) AS operario
+                WHERE pd.operario_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM jsonb_array_elements(COALESCE(pd.js_operarios, '[]'::jsonb)) AS existentes(participante)
+                      WHERE (existentes.participante->>'operario_id')::bigint = pd.operario_id
+                  )
+            ) AS op
+            WHERE " . implode(' AND ', $condiciones) . "
+        )
+        SELECT COALESCE(o.id, (a.operario->>'operario_id')::bigint) AS operario_id,
+               COALESCE(NULLIF(a.operario->>'nombre_completo', ''), NULLIF(a.operario->>'nombre', ''), o.nombre_completo, 'Operario sin nombre') AS operario,
+               a.id, a.fecha::date AS fecha, a.fecha::time AS hora,
+               $turnoSqlAvance AS turno,
+               mo.nombre AS molde, pr.descripcion AS producto,
+               COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina,
+               co.nombre AS color, a.cantidad AS kg_insertado,
+               a.producido, a.unidad,
+               CASE WHEN a.producido IS NULL THEN 1 ELSE 0 END AS pendiente,
+               a.observaciones, a.js_cantidades_salientes
+        FROM avances a
+        LEFT JOIN operario o ON o.id = (a.operario->>'operario_id')::bigint
+        LEFT JOIN molde mo ON mo.id = a.molde_id
+        LEFT JOIN producto pr ON pr.id = NULLIF(split_part(a.unico_molde_producto, '-', 2), '')::bigint
+        LEFT JOIN maquina ma ON ma.id = a.maquina_id
+        LEFT JOIN color co ON co.id = a.color_id
+        ORDER BY operario, a.fecha, a.id
+    ";
+    $filas = executeQuery($conectar, $sql, $params);
+    foreach ($filas as &$fila) {
+        $salidas = !empty($fila['js_cantidades_salientes'])
+            ? json_decode((string) $fila['js_cantidades_salientes'], true) : [];
+        $fila['pasadas'] = [];
+        foreach (is_array($salidas) ? $salidas : [] as $salida) {
+            if (!is_array($salida)) continue;
+            $cantidad = $salida['cantidad'] ?? $salida['cantidad_kg'] ?? null;
+            if ($cantidad === null) continue;
+            $aporte = null;
+            $desglose = is_array($salida['desglose_operarios'] ?? null) ? $salida['desglose_operarios'] : [];
+            foreach ($desglose as $persona) {
+                if ((int) ($persona['operario_id'] ?? 0) === (int) $fila['operario_id']) {
+                    $aporte = (float) ($persona['cantidad'] ?? 0);
+                    break;
+                }
+            }
+            if ($desglose && $aporte === null) continue;
+            $fila['pasadas'][] = [
+                'numero' => (int) ($salida['pasada'] ?? count($fila['pasadas']) + 1),
+                'cantidad' => (float) $cantidad,
+                'cantidad_operario' => $aporte,
+                'unidad' => strtoupper((string) ($salida['unidad'] ?? $fila['unidad'] ?? 'KG')),
+            ];
+        }
+        unset($fila['js_cantidades_salientes']);
+    }
+    unset($fila);
+    responder(true, 'OK', [
+        'periodo' => ['desde' => $fechaDesde, 'hasta' => $fechaHasta, 'etiqueta' => $etiquetaPeriodo],
+        'detalle' => $filas,
+    ]);
 }
 
 // =============================================================================
