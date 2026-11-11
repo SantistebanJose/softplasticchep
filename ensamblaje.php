@@ -443,8 +443,10 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
 <script>
 const FEATURE_RUTA_EXTERIOR_PINZA_PALANITA = <?= FEATURE_RUTA_EXTERIOR_PINZA_PALANITA ? 'true' : 'false' ?>;
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const CONTROLADOR_ENSAMBLAJE = 'controllers/clssEnsamblaje.php';
 const CONTROLADOR_SUCURSAL   = 'controllers/clssSucursal.php';
 // SweetAlert de cantidad se abre sobre este modal; desactivar el focus trap
@@ -977,6 +979,11 @@ function tarjetaEnsamblajeHtml(e) {
             </div>
         </div>
         <div class="pc-ens-card-foot">
+            ${FEATURE_STICKER_QR ? `<button type="button" class="btn btn-sm btn-outline-dark" title="Imprimir sticker de procedencia"
+                    data-sticker-stage="E" data-sticker-id="${e.ensamblaje_id}"
+                    data-sticker-code="${e.sticker_unico ?? ''}" data-sticker-tape="${e.codigo_escribir_cinta ?? ''}">
+                <i class="fa-solid fa-tag"></i> Sticker
+            </button>` : ''}
             <button class="pc-icon-btn" onclick="abrirModalEditarEnsamblaje(${e.ensamblaje_id})" title="Editar">
                 <i class="fa-solid fa-pen"></i>
             </button>

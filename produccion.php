@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/controllers/featureFlags.php';
 $pageTitle    = 'Producción';
 $pageSubtitle = 'Avances de producción';
 $activePage = 'produccion';
@@ -681,7 +682,9 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
 <script>
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 
 
 var total = 0;
@@ -1341,6 +1344,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
 
         <div class="pc-prod-card-foot">
+            ${FEATURE_STICKER_QR ? `<button type="button" class="pc-prod-ghost-btn" title="Imprimir sticker de procedencia"
+                    data-sticker-stage="P" data-sticker-id="${p.id}"
+                    data-sticker-code="${p.sticker_unico ?? ''}" data-sticker-tape="${p.codigo_escribir_cinta ?? ''}">
+                <i class="fa-solid fa-tag"></i> Sticker
+            </button>` : ''}
             ${puedeIniciar
                 ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
                     <i class="fa-solid fa-play"></i> Iniciar</button>`

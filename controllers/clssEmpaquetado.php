@@ -724,7 +724,9 @@ function listarTodosEmpaquetados()
 
     $limiteListado = esSesionTabletEmpaquetado() ? '' : ' LIMIT 300';
     $sql = "SELECT
-            emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id,
+            emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id, emp.sucursal,
+            CONCAT(LPAD(emp.id::varchar, 10, '0'), '-', LPAD(emp.sucursal::varchar, 5, '0'), '-', LPAD(emp.producto_id::varchar, 5, '0'), '-', COALESCE(LPAD(emp.emsamblaje_id::varchar, 10, '0'), '0')) AS sticker_unico,
+            CONCAT(emp.id, '/', emp.sucursal, '/', emp.producto_id) AS codigo_escribir_cinta,
             emp.unidad_medida,
             p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
             p.unidad_venta_id, p.cant_equivale, p.unidad_equivale_id,

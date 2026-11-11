@@ -930,6 +930,8 @@ function listarProducciones()
         SELECT
             pd.id, pd.operario_id, pd.js_operarios, pd.maquina_id, pd.molde_id,
             pd.color_id, pd.categoria_material_id, pd.sucursal, pd.cantidad,
+            CONCAT(LPAD(pd.id::varchar, 10, '0'), '-', LPAD(pd.sucursal::varchar, 5, '0'), '-', LPAD(pd.molde_id::varchar, 5, '0')) AS sticker_unico,
+            CONCAT(pd.id, '/', pd.sucursal, '/', pd.molde_id) AS codigo_escribir_cinta,
             pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
             pd.fecha_envio_ensamblaje, pd.enviado_ensamblaje, pd.deleted_at,
             pd.js_cantidades_merma, pd.js_cantidades_salientes, pd.completo, pd.pases_finalizados,

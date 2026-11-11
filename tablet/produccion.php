@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../controllers/feature_flags.php';
+require_once __DIR__ . '/../controllers/featureFlags.php';
 require __DIR__ . '/../controllers_tablet/clssAuthOperario.php';
 
 
@@ -492,7 +493,51 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 
 /* Botón principal grande, fácil de alcanzar en la parte superior de la pantalla */
 .pc-btn-lg-touch{ min-height:52px; }
+.pc-prod-record-reminder{position:relative;isolation:isolate;overflow:hidden;margin:16px 20px 0;padding:15px 18px;border:1px solid #d7e5ff;border-radius:16px;background:linear-gradient(110deg,#f4f8ff 0%,#edf5ff 58%,#f6f4ff 100%);box-shadow:0 5px 18px rgba(40,91,170,.08);color:#183b66;display:grid;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:15px}
+.pc-prod-record-reminder:after{content:"";position:absolute;z-index:-1;width:190px;height:190px;right:-84px;top:-116px;border-radius:50%;background:rgba(92,145,255,.08)}
+.pc-prod-record-reminder .reminder-art{width:72px;height:72px;display:grid;place-items:center;border-radius:18px;background:rgba(255,255,255,.82);box-shadow:inset 0 0 0 1px rgba(91,139,220,.11)}
+.pc-prod-record-reminder .reminder-art svg{width:66px;height:58px;overflow:visible}
+.pc-prod-record-reminder .reminder-copy{position:relative;min-width:0;font-size:.9rem;line-height:1.45}
+.pc-prod-record-reminder .reminder-copy strong{display:block;margin-bottom:3px;color:#173b70;font-size:1rem}
+.pc-prod-record-reminder .reminder-link{white-space:nowrap;font-weight:700;box-shadow:0 3px 8px rgba(36,107,254,.17)}
+.pc-prod-record-reminder .belt-dash{stroke-dasharray:5 5;animation:pc-reminder-belt 1.6s linear infinite}
+.pc-prod-record-reminder .moving-box{transform-box:fill-box;transform-origin:center;animation:pc-reminder-float 2.4s ease-in-out infinite}
+.pc-prod-record-reminder .success-badge{transform-box:fill-box;transform-origin:center;animation:pc-reminder-pop 2.4s ease-in-out infinite}
+.pc-prod-record-reminder .sparkle{transform-box:fill-box;transform-origin:center;animation:pc-reminder-spark 2.2s ease-in-out infinite}
+@keyframes pc-reminder-belt{to{stroke-dashoffset:-20}}
+@keyframes pc-reminder-float{0%,100%{transform:translateY(1px)}50%{transform:translateY(-3px)}}
+@keyframes pc-reminder-pop{0%,72%,100%{transform:scale(.94)}82%{transform:scale(1.12)}90%{transform:scale(1)}}
+@keyframes pc-reminder-spark{0%,100%{opacity:.45;transform:scale(.75) rotate(0)}50%{opacity:1;transform:scale(1.12) rotate(12deg)}}
+@media(max-width:700px){.pc-prod-record-reminder{margin:12px 12px 0;padding:13px;grid-template-columns:56px minmax(0,1fr);gap:10px;align-items:start;border-radius:14px}.pc-prod-record-reminder .reminder-art{width:54px;height:54px;border-radius:14px}.pc-prod-record-reminder .reminder-art svg{width:52px;height:46px}.pc-prod-record-reminder .reminder-copy{font-size:.84rem;line-height:1.42}.pc-prod-record-reminder .reminder-copy strong{font-size:.94rem}.pc-prod-record-reminder .reminder-link{grid-column:1/-1;justify-self:stretch;width:100%;white-space:normal;min-height:42px}}
+@media(prefers-reduced-motion:reduce){.pc-prod-record-reminder .belt-dash,.pc-prod-record-reminder .moving-box,.pc-prod-record-reminder .success-badge,.pc-prod-record-reminder .sparkle{animation:none}}
 </style>
+
+<aside class="pc-prod-record-reminder" role="note" aria-label="Recordatorio de producción y ayuda">
+    <span class="reminder-art" aria-hidden="true">
+        <svg viewBox="0 0 100 82" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M11 62h78" stroke="#9DB9E8" stroke-width="5" stroke-linecap="round"/>
+            <path class="belt-dash" d="M17 62h66" stroke="#4B83E4" stroke-width="2" stroke-linecap="round"/>
+            <g class="moving-box">
+                <path d="m28 35 18-10 18 10v22L46 67 28 57V35Z" fill="#F5B544"/>
+                <path d="m28 35 18 11 18-11M46 46v21" stroke="#C47A18" stroke-width="2" stroke-linejoin="round"/>
+                <path d="m38 30 18 11" stroke="#FFE1A2" stroke-width="2"/>
+            </g>
+            <g class="success-badge">
+                <circle cx="75" cy="24" r="13" fill="#2DB879"/>
+                <path d="m69 24 4 4 8-9" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <path class="sparkle" d="m20 23 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" fill="#6B8FF2"/>
+            <path class="sparkle" d="m82 47 1.5 3.5L87 52l-3.5 1.5L82 57l-1.5-3.5L77 52l3.5-1.5L82 47Z" fill="#E8A63A" style="animation-delay:.5s"/>
+        </svg>
+    </span>
+    <div class="reminder-copy">
+        <strong>¡Cada registro ayuda a que la producción avance!</strong>
+        Al terminar, registra tu producción para que el equipo continúe el proceso. ¿Tienes dudas? Pulsa <b>Hacer una consulta</b> y escríbenos en Ayuda y soporte.
+    </div>
+    <a class="btn btn-sm btn-primary reminder-link" href="soporte.php">
+        <i class="fa-solid fa-headset"></i> Hacer una consulta
+    </a>
+</aside>
 
 <div class="pc-card" style="margin:20px;">
     <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -934,8 +979,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
 
 <script>
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
@@ -1860,6 +1907,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         </div>` : ''}
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
         <div class="pc-prod-card-foot">
+            ${FEATURE_STICKER_QR ? `<button type="button" class="pc-prod-ghost-btn" title="Imprimir sticker de procedencia"
+                    data-sticker-stage="P" data-sticker-id="${p.id}"
+                    data-sticker-code="${p.sticker_unico ?? ''}" data-sticker-tape="${p.codigo_escribir_cinta ?? ''}">
+                <i class="fa-solid fa-tag"></i> Sticker
+            </button>` : ''}
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
             ${p.origen_cambio_molde_evento && puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}

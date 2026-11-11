@@ -531,8 +531,10 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
 <script>
 const FEATURE_RUTA_EXTERIOR_PINZA_PALANITA = <?= FEATURE_RUTA_EXTERIOR_PINZA_PALANITA ? 'true' : 'false' ?>;
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
@@ -1181,6 +1183,11 @@ function tarjetaEnsamblajeHtml(e, nuevosEstados, silencioso) {
         <div class="pc-ens-corrida-line"><i class="fa-regular fa-clock"></i> ${lineaCorrida}</div>
         ${renderAvancesOperariosEns(e)}
         <div class="pc-ens-card-foot">
+            ${FEATURE_STICKER_QR ? `<button type="button" class="pc-ens-ghost-btn teal" title="Imprimir sticker de procedencia"
+                    data-sticker-stage="E" data-sticker-id="${e.ensamblaje_id}"
+                    data-sticker-code="${e.sticker_unico ?? ''}" data-sticker-tape="${e.codigo_escribir_cinta ?? ''}">
+                <i class="fa-solid fa-tag"></i> Sticker
+            </button>` : ''}
             ${puedeIniciar ? `<button type="button" class="pc-ens-ghost-btn success" onclick="iniciarEnsamblajeAccion(${e.ensamblaje_id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeFinalizar ? `<button type="button" class="pc-ens-ghost-btn teal" onclick="registrarAvanceEnsamblajeAccion(${e.ensamblaje_id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
             ${puedeFinalizar && salidaEnUnidades ? `<button type="button" class="pc-ens-ghost-btn teal" onclick="registrarUnidadesTerminadasAccion(${e.ensamblaje_id})"><i class="fa-solid fa-list-ol"></i> Registrar UND</button>` : ''}

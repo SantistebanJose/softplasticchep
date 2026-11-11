@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/../controllers/featureFlags.php';
 require __DIR__ . '/../controllers_tablet/clssAuthOperario.php';
 
 if (empty($_SESSION['operario_id'])) {
@@ -565,7 +566,9 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
 <script>
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
 const OPERARIO_NOMBRE = <?= json_encode($operarioNombre) ?>;
 
@@ -1110,6 +1113,11 @@ async function cargarMisRegistros() {
             ${vendido
                 ? `<span class="pc-reg-badge-vendido">Vendido</span>`
                 : `<span class="pc-reg-badge-disp">Disponible</span>`}
+            ${FEATURE_STICKER_QR ? `<button type="button" class="btn btn-sm btn-outline-dark" title="Imprimir sticker de procedencia"
+                    data-sticker-stage="A" data-sticker-id="${r.id}"
+                    data-sticker-code="${r.sticker_unico ?? ''}" data-sticker-tape="${r.codigo_escribir_cinta ?? ''}">
+                <i class="fa-solid fa-tag"></i> Sticker
+            </button>` : ''}
         </div>`;
     }).join('');
 }

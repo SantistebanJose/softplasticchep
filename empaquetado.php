@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/controllers/featureFlags.php';
 $pageTitle    = 'Empaquetado';
 $pageSubtitle = 'Registro de empaquetado por producto (con mezcla de colores)';
 $activePage = 'empaquetado';
@@ -366,7 +367,9 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
 <script>
+const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
 const CONTROLADOR_SUCURSAL    = 'controllers/clssSucursal.php';
 const modalEmpaquetado = new bootstrap.Modal(document.getElementById('modalEmpaquetado'));
@@ -807,6 +810,11 @@ async function cargarListadoGeneralEmp() {
                 ? `<span class="badge-vendido">Vendido ${formatearFechaHoraLegibleEmp(r.pasado_venta)}</span>`
                 : '<span class="badge bg-success">Disponible</span>'}</td>
             <td>
+                ${FEATURE_STICKER_QR ? `<button type="button" class="pc-icon-btn" title="Imprimir sticker de procedencia"
+                        data-sticker-stage="A" data-sticker-id="${r.id}"
+                        data-sticker-code="${r.sticker_unico ?? ''}" data-sticker-tape="${r.codigo_escribir_cinta ?? ''}">
+                    <i class="fa-solid fa-tag"></i>
+                </button>` : ''}
                 <button type="button" class="pc-icon-btn" title="Ver registros"
                         onclick="abrirModalEmpaquetado(${r.producto_id}, '${productoLabel}')">
                     <i class="fa-solid fa-box-open"></i>

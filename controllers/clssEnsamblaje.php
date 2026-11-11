@@ -1413,6 +1413,8 @@ function listarEnsamblajes()
     $sql = "SELECT
         e.id AS ensamblaje_id,
         e.producto_id,
+        CONCAT(LPAD(e.id::varchar, 10, '0'), '-', COALESCE(LPAD(e.sucursal::varchar, 5, '0'), '0'), '-', LPAD(e.producto_id::varchar, 5, '0')) AS sticker_unico,
+        CONCAT(e.id, '/', e.sucursal, '/', e.producto_id) AS codigo_escribir_cinta,
         e.maquina_id,
         COALESCE(NULLIF(maq.alias, ''), maq.nombre) AS maquina_nombre,
         p.codigo AS producto_codigo,
