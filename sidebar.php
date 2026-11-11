@@ -46,7 +46,7 @@ $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
 $ventasPages         = ['punto_venta', 'listado_ventas'];
 $personalPages       = ['operarios', 'cargo'];
 $mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
-$administracionPages = ['usuarios', 'roles', 'sucursal', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'helpdesk'];
+$administracionPages = ['usuarios', 'roles', 'sucursal', 'almacenes', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'helpdesk'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
 $operacionesOpen    = in_array($activePage, $operacionesPages);
@@ -175,6 +175,9 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <?php endif; ?>
             <a href="sucursal.php" class="<?= pc_sub_class('sucursal', $activePage) ?>">
                 <span class="dot"></span> Sucursales
+            </a>
+            <a href="almacenes.php" class="<?= pc_sub_class('almacenes', $activePage) ?>">
+                <span class="dot"></span> Almacenes
             </a>
             <a href="proveedores.php" class="<?= pc_sub_class('proveedores', $activePage) ?>">
                 <span class="dot"></span> Proveedores
