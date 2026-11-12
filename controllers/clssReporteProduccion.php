@@ -208,6 +208,7 @@ function reporteSemanalOperarios(): void
             SELECT pd.id, pd.operario_id, pd.molde_id, pd.unico_molde_producto,
                    pd.fecha, pd.js_operarios, pd.cantidad_producida_kg,
                    pd.cantidad, pd.observaciones, pd.js_cantidades_salientes,
+                   pd.js_casusticas AS eventos_turno,
                    pd.maquina_id, pd.color_id, op.operario,
                    COALESCE(
                        NULLIF(op.operario->>'cantidad_producida', '')::numeric,
@@ -238,7 +239,8 @@ function reporteSemanalOperarios(): void
                co.nombre AS color, a.cantidad AS kg_insertado,
                a.producido, a.unidad,
                CASE WHEN a.producido IS NULL THEN 1 ELSE 0 END AS pendiente,
-               a.observaciones, a.js_cantidades_salientes
+               a.observaciones, a.js_cantidades_salientes,
+               to_jsonb(a.eventos_turno) AS eventos_turno
         FROM avances a
         LEFT JOIN operario o ON o.id = (a.operario->>'operario_id')::bigint
         LEFT JOIN molde mo ON mo.id = a.molde_id
@@ -248,7 +250,30 @@ function reporteSemanalOperarios(): void
         ORDER BY operario, a.fecha, a.id
     ";
     $filas = executeQuery($conectar, $sql, $params);
+    $cambiosTurno = [];
     foreach ($filas as &$fila) {
+        if (!isset($cambiosTurno[(string) $fila['id']])) {
+            $eventos = is_string($fila['eventos_turno'] ?? null)
+                ? json_decode($fila['eventos_turno'], true)
+                : ($fila['eventos_turno'] ?? []);
+            if (!is_array($eventos)) $eventos = [];
+            $pausasPendientes = [];
+            $eventosCambio = [];
+            foreach ($eventos as $evento) {
+                if (!is_array($evento)) continue;
+                if (($evento['tipo'] ?? '') === 'pausa' && ($evento['motivo'] ?? '') === 'cambio_turno') {
+                    $pausasPendientes[] = $evento;
+                } elseif (($evento['tipo'] ?? '') === 'reanudacion' && $pausasPendientes) {
+                    $pausa = array_shift($pausasPendientes);
+                    $eventosCambio[] = ['pausa' => $pausa, 'reanudacion' => $evento];
+                }
+            }
+            foreach ($pausasPendientes as $pausa) {
+                $eventosCambio[] = ['pausa' => $pausa, 'reanudacion' => null];
+            }
+            $cambiosTurno[(string) $fila['id']] = $eventosCambio;
+        }
+
         $salidas = !empty($fila['js_cantidades_salientes'])
             ? json_decode((string) $fila['js_cantidades_salientes'], true) : [];
         $fila['pasadas'] = [];
@@ -273,11 +298,39 @@ function reporteSemanalOperarios(): void
             ];
         }
         unset($fila['js_cantidades_salientes']);
+        unset($fila['eventos_turno']);
     }
     unset($fila);
+    $cambiosTurnoLista = [];
+    $cambiosTurnoVistos = [];
+    foreach ($filas as $fila) {
+        foreach ($cambiosTurno[(string) $fila['id']] ?? [] as $cambio) {
+            $claveCambio = (string) $fila['id'] . '|' . (string) ($cambio['pausa']['evento_id'] ?? $cambio['pausa']['fecha'] ?? '');
+            if (isset($cambiosTurnoVistos[$claveCambio])) continue;
+            $cambiosTurnoVistos[$claveCambio] = true;
+            $nombreOperarios = static function ($evento): array {
+                if (!is_array($evento)) return [];
+                return array_values(array_filter(array_map(static function ($operario): string {
+                    if (!is_array($operario)) return '';
+                    return trim((string) ($operario['nombre_completo'] ?? $operario['nombre'] ?? ''));
+                }, (array) ($evento['operarios'] ?? []))));
+            };
+            $cambiosTurnoLista[] = [
+                'produccion_id' => (int) $fila['id'],
+                'molde' => $fila['molde'],
+                'producto' => $fila['producto'],
+                'pausa_fecha' => $cambio['pausa']['fecha'] ?? null,
+                'reanudacion_fecha' => $cambio['reanudacion']['fecha'] ?? null,
+                'operarios_antes' => $nombreOperarios($cambio['pausa'] ?? null),
+                'operarios_despues' => $nombreOperarios($cambio['reanudacion'] ?? null),
+            ];
+        }
+    }
+    usort($cambiosTurnoLista, static fn($a, $b) => strcmp((string) $b['pausa_fecha'], (string) $a['pausa_fecha']));
     responder(true, 'OK', [
         'periodo' => ['desde' => $fechaDesde, 'hasta' => $fechaHasta, 'etiqueta' => $etiquetaPeriodo],
         'detalle' => $filas,
+        'cambios_turno' => $cambiosTurnoLista,
     ]);
 }
 

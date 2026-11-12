@@ -259,6 +259,12 @@ include("header.php");
     .rep-week-qty { font-weight:700; white-space:nowrap; color:#173a8a; }
     .rep-week-mold { display:block; color:#334155; }
     .rep-week-note { color:#64748b; font-size:12px; }
+    .rep-cambios-turno { margin:12px 0 16px; border:1px solid #d8e3f2; border-radius:9px; overflow:hidden; }
+    .rep-cambios-turno h3 { background:#f2f6fc; color:#193b88; font-size:15px; font-weight:700; margin:0; padding:10px 12px; }
+    .rep-cambios-turno table { width:100%; border-collapse:collapse; font-size:12px; }
+    .rep-cambios-turno th,.rep-cambios-turno td { border-bottom:1px solid #e8edf4; padding:8px 9px; text-align:left; vertical-align:top; }
+    .rep-cambios-turno th { color:#64748b; font-size:10px; text-transform:uppercase; white-space:nowrap; }
+    .rep-cambio-pendiente { color:#9a6700; font-weight:650; }
     .rep-operator-block { border:1px solid #e1e6ee; border-radius:9px; overflow:hidden; margin:12px 0; }
     .rep-operator-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 13px; background:#f2f6fc; border-bottom:1px solid #dbe3ef; }
     .rep-operator-heading h3 { color:#173a8a; font-size:15px; font-weight:750; margin:0; }
@@ -511,6 +517,7 @@ function pintarResumenSemanal(json) {
         totalesUnidad.set(unidad, (totalesUnidad.get(unidad) || 0) + producido);
     });
     const totalPills = [...totalesUnidad.entries()].map(([unidad, total]) => `<span class="rep-owner-pill">Producido <b>${formatearCantidad(total, unidad)}</b></span>`).join('');
+    const cambiosTurnoHtml = renderCambiosTurno(ultimoResumenSemanal.cambios_turno || []);
     const cuerpo = [...porOperario.values()].map(op => {
         const totales = [...op.totalUnidades.entries()].map(([unidad, total]) => formatearCantidad(total, unidad)).join(' · ');
         const filasDetalle = op.detalle.map(f => `<tr>
@@ -535,9 +542,29 @@ function pintarResumenSemanal(json) {
                 <div><h2 class="rep-exec-title">Resumen de producción por operario</h2><div class="rep-exec-subtitle">${escaparHtmlReporte(json.periodo?.etiqueta || '')}</div></div>
                 <div class="rep-download-actions"><div class="rep-owner-pills"><span class="rep-owner-pill"><b>${porOperario.size}</b> operarios</span><span class="rep-owner-pill"><b>${totalAvances}</b> avances</span>${totalPills}</div><button type="button" class="btn btn-primary btn-sm" onclick="imprimirResumenProduccion()"><i class="fa-solid fa-file-pdf"></i> Imprimir / Guardar PDF</button></div>
             </div>
+            ${cambiosTurnoHtml}
             ${filas.length ? cuerpo : '<div class="rep-vacio-tabla">No hay producción registrada en este periodo con los filtros seleccionados.</div>'}
             <div class="rep-week-note mt-2">Las pesadas muestran sus cantidades. El reporte descargado incluye esos importes y excluye las fotos.</div>
         </div>`;
+}
+
+function formatearFechaHoraCambio(fecha) {
+    if (!fecha) return '-';
+    const normalizada = String(fecha).replace(' ', 'T');
+    const date = new Date(normalizada);
+    return Number.isNaN(date.getTime()) ? escaparHtmlReporte(fecha) : escaparHtmlReporte(date.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }));
+}
+
+function renderCambiosTurno(cambios) {
+    if (!Array.isArray(cambios) || !cambios.length) return '<section class="rep-cambios-turno"><h3><i class="fa-solid fa-right-left"></i> Cambios de turno (0)</h3><div class="rep-week-note p-3">No se registraron cambios de turno en este periodo.</div></section>';
+    const filas = cambios.map(c => `<tr>
+        <td>#${Number(c.produccion_id)}</td><td>${formatearFechaHoraCambio(c.pausa_fecha)}</td>
+        <td>${c.reanudacion_fecha ? formatearFechaHoraCambio(c.reanudacion_fecha) : '<span class="rep-cambio-pendiente">Pendiente de reanudación</span>'}</td>
+        <td>${escaparHtmlReporte(c.operarios_antes?.join(', ') || 'Sin dato')}</td>
+        <td>${escaparHtmlReporte(c.operarios_despues?.join(', ') || (c.reanudacion_fecha ? 'Sin dato' : 'Aún no continúa'))}</td>
+        <td>${escaparHtmlReporte(c.molde || '-')}</td>
+    </tr>`).join('');
+    return `<section class="rep-cambios-turno"><h3><i class="fa-solid fa-right-left"></i> Cambios de turno (${cambios.length})</h3><div class="pc-table-wrap"><table><thead><tr><th>Producción</th><th>Pausada</th><th>Reanudada</th><th>Operarios anteriores</th><th>Operarios que retomaron</th><th>Molde</th></tr></thead><tbody>${filas}</tbody></table></div></section>`;
 }
 
 function renderCantidadesPesadas(pasadas) {
@@ -574,6 +601,14 @@ function imprimirResumenProduccion() {
         return `<section class="operario ${indice ? 'siguiente' : ''}"><div class="operario-titulo"><h2>${escaparHtmlReporte(op.nombre)}</h2><strong>Total producido: ${total}</strong></div>
             <table><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Kg insertado</th><th>Cant. producida</th><th>Pesadas</th><th>Obs.</th></tr></thead><tbody>${op.filas.join('')}</tbody></table></section>`;
     }).join('');
+    const cambiosTurno = (ultimoResumenSemanal.cambios_turno || []).length
+        ? `<section class="cambios"><h2>Cambios de turno</h2><table><thead><tr><th>Producción</th><th>Pausada</th><th>Reanudada</th><th>Operarios anteriores</th><th>Operarios que retomaron</th><th>Molde</th></tr></thead><tbody>${ultimoResumenSemanal.cambios_turno.map(c => `<tr>
+            <td>#${Number(c.produccion_id)}</td><td>${formatearFechaHoraCambio(c.pausa_fecha)}</td>
+            <td>${c.reanudacion_fecha ? formatearFechaHoraCambio(c.reanudacion_fecha) : 'Pendiente de reanudación'}</td>
+            <td>${escaparHtmlReporte(c.operarios_antes?.join(', ') || 'Sin dato')}</td>
+            <td>${escaparHtmlReporte(c.operarios_despues?.join(', ') || (c.reanudacion_fecha ? 'Sin dato' : 'Aún no continúa'))}</td>
+            <td>${escaparHtmlReporte(c.molde || '-')}</td></tr>`).join('')}</tbody></table></section>`
+        : '<section class="cambios"><h2>Cambios de turno</h2><p>No se registraron cambios de turno en este periodo.</p></section>';
     const documento = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte de producción por operario</title><style>
         @page{size:landscape;margin:10mm}*{box-sizing:border-box}body{font:10px Arial,sans-serif;color:#17233a;margin:0}
         header{display:flex;justify-content:space-between;align-items:end;border-bottom:2px solid #193b88;padding:0 0 8px;margin-bottom:10px}
@@ -582,8 +617,9 @@ function imprimirResumenProduccion() {
         .operario h2{font-size:13px;color:#193b88;margin:0}.operario strong{font-size:11px}
         table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#e8edf5;color:#43516a;font-size:8px;text-transform:uppercase;text-align:left}th,td{border:1px solid #d8dee8;padding:5px 4px;vertical-align:middle;overflow-wrap:anywhere}td{font-size:9px}tbody tr{break-inside:avoid}
         th:nth-child(1){width:7%}th:nth-child(2){width:5%}th:nth-child(3){width:6%}th:nth-child(4){width:11%}th:nth-child(5){width:10%}th:nth-child(6){width:8%}th:nth-child(7){width:8%}th:nth-child(8){width:7%}th:nth-child(9){width:8%}th:nth-child(10){width:13%}th:nth-child(11){width:7%}
+        .cambios{margin:10px 0 14px;break-inside:avoid}.cambios h2{font-size:13px;color:#193b88;margin:0;padding:7px 9px;background:#eef3fb;border:1px solid #ccd8eb;border-bottom:0}.cambios table{table-layout:auto}.cambios th{font-size:8px}.cambios td{font-size:9px}
         @media screen{body{padding:16px;background:#eef1f5}.hoja{max-width:1400px;margin:0 auto;background:white;padding:18px;box-shadow:0 2px 12px #17233a22}}
-    </style></head><body><main class="hoja"><header><div><h1>Reporte de producción por operario</h1><p>${escaparHtmlReporte(ultimoResumenSemanal.periodo?.etiqueta || '')}</p></div><p class="generado">Generado: ${new Date().toLocaleString('es-PE')}</p></header>${secciones || '<p>No hay producción en el periodo seleccionado.</p>'}</main></body></html>`;
+    </style></head><body><main class="hoja"><header><div><h1>Reporte de producción por operario</h1><p>${escaparHtmlReporte(ultimoResumenSemanal.periodo?.etiqueta || '')}</p></div><p class="generado">Generado: ${new Date().toLocaleString('es-PE')}</p></header>${cambiosTurno}${secciones || '<p>No hay producción en el periodo seleccionado.</p>'}</main></body></html>`;
     ventana.document.open();
     ventana.document.write(documento);
     ventana.document.close();
