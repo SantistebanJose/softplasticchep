@@ -2086,13 +2086,9 @@ function agregarMaterialProduccion(): void
                     * (float)$unidadMaterial['equivalencia_material'] / $equivalenciaKg;
             }
         }
-        executeNonQuery($conectar, "UPDATE produccion SET cantidad = COALESCE(cantidad, 0) + :cantidad_agregada, updated_at = NOW() WHERE id = :id", [
-            'cantidad_agregada' => $cantidadMaterialAgregadaKg,
-            'id' => $id,
-        ]);
         $evento = ['tipo' => 'material_agregado_a_produccion', 'fecha' => date('Y-m-d H:i:s'),
             'materiales' => $detalle, 'cantidad_agregada_kg' => $cantidadMaterialAgregadaKg,
-            'cantidad_reflejada_en_total' => true,
+            'cantidad_reflejada_en_total' => false,
             'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
             'usuario' => (string)($_SESSION['operario_nombre'] ?? $_SESSION['nombre_usuario'] ?? 'Sistema')];
         $cambios = [['campo' => 'Material agregado', 'valor_antes' => '—', 'valor_despues' => count($detalle) . ' material(es)']];

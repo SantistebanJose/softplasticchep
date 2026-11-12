@@ -632,6 +632,13 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             $desglose = is_array($salida['desglose_operarios'] ?? null)
                 ? $salida['desglose_operarios'] : [];
             $cantidadOperario = null;
+            $cantidadesUnidades = null;
+            foreach (($salida['desglose_unidades_operarios'] ?? []) as $aporteMixto) {
+                if ((int)($aporteMixto['operario_id'] ?? 0) === $operarioId) {
+                    $cantidadesUnidades = $aporteMixto['cantidades'] ?? null;
+                    break;
+                }
+            }
             if ($desglose) {
                 foreach ($desglose as $aporte) {
                     if ((int)($aporte['operario_id'] ?? 0) === $operarioId) {
@@ -662,6 +669,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
                 'cantidad' => (float)$cantidadPasada,
                 'cantidad_operario' => $cantidadOperario,
                 'unidad' => strtoupper((string)($salida['unidad'] ?? $filaDetalle['unidad'] ?? 'KG')),
+                'cantidades_unidades' => $cantidadesUnidades,
                 'fotos' => $fotos,
             ];
         }

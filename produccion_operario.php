@@ -399,6 +399,7 @@ const PALETA_MAQUINAS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', 
 
 let listaOperarios = [];
 let operarioSeleccionado = null; // { id, nombre_completo, cargo }
+let ultimoReporteOperario = null;
 let chartTurno = null;
 let chartMaquina = null;
 let chartsPorUnidad = {}; // ej: { turno_kg: Chart, maquina_und: Chart }
@@ -857,6 +858,7 @@ async function generarReporteOperario() {
 }
 
 function pintarReporteOperario(json) {
+    ultimoReporteOperario = json;
     const { operario, periodo, resumen_general, resumen_por_unidad, por_turno, por_maquina, top_moldes, detalle } = json;
 
     const cardsUnidad = (resumen_por_unidad || []).map(r => `
@@ -901,7 +903,8 @@ function pintarReporteOperario(json) {
     <div class="pc-card">
         <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h2><i class="fa-solid fa-table"></i> Detalle de producción</h2>
-            <span class="text-muted">${detalle.length} avance${detalle.length === 1 ? '' : 's'}</span>
+            <div class="d-flex align-items-center gap-2"><span class="text-muted">${detalle.length} avance${detalle.length === 1 ? '' : 's'}</span>
+            <button type="button" class="btn btn-primary btn-sm" onclick="imprimirDetalleOperario()"><i class="fa-solid fa-file-pdf"></i> Imprimir / Guardar PDF</button></div>
         </div>
         <div class="pc-table-wrap pc-table-responsive-cards">
             <table class="pc-table">
@@ -941,6 +944,53 @@ function pintarReporteOperario(json) {
     pintarTop5(top_moldes || []);
     pintarTablaDetalle(detalle || []);
     pintarDonasPorUnidad(por_turno || [], por_maquina || []);
+}
+
+function imprimirDetalleOperario() {
+    if (!ultimoReporteOperario) return;
+    const ventana = window.open('', '_blank');
+    if (!ventana) {
+        Swal.fire('Ventana bloqueada', 'Permite las ventanas emergentes para imprimir o guardar el reporte como PDF.', 'info');
+        return;
+    }
+    const { operario, periodo, resumen_general: resumen = {}, resumen_por_unidad: unidades = [], detalle = [] } = ultimoReporteOperario;
+    const resumenUnidades = unidades.map(u => `${formatearCantidad(u.total_producido, u.unidad)}`).join(' · ') || 'Sin producción confirmada';
+    const filas = detalle.map(d => {
+        const pasadas = renderCantidadesPesadas(d.pasadas);
+        const producido = Number(d.confirmado) === 1
+            ? (formatearSalidaMixta(d.pasadas) || formatearCantidad(d.kg_producido, d.unidad))
+            : 'Pendiente de desglose';
+        return `<tr>
+            <td>${escaparHtmlReporte(formatearFecha(d.fecha))}</td>
+            <td>${escaparHtmlReporte((d.hora || '').slice(0, 5))}</td>
+            <td>${escaparHtmlReporte(TURNO_LABEL[d.turno] ?? d.turno ?? '-')}</td>
+            <td>${escaparHtmlReporte(d.molde_nombre || '-')}</td>
+            <td>${escaparHtmlReporte(d.producto_descripcion || '-')}</td>
+            <td>${escaparHtmlReporte(d.maquina_nombre || '-')}</td>
+            <td>${escaparHtmlReporte(d.color_nombre || '-')}</td>
+            <td>${escaparHtmlReporte(formatearKg(d.kg_insertado))}</td>
+            <td>${escaparHtmlReporte(producido)}</td>
+            <td>${pasadas === '-' ? '-' : pasadas}</td>
+            <td>${escaparHtmlReporte(d.observaciones || '-')}</td>
+        </tr>`;
+    }).join('');
+    const documento = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Producción - ${escaparHtmlReporte(operario.nombre_completo)}</title><style>
+        @page{size:landscape;margin:10mm}*{box-sizing:border-box}body{font:10px Arial,sans-serif;color:#17233a;margin:0}
+        header{display:flex;justify-content:space-between;align-items:end;border-bottom:2px solid #193b88;padding:0 0 8px;margin-bottom:10px}
+        h1{font-size:18px;margin:0 0 3px}header p{font-size:10px;color:#52627a;margin:0}.generado{color:#64748b;text-align:right}
+        .resumen{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:10px 0 14px}.dato{border:1px solid #d8dee8;border-top:3px solid #ed174c;border-radius:6px;padding:7px}.dato b{display:block;font-size:14px;color:#173b9a}.dato span{font-size:8px;color:#64748b;text-transform:uppercase}
+        table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#e8edf5;color:#43516a;font-size:8px;text-transform:uppercase;text-align:left}th,td{border:1px solid #d8dee8;padding:5px 4px;vertical-align:top;overflow-wrap:anywhere}td{font-size:9px}tbody tr{break-inside:avoid}
+        th:nth-child(1){width:7%}th:nth-child(2){width:5%}th:nth-child(3){width:6%}th:nth-child(4){width:11%}th:nth-child(5){width:11%}th:nth-child(6){width:8%}th:nth-child(7){width:8%}th:nth-child(8){width:8%}th:nth-child(9){width:9%}th:nth-child(10){width:13%}th:nth-child(11){width:8%}
+        @media screen{body{padding:16px;background:#eef1f5}.hoja{max-width:1400px;margin:0 auto;background:white;padding:18px;box-shadow:0 2px 12px #17233a22}}
+    </style></head><body><main class="hoja"><header><div><h1>Reporte de producción por operario</h1><p>${escaparHtmlReporte(operario.nombre_completo)} · ${escaparHtmlReporte(operario.cargo || 'Sin cargo asignado')} · ${escaparHtmlReporte(periodo.etiqueta || '')}</p></div><p class="generado">Generado: ${new Date().toLocaleString('es-PE')}</p></header>
+        <section class="resumen"><div class="dato"><b>${Number(resumen.total_avances) || 0}</b><span>Avances</span></div><div class="dato"><b>${Number(resumen.moldes_distintos) || 0}</b><span>Moldes distintos</span></div><div class="dato"><b>${escaparHtmlReporte(formatearKg(resumen.total_kg_insertado))}</b><span>Kg insertados</span></div><div class="dato"><b>${escaparHtmlReporte(formatearKg(resumen.total_merma))}</b><span>Merma</span></div><div class="dato"><b>${escaparHtmlReporte(resumenUnidades)}</b><span>Producción confirmada</span></div></section>
+        <table><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Kg insertado</th><th>Cant. producida</th><th>Pasadas</th><th>Obs.</th></tr></thead><tbody>${filas || '<tr><td colspan="11">No hay avances en el periodo seleccionado.</td></tr>'}</tbody></table>
+    </main></body></html>`;
+    ventana.document.open();
+    ventana.document.write(documento);
+    ventana.document.close();
+    ventana.focus();
+    ventana.print();
 }
 
 function pintarTop5(filas) {
@@ -996,7 +1046,7 @@ function pintarTablaDetalle(detalle) {
             <td data-label="Máquina">${d.maquina_nombre ?? '-'}</td>
             <td data-label="Color">${d.color_nombre ?? '-'}</td>
             <td data-label="Kg insertado">${formatearKg(d.kg_insertado)}</td>
-            <td data-label="Cant. producida">${Number(d.confirmado) === 1 ? formatearCantidad(d.kg_producido, d.unidad) : '<span class="badge text-bg-warning">Pendiente de desglose</span>'}</td>
+            <td data-label="Cant. producida">${Number(d.confirmado) === 1 ? (formatearSalidaMixta(d.pasadas) || formatearCantidad(d.kg_producido, d.unidad)) : '<span class="badge text-bg-warning">Pendiente de desglose</span>'}</td>
             <td data-label="Pasadas / fotos">${renderPasadasReporte(d.pasadas)}</td>
             <td data-label="Obs.">
                 ${d.observaciones
