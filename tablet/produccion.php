@@ -296,15 +296,15 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-wizard-controls{display:flex;gap:10px;justify-content:space-between;width:100%}
 .pc-wizard-controls .btn{min-height:48px;flex:1}
 .pc-modal-tablet#modalCantidadEnsamblaje .modal-content{height:100%;min-height:100%}
-.pc-modal-tablet#modalCantidadEnsamblaje .modal-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.pc-modal-tablet#modalCantidadEnsamblaje .modal-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow-x:hidden}
 .pc-modal-tablet#modalCantidadEnsamblaje .modal-footer{margin-top:auto;width:100%}
-.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{width:100%;max-width:840px;margin:auto}
+.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{width:100%;max-width:840px;min-width:0;margin:auto}
 .pc-avance-actions{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(220px,1.5fr) minmax(150px,1fr);align-items:center;gap:12px;padding:14px 22px;width:100%}
 @media(max-width:700px){.pc-modal-tablet#modalCantidadEnsamblaje .modal-body{padding:12px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{gap:12px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-card{padding:14px;border-radius:14px}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-card-header{margin-bottom:12px}.pc-modal-tablet#modalCantidadEnsamblaje .modal-footer{gap:0}.pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-resumen{padding:10px}.pc-avance-actions{grid-template-columns:1fr;gap:8px;padding:10px 14px}.pc-avance-actions>[data-bs-dismiss],.pc-avance-actions>#btnSubmitCantidadEnsamblaje{width:100%;min-height:48px}.pc-avance-actions .pc-wizard-controls{gap:8px}.pc-avance-actions .pc-wizard-controls .btn{min-height:48px}}
 
 .pc-ens-card{
     border:1px solid #ece9e1; border-radius:18px; background:#fff;
-    padding:22px 24px; box-shadow:0 1px 3px rgba(20,20,10,.05);
+    width:100%; min-width:0; box-sizing:border-box; padding:22px 24px; box-shadow:0 1px 3px rgba(20,20,10,.05);
 }
 
 .pc-ens-card-header{ display:flex; align-items:center; gap:12px; margin-bottom:18px; }
@@ -341,7 +341,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-operario-cantidad-lista{ display:flex; flex-direction:column; gap:10px; }
 .pc-operario-cantidad-item{
-    display:flex; align-items:center; gap:12px;
+    display:flex; align-items:center; gap:12px; min-width:0; box-sizing:border-box;
     border:1.5px solid #e2ddcd; border-radius:12px; padding:10px 14px;
 }
 .pc-operario-cantidad-item .nombre{
@@ -353,6 +353,19 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     border:1.5px solid #eee1c4; border-radius:9px; padding:8px 4px;
 }
 .pc-operario-cantidad-item input:focus{ outline:none; border-color:#2F6FED; }
+.pc-mixta-operario-item .pc-mixta-campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:0 0 auto}
+.pc-mixta-operario-item label{display:block;min-width:0;font-size:.82rem;color:#5c5947}
+.pc-mixta-operario-item input{width:100%;min-width:0}
+@media(max-width:560px){
+    .pc-modal-tablet#modalCantidadEnsamblaje .modal-dialog{width:100vw;max-width:100vw;margin:0}
+    .pc-modal-tablet#modalCantidadEnsamblaje .modal-content{width:100%;min-width:0;overflow-x:hidden}
+    .pc-modal-tablet#modalCantidadEnsamblaje .modal-body{padding:10px}
+    .pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-body{width:100%;max-width:100%;min-width:0}
+    .pc-modal-tablet#modalCantidadEnsamblaje .pc-ens-card{padding:14px}
+    .pc-mixta-operario-item{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:10px}
+    .pc-mixta-operario-item .nombre{white-space:normal;overflow-wrap:anywhere}
+    .pc-mixta-operario-item .pc-mixta-campos{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 .pc-operario-cantidad-total{
     display:flex; align-items:center; justify-content:flex-end; gap:8px;
     margin-top:14px; padding-top:12px; border-top:1px dashed #eee1c4;
@@ -2850,9 +2863,9 @@ function inicializarCantidadProducidaPorOperario(p) {
         document.getElementById('cantidad_producida_ensamblaje').required = false;
         participantes.forEach(o => { cantidadesMixtasPorOperario[o.operario_id] = { DOC: 0, UND: 0 }; });
         document.getElementById('lista_cantidad_mixta').innerHTML = participantes.map(o => `
-            <div class="pc-operario-cantidad-item"><span class="nombre">${o.nombre_completo || `Operario #${o.operario_id}`}</span>
+            <div class="pc-operario-cantidad-item pc-mixta-operario-item"><span class="nombre">${o.nombre_completo || `Operario #${o.operario_id}`}</span><div class="pc-mixta-campos">
                 <label>Docenas<input type="number" min="0" step="1" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="DOC" placeholder="0"></label>
-                <label>Unidades<input type="number" min="0" step="1" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="UND" placeholder="0"></label></div>`).join('');
+                <label>Unidades<input type="number" min="0" step="1" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="UND" placeholder="0"></label></div></div>`).join('');
         document.querySelectorAll('#lista_cantidad_mixta [data-mixta-operario]').forEach(input => input.addEventListener('input', actualizarCantidadMixta));
         actualizarCantidadMixta(); return;
     }
