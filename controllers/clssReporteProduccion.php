@@ -208,7 +208,7 @@ function reporteSemanalOperarios(): void
         WITH avances AS (
             SELECT pd.id, pd.operario_id, pd.molde_id, pd.unico_molde_producto,
                    pd.fecha, pd.js_operarios, pd.cantidad_producida_kg,
-                   pd.cantidad, pd.observaciones, pd.js_cantidades_salientes,
+                   " . cantidadMaterialConAgregadosSql('pd') . " AS cantidad, pd.observaciones, pd.js_cantidades_salientes,
                    pd.js_casusticas AS eventos_turno,
                    pd.maquina_id, pd.color_id, op.operario,
                    COALESCE(
@@ -501,7 +501,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
         SELECT
             COUNT(pd.id) AS total_avances,
             COUNT(DISTINCT pd.molde_id) AS moldes_distintos,
-            COALESCE(SUM(pd.cantidad), 0) AS total_kg_insertado,
+            COALESCE(SUM(" . cantidadMaterialConAgregadosSql('pd') . "), 0) AS total_kg_insertado,
             COALESCE(SUM($mermaOperario), 0) AS total_merma,
             COUNT(pd.id) FILTER (WHERE NOT ($confirmadoOperario)) AS avances_pendientes
         FROM produccion pd
@@ -599,7 +599,7 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
             pr.descripcion AS producto_descripcion,
             COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina_nombre,
             co.nombre AS color_nombre,
-            pd.cantidad AS kg_insertado,
+            " . cantidadMaterialConAgregadosSql('pd') . " AS kg_insertado,
             $producidoOperario AS kg_producido,
             CASE WHEN $confirmadoOperario THEN 1 ELSE 0 END AS confirmado,
             $unidadSql AS unidad,
@@ -712,6 +712,38 @@ function turnoCaseSql(string $columnaFecha): string
 function unidadCaseSql(string $aliasProduccion): string
 {
     return "COALESCE(NULLIF($aliasProduccion.js_configuracion_moment->>'salida_produccion', ''), 'kg')";
+}
+
+/** Calcula el material pesado en kg desde sus unidades base (kg, g, etc.). */
+function cantidadMaterialConAgregadosSql(string $aliasProduccion): string
+{
+    return "COALESCE((
+        SELECT SUM(rpm.cantidad * um.equivalencia / NULLIF(ukg.equivalencia, 0))
+        FROM rel_produccion_material rpm
+        JOIN material mt ON mt.id = rpm.material_id
+        JOIN unidad_medida um ON um.id = mt.unidad_medida_id
+        JOIN unidad_medida ukg ON COALESCE(ukg.unidad_base_id, ukg.id) = COALESCE(um.unidad_base_id, um.id)
+            AND UPPER(TRIM(ukg.nombre_corto)) = 'KG'
+        WHERE rpm.produccion_id = $aliasProduccion.id AND rpm.deleted_at IS NULL
+    ), COALESCE($aliasProduccion.cantidad, 0) + COALESCE((
+        SELECT SUM(CASE
+            WHEN COALESCE(NULLIF(evento.elem->>'cantidad_reflejada_en_total', '')::boolean, FALSE)
+                 AND NULLIF(evento.elem->>'cantidad_agregada', '') IS NOT NULL
+                 AND NULLIF(evento.elem->>'cantidad_agregada_kg', '') IS NULL
+            THEN COALESCE(kg.cantidad_kg, 0) - (evento.elem->>'cantidad_agregada')::numeric
+            WHEN NOT COALESCE(NULLIF(evento.elem->>'cantidad_reflejada_en_total', '')::boolean, FALSE)
+            THEN COALESCE(kg.cantidad_kg, 0)
+            ELSE 0 END)
+        FROM unnest(COALESCE($aliasProduccion.js_casusticas, ARRAY[]::jsonb[])) AS evento(elem)
+        CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(evento.elem->>'cantidad_agregada_kg', '')::numeric,
+            (SELECT SUM(NULLIF(material.elem->>'cantidad', '')::numeric * um.equivalencia / NULLIF(ukg.equivalencia, 0))
+             FROM jsonb_array_elements(COALESCE(evento.elem->'materiales', '[]'::jsonb)) AS material(elem)
+             JOIN material mt ON mt.id = NULLIF(material.elem->>'material_id', '')::bigint
+             JOIN unidad_medida um ON um.id = mt.unidad_medida_id
+             JOIN unidad_medida ukg ON COALESCE(ukg.unidad_base_id, ukg.id) = COALESCE(um.unidad_base_id, um.id)
+                AND UPPER(TRIM(ukg.nombre_corto)) = 'KG')) AS cantidad_kg) kg
+        WHERE evento.elem->>'tipo' = 'material_agregado_a_produccion'
+    ), 0))";
 }
 
 /** Suma las cantidades de las pasadas asignadas al operario en el JSON de producción. */

@@ -872,6 +872,19 @@ function construirJsOperarios($conectar, array $operarioIds): string
 // =============================================================================
 // PRODUCCIÓN (avances)
 // =============================================================================
+function cantidadMaterialRealKgSql(string $aliasProduccion): string
+{
+    return "COALESCE((
+        SELECT SUM(rpm.cantidad * um.equivalencia / NULLIF(ukg.equivalencia, 0))
+        FROM rel_produccion_material rpm
+        JOIN material mt ON mt.id = rpm.material_id
+        JOIN unidad_medida um ON um.id = mt.unidad_medida_id
+        JOIN unidad_medida ukg ON COALESCE(ukg.unidad_base_id, ukg.id) = COALESCE(um.unidad_base_id, um.id)
+            AND UPPER(TRIM(ukg.nombre_corto)) = 'KG'
+        WHERE rpm.produccion_id = $aliasProduccion.id AND rpm.deleted_at IS NULL
+    ), COALESCE($aliasProduccion.cantidad, 0))";
+}
+
 function listarProducciones()
 {
     $conectar = conectar_oll_BD();
@@ -933,7 +946,8 @@ function listarProducciones()
     $sql = "
         SELECT
             pd.id, pd.operario_id, pd.js_operarios, pd.maquina_id, pd.molde_id,
-            pd.color_id, pd.categoria_material_id, pd.sucursal, pd.cantidad,
+            pd.color_id, pd.categoria_material_id, pd.sucursal,
+            " . cantidadMaterialRealKgSql('pd') . " AS cantidad,
             CONCAT(LPAD(pd.id::varchar, 10, '0'), '-', LPAD(pd.sucursal::varchar, 5, '0'), '-', LPAD(pd.molde_id::varchar, 5, '0')) AS sticker_unico,
             CONCAT(pd.id, '/', pd.sucursal, '/', pd.molde_id) AS codigo_escribir_cinta,
             pd.fecha, pd.fecha_hora_inicio, pd.fecha_hora_fin,
@@ -2046,8 +2060,40 @@ function agregarMaterialProduccion(): void
         }
 
         insertarLineasYRestarStock($conectar, $id, $detalle);
+        $materialIds = array_values(array_unique(array_map(static fn($linea) => (int)$linea['material_id'], $detalle)));
+        $placeholdersMaterial = [];
+        $paramsMaterial = [];
+        foreach ($materialIds as $i => $materialId) {
+            $clave = 'material_agregado_' . $i;
+            $placeholdersMaterial[] = ':' . $clave;
+            $paramsMaterial[$clave] = $materialId;
+        }
+        $unidadesMateriales = executeQuery($conectar, "SELECT mt.id, um.equivalencia AS equivalencia_material,
+                ukg.equivalencia AS equivalencia_kg
+            FROM material mt
+            JOIN unidad_medida um ON um.id = mt.unidad_medida_id
+            LEFT JOIN unidad_medida ukg ON COALESCE(ukg.unidad_base_id, ukg.id) = COALESCE(um.unidad_base_id, um.id)
+                AND UPPER(TRIM(ukg.nombre_corto)) = 'KG'
+            WHERE mt.id IN (" . implode(',', $placeholdersMaterial) . ")", $paramsMaterial);
+        $unidadPorMaterial = [];
+        foreach ($unidadesMateriales as $unidadMaterial) $unidadPorMaterial[(int)$unidadMaterial['id']] = $unidadMaterial;
+        $cantidadMaterialAgregadaKg = 0.0;
+        foreach ($detalle as $linea) {
+            $unidadMaterial = $unidadPorMaterial[(int)$linea['material_id']] ?? null;
+            $equivalenciaKg = (float)($unidadMaterial['equivalencia_kg'] ?? 0);
+            if ($unidadMaterial && $equivalenciaKg > 0) {
+                $cantidadMaterialAgregadaKg += (float)$linea['cantidad']
+                    * (float)$unidadMaterial['equivalencia_material'] / $equivalenciaKg;
+            }
+        }
+        executeNonQuery($conectar, "UPDATE produccion SET cantidad = COALESCE(cantidad, 0) + :cantidad_agregada, updated_at = NOW() WHERE id = :id", [
+            'cantidad_agregada' => $cantidadMaterialAgregadaKg,
+            'id' => $id,
+        ]);
         $evento = ['tipo' => 'material_agregado_a_produccion', 'fecha' => date('Y-m-d H:i:s'),
-            'materiales' => $detalle, 'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
+            'materiales' => $detalle, 'cantidad_agregada_kg' => $cantidadMaterialAgregadaKg,
+            'cantidad_reflejada_en_total' => true,
+            'user_id' => (int)($_SESSION['operario_id'] ?? $_SESSION['usuario_id'] ?? 0),
             'usuario' => (string)($_SESSION['operario_nombre'] ?? $_SESSION['nombre_usuario'] ?? 'Sistema')];
         $cambios = [['campo' => 'Material agregado', 'valor_antes' => '—', 'valor_despues' => count($detalle) . ' material(es)']];
         $mov = obtenerMovimientoSesion('agregar_material', $cambios);

@@ -580,7 +580,7 @@ function renderCantidadesPesadas(pasadas) {
     return pasadas.map(p => {
         const mezcla = p.cantidades_unidades;
         const detalle = mezcla && (Number(mezcla.DOC) || Number(mezcla.UND))
-            ? `${Number(mezcla.DOC) || 0} doc + ${Number(mezcla.UND) || 0} und`
+            ? formatearUnidadesMixtas(mezcla)
             : formatearCantidad(p.cantidad_operario ?? p.cantidad, p.unidad);
         return `P${Number(p.numero) || 1}: ${detalle}`;
     }).join('<br>');
@@ -595,7 +595,14 @@ function sumarUnidadesMixtas(pasadas) {
 
 function formatearSalidaMixta(pasadas) {
     const suma = sumarUnidadesMixtas(pasadas);
-    return suma ? Object.entries(suma).filter(([, n]) => n > 0).map(([u, n]) => formatearCantidad(n, u)).join(' + ') : '';
+    return suma ? formatearUnidadesMixtas(suma) : '';
+}
+
+function formatearUnidadesMixtas(cantidades) {
+    return Object.entries(cantidades || {})
+        .filter(([, cantidad]) => Number(cantidad) > 0)
+        .map(([unidad, cantidad]) => formatearCantidad(cantidad, unidad))
+        .join(' + ');
 }
 
 function imprimirResumenProduccion() {
