@@ -512,9 +512,17 @@ function pintarResumenSemanal(json) {
         grupo.detalle.push(f);
         grupo.avances++;
         grupo.pendientes += pendientes;
-        grupo.totalUnidades.set(unidad, (grupo.totalUnidades.get(unidad) || 0) + producido);
+        const unidadesMixtas = sumarUnidadesMixtas(f.pasadas);
+        if (unidadesMixtas) {
+            Object.entries(unidadesMixtas).forEach(([u, cantidad]) => {
+                grupo.totalUnidades.set(etiquetaUnidad(u), (grupo.totalUnidades.get(etiquetaUnidad(u)) || 0) + cantidad);
+                totalesUnidad.set(etiquetaUnidad(u), (totalesUnidad.get(etiquetaUnidad(u)) || 0) + cantidad);
+            });
+        } else {
+            grupo.totalUnidades.set(unidad, (grupo.totalUnidades.get(unidad) || 0) + producido);
+            totalesUnidad.set(unidad, (totalesUnidad.get(unidad) || 0) + producido);
+        }
         totalAvances++;
-        totalesUnidad.set(unidad, (totalesUnidad.get(unidad) || 0) + producido);
     });
     const totalPills = [...totalesUnidad.entries()].map(([unidad, total]) => `<span class="rep-owner-pill">Producido <b>${formatearCantidad(total, unidad)}</b></span>`).join('');
     const cambiosTurnoHtml = renderCambiosTurno(ultimoResumenSemanal.cambios_turno || []);
@@ -529,7 +537,7 @@ function pintarResumenSemanal(json) {
             <td>${escaparHtmlReporte(f.maquina || '-')}</td>
             <td>${escaparHtmlReporte(f.color || '-')}</td>
             <td>${formatearKg(f.kg_insertado)}</td>
-            <td class="rep-week-qty">${Number(f.pendiente) ? '<span class="text-warning">Pendiente</span>' : formatearCantidad(f.producido, f.unidad)}</td>
+            <td class="rep-week-qty">${Number(f.pendiente) ? '<span class="text-warning">Pendiente</span>' : (formatearSalidaMixta(f.pasadas) || formatearCantidad(f.producido, f.unidad))}</td>
             <td class="rep-pesadas-texto">${renderCantidadesPesadas(f.pasadas)}</td>
             <td>${escaparHtmlReporte(f.observaciones || '-')}</td>
         </tr>`).join('');
@@ -569,7 +577,25 @@ function renderCambiosTurno(cambios) {
 
 function renderCantidadesPesadas(pasadas) {
     if (!Array.isArray(pasadas) || !pasadas.length) return '-';
-    return pasadas.map(p => `P${Number(p.numero) || 1}: ${formatearCantidad(p.cantidad_operario ?? p.cantidad, p.unidad)}`).join('<br>');
+    return pasadas.map(p => {
+        const mezcla = p.cantidades_unidades;
+        const detalle = mezcla && (Number(mezcla.DOC) || Number(mezcla.UND))
+            ? `${Number(mezcla.DOC) || 0} doc + ${Number(mezcla.UND) || 0} und`
+            : formatearCantidad(p.cantidad_operario ?? p.cantidad, p.unidad);
+        return `P${Number(p.numero) || 1}: ${detalle}`;
+    }).join('<br>');
+}
+
+function sumarUnidadesMixtas(pasadas) {
+    if (!Array.isArray(pasadas)) return null;
+    const suma = {};
+    pasadas.forEach(p => { Object.entries(p.cantidades_unidades || {}).forEach(([u, n]) => { suma[u] = (suma[u] || 0) + (Number(n) || 0); }); });
+    return Object.keys(suma).length ? suma : null;
+}
+
+function formatearSalidaMixta(pasadas) {
+    const suma = sumarUnidadesMixtas(pasadas);
+    return suma ? Object.entries(suma).filter(([, n]) => n > 0).map(([u, n]) => formatearCantidad(n, u)).join(' + ') : '';
 }
 
 function imprimirResumenProduccion() {
@@ -585,14 +611,16 @@ function imprimirResumenProduccion() {
         if (!filasPorOperario.has(id)) filasPorOperario.set(id, { nombre: f.operario, filas: [], totales: new Map() });
         const grupo = filasPorOperario.get(id);
         const unidad = etiquetaUnidad(f.unidad);
-        grupo.totales.set(unidad, (grupo.totales.get(unidad) || 0) + (Number(f.producido) || 0));
+        const mixtas = sumarUnidadesMixtas(f.pasadas);
+        if (mixtas) Object.entries(mixtas).forEach(([u, n]) => { const etiqueta = etiquetaUnidad(u); grupo.totales.set(etiqueta, (grupo.totales.get(etiqueta) || 0) + n); });
+        else grupo.totales.set(unidad, (grupo.totales.get(unidad) || 0) + (Number(f.producido) || 0));
         const pesadas = renderCantidadesPesadas(f.pasadas);
         grupo.filas.push(`<tr>
             <td>${escaparHtmlReporte(formatearFecha(f.fecha))}</td><td>${escaparHtmlReporte((f.hora || '').slice(0, 5))}</td>
             <td>${escaparHtmlReporte(TURNO_LABEL[f.turno] ?? f.turno ?? '-')}</td><td>${escaparHtmlReporte(f.molde || '-')}</td>
             <td>${escaparHtmlReporte(f.producto || '-')}</td><td>${escaparHtmlReporte(f.maquina || '-')}</td>
             <td>${escaparHtmlReporte(f.color || '-')}</td><td>${formatearKg(f.kg_insertado)}</td>
-            <td>${Number(f.pendiente) ? 'Pendiente de desglose' : formatearCantidad(f.producido, f.unidad)}</td>
+            <td>${Number(f.pendiente) ? 'Pendiente de desglose' : (formatearSalidaMixta(f.pasadas) || formatearCantidad(f.producido, f.unidad))}</td>
             <td>${pesadas}</td><td>${escaparHtmlReporte(f.observaciones || '-')}</td>
         </tr>`);
     });

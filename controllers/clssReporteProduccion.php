@@ -240,6 +240,7 @@ function reporteSemanalOperarios(): void
                COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina,
                co.nombre AS color, a.cantidad AS kg_insertado,
                a.producido, a.unidad,
+               a.operario->'cantidades_producidas_por_unidad' AS cantidades_producidas_por_unidad,
                CASE WHEN a.producido IS NULL THEN 1 ELSE 0 END AS pendiente,
                a.observaciones, a.js_cantidades_salientes,
                to_jsonb(a.eventos_turno) AS eventos_turno
@@ -284,6 +285,13 @@ function reporteSemanalOperarios(): void
             $cantidad = $salida['cantidad'] ?? $salida['cantidad_kg'] ?? null;
             if ($cantidad === null) continue;
             $aporte = null;
+            $cantidadesUnidades = null;
+            foreach (($salida['desglose_unidades_operarios'] ?? []) as $mixto) {
+                if ((int)($mixto['operario_id'] ?? 0) === (int)$fila['operario_id']) {
+                    $cantidadesUnidades = $mixto['cantidades'] ?? null;
+                    break;
+                }
+            }
             $desglose = is_array($salida['desglose_operarios'] ?? null) ? $salida['desglose_operarios'] : [];
             foreach ($desglose as $persona) {
                 if ((int) ($persona['operario_id'] ?? 0) === (int) $fila['operario_id']) {
@@ -297,7 +305,11 @@ function reporteSemanalOperarios(): void
                 'cantidad' => (float) $cantidad,
                 'cantidad_operario' => $aporte,
                 'unidad' => strtoupper((string) ($salida['unidad'] ?? $fila['unidad'] ?? 'KG')),
+                'cantidades_unidades' => $cantidadesUnidades,
             ];
+        }
+        if (is_string($fila['cantidades_producidas_por_unidad'] ?? null)) {
+            $fila['cantidades_producidas_por_unidad'] = json_decode($fila['cantidades_producidas_por_unidad'], true) ?: null;
         }
         unset($fila['js_cantidades_salientes']);
         unset($fila['eventos_turno']);

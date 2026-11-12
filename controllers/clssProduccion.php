@@ -2246,6 +2246,10 @@ function enviarAEnsamblaje()
     // tiene varios participantes. Si viene vacío (avance de un solo
     // operario), simplemente no se toca js_operarios.
     $desgloseRaw = json_decode($_POST['desglose_operarios'] ?? '[]', true);
+    $unidadesMixtasRaw = json_decode($_POST['unidades_mixtas_operarios'] ?? '[]', true);
+    $esSalidaMixta = isset($_POST['unidades_mixtas_operarios']);
+    if ($esSalidaMixta && !is_array($unidadesMixtasRaw)) responder(false, 'El detalle de docenas y unidades no tiene un formato válido.');
+    $desgloseUnidadesPorOperario = [];
     $desglosePorOperario = [];
     if (is_array($desgloseRaw)) {
         foreach ($desgloseRaw as $item) {
@@ -2264,7 +2268,7 @@ function enviarAEnsamblaje()
     }
 
     if (!$id) responder(false, 'ID inválido.');
-    if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
+    if (!$esSalidaMixta && $cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
 
     // La evidencia de pesaje es obligatoria tanto para el admin como para el
     // operario. Ambos flujos capturan desde cámara en vivo (sin galería).
@@ -2353,7 +2357,42 @@ function enviarAEnsamblaje()
 
     $unidadProduccion = obtenerUnidadEtapa($item, 'salida_produccion');
 
-    if ($unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
+    if ($esSalidaMixta) {
+        $productoNombre = '';
+        if ($productoIdProduccion > 0) {
+            $productoInfo = executeQuery($conectar, "SELECT descripcion FROM producto WHERE id = :id", ['id' => $productoIdProduccion]);
+            $productoNombre = strtoupper((string)($productoInfo[0]['descripcion'] ?? ''));
+        }
+        if (!str_contains($productoNombre, 'COLGADOR ADULTO') || strtoupper($unidadProduccion) !== 'DOC') {
+            responder(false, 'El registro en docenas y unidades solo está habilitado para Colgador Adulto (Primera y Segunda).');
+        }
+        $unidades = executeQuery($conectar, "SELECT UPPER(nombre_corto) AS codigo, equivalencia, COALESCE(unidad_base_id,id) AS familia FROM unidad_medida WHERE UPPER(nombre_corto) IN ('DOC','UND') AND deleted_at IS NULL");
+        $equivalencias = [];
+        foreach ($unidades as $u) $equivalencias[$u['codigo']] = $u;
+        if (empty($equivalencias['DOC']) || empty($equivalencias['UND'])
+            || (int)$equivalencias['DOC']['familia'] !== (int)$equivalencias['UND']['familia']) {
+            responder(false, 'Configura DOC y UND en la misma familia de unidades de medida antes de registrar esta producción.');
+        }
+        $factorUndEnDoc = (float)$equivalencias['UND']['equivalencia'] / max((float)$equivalencias['DOC']['equivalencia'], 0.0000001);
+        if ($factorUndEnDoc <= 0) responder(false, 'La equivalencia configurada entre DOC y UND no es válida.');
+        $desglosePorOperario = [];
+        foreach ($unidadesMixtasRaw as $filaMixta) {
+            $oid = (int)($filaMixta['operario_id'] ?? 0);
+            $cantidades = $filaMixta['cantidades'] ?? null;
+            $doc = is_array($cantidades) ? ($cantidades['DOC'] ?? null) : null;
+            $und = is_array($cantidades) ? ($cantidades['UND'] ?? null) : null;
+            if ($oid <= 0 || !is_numeric($doc) || !is_numeric($und) || (float)$doc < 0 || (float)$und < 0
+                || floor((float)$doc) != (float)$doc || floor((float)$und) != (float)$und || isset($desglosePorOperario[$oid])) {
+                responder(false, 'Ingresa cantidades enteras válidas de docenas y unidades para cada operario.');
+            }
+            $desgloseUnidadesPorOperario[$oid] = ['DOC' => (float)$doc, 'UND' => (float)$und];
+            $desglosePorOperario[$oid] = (float)$doc + (float)$und * $factorUndEnDoc;
+        }
+        $cantidadProducida = array_sum($desglosePorOperario);
+        if ($cantidadProducida <= 0) responder(false, 'La cantidad producida debe ser mayor a 0.');
+    }
+
+    if (!$esSalidaMixta && $unidadProduccion !== 'KG' && floor($cantidadProducida) != $cantidadProducida) {
         responder(false, "La cantidad producida debe ser un número entero (unidad configurada: $unidadProduccion).");
     }
 
@@ -2422,7 +2461,7 @@ function enviarAEnsamblaje()
         && !in_array((int)$_SESSION['operario_id'], $operariosQueProducenEstaPasada, true)) {
         responder(false, 'Esta producción fue reasignada a otro turno. No puedes registrar avances.');
     }
-    if (count($operariosQueProducenEstaPasada) > 1) {
+    if ($esSalidaMixta || count($operariosQueProducenEstaPasada) > 1) {
         $idsParticipantes = $operariosQueProducenEstaPasada;
         $idsParticipantes = array_values(array_unique(array_filter($idsParticipantes, static fn($id) => $id > 0)));
         $idsConCantidad = array_keys($desglosePorOperario);
@@ -2432,7 +2471,7 @@ function enviarAEnsamblaje()
             responder(false, 'Asigna una cantidad a cada operario participante antes de enviar la producción.');
         }
         foreach ($desglosePorOperario as $cantidadIndividual) {
-            if ($unidadProduccion !== 'KG' && floor($cantidadIndividual) != $cantidadIndividual) {
+            if (!$esSalidaMixta && $unidadProduccion !== 'KG' && floor($cantidadIndividual) != $cantidadIndividual) {
                 responder(false, "Las cantidades individuales deben ser enteras (unidad configurada: $unidadProduccion).");
             }
         }
@@ -2513,6 +2552,20 @@ function enviarAEnsamblaje()
         'destino_ensamblaje' => $necesitaEnsamblaje ? ($realizadoPorFuera ? 'externo' : 'local') : 'empaquetado',
         'enviado_a' => $realizadoPorFuera ? $enviadoA : null,
     ];
+    if ($esSalidaMixta) {
+        $salidaActual['desglose_unidades_operarios'] = [];
+        foreach ($desgloseUnidadesPorOperario as $operarioId => $cantidades) {
+            $salidaActual['desglose_unidades_operarios'][] = [
+                'operario_id' => (int)$operarioId,
+                'cantidades' => ['DOC' => $cantidades['DOC'], 'UND' => $cantidades['UND']],
+                'cantidad_base_doc' => (float)$desglosePorOperario[$operarioId],
+            ];
+        }
+        $salidaActual['cantidades_por_unidad'] = [
+            'DOC' => array_sum(array_column($desgloseUnidadesPorOperario, 'DOC')),
+            'UND' => array_sum(array_column($desgloseUnidadesPorOperario, 'UND')),
+        ];
+    }
     $salidasActualizadas = $salidasPrevias;
     $mermasPreviasIds = [];
     foreach ($salidasPrevias as $salidaPrevia) {
@@ -2551,6 +2604,7 @@ function enviarAEnsamblaje()
         $salidasActualizadas
     ));
     $cantidadAcumuladaPorOperario = [];
+    $unidadesAcumuladasPorOperario = [];
     foreach ($salidasActualizadas as $salida) {
         foreach (($salida['desglose_operarios'] ?? []) as $operarioSalida) {
             $operarioId = (int)($operarioSalida['operario_id'] ?? 0);
@@ -2559,12 +2613,24 @@ function enviarAEnsamblaje()
                     + (float)($operarioSalida['cantidad'] ?? 0);
             }
         }
+        foreach (($salida['desglose_unidades_operarios'] ?? []) as $aporteMixto) {
+            $operarioIdMixto = (int)($aporteMixto['operario_id'] ?? 0);
+            if ($operarioIdMixto <= 0) continue;
+            foreach (($aporteMixto['cantidades'] ?? []) as $codigoUnidad => $cantidadUnidad) {
+                $codigoUnidad = strtoupper((string)$codigoUnidad);
+                if (!in_array($codigoUnidad, ['DOC', 'UND'], true)) continue;
+                $unidadesAcumuladasPorOperario[$operarioIdMixto][$codigoUnidad] = ($unidadesAcumuladasPorOperario[$operarioIdMixto][$codigoUnidad] ?? 0) + (float)$cantidadUnidad;
+            }
+        }
     }
     foreach ($listaOperarios as &$operarioResumen) {
         $operarioId = (int)($operarioResumen['operario_id'] ?? 0);
         if (isset($cantidadAcumuladaPorOperario[$operarioId])) {
             $operarioResumen['cantidad_producida'] = $cantidadAcumuladaPorOperario[$operarioId];
             $operarioResumen['unidad_producida'] = strtoupper($unidadProduccion);
+        }
+        if (isset($unidadesAcumuladasPorOperario[$operarioId])) {
+            $operarioResumen['cantidades_producidas_por_unidad'] = $unidadesAcumuladasPorOperario[$operarioId];
         }
     }
     unset($operarioResumen);

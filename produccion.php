@@ -575,6 +575,11 @@ include("header.php");
                     </div>
                     <div class="form-text">Reparte la cantidad entre todas las personas que participaron.</div>
                 </div>
+                <div id="bloque_cantidad_mixta" class="mt-2" style="display:none;">
+                    <div class="alert alert-info py-2">Registra la producción en docenas y unidades para cada operario.</div>
+                    <div id="lista_cantidad_mixta" class="d-grid gap-2"></div>
+                    <div class="alert alert-primary mt-3 mb-0"><strong>Total:</strong> <span id="total_cantidad_mixta">0 doc + 0 und</span></div>
+                </div>
                 </div>
             </div>
 
@@ -1360,7 +1365,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
                 : ''
             }
             ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
-            ${p.origen_cambio_molde_evento && puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}
+            ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}
             ${p.puede_registrar_emergencia && p.cierre_cambio_molde ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="crearProduccionEmergencia(${p.id})"><i class="fa-solid fa-plus"></i> Nueva producción de emergencia</button>` : ''}
             ${puedeGestionar && !p.deleted_at
                 ? `<button type="button" class="pc-prod-ghost-btn danger" onclick="eliminarProduccion(${p.id})" title="Desactivar">
@@ -2042,6 +2047,7 @@ let coloresMermaCache = null;       // cache de colores activos, para los chips 
 let mermaColoresSeleccionados = []; // ids de color marcados en el modal de merma
 let mermaEditandoId = null;
 let cantidadesPorOperario = {};
+let cantidadesMixtasPorOperario = {};
 let archivosFotosPesaje = [];
 let capturaPendienteFotoPesaje = false;
 let streamCamaraPesaje = null;
@@ -2244,6 +2250,28 @@ function inicializarCantidadProducidaPorOperario(p) {
     const inputTotal = document.getElementById('cantidad_producida_ensamblaje');
     const unidad = inputTotal.dataset.unidad || 'kg';
     cantidadesPorOperario = {};
+    cantidadesMixtasPorOperario = {};
+    const bloqueMixta = document.getElementById('bloque_cantidad_mixta');
+    const descripcionProducto = String(p?.producto_descripcion || p?.producto_nombre || '').toUpperCase();
+    const permiteMixta = /COLGADOR\s+ADULTO/.test(descripcionProducto) && unidad.toUpperCase() === 'DOC';
+    if (permiteMixta) {
+        const participantes = operarios.length ? operarios : [{ operario_id: p?.operario_id, nombre_completo: p?.operario_nombre }];
+        document.getElementById('bloque_cantidad_individual').style.display = 'none';
+        document.getElementById('bloque_cantidad_por_operario').style.display = 'none';
+        bloqueMixta.style.display = '';
+        inputTotal.required = false;
+        inputTotal.value = '0';
+        participantes.forEach(o => { cantidadesMixtasPorOperario[o.operario_id] = { DOC: 0, UND: 0 }; });
+        document.getElementById('lista_cantidad_mixta').innerHTML = participantes.map(o => `
+            <div class="border rounded p-2"><strong class="d-block mb-2">${o.nombre_completo || `Operario #${o.operario_id}`}</strong>
+                <div class="row g-2"><label class="col">Docenas<input type="number" min="0" step="1" inputmode="numeric" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="DOC" placeholder="0"></label>
+                <label class="col">Unidades<input type="number" min="0" step="1" inputmode="numeric" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="UND" placeholder="0"></label></div>
+            </div>`).join('');
+        document.querySelectorAll('#lista_cantidad_mixta [data-mixta-operario]').forEach(input => input.addEventListener('input', actualizarCantidadMixta));
+        actualizarCantidadMixta();
+        return;
+    }
+    bloqueMixta.style.display = 'none';
 
     if (operarios.length <= 1) {
         bloqueIndividual.style.display = '';
@@ -2269,6 +2297,17 @@ function inicializarCantidadProducidaPorOperario(p) {
         input.addEventListener('input', () => actualizarCantidadOperario(input.dataset.operarioId, input.value));
     });
     actualizarTotalCantidadOperarios();
+}
+
+function actualizarCantidadMixta() {
+    document.querySelectorAll('#lista_cantidad_mixta [data-mixta-operario]').forEach(input => {
+        const oid = input.dataset.mixtaOperario, unidad = input.dataset.mixtaUnidad;
+        cantidadesMixtasPorOperario[oid] ||= { DOC: 0, UND: 0 };
+        cantidadesMixtasPorOperario[oid][unidad] = input.value.trim() === '' ? 0 : Math.max(0, Number(input.value) || 0);
+    });
+    const totales = Object.values(cantidadesMixtasPorOperario).reduce((t, c) => ({ DOC: t.DOC + c.DOC, UND: t.UND + c.UND }), { DOC: 0, UND: 0 });
+    document.getElementById('total_cantidad_mixta').textContent = `${totales.DOC} doc + ${totales.UND} und`;
+    document.getElementById('cantidad_producida_ensamblaje').value = String(totales.DOC + totales.UND);
 }
 
 function actualizarCantidadOperario(operarioId, valor) {
@@ -2454,12 +2493,13 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
+    const esCantidadMixta = document.getElementById('bloque_cantidad_mixta').style.display !== 'none';
 
     if (isNaN(valor) || valor <= 0) {
         Swal.fire('Dato inválido', 'Ingresa una cantidad producida mayor a 0.', 'warning');
         return;
     }
-    if (esUnidadEntera(unidadProducida) && !Number.isInteger(valor)) {
+    if (!esCantidadMixta && esUnidadEntera(unidadProducida) && !Number.isInteger(valor)) {
         Swal.fire('Dato inválido', `La cantidad producida debe ser un número entero (unidad: ${unidadProducida}).`, 'warning');
         return;
     }
@@ -2474,7 +2514,14 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const operariosActivos = Array.isArray(p?.js_operarios_activos) && p.js_operarios_activos.length ? p.js_operarios_activos : (Array.isArray(p?.js_operarios) ? p.js_operarios : []);
     const esMultiOperario = operariosActivos.length > 1;
     let desglose = [];
-    if (esMultiOperario) {
+    let unidadesMixtas = [];
+    if (esCantidadMixta) {
+        const detallesMixtos = Object.entries(cantidadesMixtasPorOperario).map(([operario_id, cantidades]) => ({ operario_id: Number(operario_id), cantidades }));
+        if (!detallesMixtos.length || detallesMixtos.every(item => item.cantidades.DOC === 0 && item.cantidades.UND === 0)) {
+            Swal.fire('Cantidad requerida', 'Ingresa docenas o unidades para continuar.', 'warning'); return;
+        }
+        unidadesMixtas = detallesMixtos;
+    } else if (esMultiOperario) {
         const inputs = [...document.querySelectorAll('#lista_cantidad_operarios [data-operario-id]')];
         if (inputs.some(input => input.value.trim() === '')) {
             Swal.fire('Falta el desglose', 'Ingresa la cantidad de cada operario, aunque sea 0.', 'warning');
@@ -2501,6 +2548,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('cantidad_producida', valor);
     formData.append('unidad', unidadProducida);
     formData.append('desglose_operarios', JSON.stringify(desglose));
+    if (esCantidadMixta) formData.append('unidades_mixtas_operarios', JSON.stringify(unidadesMixtas));
     formData.append('realizado_por_fuera', destinoEnsamblaje === 'externo' ? 'true' : 'false');
     formData.append('enviado_a', enviadoA);
     formData.append('completo', completaRaw);

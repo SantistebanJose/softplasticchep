@@ -832,6 +832,11 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                             <span id="unidad_producida_badge_multi">UND</span>
                         </div>
                     </div>
+                    <div id="bloque_cantidad_mixta" class="px-3" style="display:none;">
+                        <div class="alert alert-info">Registra la producción en docenas y unidades para cada operario.</div>
+                        <div id="lista_cantidad_mixta" class="d-grid gap-2"></div>
+                        <div class="pc-operario-cantidad-total mt-3"><span>Total</span><b id="total_cantidad_mixta">0 doc + 0 und</b></div>
+                    </div>
                 </div>
 
                 <!-- El destino se decide por pasada; los pases locales mantienen la ruta actual. -->
@@ -1914,7 +1919,7 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
             </button>` : ''}
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
-            ${p.origen_cambio_molde_evento && puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}
+            ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}
             ${(p.puede_reanudar === true || p.puede_reanudar === 1 || p.puede_reanudar === '1') && p.detenido && !p.deleted_at ? `<button type="button" class="pc-prod-ghost-btn success" onclick="reanudarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Reanudar</button>` : ''}
             ${p.puede_registrar_emergencia && p.cierre_cambio_molde ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="crearProduccionEmergencia(${p.id})"><i class="fa-solid fa-plus"></i> Nueva producción de emergencia</button>` : ''}
         </div>
@@ -2600,6 +2605,7 @@ let capturaPendienteFotoPesaje = false;
 let streamCamaraPesaje = null;
 
 let cantidadesPorOperario = {}; // { operario_id: cantidad }
+let cantidadesMixtasPorOperario = {};
 
 function abrirModalCantidadParaEnsamblaje(produccionId) {
     detenerCamaraPesaje();
@@ -2833,15 +2839,35 @@ function inicializarCantidadProducidaPorOperario(p) {
     const unidad = document.getElementById('cantidad_producida_ensamblaje').dataset.unidad || 'kg';
 
     cantidadesPorOperario = {};
+    cantidadesMixtasPorOperario = {};
+    const bloqueMixta = document.getElementById('bloque_cantidad_mixta');
+    const descripcionProducto = String(p?.producto_descripcion || p?.producto_nombre || '').toUpperCase();
+    const permiteMixta = /COLGADOR\s+ADULTO/.test(descripcionProducto) && unidad.toUpperCase() === 'DOC';
+    if (permiteMixta) {
+        const participantes = operarios.length ? operarios : [{ operario_id: p?.operario_id, nombre_completo: p?.operario_nombre }];
+        document.getElementById('bloque_cantidad_individual').style.display = 'none';
+        bloqueMulti.style.display = 'none'; bloqueMixta.style.display = '';
+        document.getElementById('cantidad_producida_ensamblaje').required = false;
+        participantes.forEach(o => { cantidadesMixtasPorOperario[o.operario_id] = { DOC: 0, UND: 0 }; });
+        document.getElementById('lista_cantidad_mixta').innerHTML = participantes.map(o => `
+            <div class="pc-operario-cantidad-item"><span class="nombre">${o.nombre_completo || `Operario #${o.operario_id}`}</span>
+                <label>Docenas<input type="number" min="0" step="1" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="DOC" placeholder="0"></label>
+                <label>Unidades<input type="number" min="0" step="1" class="form-control" data-mixta-operario="${o.operario_id}" data-mixta-unidad="UND" placeholder="0"></label></div>`).join('');
+        document.querySelectorAll('#lista_cantidad_mixta [data-mixta-operario]').forEach(input => input.addEventListener('input', actualizarCantidadMixta));
+        actualizarCantidadMixta(); return;
+    }
+    bloqueMixta.style.display = 'none';
 
     if (operarios.length <= 1) {
         bloqueIndividual.style.display = '';
         bloqueMulti.style.display = 'none';
+        document.getElementById('cantidad_producida_ensamblaje').required = true;
         return;
     }
 
     bloqueIndividual.style.display = 'none';
     bloqueMulti.style.display = '';
+    document.getElementById('cantidad_producida_ensamblaje').required = false;
     document.getElementById('unidad_producida_badge_multi').textContent = unidad.toUpperCase();
 
     operarios.forEach(o => { cantidadesPorOperario[o.operario_id] = 0; });
@@ -2856,6 +2882,20 @@ function inicializarCantidadProducidaPorOperario(p) {
     `).join('');
 
     actualizarTotalCantidadOperarios();
+}
+
+function actualizarCantidadMixta() {
+    document.querySelectorAll('#lista_cantidad_mixta [data-mixta-operario]').forEach(input => {
+        const oid = input.dataset.mixtaOperario, unidad = input.dataset.mixtaUnidad;
+        cantidadesMixtasPorOperario[oid] ||= { DOC: 0, UND: 0 };
+        cantidadesMixtasPorOperario[oid][unidad] = input.value.trim() === '' ? 0 : Math.max(0, Number(input.value) || 0);
+    });
+    const totales = Object.values(cantidadesMixtasPorOperario).reduce((t, c) => ({ DOC: t.DOC + c.DOC, UND: t.UND + c.UND }), { DOC: 0, UND: 0});
+    document.getElementById('total_cantidad_mixta').textContent = `${totales.DOC} doc + ${totales.UND} und`;
+    document.getElementById('cantidad_producida_ensamblaje').value = String(totales.DOC + totales.UND);
+    actualizarResumenEnsamblaje();
+    const resumenProducido = document.getElementById('resumen_producido');
+    if (resumenProducido) resumenProducido.textContent = `${totales.DOC} doc + ${totales.UND} und`;
 }
 
 function actualizarCantidadOperario(operarioId, valor) {
@@ -3016,9 +3056,10 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const inputProducida = document.getElementById('cantidad_producida_ensamblaje');
     const unidadProducida = inputProducida.dataset.unidad || 'kg';
     const valor = parseFloat(inputProducida.value);
+    const esCantidadMixta = document.getElementById('bloque_cantidad_mixta').style.display !== 'none';
 
     if (isNaN(valor) || valor <= 0) { Swal.fire('Dato inválido', 'Ingresa una cantidad producida mayor a 0.', 'warning'); return; }
-    if (esUnidadEntera(unidadProducida) && !Number.isInteger(valor)) {
+    if (!esCantidadMixta && esUnidadEntera(unidadProducida) && !Number.isInteger(valor)) {
         Swal.fire('Dato inválido', `La cantidad producida debe ser un número entero (unidad: ${unidadProducida}).`, 'warning');
         return;
     }
@@ -3034,7 +3075,13 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     const esMultiOperario = operariosActivos.length > 1;
 
     let desglose = [];
-    if (esMultiOperario) {
+    let unidadesMixtas = [];
+    if (esCantidadMixta) {
+        unidadesMixtas = Object.entries(cantidadesMixtasPorOperario).map(([operario_id, cantidades]) => ({ operario_id: Number(operario_id), cantidades }));
+        if (!unidadesMixtas.length || unidadesMixtas.every(item => item.cantidades.DOC === 0 && item.cantidades.UND === 0)) {
+            Swal.fire('Cantidad requerida', 'Ingresa docenas o unidades para continuar.', 'warning'); return;
+        }
+    } else if (esMultiOperario) {
         const inputsOperarios = [...document.querySelectorAll('#lista_cantidad_operarios input')];
         if (inputsOperarios.some(input => input.value.trim() === '')) {
             Swal.fire('Falta el desglose', 'Ingresa la cantidad de cada operario, aunque sea 0.', 'warning');
@@ -3059,6 +3106,7 @@ document.getElementById('formCantidadEnsamblaje').addEventListener('submit', asy
     formData.append('cantidad_producida', valor);
     formData.append('unidad', unidadProducida);
     formData.append('desglose_operarios', JSON.stringify(desglose));
+    if (esCantidadMixta) formData.append('unidades_mixtas_operarios', JSON.stringify(unidadesMixtas));
     formData.append('realizado_por_fuera', destinoEnsamblaje === 'externo' ? 'true' : 'false');
     formData.append('enviado_a', enviadoA);
     formData.append('completo', completaRaw);
