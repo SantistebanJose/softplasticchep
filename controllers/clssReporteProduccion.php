@@ -94,12 +94,190 @@ function controladorReporteProduccion($accion)
         case 'REPORTESEMANALOPERARIOS':
             reporteSemanalOperarios();
             break;
+        case 'REPORTEPRODUCCIONPAREJAS':
+            reporteProduccionParejas();
+            break;
         case 'MISPRODUCCIONESOPERARIO':
             misProduccionesOperario();
             break;
         default:
             responder(false, 'Acción no reconocida: ' . htmlspecialchars($accion));
     }
+}
+
+/** Agrupa cada pasada una sola vez por el equipo que la produjo. */
+function reporteProduccionParejas(): void
+{
+    $conectar = conectar_oll_BD();
+    $modo = trim((string)($_POST['modo'] ?? 'semana'));
+    if (!in_array($modo, ['dia', 'semana', 'mes', 'rango'], true)) $modo = 'semana';
+    [$desde, $hasta, $etiqueta] = calcularRangoPeriodo(
+        $modo,
+        trim((string)($_POST['fecha'] ?? date('Y-m-d'))),
+        trim((string)($_POST['fecha_desde'] ?? '')),
+        trim((string)($_POST['fecha_hasta'] ?? ''))
+    );
+    if (!$desde || !$hasta) responder(false, 'Debes indicar un periodo válido.');
+
+    $maquinaId = max(0, (int)($_POST['maquina_id'] ?? 0));
+    $sucursalId = max(0, (int)($_POST['sucursal_id'] ?? 0));
+    $turno = trim((string)($_POST['turno'] ?? ''));
+    $condiciones = ['pd.deleted_at IS NULL', 'pd.fecha::date BETWEEN :desde AND :hasta'];
+    $params = ['desde' => $desde, 'hasta' => $hasta];
+    if ($maquinaId > 0) { $condiciones[] = 'pd.maquina_id = :maquina_id'; $params['maquina_id'] = $maquinaId; }
+    if ($sucursalId > 0) { $condiciones[] = 'pd.sucursal = :sucursal_id'; $params['sucursal_id'] = $sucursalId; }
+    $turnoSql = turnoCaseSql('pd.fecha');
+    if (in_array($turno, ['dia', 'tarde', 'noche', 'madrugada'], true)) {
+        $condiciones[] = "$turnoSql = :turno";
+        $params['turno'] = $turno;
+    }
+
+    $filas = executeQuery($conectar, "
+        SELECT pd.id, pd.fecha, pd.js_operarios, pd.js_cantidades_salientes,
+               pd.operario_id, op.nombre_completo AS operario_nombre,
+               mo.nombre AS molde, pr.descripcion AS producto,
+               COALESCE(NULLIF(ma.alias, ''), ma.nombre, 'Sin máquina') AS maquina,
+               co.nombre AS color
+        FROM produccion pd
+        LEFT JOIN operario op ON op.id = pd.operario_id
+        LEFT JOIN molde mo ON mo.id = pd.molde_id
+        LEFT JOIN producto pr ON pr.id = NULLIF(split_part(pd.unico_molde_producto, '-', 2), '')::bigint
+        LEFT JOIN maquina ma ON ma.id = pd.maquina_id
+        LEFT JOIN color co ON co.id = pd.color_id
+        WHERE " . implode(' AND ', $condiciones) . "
+        ORDER BY pd.fecha, pd.id
+    ", $params);
+
+    $equipos = [];
+    $nombresOperarios = [];
+    foreach ($filas as $fila) {
+        $nombreMoldeReporte = mb_strtoupper((string)($fila['molde'] ?? ''), 'UTF-8');
+        if (str_contains($nombreMoldeReporte, 'PINZA PALANITA') || str_contains($nombreMoldeReporte, 'GANCHO PINZA')) {
+            continue;
+        }
+        $operariosJson = is_array($fila['js_operarios'] ?? null)
+            ? $fila['js_operarios'] : (json_decode((string)($fila['js_operarios'] ?? '[]'), true) ?: []);
+        foreach ($operariosJson as $operario) {
+            $oid = (int)($operario['operario_id'] ?? 0);
+            if ($oid > 0 && !empty($operario['nombre_completo'])) $nombresOperarios[$oid] = (string)$operario['nombre_completo'];
+        }
+        if ((int)($fila['operario_id'] ?? 0) > 0 && !empty($fila['operario_nombre'])) {
+            $nombresOperarios[(int)$fila['operario_id']] = (string)$fila['operario_nombre'];
+        }
+        $salidas = is_array($fila['js_cantidades_salientes'] ?? null)
+            ? $fila['js_cantidades_salientes'] : (json_decode((string)($fila['js_cantidades_salientes'] ?? '[]'), true) ?: []);
+        foreach ($salidas as $salida) {
+            if (!is_array($salida)) continue;
+            $desglose = is_array($salida['desglose_operarios'] ?? null) ? $salida['desglose_operarios'] : [];
+            $ids = array_values(array_unique(array_filter(array_map(
+                static fn($aporte) => (int)($aporte['operario_id'] ?? 0), $desglose
+            ), static fn($oid) => $oid > 0)));
+            sort($ids);
+            if (count($ids) < 2) continue;
+
+            $clave = implode('-', $ids);
+            if (!isset($equipos[$clave])) {
+                $equipos[$clave] = [
+                    'operarios_ids' => $ids, 'totales' => [], 'aportes' => [],
+                    'avances' => 0, 'producciones' => [], 'detalle' => [],
+                ];
+            }
+
+            $unidad = strtoupper((string)($salida['unidad'] ?? 'KG'));
+            $mixtas = is_array($salida['desglose_unidades_operarios'] ?? null)
+                ? $salida['desglose_unidades_operarios'] : [];
+            $valoresPorOperario = [];
+            if ($mixtas) {
+                foreach ($mixtas as $aporteMixto) {
+                    $oid = (int)($aporteMixto['operario_id'] ?? 0);
+                    if (!in_array($oid, $ids, true)) continue;
+                    foreach (($aporteMixto['cantidades'] ?? []) as $unidadMixta => $cantidadMixta) {
+                        $u = strtoupper((string)$unidadMixta);
+                        if (!in_array($u, ['DOC', 'UND'], true)) continue;
+                        $valoresPorOperario[$oid][$u] = ($valoresPorOperario[$oid][$u] ?? 0) + (float)$cantidadMixta;
+                    }
+                }
+            } else {
+                foreach ($desglose as $aporte) {
+                    $oid = (int)($aporte['operario_id'] ?? 0);
+                    if (!in_array($oid, $ids, true)) continue;
+                    $u = strtoupper((string)($aporte['unidad'] ?? $unidad));
+                    $valoresPorOperario[$oid][$u] = ($valoresPorOperario[$oid][$u] ?? 0) + (float)($aporte['cantidad'] ?? 0);
+                }
+            }
+
+            // Un operario con aporte cero suele ser una reasignación por
+            // cambio de turno, no una pasada trabajada en pareja.
+            $ambosAportaron = true;
+            foreach ($ids as $oid) {
+                $aporteTotalOperario = array_sum(array_map('floatval', $valoresPorOperario[$oid] ?? []));
+                if ($aporteTotalOperario <= 0) { $ambosAportaron = false; break; }
+            }
+            if (!$ambosAportaron) continue;
+
+            $cantidadesPasada = [];
+            $aportesPasada = [];
+            foreach ($ids as $oid) {
+                foreach (($valoresPorOperario[$oid] ?? []) as $u => $cantidad) {
+                    $cantidadesPasada[$u] = ($cantidadesPasada[$u] ?? 0) + $cantidad;
+                    $equipos[$clave]['totales'][$u] = ($equipos[$clave]['totales'][$u] ?? 0) + $cantidad;
+                    $equipos[$clave]['aportes'][$oid][$u] = ($equipos[$clave]['aportes'][$oid][$u] ?? 0) + $cantidad;
+                }
+                $aportesPasada[] = [
+                    'operario_id' => $oid,
+                    'cantidad' => $valoresPorOperario[$oid] ?? [],
+                ];
+            }
+            $equipos[$clave]['avances']++;
+            $equipos[$clave]['producciones'][(int)$fila['id']] = true;
+            $fecha = (string)$fila['fecha'];
+            $equipos[$clave]['detalle'][] = [
+                'produccion_id' => (int)$fila['id'],
+                'pasada' => (int)($salida['pasada'] ?? 0),
+                'fecha' => substr($fecha, 0, 10), 'hora' => substr($fecha, 11, 5),
+                'turno' => turnoReporteDesdeHora(substr($fecha, 11, 8)),
+                'operarios_ids' => $ids,
+                'molde' => (string)($fila['molde'] ?? '-'),
+                'producto' => (string)($fila['producto'] ?? '-'),
+                'maquina' => (string)($fila['maquina'] ?? '-'),
+                'color' => (string)($fila['color'] ?? '-'),
+                'cantidades' => $cantidadesPasada,
+                'aportes' => $aportesPasada,
+            ];
+        }
+    }
+
+    $idsPorBuscar = [];
+    foreach ($equipos as $equipo) $idsPorBuscar = array_merge($idsPorBuscar, $equipo['operarios_ids']);
+    $idsPorBuscar = array_values(array_unique($idsPorBuscar));
+    if ($idsPorBuscar) {
+        $binds = [];
+        $paramsNombres = [];
+        foreach ($idsPorBuscar as $i => $oid) { $key = 'op_equipo_' . $i; $binds[] = ':' . $key; $paramsNombres[$key] = $oid; }
+        foreach (executeQuery($conectar, 'SELECT id, nombre_completo FROM operario WHERE id IN (' . implode(',', $binds) . ')', $paramsNombres) as $operario) {
+            $nombresOperarios[(int)$operario['id']] = (string)$operario['nombre_completo'];
+        }
+    }
+
+    foreach ($equipos as &$equipo) {
+        $equipo['operarios'] = array_map(static fn($oid) => [
+            'id' => $oid, 'nombre' => $nombresOperarios[$oid] ?? "Operario #$oid",
+        ], $equipo['operarios_ids']);
+        $equipo['producciones'] = count($equipo['producciones']);
+        foreach ($equipo['detalle'] as &$detalle) {
+            $detalle['operarios'] = array_map(static fn($oid) => $nombresOperarios[$oid] ?? "Operario #$oid", $detalle['operarios_ids']);
+            unset($detalle['operarios_ids']);
+            foreach ($detalle['aportes'] as &$aporte) $aporte['nombre'] = $nombresOperarios[$aporte['operario_id']] ?? "Operario #{$aporte['operario_id']}";
+            unset($aporte);
+        }
+        unset($detalle);
+    }
+    unset($equipo);
+
+    responder(true, 'OK', [
+        'periodo' => ['desde' => $desde, 'hasta' => $hasta, 'etiqueta' => $etiqueta],
+        'equipos' => array_values($equipos),
+    ]);
 }
 
 // =============================================================================
@@ -711,6 +889,15 @@ function turnoCaseSql(string $columnaFecha): string
             ELSE 'madrugada'
         END
     ";
+}
+
+function turnoReporteDesdeHora(string $hora): string
+{
+    $horaNum = (int)substr($hora, 0, 2);
+    if ($horaNum >= 6 && $horaNum < 12) return 'dia';
+    if ($horaNum >= 12 && $horaNum < 18) return 'tarde';
+    if ($horaNum >= 18) return 'noche';
+    return 'madrugada';
 }
 
 /**

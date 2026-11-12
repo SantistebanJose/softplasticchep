@@ -240,7 +240,7 @@ include("header.php");
     .rep-pasada-titulo { font-size: 10px; font-weight: 700; letter-spacing: -.02em; }
     .rep-pasada-aporte { color: #6b7280; font-size: 9px; }
     .rep-pasada-fotos { display: inline-flex; align-items: center; gap: 1px; }
-    .rep-panel-tabs { display:flex; gap:6px; margin:0 0 10px; border-bottom:1px solid #dbe1ea; }
+    .rep-panel-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; border-bottom:1px solid #dbe1ea; }
     .rep-panel-tab { border:0; border-bottom:3px solid transparent; background:transparent; color:#64748b; padding:9px 13px; font-size:13px; font-weight:650; }
     .rep-panel-tab.activo { color:var(--pc-navy,#1f2937); border-bottom-color:var(--pc-red,#c0392b); }
     .rep-exec-title { font-size:20px; font-weight:700; margin:0; color:#17233a; }
@@ -359,6 +359,7 @@ include("header.php");
 <div class="rep-panel-tabs" role="tablist" aria-label="Vistas del reporte de producción">
     <button type="button" class="rep-panel-tab activo" id="rep_tab_semanal" role="tab" aria-selected="true" onclick="cambiarVistaReporte('semanal')">Resumen por operario</button>
     <button type="button" class="rep-panel-tab" id="rep_tab_operario" role="tab" aria-selected="false" onclick="cambiarVistaReporte('operario')">Detalle por operario</button>
+    <button type="button" class="rep-panel-tab" id="rep_tab_parejas" role="tab" aria-selected="false" onclick="cambiarVistaReporte('parejas')">Producción en pareja</button>
 </div>
 
 <div id="rep_contenido" class="rep-contenido">
@@ -406,6 +407,8 @@ let chartsPorUnidad = {}; // ej: { turno_kg: Chart, maquina_und: Chart }
 let vistaReporteActiva = 'semanal';
 let solicitudSemanalActual = 0;
 let ultimoResumenSemanal = null;
+let ultimoReporteParejas = null;
+let solicitudParejasActual = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('rep_fecha').value = hoyISO();
@@ -456,17 +459,23 @@ function recargarSiHayOperario() {
 function cambiarVistaReporte(vista) {
     vistaReporteActiva = vista;
     solicitudSemanalActual++;
+    solicitudParejasActual++;
     const semanal = vista === 'semanal';
+    const parejas = vista === 'parejas';
     document.getElementById('rep_tab_semanal').classList.toggle('activo', semanal);
-    document.getElementById('rep_tab_operario').classList.toggle('activo', !semanal);
+    document.getElementById('rep_tab_operario').classList.toggle('activo', !semanal && !parejas);
+    document.getElementById('rep_tab_parejas').classList.toggle('activo', parejas);
     document.getElementById('rep_tab_semanal').setAttribute('aria-selected', String(semanal));
-    document.getElementById('rep_tab_operario').setAttribute('aria-selected', String(!semanal));
+    document.getElementById('rep_tab_operario').setAttribute('aria-selected', String(!semanal && !parejas));
+    document.getElementById('rep_tab_parejas').setAttribute('aria-selected', String(parejas));
     if (semanal) generarReporteSemanal();
+    else if (parejas) generarReporteParejas();
     else recargarSiHayOperario();
 }
 
 function recargarVistaActiva() {
     if (vistaReporteActiva === 'semanal') generarReporteSemanal();
+    else if (vistaReporteActiva === 'parejas') generarReporteParejas();
     else recargarSiHayOperario();
 }
 
@@ -495,6 +504,108 @@ async function generarReporteSemanal() {
         console.error(error);
         contenido.innerHTML = `<div class="pc-card"><div class="rep-vacio-estado"><p>${escaparHtmlReporte(error.message || 'No se pudo cargar el resumen.')}</p></div></div>`;
     }
+}
+
+async function generarReporteParejas() {
+    const solicitud = ++solicitudParejasActual;
+    const contenido = document.getElementById('rep_contenido');
+    const modo = document.getElementById('rep_modo').value;
+    const fecha = document.getElementById('rep_fecha').value || hoyISO();
+    const params = {
+        modo,
+        fecha: modo === 'mes' ? `${fecha}-01` : fecha,
+        fecha_desde: document.getElementById('rep_fecha_desde').value,
+        fecha_hasta: document.getElementById('rep_fecha_hasta').value,
+        turno: document.getElementById('rep_turno').value,
+        maquina_id: document.getElementById('rep_maquina').value,
+        sucursal_id: document.getElementById('rep_sucursal').value,
+    };
+    contenido.innerHTML = '<div class="pc-card"><div class="rep-vacio-estado"><i class="fa-solid fa-spinner fa-spin"></i><p>Calculando producción compartida...</p></div></div>';
+    try {
+        const json = await llamarReporte('REPORTEPRODUCCIONPAREJAS', params);
+        if (solicitud !== solicitudParejasActual || vistaReporteActiva !== 'parejas') return;
+        if (!json.success) throw new Error(json.message || 'No se pudo cargar el reporte de equipos.');
+        pintarReporteParejas(json);
+    } catch (error) {
+        if (solicitud !== solicitudParejasActual || vistaReporteActiva !== 'parejas') return;
+        console.error(error);
+        contenido.innerHTML = `<div class="pc-card"><div class="rep-vacio-estado"><p>${escaparHtmlReporte(error.message || 'No se pudo cargar el reporte.')}</p></div></div>`;
+    }
+}
+
+function resumenCantidadesEquipo(cantidades) {
+    return Object.entries(cantidades || {}).filter(([, n]) => Number(n) > 0)
+        .map(([unidad, cantidad]) => formatearCantidad(cantidad, unidad)).join(' · ') || '0';
+}
+
+function aportesEquipoHtml(aportes) {
+    if (!Array.isArray(aportes) || !aportes.length) return '-';
+    return aportes.map(aporte => {
+        const detalle = resumenCantidadesEquipo(aporte.cantidad);
+        return `${escaparHtmlReporte(aporte.nombre || `Operario #${aporte.operario_id}`)}: ${escaparHtmlReporte(detalle)}`;
+    }).join('<br>');
+}
+
+function pintarReporteParejas(json) {
+    ultimoReporteParejas = json;
+    const equipos = Array.isArray(json.equipos) ? json.equipos : [];
+    const totalAvances = equipos.reduce((suma, equipo) => suma + (Number(equipo.avances) || 0), 0);
+    const totalCorridas = equipos.reduce((suma, equipo) => suma + (Number(equipo.producciones) || 0), 0);
+    const tarjetas = equipos.map(equipo => {
+        const nombreEquipo = equipo.operarios.map(persona => persona.nombre).join(' + ');
+        const filas = equipo.detalle.map(pasada => `<tr>
+            <td>${escaparHtmlReporte(formatearFecha(pasada.fecha))}<br>${escaparHtmlReporte((pasada.hora || '').slice(0, 5))}</td>
+            <td>${escaparHtmlReporte(TURNO_LABEL[pasada.turno] || pasada.turno || '-')}</td>
+            <td>#${Number(pasada.produccion_id)} · P${Number(pasada.pasada) || '-'}</td>
+            <td>${escaparHtmlReporte(pasada.molde || '-')}</td>
+            <td>${escaparHtmlReporte(pasada.producto || '-')}</td>
+            <td>${escaparHtmlReporte(pasada.maquina || '-')}</td>
+            <td>${escaparHtmlReporte(pasada.color || '-')}</td>
+            <td><strong>${escaparHtmlReporte(resumenCantidadesEquipo(pasada.cantidades))}</strong></td>
+            <td>${aportesEquipoHtml(pasada.aportes)}</td>
+        </tr>`).join('');
+        return `<section class="rep-operator-block">
+            <div class="rep-operator-heading"><div><h3>${escaparHtmlReporte(nombreEquipo)}</h3><span>${Number(equipo.avances) || 0} pasadas compartidas · ${Number(equipo.producciones) || 0} producciones</span></div><strong>Total juntos: ${escaparHtmlReporte(resumenCantidadesEquipo(equipo.totales))}</strong></div>
+            <div class="pc-table-wrap"><table class="rep-week-table rep-week-detail"><thead><tr><th>Fecha / hora</th><th>Turno</th><th>Producción / pasada</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Produjeron juntos</th><th>Aporte por operario</th></tr></thead><tbody>${filas}</tbody></table></div>
+        </section>`;
+    }).join('');
+    document.getElementById('rep_contenido').innerHTML = `<div class="pc-card">
+        <div class="rep-owner-summary"><div><h2 class="rep-exec-title">Producción en pareja</h2><div class="rep-exec-subtitle">${escaparHtmlReporte(json.periodo?.etiqueta || '')}</div></div>
+            <div class="rep-download-actions"><div class="rep-owner-pills"><span class="rep-owner-pill"><b>${equipos.length}</b> equipos</span><span class="rep-owner-pill"><b>${totalAvances}</b> pasadas compartidas</span><span class="rep-owner-pill"><b>${totalCorridas}</b> producciones</span></div><button type="button" class="btn btn-primary btn-sm" onclick="imprimirReporteParejas()"><i class="fa-solid fa-file-pdf"></i> Imprimir / Guardar PDF</button></div>
+        </div>
+        <div class="rep-week-note mb-3">Se excluye el molde Gancho Pinza / Pinza Palanita y las pasadas con aporte cero por cambio de turno.</div>
+        ${tarjetas || '<div class="rep-vacio-tabla">No hay pasadas registradas por varios operarios en este periodo y con estos filtros.</div>'}
+    </div>`;
+}
+
+function imprimirReporteParejas() {
+    if (!ultimoReporteParejas) return;
+    const ventana = window.open('', '_blank');
+    if (!ventana) {
+        Swal.fire('Ventana bloqueada', 'Permite las ventanas emergentes para imprimir o guardar el reporte como PDF.', 'info');
+        return;
+    }
+    const equipos = Array.isArray(ultimoReporteParejas.equipos) ? ultimoReporteParejas.equipos : [];
+    const secciones = equipos.map(equipo => {
+        const nombre = equipo.operarios.map(persona => persona.nombre).join(' + ');
+        const filas = equipo.detalle.map(pasada => `<tr>
+            <td>${escaparHtmlReporte(formatearFecha(pasada.fecha))} ${escaparHtmlReporte((pasada.hora || '').slice(0, 5))}</td>
+            <td>${escaparHtmlReporte(TURNO_LABEL[pasada.turno] || pasada.turno || '-')}</td>
+            <td>#${Number(pasada.produccion_id)} · P${Number(pasada.pasada) || '-'}</td>
+            <td>${escaparHtmlReporte(pasada.molde || '-')}</td><td>${escaparHtmlReporte(pasada.producto || '-')}</td>
+            <td>${escaparHtmlReporte(pasada.maquina || '-')}</td><td>${escaparHtmlReporte(pasada.color || '-')}</td>
+            <td>${escaparHtmlReporte(resumenCantidadesEquipo(pasada.cantidades))}</td><td>${aportesEquipoHtml(pasada.aportes)}</td>
+        </tr>`).join('');
+        return `<section><header class="equipo"><h2>${escaparHtmlReporte(nombre)}</h2><strong>Total juntos: ${escaparHtmlReporte(resumenCantidadesEquipo(equipo.totales))}</strong><span>${Number(equipo.avances) || 0} pasadas · ${Number(equipo.producciones) || 0} producciones</span></header>
+            <table><thead><tr><th>Fecha / hora</th><th>Turno</th><th>Producción / pasada</th><th>Molde</th><th>Producto</th><th>Máquina</th><th>Color</th><th>Produjeron juntos</th><th>Aporte por operario</th></tr></thead><tbody>${filas}</tbody></table></section>`;
+    }).join('');
+    const documento = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Producción en pareja</title><style>
+        @page{size:landscape;margin:10mm}*{box-sizing:border-box}body{font:10px Arial,sans-serif;color:#17233a;margin:0}h1{font-size:18px;margin:0 0 4px}p{color:#52627a;margin:0 0 12px}
+        section{margin:0 0 14px;break-inside:auto}.equipo{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#eef3fb;border:1px solid #ccd8eb;padding:7px 9px;break-after:avoid}.equipo h2{font-size:13px;color:#193b88;margin:0;flex:1}.equipo span{color:#64748b}
+        table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#e8edf5;color:#43516a;font-size:8px;text-transform:uppercase;text-align:left}th,td{border:1px solid #d8dee8;padding:5px 4px;vertical-align:top;overflow-wrap:anywhere}td{font-size:9px}tbody tr{break-inside:avoid}
+        @media screen{body{padding:16px;background:#eef1f5}.hoja{max-width:1400px;margin:0 auto;background:white;padding:18px;box-shadow:0 2px 12px #17233a22}}
+    </style></head><body><main class="hoja"><h1>Reporte de producción en pareja</h1><p>${escaparHtmlReporte(ultimoReporteParejas.periodo?.etiqueta || '')} · Generado ${new Date().toLocaleString('es-PE')}</p><p>Se excluye Gancho Pinza / Pinza Palanita y las pasadas con aporte cero por cambio de turno.</p>${secciones || '<p>No hay producción compartida en el periodo seleccionado.</p>'}</main></body></html>`;
+    ventana.document.open(); ventana.document.write(documento); ventana.document.close(); ventana.focus(); ventana.print();
 }
 
 function pintarResumenSemanal(json) {
