@@ -186,6 +186,7 @@ function reporteSemanalOperarios(): void
     $sucursalId = max(0, (int) ($_POST['sucursal_id'] ?? 0));
     $turno = trim((string) ($_POST['turno'] ?? ''));
     $unidadSql = unidadCaseSql('pd');
+    $producidoDesdePasadas = cantidadOperarioDesdePasadasSql('pd', 'op.operario');
     $turnoSql = turnoCaseSql('pd.fecha');
     $turnoSqlAvance = turnoCaseSql('a.fecha');
     $condiciones = ["pd.deleted_at IS NULL", "pd.fecha::date BETWEEN :desde AND :hasta"];
@@ -212,6 +213,7 @@ function reporteSemanalOperarios(): void
                    pd.maquina_id, pd.color_id, op.operario,
                    COALESCE(
                        NULLIF(op.operario->>'cantidad_producida', '')::numeric,
+                       $producidoDesdePasadas,
                        CASE WHEN jsonb_array_length(COALESCE(pd.js_operarios, '[]'::jsonb)) <= 1
                             THEN pd.cantidad_producida_kg END
                    ) AS producido,
@@ -431,8 +433,10 @@ function reporteOperarioDetalleInterno($conectar, int $operarioId, array $filtro
               WHERE (existentes.participante->>'operario_id')::bigint = pd.operario_id
           )
     ) AS op";
+    $producidoDesdePasadas = cantidadOperarioDesdePasadasSql('pd', 'op.operario');
     $producidoOperario = "COALESCE(
         NULLIF(op.operario->>'cantidad_producida', '')::numeric,
+        $producidoDesdePasadas,
         CASE
             WHEN jsonb_array_length(COALESCE(pd.js_operarios, '[]'::jsonb)) <= 1
             THEN pd.cantidad_producida_kg
@@ -696,6 +700,17 @@ function turnoCaseSql(string $columnaFecha): string
 function unidadCaseSql(string $aliasProduccion): string
 {
     return "COALESCE(NULLIF($aliasProduccion.js_configuracion_moment->>'salida_produccion', ''), 'kg')";
+}
+
+/** Suma las cantidades de las pasadas asignadas al operario en el JSON de producción. */
+function cantidadOperarioDesdePasadasSql(string $aliasProduccion, string $jsonOperario): string
+{
+    return "(
+        SELECT SUM(NULLIF(aportes.elem->>'cantidad', '')::numeric)
+        FROM jsonb_array_elements(COALESCE($aliasProduccion.js_cantidades_salientes, '[]'::jsonb)) AS pasadas(salida)
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pasadas.salida->'desglose_operarios', '[]'::jsonb)) AS aportes(elem)
+        WHERE aportes.elem->>'operario_id' = (" . $jsonOperario . "->>'operario_id')
+    )";
 }
 
 function calcularRangoPeriodo(string $modo, string $fechaRef, string $fechaDesdeInput, string $fechaHastaInput): array
