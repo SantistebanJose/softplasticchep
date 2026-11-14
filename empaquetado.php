@@ -990,7 +990,20 @@ function disponibleRestanteOrigen(tipo, id, excluirTempColorId = null) {
             comprometido += (parseFloat(c.cantidad) || 0);
         }
     }));
-    return (parseFloat(o.disponible) || 0) - comprometido;
+    return Math.max(0, (parseFloat(o.disponible) || 0) - comprometido);
+}
+
+function limitarCantidadesAlDisponible() {
+    const usados = new Map();
+    bultosState.forEach(b => b.colores.forEach(c => {
+        if (!c.origen_tipo || !c.origen_id) return;
+        const clave = claveOrigen(c.origen_tipo, c.origen_id);
+        const origen = origenesDisponiblesCache.find(o => o.origen_tipo === c.origen_tipo && o.origen_id == c.origen_id);
+        const base = Math.max(0, Number(origen?.disponible) || 0);
+        const yaUsado = usados.get(clave) || 0;
+        c.cantidad = Math.min(Math.max(0, Number(c.cantidad) || 0), Math.max(0, base - yaUsado));
+        usados.set(clave, yaUsado + c.cantidad);
+    }));
 }
 
 function totalBulto(bulto) {
@@ -1348,11 +1361,26 @@ function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
     const fila = bulto.colores.find(c => c.tempColorId === tempColorId);
-    if (fila) fila.cantidad = valor;
-    actualizarResumenBultos(); // solo el total; no re-renderiza para no perder el foco del input
+    if (fila) {
+        const solicitada = Math.max(0, Number(valor) || 0);
+        const restante = fila.origen_tipo ? disponibleRestanteOrigen(fila.origen_tipo, fila.origen_id, fila.tempColorId) : Infinity;
+        const capacidad = capacidadEnUnidadOrigenActual;
+        const espacio = capacidad !== null && capacidad !== undefined
+            ? Math.max(0, Number(capacidad) - (totalBulto(bulto) - (Number(fila.cantidad) || 0)))
+            : Infinity;
+        fila.cantidad = Math.min(solicitada, restante, espacio);
+        const input = document.getElementById(`cant-color-${tempColorId}`);
+        if (input) {
+            input.value = fila.cantidad || '';
+            input.max = String(Math.max(0, Math.min(restante, espacio)));
+        }
+    }
+    renderSacosBultoGrid();
+    actualizarResumenBultos();
 }
 
 function renderBultos() {
+    limitarCantidadesAlDisponible();
     renderSacosBultoGrid();
 
     const cont = document.getElementById('listaBultos');
@@ -1405,7 +1433,7 @@ function renderBultos() {
             const restanteOrigenActual = c.origen_tipo ? disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) : null;
             const espacioRestanteBulto = capacidad !== null ? Math.max(0, capacidad - (total - (parseFloat(c.cantidad) || 0))) : null;
             const topes = [restanteOrigenActual, espacioRestanteBulto].filter(v => v !== null && v !== undefined);
-            const maxInput = topes.length > 0 ? Math.min(...topes) : null;
+            const maxInput = topes.length > 0 ? Math.max(0, Math.min(...topes)) : null;
 
             return `
             <div class="mb-2">
@@ -1415,7 +1443,7 @@ function renderBultos() {
                         <option value="">Selecciona color/origen...</option>
                         ${opciones}
                     </select>
-                    <input type="number" min="0.0001" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} class="form-control form-control-sm"
+                    <input type="number" min="0" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} id="cant-color-${c.tempColorId}" class="form-control form-control-sm"
                            placeholder="Cantidad" value="${c.cantidad}"
                            oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
                     <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">

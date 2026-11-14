@@ -253,10 +253,10 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
                 e.unidad_salida_id,
                 us.nombre_corto AS unidad_salida_codigo,
                 col.color_id, col.color_nombre, col.color_hex,
-                e.cantidad_peso_kg - COALESCE((
+                GREATEST(0, e.cantidad_peso_kg - COALESCE((
                     SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
                     WHERE reo.ensamblaje_id = e.id AND reo.deleted_at IS NULL
-                ), 0) AS disponible
+                ), 0)) AS disponible
             FROM ensamblaje e
             LEFT JOIN producto pr_ens ON pr_ens.id = e.producto_id
             LEFT JOIN unidad_medida us ON us.id = e.unidad_salida_id
@@ -303,10 +303,10 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
                 cfgu.uid AS unidad_salida_id,
                 umx.nombre_corto AS unidad_salida_codigo,
                 pd.color_id, co.nombre AS color_nombre, co.rgb AS color_hex,
-                pd.cantidad_producida_kg - COALESCE((
+                GREATEST(0, pd.cantidad_producida_kg - COALESCE((
                     SELECT SUM(reo.cantidad) FROM rel_empaquetado_origen reo
                     WHERE reo.produccion_id = pd.id AND reo.deleted_at IS NULL
-                ), 0) AS disponible
+                ), 0)) AS disponible
             FROM produccion pd
             INNER JOIN producto pr ON pr.id = :producto_id2
             LEFT JOIN molde mo ON mo.id = pd.molde_id
@@ -1102,21 +1102,26 @@ function crearEmpaquetado()
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);
             if ($tipo === 'ensamblaje') {
+                // Serializa el cálculo del saldo frente a otros empaquetados
+                // que consuman el mismo origen al mismo tiempo.
+                executeQuery($conectar, "SELECT id FROM ensamblaje WHERE id = :id AND deleted_at IS NULL AND fin IS NOT NULL FOR UPDATE", ['id' => $oid]);
                 $fila = executeQuery($conectar, "
-                    SELECT e.cantidad_peso_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
-                        WHERE ensamblaje_id = e.id AND deleted_at IS NULL), 0) AS disponible
+                    SELECT GREATEST(0, e.cantidad_peso_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
+                        WHERE ensamblaje_id = e.id AND deleted_at IS NULL), 0)) AS disponible
                     FROM ensamblaje e WHERE e.id = :id AND e.deleted_at IS NULL AND e.fin IS NOT NULL
                 ", ['id' => $oid]);
             } else {
+                executeQuery($conectar, "SELECT id FROM produccion WHERE id = :id AND deleted_at IS NULL FOR UPDATE", ['id' => $oid]);
                 $fila = executeQuery($conectar, "
-                    SELECT pd.cantidad_producida_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
-                        WHERE produccion_id = pd.id AND deleted_at IS NULL), 0) AS disponible
+                    SELECT GREATEST(0, pd.cantidad_producida_kg - COALESCE((SELECT SUM(cantidad) FROM rel_empaquetado_origen
+                        WHERE produccion_id = pd.id AND deleted_at IS NULL), 0)) AS disponible
                     FROM produccion pd WHERE pd.id = :id AND pd.deleted_at IS NULL
                 ", ['id' => $oid]);
             }
             if (empty($fila)) throw new Exception("El origen $tipo #$oid ya no existe, está inactivo o no ha finalizado.");
-            if ($info['cantidad'] > (float)$fila[0]['disponible'] + 0.0001) {
-                throw new Exception("No queda suficiente disponible en $tipo #$oid (disponible: {$fila[0]['disponible']}, pedido: {$info['cantidad']}).");
+            $disponibleReal = max(0, (float)$fila[0]['disponible']);
+            if ($info['cantidad'] > $disponibleReal + 0.0001) {
+                throw new Exception("No queda suficiente disponible en $tipo #$oid (disponible: $disponibleReal, pedido: {$info['cantidad']}). Actualiza los disponibles y ajusta el paquete.");
             }
         }
 

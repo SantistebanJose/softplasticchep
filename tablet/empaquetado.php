@@ -260,6 +260,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-saco-card:active{ transform:scale(.96); border-color:var(--emp-accent); }
 .pc-saco-card.agotado{ opacity:.4; cursor:not-allowed; pointer-events:none; }
+.pc-saco-card.en-paquete{border-color:var(--emp-accent);background:var(--emp-accent-bg)}
 .pc-saco-card .swatch{ width:100%; height:52px; border-radius:9px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
 .pc-saco-card .nombre{ font-size:.94em; font-weight:700; margin:10px 0 1px; color:var(--pc-ink); }
 .pc-saco-card .origen{ font-size:.81em; color:var(--pc-muted); }
@@ -289,10 +290,20 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-swatch-chip.agotado{ opacity:.35; cursor:not-allowed; pointer-events:none; }
 
 .pc-bulto-card{ border:1px solid var(--pc-border); border-radius:var(--pc-r-md); padding:16px; margin-bottom:14px; background:var(--pc-surface); }
+.pc-bulto-card{overflow:hidden}
 .pc-bulto-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:.95em; font-weight:700; color:var(--pc-ink); flex-wrap:wrap; gap:8px; }
+.pc-bulto-card-head .resumen{display:flex;align-items:center;gap:8px;min-width:0}
+.pc-bulto-card-head .contador-colores{font-size:.76em;font-weight:700;color:var(--emp-accent);background:var(--emp-accent-bg);border-radius:999px;padding:4px 9px;white-space:nowrap}
+.pc-paquete-vacio{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px dashed var(--pc-border);border-radius:var(--pc-r-sm);color:var(--pc-muted);font-size:.82em;margin:0 0 10px}
+.pc-packer-active-hint{display:inline-flex;align-items:center;border-radius:999px;background:var(--emp-accent-bg);color:var(--emp-accent-dark);padding:5px 10px;font-size:.76em;font-weight:700;margin:0 0 8px}
+.pc-package-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
 .pc-color-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
 .pc-color-row select{ flex:2; min-width:160px; min-height:46px; }
 .pc-color-row input{ flex:1; min-width:100px; min-height:46px; }
+.pc-package-color-dot{width:16px;height:16px;border:1px solid rgba(27,33,48,.14);border-radius:5px;flex:0 0 auto}
+.pc-package-color-info{flex:2;min-width:0;display:flex;flex-direction:column;gap:3px}
+.pc-package-color-info select{width:100%;min-width:0!important;min-height:42px!important}
+.pc-package-color-info small{font-size:.72em;color:var(--pc-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pc-bulto-remove{ border:none; background:none; color:#c94a4a; font-size:1.2em; flex:0 0 auto; padding:10px; min-width:44px; min-height:44px; border-radius:var(--pc-r-sm); }
 .pc-bultos-total{
     display:flex; justify-content:space-between; align-items:center;
@@ -319,11 +330,22 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
  .pc-packer-pane .pc-saco-card .origen,.pc-packer-pane .pc-saco-card .disp{font-size:.74em}
  .pc-packer-pane .pc-swatch-picker{gap:5px}
  .pc-packer-pane .pc-swatch-chip{width:30px;height:30px}
+ .pc-packer-pane #sacosBultoGrid{grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:7px}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card{min-height:0;padding:7px;text-align:center;border-radius:11px}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card .swatch{height:34px;border-radius:8px}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card .nombre{font-size:.72em;line-height:1.2;margin:6px 0 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card .origen{font-size:.64em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card .disp{font-size:.67em;margin-top:2px}
+ .pc-packer-pane #sacosBultoGrid .pc-saco-card .en-mezcla{font-size:.62em;padding:2px 6px;top:3px;right:3px}
  .pc-estacion-titulo-paso{margin:16px 0 8px}
  .pc-bulto-card{padding:11px;margin-bottom:9px}
  .pc-bulto-card-head{font-size:.86em;margin-bottom:7px}
- .pc-color-row select{min-width:130px;min-height:42px}
- .pc-color-row input{min-width:78px;min-height:42px}
+ .pc-color-row{display:grid;grid-template-columns:16px minmax(0,1fr) 72px 40px;gap:6px;align-items:center}
+ .pc-package-color-info{grid-column:2;grid-row:1}
+ .pc-package-color-info select{min-height:40px!important;font-size:.78em}
+ .pc-package-color-info small{font-size:.65em}
+ .pc-color-row input{grid-column:3;grid-row:1;min-width:0;width:100%;min-height:42px}
+ .pc-color-row .pc-bulto-remove{grid-column:4;grid-row:1}
  .pc-chip-wrap-scroll{max-height:112px}
  .pc-estacion > div:first-child .pc-sacos-grid{max-height:35vh;overflow-y:auto;overscroll-behavior:contain;padding:2px}
 }
@@ -484,6 +506,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div class="pc-packer-layout">
                             <section class="pc-packer-pane" id="paneDisponibles" aria-hidden="false">
                                 <h5 class="pc-packer-pane-title">Toca un color para agregarlo</h5>
+                                <p class="pc-packer-active-hint" id="paqueteActivoHint">Selecciona un paquete para empezar.</p>
+                                <p class="pc-estacion-hint mb-2" id="colorGranularidadHint">Añade los colores que necesites al paquete activo. Se respeta la capacidad total y cada origen queda identificado.</p>
                                 <div class="pc-packer-scroll"><div class="pc-sacos-grid" id="sacosBultoGrid"></div></div>
                             </section>
                             <section class="pc-packer-pane" id="panePaquetes" aria-hidden="false">
@@ -586,6 +610,7 @@ let origenesDisponiblesCache = [];
 let unidadEmpaquetadoProductoActual = null;
 let reglasEmpaquetadoActuales = null;
 let bultosState = [];
+let bultoActivoTempId = null;
 let mezclaOrigenes = [];
 let contadorMezclaOrigen = 0;
 let bolsasProducidasValor = '';
@@ -1019,6 +1044,7 @@ async function cargarEstacionParaProducto(productoId) {
     const miToken = ++tokenCargaEstacion;   // <-- NUEVO
 
     bultosState = [];
+    bultoActivoTempId = null;
     mezclaOrigenes = [];
     bolsasProducidasValor = '';
     const campoBolsasProducidas = document.getElementById('mezclaBolsasProducidas');
@@ -1254,7 +1280,21 @@ function disponibleRestanteOrigen(tipo, id, excluirTempColorId = null) {
             comprometido += (parseFloat(c.cantidad) || 0);
         }
     }));
-    return (parseFloat(o.disponible) || 0) - comprometido;
+    return Math.max(0, (parseFloat(o.disponible) || 0) - comprometido);
+}
+
+function limitarCantidadesAlDisponible() {
+    const usados = new Map();
+    bultosState.forEach(b => b.colores.forEach(c => {
+        if (!c.origen_tipo || !c.origen_id) return;
+        const clave = claveOrigen(c.origen_tipo, c.origen_id);
+        const origen = origenesDisponiblesCache.find(o => o.origen_tipo === c.origen_tipo && o.origen_id == c.origen_id);
+        const base = Math.max(0, Number(origen?.disponible) || 0);
+        const yaUsado = usados.get(clave) || 0;
+        const cantidad = Math.max(0, Number(c.cantidad) || 0);
+        c.cantidad = Math.min(cantidad, Math.max(0, base - yaUsado));
+        usados.set(clave, yaUsado + c.cantidad);
+    }));
 }
 
 function totalBulto(bulto) {
@@ -1262,8 +1302,10 @@ function totalBulto(bulto) {
 }
 
 function agregarBulto() {
-    bultosState.push({ tempId: ++contadorBulto, colores: [] });
-    agregarColorABulto(bultosState[bultosState.length - 1].tempId);
+    const bulto = { tempId: ++contadorBulto, colores: [] };
+    bultosState.push(bulto);
+    bultoActivoTempId = bulto.tempId;
+    renderBultos();
 }
 
 function esModoMezcla() {
@@ -1318,20 +1360,22 @@ function tocarSacoMezcla(origenTipo, origenId) {
 
 function tocarSacoBulto(origenTipo, origenId) {
     if (bultosState.length === 0) agregarBulto();
-    let bulto = bultosState[bultosState.length - 1];
+    let bulto = bultosState.find(item => item.tempId === bultoActivoTempId) || bultosState[bultosState.length - 1];
+    let fila = bulto.colores.find(c => c.origen_tipo === origenTipo && c.origen_id == origenId);
+    const restanteOrigen = disponibleRestanteOrigen(origenTipo, origenId, fila ? fila.tempColorId : null);
+    if (restanteOrigen <= 0.0001) return;
 
     const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
     const incremento = granularidad > 1 ? granularidad : 1;
 
     if (capacidad !== null && totalBulto(bulto) >= capacidad - 0.0001) {
-        agregarBulto();
-        bulto = bultosState[bultosState.length - 1];
+        const nuevo = { tempId: ++contadorBulto, colores: [] };
+        bultosState.push(nuevo);
+        bultoActivoTempId = nuevo.tempId;
+        bulto = nuevo;
+        fila = null;
     }
-
-    let fila = bulto.colores.find(c => c.origen_tipo === origenTipo && c.origen_id == origenId);
-    const restanteOrigen = disponibleRestanteOrigen(origenTipo, origenId, fila ? fila.tempColorId : null);
-    if (restanteOrigen <= 0.0001) return;
 
     const espacioBulto = capacidad !== null
         ? Math.max(0, capacidad - totalBulto(bulto) + (fila ? (parseFloat(fila.cantidad) || 0) : 0))
@@ -1464,19 +1508,19 @@ function renderSacosBultoGrid() {
         return;
     }
     cont.innerHTML = origenesDisponiblesCache.map(o => {
-        const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id);
+        const restante = Math.max(0, disponibleRestanteOrigen(o.origen_tipo, o.origen_id));
         const comprometido = cantidadComprometidaOrigen(o.origen_tipo, o.origen_id);
         const agotado = restante <= 0.0001;
         const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
         const hex = colorHexPara(o.color_nombre, o.color_hex);
         return `
-        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''}"
+        <button type="button" class="pc-saco-card ${agotado ? 'agotado' : ''} ${comprometido > 0 ? 'en-paquete' : ''}"
                 onclick="tocarSacoBulto('${o.origen_tipo}', ${o.origen_id})" title="Tocar para agregar al paquete actual">
-            ${comprometido > 0 ? `<span class="en-mezcla">${formatearCantidadEmp(comprometido)}</span>` : ''}
+            ${comprometido > 0 ? `<span class="en-mezcla">+${formatearCantidadEmp(comprometido)}</span>` : ''}
             <div class="swatch" style="background:${hex};"></div>
             <p class="nombre">${o.color_nombre ?? 'Sin color'}</p>
             <p class="origen">${origenLabel}</p>
-            <p class="disp">disp: ${formatearCantidadEmp(restante)}</p>
+            <p class="disp">disp: ${formatearCantidadEmp(restante)} ${o.unidad_salida_codigo || ''}</p>
         </button>`;
     }).join('');
 }
@@ -1517,28 +1561,46 @@ function inicializarBloqueFormulario() {
     if (modoMezcla) {
         renderMezcla();
     } else {
-        seleccionarPanelPacker('disponibles');
         if (bultosState.length === 0) agregarBulto(); else renderBultos();
+        seleccionarPanelPacker('disponibles');
     }
 }
 
 function quitarBulto(tempId) {
     bultosState = bultosState.filter(b => b.tempId !== tempId);
+    if (bultoActivoTempId === tempId) bultoActivoTempId = bultosState.length ? bultosState[bultosState.length - 1].tempId : null;
     renderBultos();
+}
+function seleccionarBultoParaAgregar(tempId) {
+    bultoActivoTempId = tempId;
+    renderBultos();
+    seleccionarPanelPacker('disponibles');
 }
 function distribuirParejoBulto(bultoTempId) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
     const colores = bulto.colores.filter(c => c.origen_tipo && c.origen_id);
     if (colores.length < 2) return;
-    const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
-    const granularidad = reglasEmpaquetadoActuales?.granularidad_color || 1;
-    if (!capacidad) return;
-    const base = Math.floor((capacidad / colores.length) / granularidad) * granularidad;
-    colores.forEach(c => {
-        const restante = disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId);
-        c.cantidad = Math.min(base, restante);
+    const capacidad = capacidadEnUnidadOrigenActual;
+    const unidad = String(origenesDisponiblesCache[0]?.unidad_salida_codigo || '').toUpperCase();
+    const cantidadActual = colores.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
+    const objetivoTotal = capacidad !== null && capacidad !== undefined ? Number(capacidad) : cantidadActual;
+    if (!(objetivoTotal > 0)) return;
+
+    // La granularidad define el incremento al tocar la tarjeta; no limita
+    // el reparto parejo, que también debe funcionar con muchos colores.
+    const maximos = colores.map(c => {
+        const actual = parseFloat(c.cantidad) || 0;
+        return Math.max(0, disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) + actual);
     });
+    const cantidadIgual = Math.min(objetivoTotal / colores.length, ...maximos);
+    const paso = /^(DOC|DOCENA|DOCENAS|UND|UNIDAD|UNIDADES)$/.test(unidad) ? 1 : 0.0001;
+    const igualRedondeado = Math.floor((cantidadIgual + 1e-9) / paso) * paso;
+    if (igualRedondeado <= 0) {
+        Swal.fire('No se puede repartir', 'La cantidad disponible no alcanza para asignar al menos una unidad a cada color.', 'info');
+        return;
+    }
+    colores.forEach(c => { c.cantidad = igualRedondeado; });
     renderBultos();
 }
 function agregarColorABulto(bultoTempId) {
@@ -1576,11 +1638,26 @@ function actualizarCantidadColor(bultoTempId, tempColorId, valor) {
     const bulto = bultosState.find(b => b.tempId === bultoTempId);
     if (!bulto) return;
     const fila = bulto.colores.find(c => c.tempColorId === tempColorId);
-    if (fila) fila.cantidad = valor;
+    if (fila) {
+        const solicitada = Math.max(0, Number(valor) || 0);
+        const restante = fila.origen_tipo ? Math.max(0, disponibleRestanteOrigen(fila.origen_tipo, fila.origen_id, fila.tempColorId)) : Infinity;
+        const capacidad = capacidadEnUnidadOrigenActual;
+        const espacio = capacidad !== null && capacidad !== undefined
+            ? Math.max(0, Number(capacidad) - (totalBulto(bulto) - (Number(fila.cantidad) || 0)))
+            : Infinity;
+        fila.cantidad = Math.min(solicitada, restante, espacio);
+        const input = document.getElementById(`cant-color-${tempColorId}`);
+        if (input) {
+            input.value = fila.cantidad || '';
+            input.max = String(Math.max(0, Math.min(restante, espacio)));
+        }
+    }
+    renderSacosBultoGrid();
     actualizarResumenBultos();
 }
 
 function renderBultos() {
+    limitarCantidadesAlDisponible();
     renderSacosBultoGrid();
     const cont = document.getElementById('listaBultos');
     const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
@@ -1600,18 +1677,6 @@ function renderBultos() {
 
         const filasColores = b.colores.map(c => {
             const valorActual = c.origen_tipo ? claveOrigen(c.origen_tipo, c.origen_id) : '';
-
-            const swatchesHtml = origenesDisponiblesCache.map(o => {
-                const clave = claveOrigen(o.origen_tipo, o.origen_id);
-                const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
-                const deshabilitado = restante <= 0.0001 && clave !== valorActual;
-                const hex = colorHexPara(o.color_nombre, o.color_hex);
-                const origenLabel = o.origen_tipo === 'ensamblaje' ? `Ensamblaje #${o.origen_id}` : `Producción #${o.origen_id}`;
-                return `<button type="button" class="pc-swatch-chip ${clave === valorActual ? 'activo' : ''} ${deshabilitado ? 'agotado' : ''}"
-                    style="background:${hex};" title="${o.color_nombre ?? 'Sin color'} · ${origenLabel} (disp: ${formatearCantidadEmp(restante)})"
-                    onclick="elegirColorEnFilaBulto(${b.tempId}, ${c.tempColorId}, '${o.origen_tipo}', ${o.origen_id})"></button>`;
-            }).join('');
-
             const opciones = origenesDisponiblesCache.map(o => {
                 const clave = claveOrigen(o.origen_tipo, o.origen_id);
                 const restante = disponibleRestanteOrigen(o.origen_tipo, o.origen_id, c.tempColorId);
@@ -1625,44 +1690,54 @@ function renderBultos() {
             const restanteOrigenActual = c.origen_tipo ? disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId) : null;
             const espacioRestanteBulto = capacidad !== null ? Math.max(0, capacidad - (total - (parseFloat(c.cantidad) || 0))) : null;
             const topes = [restanteOrigenActual, espacioRestanteBulto].filter(v => v !== null && v !== undefined);
-            const maxInput = topes.length > 0 ? Math.min(...topes) : null;
+            const maxInput = topes.length > 0 ? Math.max(0, Math.min(...topes)) : null;
 
+            const origenActual = origenesDisponiblesCache.find(o => o.origen_tipo === c.origen_tipo && o.origen_id == c.origen_id);
+            const hexActual = origenActual ? colorHexPara(origenActual.color_nombre, origenActual.color_hex) : '#d9dee8';
+            const disponibleTexto = origenActual ? `Disponible: ${formatearCantidadEmp(disponibleRestanteOrigen(c.origen_tipo, c.origen_id, c.tempColorId))} ${origenActual.unidad_salida_codigo || ''}` : 'Elige un origen disponible';
             return `
-            <div class="mb-2">
-                <div class="pc-swatch-picker">${swatchesHtml}</div>
-                <div class="pc-color-row">
-                    <select class="form-select form-select-sm" onchange="actualizarOrigenColor(${b.tempId}, ${c.tempColorId}, this.value)">
+            <div class="pc-color-row">
+                <span class="pc-package-color-dot" style="background:${hexActual}"></span>
+                <div class="pc-package-color-info">
+                    <select class="form-select form-select-sm" aria-label="Color y origen" onchange="actualizarOrigenColor(${b.tempId}, ${c.tempColorId}, this.value)">
                         <option value="">Selecciona color/origen...</option>
                         ${opciones}
                     </select>
-                    <input type="number" min="0.0001" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} class="form-control form-control-sm"
-                           placeholder="Cantidad" value="${c.cantidad}"
-                           oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
-                    <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
+                    <small>${disponibleTexto}</small>
                 </div>
+                <input type="number" min="0" step="0.0001" ${maxInput !== null ? `max="${maxInput}"` : ''} id="cant-color-${c.tempColorId}" class="form-control form-control-sm"
+                       aria-label="Cantidad para este color" placeholder="Cantidad" value="${c.cantidad}"
+                       oninput="actualizarCantidadColor(${b.tempId}, ${c.tempColorId}, this.value)">
+                <button type="button" class="pc-bulto-remove" onclick="quitarColorDeBulto(${b.tempId}, ${c.tempColorId})" title="Quitar color">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             </div>`;
         }).join('');
 
         return `
         <div class="pc-bulto-card" style="${excedido ? 'border-color:#c94a4a;' : ''}">
             <div class="pc-bulto-card-head" style="${excedido ? 'color:#c94a4a;' : ''}">
-                <span>Bulto ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
+                <div class="resumen">
+                    <span>Paquete ${idx + 1} — ${textoTotal}${excedido ? ' ⚠ excede la capacidad' : ''}</span>
+                    <span class="contador-colores">${b.colores.filter(c => c.origen_tipo && c.origen_id).length} colores</span>
+                </div>
                 <div>
-                    ${b.colores.length > 1 ? `
-                        <button type="button" class="btn btn-sm btn-outline-primary" style="margin-right:6px;" onclick="distribuirParejoBulto(${b.tempId})">
-                            <i class="fa-solid fa-scale-balanced"></i> Repartir parejo
-                        </button>` : ''}
+                    ${bultoActivoTempId === b.tempId
+                        ? '<span class="badge text-bg-primary">En edición</span>'
+                        : `<button type="button" class="btn btn-sm btn-outline-primary" onclick="seleccionarBultoParaAgregar(${b.tempId})">Agregar colores aquí</button>`}
                     <button type="button" class="pc-bulto-remove" onclick="quitarBulto(${b.tempId})" title="Quitar bulto">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </div>
             </div>
+            ${b.colores.length === 0 ? '<p class="pc-paquete-vacio"><i class="fa-solid fa-hand-pointer"></i> Elige colores en “Disponibles” para agregarlos a este paquete.</p>' : ''}
             ${filasColores}
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="agregarColorABulto(${b.tempId})">
-                <i class="fa-solid fa-plus"></i> Agregar color a este bulto
-            </button>
+            <div class="pc-package-actions">
+                ${b.colores.filter(c => c.origen_tipo && c.origen_id).length > 1 ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="distribuirParejoBulto(${b.tempId})" title="Reparte por igual entre los colores y respeta el disponible de cada producción"><i class="fa-solid fa-scale-balanced"></i> Repartir parejo</button>` : ''}
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="seleccionarBultoParaAgregar(${b.tempId})">
+                    <i class="fa-solid fa-plus"></i> Elegir más colores
+                </button>
+            </div>
         </div>`;
     }).join('');
     actualizarResumenBultos();
@@ -1672,10 +1747,18 @@ function actualizarResumenBultos() {
     const total = bultosState.reduce((s, b) => s + totalBulto(b), 0);
     document.getElementById('bultosCount').textContent = bultosState.length;
     document.getElementById('bultosTabCount').textContent = bultosState.length > 0 ? `(${bultosState.length})` : '';
+    const indiceActivo = bultosState.findIndex(b => b.tempId === bultoActivoTempId);
+    const hintPaquete = document.getElementById('paqueteActivoHint');
+    if (hintPaquete) hintPaquete.textContent = indiceActivo >= 0 ? `Añadiendo colores al paquete ${indiceActivo + 1}` : 'Selecciona un paquete para empezar.';
 
     const capacidad = capacidadEnUnidadOrigenActual; // CAMBIO
     const unidadPaquete = unidadEmpaquetadoProductoActual?.nombre_corto || '';
     const unidadBase = origenesDisponiblesCache[0]?.unidad_salida_codigo || '';
+    const granularidad = Math.max(1, Number(reglasEmpaquetadoActuales?.granularidad_color) || 1);
+    const hintGranularidad = document.getElementById('colorGranularidadHint');
+    if (hintGranularidad) {
+        hintGranularidad.textContent = `Cada toque agrega ${granularidad} ${unidadBase || 'unidad(es)'} al paquete activo, si hay cantidad disponible y espacio. Puedes añadir todos los colores necesarios; cada origen conserva su trazabilidad.`;
+    }
 
     let texto = `${formatearCantidadEmp(total)}${unidadBase ? ' ' + unidadBase : ''}`;
     if (capacidad) {
