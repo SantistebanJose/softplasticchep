@@ -175,6 +175,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         confirmButtonText: '¡A seguir con todo!',
         cancelButtonText: 'Hacer una consulta',
         showCancelButton: true,
+        reverseButtons: true,
         confirmButtonColor: '#23714b',
         cancelButtonColor: '#2563eb',
         focusConfirm: true,

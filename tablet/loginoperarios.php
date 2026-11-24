@@ -45,12 +45,12 @@ if (!empty($_SESSION['operario_id'])) {
             <button type="button" class="pc-op-key" data-key="7">7</button>
             <button type="button" class="pc-op-key" data-key="8">8</button>
             <button type="button" class="pc-op-key" data-key="9">9</button>
-            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpBorrar">
-                <i class="fa-solid fa-delete-left"></i>
-            </button>
-            <button type="button" class="pc-op-key" data-key="0">0</button>
             <button type="button" class="pc-op-key pc-op-key-action" id="pcOpLimpiar">
                 <i class="fa-solid fa-xmark"></i>
+            </button>
+            <button type="button" class="pc-op-key" data-key="0">0</button>
+            <button type="button" class="pc-op-key pc-op-key-action" id="pcOpBorrar">
+                <i class="fa-solid fa-delete-left"></i>
             </button>
         </div>
 
@@ -89,12 +89,12 @@ if (!empty($_SESSION['operario_id'])) {
       <button type="button" class="pc-op-key" data-key="7">7</button>
       <button type="button" class="pc-op-key" data-key="8">8</button>
       <button type="button" class="pc-op-key" data-key="9">9</button>
-      <button type="button" class="pc-op-key pc-op-key-action" id="pcOpPinBorrar">
-        <i class="fa-solid fa-delete-left"></i>
-      </button>
-      <button type="button" class="pc-op-key" data-key="0">0</button>
       <button type="button" class="pc-op-key pc-op-key-action" id="pcOpPinLimpiar">
         <i class="fa-solid fa-xmark"></i>
+      </button>
+      <button type="button" class="pc-op-key" data-key="0">0</button>
+      <button type="button" class="pc-op-key pc-op-key-action" id="pcOpPinBorrar">
+        <i class="fa-solid fa-delete-left"></i>
       </button>
     </div>
 
@@ -107,5 +107,8 @@ if (!empty($_SESSION['operario_id'])) {
 
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/loginoperarios.js"></script>
+<?php require_once __DIR__ . '/../controllers/featureFlags.php'; if (FEATURE_EFECTOS_NAVIDENOS): ?>
+<script src="../assets/js/login-navidad-pinzas.js?v=20261124" defer></script>
+<?php endif; ?>
 </body>
 </html>
