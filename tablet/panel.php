@@ -11,6 +11,13 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
 $mostrarBienvenidaSoporte = !empty($_SESSION['mostrar_bienvenida_soporte']);
 unset($_SESSION['mostrar_bienvenida_soporte']);
+$zonaNavidad = new DateTimeZone('America/Lima');
+$hoyNavidad = new DateTimeImmutable('today', $zonaNavidad);
+$fechaNavidad = new DateTimeImmutable($hoyNavidad->format('Y') . '-12-25', $zonaNavidad);
+if ($fechaNavidad < $hoyNavidad) {
+    $fechaNavidad = $fechaNavidad->modify('+1 year');
+}
+$diasParaNavidad = (int)$hoyNavidad->diff($fechaNavidad)->days;
 
 $puedeProduccion  = operarioTieneEtapa('PRODUC');
 $puedeEnsamblaje  = operarioTieneEtapa('ENSAMBLA');
@@ -40,6 +47,12 @@ else                 $saludo = 'Buenas noches';
         .hd-wave-hand{display:inline-block;transform-origin:75% 75%;animation:hd-wave 1s ease-in-out infinite}
         @keyframes hd-wave{0%,60%,100%{transform:rotate(0)}10%,30%,50%{transform:rotate(18deg)}20%,40%{transform:rotate(-10deg)}}
         .hd-welcome-copy{font-size:1rem;line-height:1.5;color:#5d6472}
+        .hd-navidad-figure{display:flex;justify-content:center;align-items:center;gap:12px;margin:2px auto 14px;font-size:58px;line-height:1.15;animation:hd-navidad-flotar 2.8s ease-in-out infinite}
+        .hd-navidad-copy{padding:16px 18px;border:1px solid #ead9ab;border-radius:16px;background:linear-gradient(145deg,#fffaf0,#f1f9f2);color:#46505c;font-size:1rem;line-height:1.55}
+        .hd-navidad-count{display:block;margin-bottom:8px;color:#a23832;font-family:Poppins,sans-serif;font-size:1.35rem;font-weight:800}
+        .hd-navidad-copy strong{color:#236546}
+        @keyframes hd-navidad-flotar{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+        @media(prefers-reduced-motion:reduce){.hd-navidad-figure{animation:none}}
     </style>
 </head>
 <body>
@@ -155,17 +168,19 @@ else                 $saludo = 'Buenas noches';
 document.addEventListener('DOMContentLoaded', async () => {
     if (!window.Swal) return;
     const nombre = <?= json_encode($primerNombre, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const diasParaNavidad = <?= json_encode($diasParaNavidad) ?>;
     const resultado = await Swal.fire({
-        title: `¡Hola, ${nombre}!`,
-        html: '<div class="hd-wave-figure" aria-hidden="true"><span>🧑‍🏭</span><span class="hd-wave-hand">👋</span></div><div class="hd-welcome-copy">Ahora puedes hacer tus consultas desde el mismo sistema. Si tienes dudas al registrar producción, ensamblaje u otra operación, escríbenos desde <strong>Ayuda y soporte</strong>.</div>',
-        confirmButtonText: 'Hacer una consulta',
-        cancelButtonText: 'Ahora no',
+        title: `¡Hola, ${nombre}! 🎄`,
+        html: `<div class="hd-navidad-figure" aria-hidden="true"><span>🎄</span><span>🧥</span><span>🎁</span></div><div class="hd-navidad-copy"><strong class="hd-navidad-count">¡Faltan ${diasParaNavidad} días para Navidad!</strong>Cada avance que registras ayuda a que el trabajo del equipo siga creciendo. ¡Vamos con ánimo en esta recta final del año!<div class="mt-3">¿Tienes dudas al registrar producción, ensamblaje o empaquetado? Escríbenos desde <strong>Ayuda y soporte</strong>.</div></div>`,
+        confirmButtonText: '¡A seguir con todo!',
+        cancelButtonText: 'Hacer una consulta',
         showCancelButton: true,
-        confirmButtonColor: '#2563eb',
-        focusCancel: true,
+        confirmButtonColor: '#23714b',
+        cancelButtonColor: '#2563eb',
+        focusConfirm: true,
         allowOutsideClick: false
     });
-    if (resultado.isConfirmed) window.location.href = 'soporte.php';
+    if (resultado.dismiss === Swal.DismissReason.cancel) window.location.href = 'soporte.php';
 });
 </script>
 <?php endif; ?>
