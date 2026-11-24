@@ -27,6 +27,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 
 <header class="pc-op-brand-bar pc-op-brand-bar-inline">
     <div class="pc-op-brand">
@@ -455,6 +456,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                         <div class="pc-panel-search">
                             <input type="text" id="ens_buscar_detalle" class="form-control form-control-lg" placeholder="Buscar...">
                         </div>
+                        <div class="d-flex justify-content-end mb-2"><button type="button" class="btn btn-outline-primary" onclick="escanearProduccionQR()"><i class="fa-solid fa-qrcode"></i> Escanear pasada</button></div>
                         <div class="pc-panel-body-scroll">
                             <div class="pc-mat-grid" id="ens_detalle_grid">
                                 <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
@@ -531,7 +533,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
+<script src="../assets/js/qr-camera.js?v=20261114"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 <script>
 const FEATURE_RUTA_EXTERIOR_PINZA_PALANITA = <?= FEATURE_RUTA_EXTERIOR_PINZA_PALANITA ? 'true' : 'false' ?>;
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
@@ -553,6 +556,7 @@ let ensamblajeIdActual = 0;
 let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento'
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = [];
+let produccionesDisponiblesQrEns = [];
 let productosDisponiblesEnsCache = null;
 let maquinasEnsamblajeCache = [];
 let ensamblajesCache = [];
@@ -1418,6 +1422,7 @@ async function renderGridDetalle() {
         const permiteMezcla = ['t', 'true', '1'].includes(String(productoSeleccionadoEns.permitir_colores_mixtos_ensamblaje).toLowerCase());
         const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: permiteMezcla ? '' : colorId, categoria_material_id: permiteMezcla ? '' : (categoriaFiltro || ''), texto, solo_cadenita_chica_primera: modoHabilitacionEns ? '1' : '0' });
         const producciones = json.success ? (json.producciones || []) : [];
+        produccionesDisponiblesQrEns = producciones;
 
         if (producciones.length === 0) {
             grid.innerHTML = modoHabilitacionEns
@@ -1550,6 +1555,42 @@ async function renderGridDetalle() {
     }
 }
 
+async function escanearProduccionQR() {
+    if (tabDetalleActiva !== 'produccion') { Swal.fire('Selecciona Producciones', 'El QR de una pasada de producción se vincula desde la pestaña Producciones.', 'info'); return; }
+    const valor = await new Promise(resolve => window.abrirLectorQR(resolve));
+    const m = String(valor || '').trim().match(/^PR-(\d{10})-(\d{5})-(\d{5})-(\d{5})$/);
+    if (!m) { if (valor) Swal.fire('QR no válido', 'Escanea un sticker de una pasada de producción.', 'warning'); return; }
+    const productoId = productoSeleccionadoEns.producto_id;
+    if (!productoId) { Swal.fire('Selecciona producto', 'Primero selecciona el producto que vas a ensamblar.', 'info'); return; }
+    let fila = produccionesDisponiblesQrEns.find(p => Number(p.produccion_id) === Number(m[1]) && Number(p.pasada) === Number(m[4]));
+    if (!fila) {
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', {
+            producto_id: productoId, produccion_id: Number(m[1]),
+            destino_ensamblaje: document.getElementById('ens_destino')?.value || 'local',
+            solo_cadenita_chica_primera: modoHabilitacionEns ? '1' : '0'
+        });
+        if (!json.success) {
+            Swal.fire('No se pudo consultar la pasada', json.message || 'Intenta escanear nuevamente.', 'error');
+            return;
+        }
+        fila = (json.producciones || []).find(p => Number(p.pasada) === Number(m[4]));
+    }
+    // El ID de producción y la pasada identifican el origen. Sucursal y molde
+    // vienen impresos como datos redundantes del QR, pero no deben impedir
+    // recuperar el ticket si esos datos históricos cambiaron.
+    if (!fila) { Swal.fire('Pasada no disponible', 'No se encontró esa pasada para el producto, color o destino seleccionado, o ya fue utilizada.', 'warning'); return; }
+    await agregarLineaDetalle('produccion', {
+        produccion_id: fila.produccion_id, relacion_id: fila.relacion_id, pasada: fila.pasada,
+        molde_nombre: fila.molde_nombre, color_nombre: fila.color_nombre_verif ?? fila.color_nombre,
+        color_rgb: fila.color_rgb, color_id: fila.color_id, cantidad_kg: fila.cantidad_kg ?? fila.cantidad,
+        destino_ensamblaje: fila.destino_ensamblaje || 'local', enviado_a: fila.enviado_a || null,
+        ensamblaje_pendiente_id: fila.ensamblaje_pendiente_id, fecha_hora_fin: fila.fecha_hora_fin,
+        categoria_material_id: fila.categoria_material_id, categoria_material_nombre: fila.categoria_material_nombre_verif,
+        unidad_codigo: fila.unidad_produccion_codigo || 'KG', cantidad_por_unidad_armada: fila.cantidad_por_unidad_armada,
+        unidad_componente_configurada: fila.unidad_componente_configurada, codigo_qr: String(valor).trim()
+    });
+}
+
 async function agregarLineaDetalle(tipo, datos) {
     const esHabilitacion = tipo === 'habilitacion' || !!datos.es_habilitacion_gancho;
     if (tipo === 'habilitacion') tipo = 'complemento';
@@ -1614,6 +1655,7 @@ async function agregarLineaDetalle(tipo, datos) {
             cantidad_entrada_produccion: cantidadRecibidaNum,
             categoria_material_id: datos.categoria_material_id,
             categoria_material_nombre: datos.categoria_material_nombre,
+            codigo_qr: datos.codigo_qr || null,
             destino_ensamblaje: datos.destino_ensamblaje || 'local',
             enviado_a: datos.enviado_a || null,
             fecha_hora_fin: datos.fecha_hora_fin || '',

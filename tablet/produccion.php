@@ -32,6 +32,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 
 <header class="pc-op-brand-bar pc-op-brand-bar-inline">
     <div class="pc-op-brand">
@@ -997,7 +998,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 
 <script>
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
@@ -1917,6 +1918,11 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Origen: producción #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
         ${estado === 'pausada' && eventoPausa ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-pause"></i> Paro: ${escaparResumenProd(eventoPausa.motivo_detalle || ({cambio_turno:'Cambio de turno', emergencia_molde:'Cambio de molde'}[eventoPausa.motivo] || 'Otro motivo'))}${eventoPausa.comentario ? ` · ${escaparResumenProd(eventoPausa.comentario)}` : ''}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
+        ${FEATURE_STICKER_QR && salidas.length ? `<div class="pc-prod-corrida-line pc-prod-qr-passes"><i class="fa-solid fa-qrcode"></i> Stickers por pasada: ${salidas.map(s => {
+            const pasada = Number(s.pasada || 0);
+            const codigo = s.codigo_qr || `PR-${String(p.id).padStart(10, '0')}-${String(p.sucursal || 0).padStart(5, '0')}-${String(p.molde_id || 0).padStart(5, '0')}-${String(pasada).padStart(5, '0')}`;
+            return `<button type="button" class="btn btn-sm btn-outline-primary" data-sticker-stage="P" data-sticker-id="${p.id}" data-sticker-pass="1" data-sticker-code="${codigo}" data-sticker-tape="${p.id}/${p.sucursal || 0}/${p.molde_id || 0}/${pasada}">P${pasada}</button>`;
+        }).join(' ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="#" onclick="event.preventDefault(); abrirFotoPesaje('${encodeURIComponent(String(foto.url || ''))}')">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
         ${Array.isArray(p.js_operarios) && p.js_operarios.length > 0 ? `
         <div class="pc-prod-operarios">
@@ -1925,11 +1931,6 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         </div>` : ''}
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
         <div class="pc-prod-card-foot">
-            ${FEATURE_STICKER_QR ? `<button type="button" class="pc-prod-ghost-btn" title="Imprimir sticker de procedencia"
-                    data-sticker-stage="P" data-sticker-id="${p.id}"
-                    data-sticker-code="${p.sticker_unico ?? ''}" data-sticker-tape="${p.codigo_escribir_cinta ?? ''}">
-                <i class="fa-solid fa-tag"></i> Sticker
-            </button>` : ''}
             ${puedeIniciar ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})"><i class="fa-solid fa-play"></i> Iniciar</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="abrirModalCantidadParaEnsamblaje(${p.id})"><i class="fa-solid fa-scale-balanced"></i> Registrar avance</button>` : ''}
             ${puedeRegistrarAvance ? `<button type="button" class="pc-prod-ghost-btn warn" onclick="agregarMaterialAProduccion(${p.id})"><i class="fa-solid fa-plus"></i> Añadir material</button>` : ''}

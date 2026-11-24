@@ -24,6 +24,9 @@ function controladorPerfilOperario($accion)
         case 'ACTUALIZARPINOPERARIO':
             actualizarPinOperario();
             break;
+        case 'ACTUALIZARBANCOPERFIL':
+            actualizarDatosBancariosPerfil();
+            break;
         default:
             responder(false, 'Acción no reconocida.');
     }
@@ -78,7 +81,7 @@ function obtenerPerfilOperario()
     $result = executeQuery($conectar, "
         SELECT
             u.user_, u.nombre_completo, u.rol_y_perfiles, u.pin, u.created_at,
-            o.dni, o.js_sucursales, o.js_etapas_relacionadas,
+            o.dni, o.js_sucursales, o.js_etapas_relacionadas, o.banco,
             c.nombre AS cargo_nombre, ar.nombre AS area_nombre
         FROM usuario u
         JOIN operario o  ON o.id = u.operario_id
@@ -91,6 +94,8 @@ function obtenerPerfilOperario()
 
     $u = $result[0];
     $rolPerfiles = decodificarRolPerfilesOperario($u['rol_y_perfiles']);
+    $bancos = executeQuery($conectar, 'SELECT nombre FROM public.banco WHERE deleted_at IS NULL ORDER BY nombre');
+    $datosBanco = decodificarJsonColumna($u['banco']);
 
     responder(true, 'OK', [
         'usuario'         => $u['user_'],
@@ -98,12 +103,51 @@ function obtenerPerfilOperario()
         'rol'             => $rolPerfiles['rol'] ?? 'Operario',
         'pin'             => $u['pin'],
         'dni'             => $u['dni'],
+        'banco'           => $datosBanco,
+        'bancos_disponibles' => $bancos,
         'cargo'           => $u['cargo_nombre'] ?? null,
         'area'            => $u['area_nombre'] ?? null,
         'sucursales'      => decodificarJsonColumna($u['js_sucursales']),
         'etapas'          => decodificarJsonColumna($u['js_etapas_relacionadas']),
         'miembro_desde'   => $u['created_at'] ? date('d/m/Y', strtotime($u['created_at'])) : null,
     ]);
+}
+
+function actualizarDatosBancariosPerfil(): void
+{
+    $id = requerirSesionOperario();
+    $bancoNombre = mb_strtoupper(trim($_POST['banco_nombre'] ?? ''), 'UTF-8');
+    $cuenta = trim($_POST['banco_cuenta'] ?? '');
+    $cci = trim($_POST['banco_cci'] ?? '');
+    if ($cuenta !== '' && !preg_match('/^\d{6,30}$/', $cuenta)) {
+        responder(false, 'El número de cuenta debe tener de 6 a 30 dígitos.');
+    }
+    if ($cci !== '' && !preg_match('/^\d{20}$/', $cci)) {
+        responder(false, 'El CCI debe contener exactamente 20 dígitos.');
+    }
+    $conectar = conectar_oll_BD();
+    if ($bancoNombre !== '') {
+        $catalogo = executeQuery($conectar, 'SELECT nombre FROM public.banco WHERE UPPER(nombre) = :nombre AND deleted_at IS NULL', ['nombre' => $bancoNombre]);
+        if (empty($catalogo)) responder(false, 'Selecciona un banco activo del catálogo.');
+        $bancoNombre = $catalogo[0]['nombre'];
+    }
+
+    $actual = executeQuery($conectar, 'SELECT banco FROM public.operario WHERE id = :id AND deleted_at IS NULL', ['id' => $id]);
+    if (empty($actual)) responder(false, 'Operario no encontrado o inactivo.');
+    $banco = decodificarJsonColumna($actual[0]['banco']);
+    $banco['nombre'] = $bancoNombre;
+    $banco['cuenta'] = $cuenta;
+    $banco['cci'] = $cci;
+    if ($bancoNombre === '' && $cuenta === '' && $cci === '') {
+        $nuevoJson = null;
+    } else {
+        $nuevoJson = json_encode($banco, JSON_UNESCAPED_UNICODE);
+    }
+    executeNonQuery($conectar, 'UPDATE public.operario SET banco = CAST(:banco AS jsonb), updated_at = NOW() WHERE id = :id', [
+        'banco' => $nuevoJson,
+        'id' => $id,
+    ]);
+    responder(true, 'Tus datos bancarios se actualizaron correctamente.');
 }
 
 function actualizarPinOperario()

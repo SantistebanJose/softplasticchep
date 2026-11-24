@@ -2355,7 +2355,7 @@ function enviarAEnsamblaje()
 
     $existe = executeQuery(
         $conectar,
-        "SELECT id, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios, maquina_id,
+        "SELECT id, sucursal, deleted_at, fecha_hora_inicio, fecha_hora_fin, enviado_ensamblaje, molde_id, categoria_material_id, unico_molde_producto, js_operarios, maquina_id,
                 js_cantidades_salientes, js_cantidades_merma, pases_finalizados, cantidad_producida_kg, js_casusticas, detenido,
                 realizado_por_fuera, js_realizado_por_fuera,
                 (SELECT evt->'operarios_ids' FROM unnest(COALESCE(js_casusticas, ARRAY[]::jsonb[])) WITH ORDINALITY AS ev(evt, ord)
@@ -2594,6 +2594,15 @@ function enviarAEnsamblaje()
         'destino_ensamblaje' => $necesitaEnsamblaje ? ($realizadoPorFuera ? 'externo' : 'local') : 'empaquetado',
         'enviado_a' => $realizadoPorFuera ? $enviadoA : null,
     ];
+    // QR alfanumérico compacto: producción, sucursal, molde y pasada.
+    // Las cantidades siguen siendo validadas en el servidor al escanear.
+    $salidaActual['codigo_qr'] = sprintf(
+        'PR-%010d-%05d-%05d-%05d',
+        $id,
+        (int)($existe[0]['sucursal'] ?? 0),
+        (int)($existe[0]['molde_id'] ?? 0),
+        (int)$salidaActual['pasada']
+    );
     if ($esSalidaMixta) {
         $salidaActual['desglose_unidades_operarios'] = [];
         foreach ($desgloseUnidadesPorOperario as $operarioId => $cantidades) {

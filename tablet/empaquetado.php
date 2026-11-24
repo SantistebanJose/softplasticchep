@@ -27,6 +27,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
 <body class="pc-emp-body">
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 
 <header class="pc-op-brand-bar pc-op-brand-bar-inline">
     <div class="pc-op-brand">
@@ -508,6 +509,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
                                 <h5 class="pc-packer-pane-title">Toca un color para agregarlo</h5>
                                 <p class="pc-packer-active-hint" id="paqueteActivoHint">Selecciona un paquete para empezar.</p>
                                 <p class="pc-estacion-hint mb-2" id="colorGranularidadHint">Añade los colores que necesites al paquete activo. Se respeta la capacidad total y cada origen queda identificado.</p>
+                                <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="escanearOrigenQR()"><i class="fa-solid fa-qrcode"></i> Escanear saco</button>
                                 <div class="pc-packer-scroll"><div class="pc-sacos-grid" id="sacosBultoGrid"></div></div>
                             </section>
                             <section class="pc-packer-pane" id="panePaquetes" aria-hidden="false">
@@ -590,7 +592,8 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js"></script><?php endif; ?>
+<script src="../assets/js/qr-camera.js?v=20261114"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="../assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 <script>
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const OPERARIO_ID     = <?= json_encode($operarioId) ?>;
@@ -1076,6 +1079,31 @@ async function cargarOrigenesDisponibles(productoId, miToken) {
     actualizarEtiquetasMezcla();
 }
 
+async function escanearOrigenQR() {
+    const valor = await new Promise(resolve => window.abrirLectorQR(resolve));
+    const codigo = String(valor || '').trim();
+    const prod = codigo.match(/^PR-(\d{10})-(\d{5})-(\d{5})-(\d{5})$/);
+    const ens = codigo.match(/^E-(\d{10})-(\d{5})-(\d{5})$/);
+    if (!prod && !ens) { if (codigo) Swal.fire('QR no válido', 'Escanea el sticker de una pasada o un ensamblaje.', 'warning'); return; }
+    if (!estacionProductoIdActual) { Swal.fire('Selecciona producto', 'Primero abre la estación de empaquetado para un producto.', 'info'); return; }
+    await cargarOrigenesDisponibles(estacionProductoIdActual, ++tokenCargaEstacion);
+    const tipo = prod ? 'produccion' : 'ensamblaje';
+    const id = Number((prod || ens)[1]);
+    const origen = origenesDisponiblesCache.find(item => item.origen_tipo === tipo && Number(item.origen_id) === id);
+    const sucursalQr = Number((prod || ens)[2]);
+    const idRelacionado = Number((prod || ens)[3]);
+    if (!origen || (origen.origen_sucursal && Number(origen.origen_sucursal) !== sucursalQr)
+        || (prod && origen.origen_molde_id && Number(origen.origen_molde_id) !== idRelacionado)
+        || (ens && origen.origen_producto_id && Number(origen.origen_producto_id) !== idRelacionado)) {
+        Swal.fire('Origen no disponible', 'El QR no pertenece a un saco disponible para este producto, sucursal o etapa.', 'warning'); return;
+    }
+    const qrMeta = { codigo_qr: codigo, pasada: prod ? Number(prod[4]) : null };
+    const modosMezcla = reglasEmpaquetadoActuales?.conversion_peso_a_unidad === true
+        || reglasEmpaquetadoActuales?.conversion_peso_a_unidad === 1
+        || reglasEmpaquetadoActuales?.conversion_peso_a_unidad === '1';
+    if (modosMezcla) tocarSacoMezcla(tipo, id, qrMeta); else tocarSacoBulto(tipo, id, qrMeta);
+}
+
 function aplicarMaquinaEmpaquetado() {
     const requerida = reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === true
         || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === 1
@@ -1342,7 +1370,7 @@ function disponibleKgOrigen(tipo, id, excluirTempId = null) {
     return dispKgBase - comprometido;
 }
 
-function tocarSacoMezcla(origenTipo, origenId) {
+function tocarSacoMezcla(origenTipo, origenId, qrMeta = null) {
     const o = origenesDisponiblesCache.find(x => x.origen_tipo === origenTipo && x.origen_id == origenId);
     if (!o) return;
     const restante = disponibleKgOrigen(origenTipo, origenId);
@@ -1353,12 +1381,16 @@ function tocarSacoMezcla(origenTipo, origenId) {
         fila = { tempId: ++contadorMezclaOrigen, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10), color_id: o.color_id, color_nombre: o.color_nombre, cantidad_kg: '' };
         mezclaOrigenes.push(fila);
     }
+    if (qrMeta) {
+        if (!Array.isArray(fila.qr_scans)) fila.qr_scans = [];
+        fila.qr_scans.push({ codigo_qr: qrMeta.codigo_qr, pasada: qrMeta.pasada });
+    }
     const actual = parseFloat(fila.cantidad_kg) || 0;
     fila.cantidad_kg = Math.round((actual + restante) * 10000) / 10000;
     renderMezcla();
 }
 
-function tocarSacoBulto(origenTipo, origenId) {
+function tocarSacoBulto(origenTipo, origenId, qrMeta = null) {
     if (bultosState.length === 0) agregarBulto();
     let bulto = bultosState.find(item => item.tempId === bultoActivoTempId) || bultosState[bultosState.length - 1];
     let fila = bulto.colores.find(c => c.origen_tipo === origenTipo && c.origen_id == origenId);
@@ -1392,14 +1424,20 @@ function tocarSacoBulto(origenTipo, origenId) {
             filaVacia.color_id = o ? o.color_id : null;
             filaVacia.color_nombre = o ? o.color_nombre : '';
             filaVacia.cantidad = aAgregar;
+            fila = filaVacia;
         } else {
-            bulto.colores.push({
+            fila = {
                 tempColorId: ++contadorColorRow, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10),
                 color_id: o ? o.color_id : null, color_nombre: o ? o.color_nombre : '', cantidad: aAgregar,
-            });
+            };
+            bulto.colores.push(fila);
         }
     } else {
         fila.cantidad = (parseFloat(fila.cantidad) || 0) + aAgregar;
+    }
+    if (qrMeta && fila) {
+        if (!Array.isArray(fila.qr_scans)) fila.qr_scans = [];
+        fila.qr_scans.push({ codigo_qr: qrMeta.codigo_qr, pasada: qrMeta.pasada, cantidad: aAgregar });
     }
 
     renderBultos();

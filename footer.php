@@ -36,5 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
+<?php require __DIR__ . '/components/efectos_navidenos.php'; ?>
+
 </body>
 </html>

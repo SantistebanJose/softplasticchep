@@ -249,6 +249,9 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             SELECT
                 'ensamblaje' AS origen_tipo,
                 e.id AS origen_id,
+                e.sucursal AS origen_sucursal,
+                NULL::bigint AS origen_molde_id,
+                e.producto_id AS origen_producto_id,
                 e.cantidad_peso_kg AS cantidad_total,
                 e.unidad_salida_id,
                 us.nombre_corto AS unidad_salida_codigo,
@@ -299,6 +302,9 @@ function buscarOrigenesDisponiblesParaEmpaquetar(int $productoId)
             SELECT
                 'produccion' AS origen_tipo,
                 pd.id AS origen_id,
+                pd.sucursal AS origen_sucursal,
+                pd.molde_id AS origen_molde_id,
+                pr.id AS origen_producto_id,
                 pd.cantidad_producida_kg AS cantidad_total,
                 cfgu.uid AS unidad_salida_id,
                 umx.nombre_corto AS unidad_salida_codigo,
@@ -729,7 +735,7 @@ function listarTodosEmpaquetados()
     $limiteListado = esSesionTabletEmpaquetado() ? '' : ' LIMIT 300';
     $sql = "SELECT
             emp.id, emp.emsamblaje_id, emp.produccion_id, emp.producto_id, emp.sucursal,
-            CONCAT(LPAD(emp.id::varchar, 10, '0'), '-', LPAD(emp.sucursal::varchar, 5, '0'), '-', LPAD(emp.producto_id::varchar, 5, '0'), '-', COALESCE(LPAD(emp.emsamblaje_id::varchar, 10, '0'), '0')) AS sticker_unico,
+            CONCAT(LPAD(emp.id::varchar, 10, '0'), '-', LPAD(emp.sucursal::varchar, 5, '0'), '-', LPAD(emp.producto_id::varchar, 5, '0'), '-', COALESCE(LPAD(emp.emsamblaje_id::varchar, 10, '0'), '0000000000')) AS sticker_unico,
             CONCAT(emp.id, '/', emp.sucursal, '/', emp.producto_id) AS codigo_escribir_cinta,
             emp.unidad_medida,
             p.codigo AS producto_codigo, p.descripcion AS producto_descripcion,
@@ -951,6 +957,56 @@ function obtenerCapacidadPaqueteEnUnidadOrigen($conectar, ?array $unidadEmpaquet
     return (float)$unidadEmpaquetado['equivalencia'] / (float)$unidadOrigen[0]['equivalencia'];
 }
 
+function validarCodigoQrOrigenEmpaquetado($conectar, string $tipo, int $origenId, array $lectura): void
+{
+    $codigo = trim((string)($lectura['codigo_qr'] ?? ''));
+    if ($codigo === '') return;
+    if ($tipo === 'produccion') {
+        if (!preg_match('/^PR-(\d{10})-(\d{5})-(\d{5})-(\d{5})$/', $codigo, $m) || (int)$m[1] !== $origenId) {
+            throw new Exception('El QR no corresponde a la producción seleccionada.');
+        }
+        $fila = executeQuery($conectar, 'SELECT sucursal, molde_id, js_cantidades_salientes FROM produccion WHERE id = :id AND deleted_at IS NULL FOR UPDATE', ['id' => $origenId]);
+        if (!$fila || (int)$fila[0]['sucursal'] !== (int)$m[2] || (int)$fila[0]['molde_id'] !== (int)$m[3]) {
+            throw new Exception('El QR de producción no coincide con los datos registrados.');
+        }
+        $pasada = (int)$m[4];
+        $salidas = json_decode((string)($fila[0]['js_cantidades_salientes'] ?? '[]'), true) ?: [];
+        $coincide = false;
+        foreach ($salidas as $salida) if ((int)($salida['pasada'] ?? 0) === $pasada) { $coincide = true; break; }
+        if (!$coincide) throw new Exception('La pasada indicada por el QR ya no existe.');
+        return;
+    }
+    if (!preg_match('/^E-(\d{10})-(\d{5})-(\d{5})$/', $codigo, $m) || (int)$m[1] !== $origenId) {
+        throw new Exception('El QR no corresponde al ensamblaje seleccionado.');
+    }
+    $fila = executeQuery($conectar, 'SELECT sucursal, producto_id FROM ensamblaje WHERE id = :id AND deleted_at IS NULL FOR UPDATE', ['id' => $origenId]);
+    if (!$fila || (int)$fila[0]['sucursal'] !== (int)$m[2] || (int)$fila[0]['producto_id'] !== (int)$m[3]) {
+        throw new Exception('El QR del ensamblaje no coincide con los datos registrados.');
+    }
+}
+
+function registrarLecturasQrEmpaquetado($conectar, int $empaquetadoId, array $bultos): void
+{
+    foreach ($bultos as $bulto) foreach (($bulto['colores'] ?? []) as $detalle) {
+        $tipo = ($detalle['origen_tipo'] ?? '') === 'produccion' ? 'produccion' : 'ensamblaje';
+        $id = (int)($detalle['origen_id'] ?? 0);
+        foreach (($detalle['qr_scans'] ?? []) as $lectura) {
+            if (!is_array($lectura) || empty($lectura['codigo_qr'])) continue;
+            $tabla = $tipo === 'produccion' ? 'produccion' : 'ensamblaje';
+            $evento = json_encode([
+                'codigo' => (string)$lectura['codigo_qr'], 'etapa' => 'empaquetado',
+                'empaquetado_id' => $empaquetadoId, 'pasada' => $lectura['pasada'] ?? null,
+                'cantidad' => (float)($lectura['cantidad'] ?? $detalle['cantidad'] ?? $detalle['cantidad_kg'] ?? 0), 'fecha' => date('c'),
+                'usuario_id' => (int)($_SESSION['usuario_id'] ?? 0),
+                'operario_id' => (int)($_SESSION['operario_id'] ?? 0),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            executeNonQuery($conectar, "UPDATE {$tabla}
+                SET js_codigo_qr_escaneado = COALESCE(js_codigo_qr_escaneado, '[]'::jsonb) || jsonb_build_array(CAST(:evento AS jsonb))
+                WHERE id = :id", ['evento' => $evento, 'id' => $id]);
+        }
+    }
+}
+
 function crearEmpaquetado()
 {
     $conectar = conectar_oll_BD();
@@ -1072,7 +1128,11 @@ function crearEmpaquetado()
                     'origen_tipo' => $tipo, 'origen_id' => $oid,
                     'color_id' => $d['color_id'] ?? null, 'color_nombre' => $d['color_nombre'] ?? null,
                     'cantidad' => $cant,
+                    'qr_scans' => is_array($d['qr_scans'] ?? null) ? array_values($d['qr_scans']) : [],
                 ];
+                foreach (($d['qr_scans'] ?? []) as $lecturaQr) {
+                    if (is_array($lecturaQr)) validarCodigoQrOrigenEmpaquetado($conectar, $tipo, $oid, $lecturaQr);
+                }
                 $clave = "$tipo:$oid";
                 if (!isset($consumoPorOrigen[$clave])) {
                     $consumoPorOrigen[$clave] = ['cantidad' => 0, 'color_id' => $d['color_id'] ?? null];
@@ -1169,6 +1229,8 @@ function crearEmpaquetado()
             ]);
         }
 
+        registrarLecturasQrEmpaquetado($conectar, (int)$empaquetadoId, $bultosLimpios);
+
         $conectar->commit();
         responder(true, 'Empaquetado registrado correctamente.', ['id' => $empaquetadoId]);
     } catch (Throwable $e) {
@@ -1219,7 +1281,13 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
                     'cantidad_kg'  => 0,
                     'color_id'     => $o['color_id'] ?? null,
                     'color_nombre' => $o['color_nombre'] ?? null,
+                    'qr_scans'     => [],
                 ];
+            }
+            foreach (($o['qr_scans'] ?? []) as $lecturaQr) {
+                if (!is_array($lecturaQr)) continue;
+                validarCodigoQrOrigenEmpaquetado($conectar, $tipo, $oid, $lecturaQr);
+                $consumoPorOrigen[$clave]['qr_scans'][] = $lecturaQr;
             }
             $consumoPorOrigen[$clave]['cantidad_kg'] += $cantKg;
             $kgTotal += $cantKg;
@@ -1273,6 +1341,7 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
                     'origen_tipo' => $tipo, 'origen_id' => (int)$oid,
                     'color_id' => $info['color_id'], 'color_nombre' => $info['color_nombre'],
                     'cantidad_kg' => $info['cantidad_kg'],
+                    'qr_scans' => $info['qr_scans'],
                 ];
             }, array_keys($consumoPorOrigen), $consumoPorOrigen)),
             'kg_total_mezclados'        => $kgTotal,
@@ -1299,6 +1368,8 @@ function crearEmpaquetadoMezcla($conectar, int $productoId, int $operarioIdPrima
         if (!$empaquetadoId) throw new Exception('No se pudo crear el registro de empaquetado.');
 
         registrarEntradaStockProducto($conectar, $productoId, $empaquetadoId, $unidadMedida, $bolsasProducidas);
+
+        registrarLecturasQrEmpaquetado($conectar, (int)$empaquetadoId, $mezclaDetalle);
 
         foreach ($consumoPorOrigen as $clave => $info) {
             [$tipo, $oid] = explode(':', $clave);

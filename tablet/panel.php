@@ -43,6 +43,7 @@ else                 $saludo = 'Buenas noches';
     </style>
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 <div class="pc-op-panel-shell">
 
     <header class="pc-op-brand-bar">
@@ -93,6 +94,12 @@ else                 $saludo = 'Buenas noches';
             <div class="pc-op-panel-icon"><i class="fa-solid fa-box-open"></i></div>
             <span class="pc-op-panel-label">Empaquetado</span>
             <span class="pc-op-panel-sub">Prepara sacos y bultos</span>
+            <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+        </a>
+        <a href="almacen.php" class="pc-op-panel-btn q-teal">
+            <div class="pc-op-panel-icon"><i class="fa-solid fa-warehouse"></i></div>
+            <span class="pc-op-panel-label">Ubicar paquete</span>
+            <span class="pc-op-panel-sub">Escanea su QR al llevarlo al almacén</span>
             <span class="pc-op-panel-arrow"><i class="fa-solid fa-arrow-right"></i></span>
         </a>
         <?php endif; ?>

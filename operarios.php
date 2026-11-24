@@ -38,7 +38,10 @@ include("header.php");
         <thead>
             <tr>
                 <th>#</th>
-                <th>Nombre completo</th>
+                <th>Nombres</th>
+                <th>Apellido paterno</th>
+                <th>Apellido materno</th>
+                <th>Apodo</th>
                 <th>DNI</th>
                 <th>Cargo</th>
                 <th>Marcación</th>
@@ -50,7 +53,7 @@ include("header.php");
             </tr>
         </thead>
         <tbody id="tbodyOperarios">
-            <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
+            <tr><td colspan="13" style="text-align:center;">Cargando...</td></tr>
         </tbody>
     </table>
     </div>
@@ -78,10 +81,27 @@ include("header.php");
             <small class="text-muted">Obligatorio. Se usa como usuario y contraseña iniciales de acceso al sistema.</small>
           </div>
           <div id="op_usuario_info" class="alert alert-info py-2 px-3 d-none mb-2"></div>
-          <div class="mb-2">
-            <label class="form-label">Nombre completo *</label>
-            <input type="text" class="form-control" id="op_nombre_completo" required>
+          <div class="row g-2">
+            <div class="col-12 mb-2"><label class="form-label">Nombres *</label><input type="text" class="form-control" id="op_nombre_completo" required></div>
+            <div class="col-md-6 mb-2"><label class="form-label">Apellido paterno</label><input type="text" class="form-control" id="op_ape_paterno" maxlength="100"></div>
+            <div class="col-md-6 mb-2"><label class="form-label">Apellido materno</label><input type="text" class="form-control" id="op_ape_materno" maxlength="100"></div>
+            <div class="col-12 mb-2"><label class="form-label">Apodo</label><input type="text" class="form-control" id="op_apodo" maxlength="100"></div>
           </div>
+          <small class="text-muted d-block mb-3">El nombre completo se mantiene sincronizado para conservar compatibilidad con reportes e historial. En registros antiguos, revisa y separa los apellidos al editar.</small>
+          <details class="border rounded p-3 mb-3"><summary class="fw-semibold">Datos personales y laborales</summary><div class="row g-2 mt-2">
+            <div class="col-md-6"><label class="form-label">Fecha de nacimiento</label><input type="date" class="form-control" id="op_fecha_nacimiento"></div>
+            <div class="col-md-6"><label class="form-label">Fecha de ingreso</label><input type="date" class="form-control" id="op_fecha_ingreso"></div>
+            <div class="col-md-6"><label class="form-label">Modalidad</label><select class="form-select" id="op_modalidad"><option value="">Selecciona una modalidad</option></select></div>
+            <div class="col-md-6"><label class="form-label">Tipo de gestión</label><select class="form-select" id="op_tipo_gestion"><option value="">Selecciona un tipo</option></select></div>
+            <div class="col-md-6"><label class="form-label">Sueldo bruto (S/)</label><input type="number" class="form-control" id="op_sueldo_bruto" min="0" step="0.01" inputmode="decimal"></div>
+          </div></details>
+          <details class="border rounded p-3 mb-3"><summary class="fw-semibold">Cese y datos bancarios</summary><div class="row g-2 mt-2">
+            <div class="col-md-6"><label class="form-label">Fecha de egreso</label><input type="date" class="form-control" id="op_fecha_egreso"></div>
+            <div class="col-12"><label class="form-label">Motivo del egreso</label><textarea class="form-control" id="op_detalle_egreso" rows="2" maxlength="500" placeholder="Escribe el motivo del egreso"></textarea></div>
+            <div class="col-md-6"><label class="form-label">Banco</label><select class="form-select" id="op_banco_catalogo"><option value="">Selecciona un banco</option></select></div>
+            <div class="col-md-6"><label class="form-label" for="op_banco_cuenta">Número de cuenta</label><input type="text" class="form-control" id="op_banco_cuenta" minlength="6" maxlength="30" pattern="[0-9]{6,30}" inputmode="numeric" autocomplete="off" placeholder="Solo números"><small class="form-text">De 6 a 30 dígitos, sin espacios ni guiones.</small></div>
+            <div class="col-12"><label class="form-label" for="op_banco_cci">CCI</label><input type="text" class="form-control" id="op_banco_cci" minlength="20" maxlength="20" pattern="[0-9]{20}" inputmode="numeric" autocomplete="off" placeholder="20 dígitos"><small class="form-text">Debe contener exactamente 20 dígitos.</small></div>
+          </div></details>
           <div class="mb-2">
             <label class="form-label">Cargo</label>
             <select id="op_cargo" class="form-select">
@@ -217,13 +237,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
         await cargarCargosActivos();
+        await cargarCatalogosOperario();
         await cargarSucursalesActivas();
         await cargarEtapasActivas();
         await cargarOperarios();
     } catch (err) {
         console.error('Error cargando operarios:', err);
         document.getElementById('tbodyOperarios').innerHTML =
-            `<tr><td colspan="10" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
+            `<tr><td colspan="13" style="text-align:center;color:red;">Error de conexión con el servidor. Revisa la consola (F12).</td></tr>`;
     }
 
     let debounceTimer = null;
@@ -275,6 +296,32 @@ async function cargarCargosActivos() {
         cargosActivos.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 }
 
+async function cargarCatalogosOperario() {
+    const json = await llamarOperario('LISTARCATALOGOSOPERARIO');
+    if (!json.success) {
+        console.warn('No se pudieron cargar los catálogos de operarios:', json.message);
+        window.catalogosOperario = { modalidades: [], tipos_gestion: [], bancos: [] };
+        return;
+    }
+    window.catalogosOperario = {
+        modalidades: json.modalidades || [],
+        tipos_gestion: json.tipos_gestion || [],
+        bancos: json.bancos || [],
+    };
+    llenarSelectCatalogo('op_modalidad', window.catalogosOperario.modalidades, 'Selecciona una modalidad');
+    llenarSelectCatalogo('op_tipo_gestion', window.catalogosOperario.tipos_gestion, 'Selecciona un tipo');
+    llenarSelectCatalogo('op_banco_catalogo', window.catalogosOperario.bancos, 'Selecciona un banco');
+}
+
+function llenarSelectCatalogo(id, valores, placeholder, valorActual = '') {
+    const select = document.getElementById(id);
+    const lista = [...valores];
+    if (valorActual && !lista.some(item => item.nombre === valorActual)) lista.push({ nombre: valorActual, historico: true });
+    select.innerHTML = `<option value="">${placeholder}</option>` + lista.map(item =>
+        `<option value="${item.nombre}">${item.nombre}${item.historico ? ' (registro anterior)' : ''}</option>`
+    ).join('');
+}
+
 async function cargarSucursalesActivas() {
     const json = await llamarSucursal('LISTARSUCURSALES', { visibilidad: 'activas' });
     if (!json.success) return;
@@ -313,6 +360,15 @@ function badgeEstadoOperario(deletedAt) {
         : '<span class="badge bg-secondary">Inactivo</span>';
 }
 
+function obtenerNombresOperario(o) {
+    const apellidos = [o.ape_parteno, o.ape_marteno].filter(Boolean).join(' ');
+    let nombres = o.nombre_completo || '-';
+    if (apellidos && nombres.toLocaleUpperCase('es').endsWith(apellidos.toLocaleUpperCase('es'))) {
+        nombres = nombres.slice(0, nombres.length - apellidos.length).trim();
+    }
+    return nombres || '-';
+}
+
 function badgesSucursales(jsSucursales) {
     let sucursales = jsSucursales || [];
     if (typeof sucursales === 'string') {
@@ -343,20 +399,23 @@ async function cargarOperarios() {
     const tbody = document.getElementById('tbodyOperarios');
 
     if (!json.success) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${json.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">${json.message}</td></tr>`;
         return;
     }
 
     const operarios = json.operarios || [];
     if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No hay operarios registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">No hay operarios registrados.</td></tr>';
         return;
     }
 
     tbody.innerHTML = operarios.map(o => `
         <tr id="fila-operario-${o.id}">
             <td data-label="#">${o.id}</td>
-            <td data-label="Nombre completo">${o.nombre_completo}</td>
+            <td data-label="Nombres">${obtenerNombresOperario(o)}</td>
+            <td data-label="Apellido paterno">${o.ape_parteno ?? '-'}</td>
+            <td data-label="Apellido materno">${o.ape_marteno ?? '-'}</td>
+            <td data-label="Apodo">${o.apodo ?? '-'}</td>
             <td data-label="DNI">${o.dni ?? '-'}</td>
             <td data-label="Cargo">${o.cargo_nombre ?? '-'}</td>
             <td data-label="Marcación"><span class="badge ${o.marcacion === 'T' ? 'bg-warning text-dark' : 'bg-primary'}">${o.marcacion === 'T' ? 'Temporal' : 'Siempre'}</span></td>
@@ -388,6 +447,7 @@ function limpiarFormularioOperario() {
     infoUsuario.classList.add('d-none');
     infoUsuario.innerHTML = '';
     document.getElementById('op_marcacion').value = 'S';
+    document.querySelectorAll('#modalOperario details').forEach(detalle => detalle.open = false);
     document.getElementById('op_dia_inicio').value = fechaLocalISO();
     document.getElementById('op_dia_fin').value = '';
     document.getElementById('op_descripcion_marcacion').value = '';
@@ -415,7 +475,30 @@ async function abrirModalEditarOperario(id) {
 
     const o = json.operario;
     document.getElementById('modalOperarioTitulo').textContent = 'Editar operario #' + id;
-    document.getElementById('op_nombre_completo').value = o.nombre_completo;
+    document.getElementById('op_nombre_completo').value = obtenerNombresOperario(o) === '-' ? '' : obtenerNombresOperario(o);
+    document.getElementById('op_ape_paterno').value = o.ape_parteno ?? '';
+    document.getElementById('op_ape_materno').value = o.ape_marteno ?? '';
+    document.getElementById('op_apodo').value = o.apodo ?? '';
+    document.getElementById('op_fecha_nacimiento').value = o.fecha_nacimiento ?? '';
+    document.getElementById('op_fecha_ingreso').value = o.fecha_ingreso ?? '';
+    document.getElementById('op_fecha_egreso').value = o.fecha_egreso ?? '';
+    llenarSelectCatalogo('op_modalidad', window.catalogosOperario?.modalidades || [], 'Selecciona una modalidad', o.modalidad ?? '');
+    llenarSelectCatalogo('op_tipo_gestion', window.catalogosOperario?.tipos_gestion || [], 'Selecciona un tipo', o.tipo_gestion ?? '');
+    document.getElementById('op_modalidad').value = o.modalidad ?? '';
+    document.getElementById('op_tipo_gestion').value = o.tipo_gestion ?? '';
+    document.getElementById('op_sueldo_bruto').value = o.sueldo_bruto ?? '';
+    const detalleEgreso = o.js_detalle_egreso;
+    document.getElementById('op_detalle_egreso').value = typeof detalleEgreso === 'string'
+        ? detalleEgreso
+        : (detalleEgreso?.motivo ?? detalleEgreso?.detalle ?? '');
+    const datosBanco = (o.banco && typeof o.banco === 'object' && !Array.isArray(o.banco)) ? { ...o.banco } : {};
+    const nombreBanco = datosBanco.nombre ?? datosBanco.banco ?? '';
+    delete datosBanco.nombre;
+    delete datosBanco.banco;
+    llenarSelectCatalogo('op_banco_catalogo', window.catalogosOperario?.bancos || [], 'Selecciona un banco', nombreBanco);
+    document.getElementById('op_banco_catalogo').value = nombreBanco;
+    document.getElementById('op_banco_cuenta').value = datosBanco.cuenta ?? datosBanco.numero_cuenta ?? '';
+    document.getElementById('op_banco_cci').value = datosBanco.cci ?? '';
     document.getElementById('op_cargo').value = o.cargo_id ?? '';
     document.getElementById('op_dni').value = o.dni ?? '';
     const detalleMarcacion = o.js_marcacion || {};
@@ -443,6 +526,14 @@ async function abrirModalEditarOperario(id) {
     mostrarInfoUsuarioOperario(o);
 
     modalOperario.show();
+}
+
+function formatearJsonTextarea(valor) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    if (typeof valor === 'string') {
+        try { return JSON.stringify(JSON.parse(valor), null, 2); } catch (_) { return valor; }
+    }
+    return JSON.stringify(valor, null, 2);
 }
 
 function mostrarInfoUsuarioOperario(o) {
@@ -499,9 +590,33 @@ async function buscarDNIOperario() {
 document.getElementById('formOperario').addEventListener('submit', async function (e) {
     e.preventDefault();
 
+    const cuentaBancaria = document.getElementById('op_banco_cuenta').value.trim();
+    const cciBancario = document.getElementById('op_banco_cci').value.trim();
+    if (cuentaBancaria && !/^\d{6,30}$/.test(cuentaBancaria)) {
+        Swal.fire('Número de cuenta inválido', 'Ingresa de 6 a 30 dígitos, sin letras, espacios ni guiones.', 'warning');
+        return;
+    }
+    if (cciBancario && !/^\d{20}$/.test(cciBancario)) {
+        Swal.fire('CCI inválido', 'El CCI debe tener exactamente 20 dígitos.', 'warning');
+        return;
+    }
+
     const params = {
         id: operarioIdActual,
         nombre_completo: document.getElementById('op_nombre_completo').value.trim(),
+        ape_parteno: document.getElementById('op_ape_paterno').value.trim(),
+        ape_marteno: document.getElementById('op_ape_materno').value.trim(),
+        apodo: document.getElementById('op_apodo').value.trim(),
+        fecha_nacimiento: document.getElementById('op_fecha_nacimiento').value,
+        fecha_ingreso: document.getElementById('op_fecha_ingreso').value,
+        fecha_egreso: document.getElementById('op_fecha_egreso').value,
+        modalidad: document.getElementById('op_modalidad').value.trim(),
+        tipo_gestion: document.getElementById('op_tipo_gestion').value.trim(),
+        sueldo_bruto: document.getElementById('op_sueldo_bruto').value,
+        banco_nombre: document.getElementById('op_banco_catalogo').value,
+        banco_cuenta: cuentaBancaria,
+        banco_cci: cciBancario,
+        motivo_egreso: document.getElementById('op_detalle_egreso').value.trim(),
         cargo_id: document.getElementById('op_cargo').value,
         dni: document.getElementById('op_dni').value.trim(),
         marcacion: document.getElementById('op_marcacion').value,

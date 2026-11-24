@@ -1013,6 +1013,8 @@ function buscarProduccionesDisponibles()
 
     $sql = "SELECT
             t1.id AS produccion_id,
+            t1.sucursal AS qr_sucursal,
+            t1.molde_id AS qr_molde_id,
             rep.id AS relacion_id,
             rep.ensamblaje_id AS ensamblaje_pendiente_id,
             t1.fecha_envio_ensamblaje,
@@ -1666,6 +1668,7 @@ function guardarEnsamblaje()
                 'derivado_id' => null, 'ensamblaje_complemento_id' => null,
                 'relacion_id' => $relacionId > 0 ? $relacionId : null,
                 'pasada' => $pasada > 0 ? $pasada : null,
+                'codigo_qr' => trim((string)($linea['codigo_qr'] ?? '')),
                 'cantidad_entrada_produccion' => $cantidadEntrada,
             ];
         } elseif ($tipo === 'derivado') {
@@ -1883,6 +1886,30 @@ function guardarEnsamblaje()
             }
 
             insertarLineasEnsamblaje($conectar, $ensamblajeId, $detalle);
+            foreach ($detalle as $lineaQr) {
+                $codigoQr = $lineaQr['codigo_qr'] ?? '';
+                if ($lineaQr['tipo'] !== 'produccion' || $codigoQr === '') continue;
+                $fuenteQr = executeQuery($conectar, "
+                    SELECT sucursal, molde_id, js_cantidades_salientes
+                    FROM produccion WHERE id = :id AND deleted_at IS NULL FOR UPDATE
+                ", ['id' => $lineaQr['molde_produccion_id']]);
+                if (!$fuenteQr) throw new Exception('La producción del QR ya no está disponible.');
+                $esperadoQr = sprintf('PR-%010d-%05d-%05d-%05d',
+                    (int)$lineaQr['molde_produccion_id'], (int)$fuenteQr[0]['sucursal'],
+                    (int)$fuenteQr[0]['molde_id'], (int)$lineaQr['pasada']);
+                if (!hash_equals($esperadoQr, $codigoQr)) throw new Exception('El QR no corresponde a la pasada seleccionada.');
+                $eventoQr = json_encode([
+                    'codigo' => $codigoQr, 'etapa' => 'ensamblaje', 'ensamblaje_id' => (int)$ensamblajeId,
+                    'pasada' => (int)$lineaQr['pasada'], 'fecha' => date('c'),
+                    'usuario_id' => (int)($_SESSION['usuario_id'] ?? 0),
+                    'operario_id' => (int)($_SESSION['operario_id'] ?? 0),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                executeNonQuery($conectar, "
+                    UPDATE produccion
+                    SET js_codigo_qr_escaneado = COALESCE(js_codigo_qr_escaneado, '[]'::jsonb) || jsonb_build_array(CAST(:evento AS jsonb)), updated_at = NOW()
+                    WHERE id = :id
+                ", ['evento' => $eventoQr, 'id' => $lineaQr['molde_produccion_id']]);
+            }
             recalcularResumenesEnsamblaje($conectar, $ensamblajeId);
 
             $conectar->commit();

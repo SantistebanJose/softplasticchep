@@ -202,6 +202,7 @@ $primerNombre   = trim(explode(' ', $nombreOperario)[0]);
     </style>
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 <div class="pc-op-panel-shell">
 
     <header class="pc-op-brand-bar">

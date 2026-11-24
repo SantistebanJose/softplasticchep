@@ -33,6 +33,7 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
     <link rel="stylesheet" href="../assets/css/produccion_tablet.css">
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 
 <header class="pc-op-brand-bar pc-op-brand-bar-inline">
     <div class="pc-op-brand">

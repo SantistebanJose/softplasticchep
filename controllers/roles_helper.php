@@ -25,7 +25,7 @@ function obtenerRolesBaseCatalogo($conectar, string $codigo): array
         $perfiles = $asignados[0]['perfiles'] ?? [];
         if (is_string($perfiles)) $perfiles = json_decode($perfiles, true) ?: [];
         return is_array($perfiles)
-            ? array_values(array_intersect($perfiles, ['produccion', 'compras', 'ventas', 'consulta', 'administrador']))
+            ? array_values(array_intersect($perfiles, ['produccion', 'compras', 'ventas', 'consulta', 'personal', 'administrador']))
             : [];
     }
 
@@ -33,7 +33,7 @@ function obtenerRolesBaseCatalogo($conectar, string $codigo): array
     if (is_string($roles)) $roles = json_decode($roles, true) ?: [];
     $permisos = is_array($roles) ? ($roles['permisos'] ?? []) : [];
     return is_array($permisos)
-        ? array_values(array_intersect($permisos, ['produccion', 'compras', 'ventas', 'consulta', 'administrador']))
+        ? array_values(array_intersect($permisos, ['produccion', 'compras', 'ventas', 'consulta', 'personal', 'administrador']))
         : [];
 }
 

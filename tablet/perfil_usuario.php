@@ -114,6 +114,43 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 }
 .pc-perfil-back i { font-size: 12px; }
 
+.pc-perfil-edit-bank {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    border: 0; border-radius: 12px; padding: 13px 18px; margin-top: 18px;
+    color: #fff; background: #1769e8; font: 600 14px Inter, sans-serif;
+    box-shadow: 0 6px 14px rgba(23,105,232,.2); cursor: pointer;
+}
+.pc-perfil-edit-bank:hover { background: #0c58cc; }
+.swal2-popup.pc-banco-popup {
+    width: min(470px, calc(100vw - 28px)); padding: 28px 28px 22px;
+    border-radius: 22px; font-family: Inter, sans-serif;
+}
+.pc-banco-popup .swal2-title {
+    padding: 0; margin: 4px 0 8px; color: #17243a;
+    font: 700 22px/1.25 Poppins, sans-serif;
+}
+.pc-banco-popup .swal2-html-container { margin: 0; color: #64748b; font-size: 14px; }
+.pc-banco-popup .swal2-actions { width: 100%; gap: 10px; margin: 22px 0 0; }
+.pc-banco-popup .swal2-styled { margin: 0; border-radius: 11px; padding: 12px 20px; font: 600 14px Inter, sans-serif; }
+.pc-banco-popup .swal2-confirm { background: #1769e8; }
+.pc-banco-popup .swal2-cancel { background: #eef2f7; color: #344256; }
+.pc-banco-form { display: grid; gap: 16px; padding-top: 12px; text-align: left; }
+.pc-banco-intro {
+    display: flex; gap: 12px; align-items: center; padding: 13px;
+    border: 1px solid #dce9ff; border-radius: 14px; background: #f4f8ff;
+    color: #365577; line-height: 1.45;
+}
+.pc-banco-intro i { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 12px; background: #e4efff; color: #1769e8; }
+.pc-banco-field { display: grid; gap: 7px; }
+.pc-banco-field label { color: #26364d; font: 600 14px Inter, sans-serif; }
+.pc-banco-field input, .pc-banco-field select {
+    box-sizing: border-box; width: 100%; min-height: 47px; padding: 11px 13px;
+    border: 1px solid #d8e0eb; border-radius: 11px; background: #fff;
+    color: #17243a; font: 500 15px Inter, sans-serif; outline: none;
+}
+.pc-banco-field input:focus, .pc-banco-field select:focus { border-color: #3983f6; box-shadow: 0 0 0 3px rgba(57,131,246,.14); }
+.pc-banco-hint { color: #7c8ba0; font-size: 12px; line-height: 1.4; }
+
 @media (min-width: 768px) {
     .pc-perfil-header { padding: 38px 42px; }
     .pc-perfil-avatar { width: 104px; height: 104px; font-size: 40px; }
@@ -130,6 +167,7 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
 </style>
 </head>
 <body>
+<?php $prefijoEfectosNavidenos = '../'; require __DIR__ . '/../components/efectos_navidenos.php'; ?>
 <div class="pc-op-panel-shell">
 
     <header class="pc-op-brand-bar">
@@ -194,6 +232,19 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
         </div>
 
         <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-building-columns"></i> Banco</span>
+            <span class="pc-perfil-valor" id="pfBanco">-</span>
+        </div>
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-credit-card"></i> Cuenta</span>
+            <span class="pc-perfil-valor" id="pfCuenta">-</span>
+        </div>
+        <div class="pc-perfil-row">
+            <span class="pc-perfil-label"><i class="fa-solid fa-money-check"></i> CCI</span>
+            <span class="pc-perfil-valor" id="pfCci">-</span>
+        </div>
+
+        <div class="pc-perfil-row">
             <span class="pc-perfil-label"><i class="fa-solid fa-briefcase"></i> Cargo</span>
             <span class="pc-perfil-valor" id="pfCargo">-</span>
         </div>
@@ -217,6 +268,9 @@ $nombreOperario = $_SESSION['operario_nombre'] ?? 'Operario';
             <i class="fa-solid fa-circle-info"></i>
             Para modificar tu nombre, usuario o rol, contacta al administrador del sistema.
         </div>
+        <button type="button" class="pc-perfil-edit-bank" id="btnEditarDatosBancarios">
+            <i class="fa-solid fa-pen"></i> Actualizar datos bancarios
+        </button>
     </div>
 
 </div>
@@ -257,6 +311,10 @@ async function cargarPerfil() {
     document.getElementById('pfMiembroDesde').textContent = json.miembro_desde || '-';
 
     document.getElementById('pfDni').textContent = json.dni || '-';
+    const banco = json.banco || {};
+    document.getElementById('pfBanco').textContent = banco.nombre || banco.banco || '-';
+    document.getElementById('pfCuenta').textContent = banco.cuenta ? `•••• ${String(banco.cuenta).slice(-4)}` : '-';
+    document.getElementById('pfCci').textContent = banco.cci ? `•••• ${String(banco.cci).slice(-4)}` : '-';
     document.getElementById('pfCargo').textContent = json.cargo || '-';
     document.getElementById('pfArea').textContent = json.area || '-';
 
@@ -266,6 +324,49 @@ async function cargarPerfil() {
     const pfPin = document.getElementById('pfPin');
     pfPin.dataset.pin = json.pin || '';
     pfPin.textContent = '••••';
+}
+
+document.getElementById('btnEditarDatosBancarios').addEventListener('click', async () => {
+    const perfil = await llamarPerfil('OBTENERPERFILOPERARIO');
+    if (!perfil.success) { Swal.fire('Error', perfil.message, 'error'); return; }
+    const banco = perfil.banco || {};
+    const opciones = (perfil.bancos_disponibles || []).map(b =>
+        `<option value="${escaparHtml(b.nombre)}" ${b.nombre === (banco.nombre || banco.banco) ? 'selected' : ''}>${escaparHtml(b.nombre)}</option>`
+    ).join('');
+    const { value: datos, isConfirmed } = await Swal.fire({
+        title: 'Actualizar datos bancarios',
+        html: `<div class="pc-banco-form">
+            <div class="pc-banco-intro"><i class="fa-solid fa-shield-halved"></i><span>Actualiza la información donde recibes tus pagos. Tus números se mostrarán protegidos en el perfil.</span></div>
+            <div class="pc-banco-field"><label for="swal-banco">Banco</label><select id="swal-banco"><option value="">Selecciona un banco</option>${opciones}</select></div>
+            <div class="pc-banco-field"><label for="swal-cuenta">Número de cuenta</label><input id="swal-cuenta" inputmode="numeric" maxlength="30" placeholder="De 6 a 30 dígitos" value="${escaparHtml(banco.cuenta || banco.numero_cuenta || '')}"><span class="pc-banco-hint">Solo números, sin espacios ni guiones.</span></div>
+            <div class="pc-banco-field"><label for="swal-cci">CCI</label><input id="swal-cci" inputmode="numeric" maxlength="20" placeholder="20 dígitos" value="${escaparHtml(banco.cci || '')}"><span class="pc-banco-hint">Debe contener exactamente 20 dígitos.</span></div>
+        </div>`,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        cancelButtonText: 'Cancelar',
+        buttonsStyling: false,
+        customClass: {
+            popup: 'pc-banco-popup',
+            confirmButton: 'swal2-confirm',
+            cancelButton: 'swal2-cancel',
+        },
+        preConfirm: () => {
+            const cuenta = document.getElementById('swal-cuenta').value.trim();
+            const cci = document.getElementById('swal-cci').value.trim();
+            if (cuenta && !/^\d{6,30}$/.test(cuenta)) { Swal.showValidationMessage('La cuenta debe tener de 6 a 30 dígitos, solo números.'); return false; }
+            if (cci && !/^\d{20}$/.test(cci)) { Swal.showValidationMessage('El CCI debe tener exactamente 20 dígitos.'); return false; }
+            return { banco_nombre: document.getElementById('swal-banco').value, banco_cuenta: cuenta, banco_cci: cci };
+        }
+    });
+    if (!isConfirmed) return;
+    const respuesta = await llamarPerfil('ACTUALIZARBANCOPERFIL', datos);
+    if (!respuesta.success) { Swal.fire('No se pudo actualizar', respuesta.message, 'error'); return; }
+    await Swal.fire('Actualizado', respuesta.message, 'success');
+    cargarPerfil();
+});
+
+function escaparHtml(valor) {
+    return String(valor).replace(/[&<>"']/g, caracter => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[caracter]));
 }
 
 let pinVisible = false;

@@ -43,9 +43,9 @@ function pc_group_summary_class($isOpen)
 }
 
 $operacionesPages    = ['produccion', 'ensamblaje', 'empaquetado'];
-$ventasPages         = ['punto_venta', 'listado_ventas'];
-$personalPages       = ['operarios', 'cargo'];
-$mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas'];
+$ventasPages         = ['punto_venta', 'listado_ventas', 'transportes'];
+$personalPages       = ['operarios', 'cargo', 'asistencia'];
+$mantenimientoPages  = ['productos', 'moldes', 'materiales', 'categoria_material', 'unidad_medida', 'colores', 'area', 'maquinas', 'bancos', 'catalogos_personal'];
 $administracionPages = ['usuarios', 'roles', 'sucursal', 'almacenes', 'proveedores', 'compras', 'configuracion', 'ayuda_videos', 'helpdesk'];
 $reportesPages       = ['stock', 'produccion_operario', 'kardex', 'reporte_pase_ensamblaje', 'reporte_ventas_productos', 'reporte_empaquetado', 'reporte_servicios_externos'];
 
@@ -104,6 +104,9 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="listadoVentas.php" class="<?= pc_sub_class('listado_ventas', $activePage) ?>">
                 <span class="dot"></span> Listado de Ventas
             </a>
+            <a href="transportes.php" class="<?= pc_sub_class('transportes', $activePage) ?>">
+                <span class="dot"></span> Transporte y despachos
+            </a>
         </div>
     </details>
     <?php endif; ?>
@@ -121,6 +124,11 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="cargo.php" class="<?= pc_sub_class('cargo', $activePage) ?>">
                 <span class="dot"></span> Cargos
             </a>
+            <?php if (usuarioTieneRol($usuarioMenu, 'administrador') || usuarioTieneRol($usuarioMenu, 'personal', 'personal')): ?>
+            <a href="asistencia.php" class="<?= pc_sub_class('asistencia', $activePage) ?>">
+                <span class="dot"></span> Asistencia
+            </a>
+            <?php endif; ?>
         </div>
     </details>
 
@@ -155,6 +163,10 @@ $reportesOpen       = in_array($activePage, $reportesPages);
             <a href="maquinas.php" class="<?= pc_sub_class('maquinas', $activePage) ?>">
                 <span class="dot"></span> Máquinas
             </a>
+            <?php if (usuarioTieneRol($usuarioMenu, 'administrador') || usuarioTieneRol($usuarioMenu, 'personal', 'personal')): ?>
+            <a href="bancos.php" class="<?= pc_sub_class('bancos', $activePage) ?>"><span class="dot"></span> Bancos</a>
+            <a href="catalogos_personal.php" class="<?= pc_sub_class('catalogos_personal', $activePage) ?>"><span class="dot"></span> Modalidades y gestión</a>
+            <?php endif; ?>
         </div>
     </details>
 

@@ -404,6 +404,7 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
                 <div class="pc-mat-search">
                     <input type="text" id="ens_buscar_detalle" class="form-control form-control-sm" placeholder="Buscar...">
                 </div>
+                <div class="d-flex justify-content-end mb-2"><button type="button" class="btn btn-sm btn-outline-primary" onclick="escanearProduccionQR()"><i class="fa-solid fa-qrcode"></i> Escanear pasada</button></div>
                 <div class="pc-mat-grid" id="ens_detalle_grid">
                     <div class="pc-mat-empty">Selecciona un producto para ver producciones disponibles.</div>
                 </div>
@@ -443,7 +444,8 @@ $puedeRegistrarExternoEns = !empty($_SESSION['rol_usuario'])
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
+<script src="assets/js/qr-camera.js?v=20261114"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 <script>
 const FEATURE_RUTA_EXTERIOR_PINZA_PALANITA = <?= FEATURE_RUTA_EXTERIOR_PINZA_PALANITA ? 'true' : 'false' ?>;
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
@@ -463,6 +465,7 @@ let productosEnsCache = null;   // cache de productos para selects/filtro
 let tabDetalleActiva = 'produccion'; // 'produccion' | 'derivado' | 'complemento'
 let contadorLineaTicketEns = 0;
 let ticketDetalleEns = []; // [{tempId, tipo, molde_produccion_id, derivado_id, ensamblaje_complemento_id, nombre, meta, color, bg, icono}]
+let produccionesDisponiblesQrEns = [];
 let productosDisponiblesEnsCache = null; // cache para el select del modal (producto+color pendientes)
 let maquinasEnsamblajeCache = [];
 let ensamblajesCache = [];       // último listado recibido del backend
@@ -1323,6 +1326,7 @@ async function renderGridDetalle() {
         const categoriaFiltro = categoriaMaterialTicketActual();
         const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', { producto_id: productoId, color_id: colorId || '', categoria_material_id: categoriaFiltro || '', texto, destino_ensamblaje: destinoEnsamblaje, solo_cadenita_chica_primera: modoHabilitacionEns ? '1' : '0' });
         const producciones = json.success ? (json.producciones || []) : [];
+        produccionesDisponiblesQrEns = producciones;
 
         if (producciones.length === 0) {
             grid.innerHTML = modoHabilitacionEns
@@ -1461,6 +1465,39 @@ async function renderGridDetalle() {
     }
 }
 
+async function escanearProduccionQR() {
+    if (tabDetalleActiva !== 'produccion') {
+        Swal.fire('Selecciona Producciones', 'El QR de una pasada de producción se vincula desde la pestaña Producciones.', 'info');
+        return;
+    }
+    const valor = await new Promise(resolve => window.abrirLectorQR(resolve));
+    const m = String(valor || '').trim().match(/^PR-(\d{10})-(\d{5})-(\d{5})-(\d{5})$/);
+    if (!m) { if (valor) Swal.fire('QR no válido', 'Escanea un sticker de una pasada de producción.', 'warning'); return; }
+    const productoId = document.getElementById('ens_producto_id').value;
+    if (!productoId) { Swal.fire('Selecciona producto', 'Primero selecciona el producto que vas a ensamblar.', 'info'); return; }
+    const destinoEnsamblaje = document.getElementById('ens_destino')?.value || 'local';
+    let fila = produccionesDisponiblesQrEns.find(p => Number(p.produccion_id) === Number(m[1]) && Number(p.pasada) === Number(m[4]));
+    if (!fila) {
+        const json = await llamarEnsamblaje('BUSCARPRODUCCIONESDISPONIBLES', {
+            producto_id: productoId, produccion_id: Number(m[1]), destino_ensamblaje: destinoEnsamblaje,
+            solo_cadenita_chica_primera: modoHabilitacionEns ? '1' : '0'
+        });
+        if (!json.success) { Swal.fire('No se pudo consultar la pasada', json.message || 'Intenta escanear nuevamente.', 'error'); return; }
+        fila = (json.producciones || []).find(p => Number(p.pasada) === Number(m[4]));
+    }
+    if (!fila) { Swal.fire('Pasada no disponible', 'No se encontró esa pasada para el producto o destino seleccionado, o ya fue utilizada.', 'warning'); return; }
+    await agregarLineaDetalle('produccion', {
+        produccion_id: fila.produccion_id, relacion_id: fila.relacion_id, pasada: fila.pasada,
+        molde_nombre: fila.molde_nombre, color_nombre: fila.color_nombre_verif ?? fila.color_nombre,
+        color_rgb: fila.color_rgb, color_id: fila.color_id, cantidad_kg: fila.cantidad_kg ?? fila.cantidad,
+        destino_ensamblaje: fila.destino_ensamblaje || 'local', enviado_a: fila.enviado_a || null,
+        ensamblaje_pendiente_id: fila.ensamblaje_pendiente_id, fecha_hora_fin: fila.fecha_hora_fin,
+        categoria_material_id: fila.categoria_material_id, categoria_material_nombre: fila.categoria_material_nombre_verif,
+        unidad_codigo: fila.unidad_produccion_codigo || 'KG', cantidad_por_unidad_armada: fila.cantidad_por_unidad_armada,
+        unidad_componente_configurada: fila.unidad_componente_configurada, codigo_qr: String(valor).trim()
+    });
+}
+
 async function agregarLineaDetalle(tipo, datos) {
     const esHabilitacion = tipo === 'habilitacion';
     if (esHabilitacion) tipo = 'complemento';
@@ -1561,6 +1598,7 @@ async function agregarLineaDetalle(tipo, datos) {
             cantidad_entrada_produccion: cantidadRecibidaNum,
             categoria_material_id: datos.categoria_material_id,
             categoria_material_nombre: datos.categoria_material_nombre,
+            codigo_qr: datos.codigo_qr || null,
             destino_ensamblaje: datos.destino_ensamblaje || 'local',
             enviado_a: datos.enviado_a || null,
         });

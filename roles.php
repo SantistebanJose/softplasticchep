@@ -34,7 +34,7 @@ function cargarCatalogoRoles(PDO $pdo): array {
             'codigo'=>$codigo,
             'nombre'=>$nombres[$codigo] ?? mb_convert_case(str_replace(['_', '-'], ' ', $codigo), MB_CASE_TITLE, 'UTF-8'),
             'descripcion'=>'Rol existente en usuario.rol_y_perfiles',
-            'permisos'=>array_values(array_intersect($perfiles, ['produccion','compras','ventas','consulta'])),
+            'permisos'=>array_values(array_intersect($perfiles, ['produccion','compras','ventas','consulta','personal'])),
             'activo'=>true,
             'sistema'=>in_array($codigo, ['administrador','operario','conductor'], true),
         ];
@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $descripcion = trim((string)($_POST['descripcion'] ?? ''));
             $permisos = $_POST['roles_permitidos'] ?? [];
             if (!is_array($permisos)) $permisos = [];
-            $permitidos = ['produccion', 'compras', 'ventas', 'consulta', 'administrador'];
+            $permitidos = ['produccion', 'compras', 'ventas', 'consulta', 'personal', 'administrador'];
             $permisos = array_values(array_unique(array_intersect($permitidos, $permisos)));
             $exclusiones = $_POST['exclusiones'] ?? [];
             if (!is_array($exclusiones)) $exclusiones = [];
@@ -184,6 +184,7 @@ include 'header.php';
     <label class="form-check"><input class="form-check-input rolPermiso" type="checkbox" value="compras"> Compras y proveedores</label>
     <label class="form-check"><input class="form-check-input rolPermiso" type="checkbox" value="ventas"> Ventas</label>
     <label class="form-check"><input class="form-check-input rolPermiso" type="checkbox" value="consulta"> Consultas y reportes</label>
+    <label class="form-check"><input class="form-check-input rolPermiso" type="checkbox" value="personal"> Gestión de personal y catálogos (bancos, modalidades y tipos de gestión)</label>
   </fieldset>
   <fieldset class="mt-3"><legend class="fs-6">Restringir módulos</legend><div class="form-text mb-2">Aplica principalmente a perfiles de acceso general.</div>
     <label class="form-check"><input class="form-check-input rolExclusion" type="checkbox" value="ventas"> Ventas (venta rápida, listado e informes)</label>
@@ -195,7 +196,7 @@ include 'header.php';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const rolModal = new bootstrap.Modal(document.getElementById('modalRol'));
-const rolesBaseNombre = {administrador:'Acceso general',produccion:'Producción y operaciones',compras:'Compras y proveedores',ventas:'Ventas',consulta:'Consultas y reportes'};
+const rolesBaseNombre = {administrador:'Acceso general',produccion:'Producción y operaciones',compras:'Compras y proveedores',ventas:'Ventas',consulta:'Consultas y reportes',personal:'Gestión de personal y catálogos'};
 async function llamarRoles(data){const r=await fetch('roles.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});const j=await r.json();if(!j.ok)throw new Error(j.msg);return j}
 async function cargarRoles(){try{const j=await llamarRoles({accion:'listar'});document.getElementById('rolesFilas').innerHTML=j.roles.length?j.roles.map(r=>`<tr><td>${esc(r.nombre)}</td><td>${(r.permisos||[]).map(p=>esc(rolesBaseNombre[p]||p)).join(', ')|| (r.sistema?'Acceso propio del sistema':'—')}${(r.exclusiones||[]).length?`<div class="small text-danger mt-1">Excepto: ${r.exclusiones.map(x=>esc({ventas:'Ventas',usuarios:'Usuarios',roles:'Roles y permisos'}[x]||x)).join(', ')}</div>`:''}</td><td>${esc(r.descripcion||'—')}</td><td>${r.activo?'Activo':'Inactivo'}</td><td>${r.sistema?'<span class="text-muted">Base del sistema</span>':`<button class="pc-icon-btn" onclick="editarRol(${Number(r.id)})" title="Editar"><i class="fa-solid fa-pen"></i></button><button class="pc-icon-btn" onclick="cambiarEstadoRol(${Number(r.id)},${!r.activo})" title="${r.activo?'Desactivar':'Activar'}"><i class="fa-solid fa-${r.activo?'ban':'rotate-left'}"></i></button>`}</td></tr>`).join(''):'<tr><td colspan="5">Aún no hay roles en los registros de usuario.</td></tr>'}catch(e){Swal.fire('Error',e.message,'error')}}
 function esc(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML}

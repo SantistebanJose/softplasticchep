@@ -687,7 +687,7 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 <script>
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 
@@ -1344,16 +1344,16 @@ function tarjetaProduccionHtml(p, nuevosEstados, silencioso) {
         ${p.cierre_cambio_molde ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-triangle-exclamation"></i> Cerrada por cambio de molde · remanente no medido${p.cierre_cambio_molde.molde ? ` · destino: ${p.cierre_cambio_molde.molde}` : ''}</div>` : ''}
         ${p.origen_cambio_molde_evento?.produccion_origen_id ? `<div class="pc-prod-corrida-line text-warning-emphasis"><i class="fa-solid fa-circle-info"></i> Remanente no medido de #${p.origen_cambio_molde_evento.produccion_origen_id}</div>` : ''}
         ${salidas.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-scale-balanced"></i> Salidas: ${salidas.map(s => `P${s.pasada}: ${formatearCantidadProd(s.cantidad)} ${s.unidad || ''}${s.ultima_pasada ? ' (última)' : ''}`).join(' · ')}</div>` : ''}
+        ${FEATURE_STICKER_QR && salidas.length ? `<div class="pc-prod-corrida-line pc-prod-qr-passes"><i class="fa-solid fa-qrcode"></i> Stickers por pasada: ${salidas.map(s => {
+            const pasada = Number(s.pasada || 0);
+            const codigo = s.codigo_qr || `PR-${String(p.id).padStart(10, '0')}-${String(p.sucursal || 0).padStart(5, '0')}-${String(p.molde_id || 0).padStart(5, '0')}-${String(pasada).padStart(5, '0')}`;
+            return `<button type="button" class="btn btn-sm btn-outline-primary" data-sticker-stage="P" data-sticker-id="${p.id}" data-sticker-pass="1" data-sticker-code="${codigo}" data-sticker-tape="${p.id}/${p.sucursal || 0}/${p.molde_id || 0}/${pasada}">P${pasada}</button>`;
+        }).join(' ')}</div>` : ''}
         ${Array.isArray(p.fotos_pesaje) && p.fotos_pesaje.length ? `<div class="pc-prod-corrida-line"><i class="fa-solid fa-camera"></i> ${p.fotos_pesaje.map((foto, i) => `<a href="#" onclick="event.preventDefault(); abrirFotoPesaje('${encodeURIComponent(String(foto.url || ''))}')">Foto ${i + 1}</a>`).join(' · ')}</div>` : ''}
 
         ${!requiereEnsamblaje ? `<div class="pc-prod-sin-ensamblaje"><i class="fa-solid fa-circle-info"></i> Este molde no pasa por ensamblaje</div>` : ''}
 
         <div class="pc-prod-card-foot">
-            ${FEATURE_STICKER_QR ? `<button type="button" class="pc-prod-ghost-btn" title="Imprimir sticker de procedencia"
-                    data-sticker-stage="P" data-sticker-id="${p.id}"
-                    data-sticker-code="${p.sticker_unico ?? ''}" data-sticker-tape="${p.codigo_escribir_cinta ?? ''}">
-                <i class="fa-solid fa-tag"></i> Sticker
-            </button>` : ''}
             ${puedeIniciar
                 ? `<button type="button" class="pc-prod-ghost-btn success" onclick="iniciarProduccion(${p.id})" title="Iniciar corrida">
                     <i class="fa-solid fa-play"></i> Iniciar</button>`

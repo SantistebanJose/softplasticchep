@@ -192,6 +192,7 @@ include("header.php");
         <div id="bloqueBultos">
             <label class="form-label">Paquetes (toca un saco para agregar) *</label>
             <p class="pc-estacion-hint">Toca un saco para agregarlo al paquete actual. Puedes ajustar la cantidad exacta abajo.</p>
+            <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="escanearOrigenQR()"><i class="fa-solid fa-qrcode"></i> Escanear saco</button>
             <div class="pc-sacos-grid" id="sacosBultoGrid" style="margin-bottom:14px;"></div>
 
             <div id="listaBultos"></div>
@@ -367,7 +368,8 @@ include("header.php");
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
-<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js"></script><?php endif; ?>
+<script src="assets/js/qr-camera.js?v=20261114"></script>
+<?php if (FEATURE_STICKER_QR): ?><script src="assets/js/traceability-stickers.js?v=20261114-3"></script><?php endif; ?>
 <script>
 const FEATURE_STICKER_QR = <?= FEATURE_STICKER_QR ? 'true' : 'false' ?>;
 const CONTROLADOR_EMPAQUETADO = 'controllers/clssEmpaquetado.php';
@@ -750,6 +752,31 @@ async function cargarOrigenesDisponibles(productoId, miToken = null) {
     aplicarMaquinaEmpaquetado();
 }
 
+async function escanearOrigenQR() {
+    const valor = await new Promise(resolve => window.abrirLectorQR(resolve));
+    const codigo = String(valor || '').trim();
+    const prod = codigo.match(/^PR-(\d{10})-(\d{5})-(\d{5})-(\d{5})$/);
+    const ens = codigo.match(/^E-(\d{10})-(\d{5})-(\d{5})$/);
+    if (!prod && !ens) { if (codigo) Swal.fire('QR no válido', 'Escanea el sticker de una pasada o un ensamblaje.', 'warning'); return; }
+    if (!estacionProductoIdActual) { Swal.fire('Selecciona producto', 'Primero abre la estación de empaquetado para un producto.', 'info'); return; }
+    await cargarOrigenesDisponibles(estacionProductoIdActual, ++tokenCargaEstacion);
+    const tipo = prod ? 'produccion' : 'ensamblaje';
+    const id = Number((prod || ens)[1]);
+    const origen = origenesDisponiblesCache.find(item => item.origen_tipo === tipo && Number(item.origen_id) === id);
+    const sucursalQr = Number((prod || ens)[2]);
+    const idRelacionado = Number((prod || ens)[3]);
+    if (!origen || (origen.origen_sucursal && Number(origen.origen_sucursal) !== sucursalQr)
+        || (prod && origen.origen_molde_id && Number(origen.origen_molde_id) !== idRelacionado)
+        || (ens && origen.origen_producto_id && Number(origen.origen_producto_id) !== idRelacionado)) {
+        Swal.fire('Origen no disponible', 'El QR no pertenece a un saco disponible para este producto, sucursal o etapa.', 'warning'); return;
+    }
+    const qrMeta = { codigo_qr: codigo, pasada: prod ? Number(prod[4]) : null };
+    const modosMezcla = reglasEmpaquetadoActuales?.conversion_peso_a_unidad === true
+        || reglasEmpaquetadoActuales?.conversion_peso_a_unidad === 1
+        || reglasEmpaquetadoActuales?.conversion_peso_a_unidad === '1';
+    if (modosMezcla) tocarSacoMezcla(tipo, id, qrMeta); else tocarSacoBulto(tipo, id, qrMeta);
+}
+
 function aplicarMaquinaEmpaquetado() {
     const requerida = reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === true
         || reglasEmpaquetadoActuales?.requiere_maquina_empaquetado === 1
@@ -1045,7 +1072,7 @@ function disponibleKgOrigen(tipo, id, excluirTempId = null) {
 // Toca un saco en la grilla visual (modo MEZCLA): si ya está en la mezcla,
 // le suma todo lo que le queda disponible; si no está, lo agrega con su
 // disponible completo. El operario después ajusta el número exacto.
-function tocarSacoMezcla(origenTipo, origenId) {
+function tocarSacoMezcla(origenTipo, origenId, qrMeta = null) {
     const o = origenesDisponiblesCache.find(x => x.origen_tipo === origenTipo && x.origen_id == origenId);
     if (!o) return;
     const restante = disponibleKgOrigen(origenTipo, origenId);
@@ -1056,6 +1083,10 @@ function tocarSacoMezcla(origenTipo, origenId) {
         fila = { tempId: ++contadorMezclaOrigen, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10), color_id: o.color_id, color_nombre: o.color_nombre, cantidad_kg: '' };
         mezclaOrigenes.push(fila);
     }
+    if (qrMeta) {
+        if (!Array.isArray(fila.qr_scans)) fila.qr_scans = [];
+        fila.qr_scans.push({ codigo_qr: qrMeta.codigo_qr, pasada: qrMeta.pasada });
+    }
     const actual = parseFloat(fila.cantidad_kg) || 0;
     fila.cantidad_kg = Math.round((actual + restante) * 10000) / 10000;
     renderMezcla();
@@ -1065,7 +1096,7 @@ function tocarSacoMezcla(origenTipo, origenId) {
 // una unidad de "granularidad" (ej. 1 docena) al paquete actual, respetando
 // la capacidad del paquete y el disponible del saco. Si el paquete actual
 // ya está lleno, abre uno nuevo automáticamente.
-function tocarSacoBulto(origenTipo, origenId) {
+function tocarSacoBulto(origenTipo, origenId, qrMeta = null) {
     if (bultosState.length === 0) agregarBulto();
     let bulto = bultosState[bultosState.length - 1];
 
@@ -1098,14 +1129,20 @@ function tocarSacoBulto(origenTipo, origenId) {
             filaVacia.color_id = o ? o.color_id : null;
             filaVacia.color_nombre = o ? o.color_nombre : '';
             filaVacia.cantidad = aAgregar;
+            fila = filaVacia;
         } else {
-            bulto.colores.push({
+            fila = {
                 tempColorId: ++contadorColorRow, origen_tipo: origenTipo, origen_id: parseInt(origenId, 10),
                 color_id: o ? o.color_id : null, color_nombre: o ? o.color_nombre : '', cantidad: aAgregar,
-            });
+            };
+            bulto.colores.push(fila);
         }
     } else {
         fila.cantidad = (parseFloat(fila.cantidad) || 0) + aAgregar;
+    }
+    if (qrMeta && fila) {
+        if (!Array.isArray(fila.qr_scans)) fila.qr_scans = [];
+        fila.qr_scans.push({ codigo_qr: qrMeta.codigo_qr, pasada: qrMeta.pasada, cantidad: aAgregar });
     }
 
     renderBultos();

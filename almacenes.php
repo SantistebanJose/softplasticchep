@@ -27,6 +27,33 @@ include 'header.php';
     </div>
 </div>
 
+<div class="pc-card mt-3">
+    <div class="pc-card-header">
+        <div><h2>Ubicar paquete con QR</h2><small class="text-muted">Escanea el sticker para registrar en qué almacén quedó. Esta acción no modifica el stock global.</small></div>
+    </div>
+    <div class="d-flex flex-wrap align-items-end gap-2">
+        <div style="min-width:min(100%,320px)">
+            <label class="form-label" for="alm_qr_destino">Almacén de destino</label>
+            <select id="alm_qr_destino" class="form-select"><option value="">Cargando almacenes...</option></select>
+        </div>
+        <button type="button" class="pc-btn pc-btn-primary" onclick="escanearPaqueteAlmacen()"><i class="fa-solid fa-qrcode"></i> Escanear paquete</button>
+    </div>
+    <div id="alm_qr_resultado" class="mt-3" role="status" aria-live="polite"></div>
+</div>
+
+<div class="pc-card mt-3">
+    <div class="pc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div><h2>Paquetes ubicados</h2><small class="text-muted">Muestra la ubicación más reciente de cada paquete.</small></div>
+        <button type="button" class="btn btn-outline-primary btn-sm" onclick="cargarPaquetesUbicados()"><i class="fa-solid fa-rotate"></i> Actualizar</button>
+    </div>
+    <div class="pc-table-wrap pc-table-responsive-cards">
+        <table class="pc-table">
+            <thead><tr><th>Paquete</th><th>Producto</th><th>Cantidad</th><th>Almacén</th><th>Sucursal</th><th>Ubicado</th></tr></thead>
+            <tbody id="alm_qr_ubicaciones"><tr><td colspan="6" class="text-center">Cargando ubicaciones...</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
 <div class="modal fade" id="modalAlmacen" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -48,6 +75,7 @@ include 'header.php';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="assets/js/device-tracking.js"></script>
 <script src="assets/js/app-common.js"></script>
+<script src="assets/js/qr-camera.js?v=20261114"></script>
 <script>
 const URL_ALMACEN = 'controllers/clssAlmacen.php';
 const URL_SUCURSAL = 'controllers/clssSucursal.php';
@@ -61,6 +89,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         await cargarSucursalesAlmacen();
         await cargarAlmacenes();
+        await cargarSelectorUbicacionAlmacen();
+        await cargarPaquetesUbicados();
     } catch (error) {
         console.error(error);
         document.getElementById('alm_tbody').innerHTML = '<tr><td colspan="6" class="text-center text-danger">No se pudo cargar el listado.</td></tr>';
@@ -79,6 +109,53 @@ async function cargarSucursalesAlmacen() {
     const opciones = almacenesSucursales.map(s => `<option value="${Number(s.id)}">${htmlAlmacen(s.nombre)}</option>`).join('');
     document.getElementById('alm_filtro_sucursal').insertAdjacentHTML('beforeend', opciones);
     document.getElementById('alm_sucursal').insertAdjacentHTML('beforeend', opciones);
+}
+
+async function cargarSelectorUbicacionAlmacen() {
+    const select = document.getElementById('alm_qr_destino');
+    const json = await pedirAlmacen('LISTARALMACENES', { estado: 'activos' });
+    if (!json.success) { select.innerHTML = '<option value="">No se pudieron cargar</option>'; return; }
+    const items = json.almacenes || [];
+    select.innerHTML = '<option value="">Selecciona...</option>' + items.map(a =>
+        `<option value="${Number(a.id)}">${htmlAlmacen(a.nombre)} · ${htmlAlmacen(a.sucursal_nombre || 'Sin sucursal')}</option>`
+    ).join('');
+}
+
+async function cargarPaquetesUbicados() {
+    const tbody = document.getElementById('alm_qr_ubicaciones');
+    const json = await pedirAlmacen('LISTARPAQUETESUBICADOS');
+    if (!json.success) { tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${htmlAlmacen(json.message)}</td></tr>`; return; }
+    const filas = json.paquetes || [];
+    if (!filas.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Aún no hay paquetes ubicados mediante QR.</td></tr>'; return; }
+    tbody.innerHTML = filas.map(p => `<tr>
+        <td data-label="Paquete"><strong>#${Number(p.empaquetado_id)}</strong><br><small>${htmlAlmacen(p.unico || '')}</small></td>
+        <td data-label="Producto">${htmlAlmacen((p.producto_codigo || '') + ' - ' + (p.producto_descripcion || ''))}</td>
+        <td data-label="Cantidad">${htmlAlmacen(p.cantidad_tota ?? '')} ${htmlAlmacen(p.unidad_codigo || '')}</td>
+        <td data-label="Almacén">${htmlAlmacen(p.almacen_nombre || '')}</td>
+        <td data-label="Sucursal">${htmlAlmacen(p.sucursal_nombre || '')}</td>
+        <td data-label="Ubicado">${htmlAlmacen(p.fecha_ubicacion || '')}</td>
+    </tr>`).join('');
+}
+
+async function escanearPaqueteAlmacen() {
+    const almacenId = document.getElementById('alm_qr_destino').value;
+    if (!almacenId) { Swal.fire('Selecciona un almacén', 'Indica primero dónde quedó el paquete.', 'info'); return; }
+    const codigo = await new Promise(resolve => window.abrirLectorQR(resolve));
+    if (!codigo) return;
+    const resultado = document.getElementById('alm_qr_resultado');
+    resultado.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Validando paquete…</span>';
+    const json = await pedirAlmacen('REGISTRARUBICACIONQR', { codigo_qr: codigo, almacen_id: almacenId });
+    if (!json.success) {
+        resultado.innerHTML = `<div class="alert alert-danger mb-0">${htmlAlmacen(json.message)}</div>`;
+        return;
+    }
+    const yaRegistrado = json.ubicacion_repetida === true;
+    resultado.innerHTML = `<div class="alert ${yaRegistrado ? 'alert-info' : 'alert-success'} mb-0">
+        <strong>${yaRegistrado ? 'El paquete ya estaba ubicado' : 'Ubicación registrada'}</strong><br>
+        ${htmlAlmacen(json.producto || '')} · ${htmlAlmacen(json.cantidad ?? '')} ${htmlAlmacen(json.unidad || '')}
+        ${json.almacen ? `· ${htmlAlmacen(json.almacen)}` : ''}<br><small>${htmlAlmacen(json.message)}</small>
+    </div>`;
+    if (!yaRegistrado) await cargarPaquetesUbicados();
 }
 
 async function cargarAlmacenes() {

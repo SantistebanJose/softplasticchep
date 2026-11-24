@@ -53,6 +53,13 @@ if (isset($_POST['accion'])) {
         controladorOperario((string) $_POST['accion']);
     } catch (PDOException $e) {
         error_log('Error de base de datos en clssOperario.php: ' . $e->getMessage());
+        $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+        if ($sqlState === '42501') {
+            responder(false, 'La aplicación no tiene permisos para leer los catálogos de personal. Ejecuta los GRANT del catálogo en PostgreSQL.');
+        }
+        if ($sqlState === '42P01') {
+            responder(false, 'Falta una tabla de catálogo de personal en la base de datos de la aplicación.');
+        }
         responder(false, 'Error de base de datos.');
     } catch (Throwable $e) {
         error_log('Error inesperado en clssOperario.php: ' . $e->getMessage());
@@ -69,6 +76,7 @@ function controladorOperario(string $accion): void
         'OBTENEROPERARIO',
         'LISTARCARGOS',
         'LISTARETAPASACTIVAS',
+        'LISTARCATALOGOSOPERARIO',
     ];
 
     $accionesAdministracion = [
@@ -123,7 +131,51 @@ function controladorOperario(string $accion): void
         case 'LISTARETAPASACTIVAS':
             listarEtapasActivas();
             break;
+
+        case 'LISTARCATALOGOSOPERARIO':
+            listarCatalogosOperario();
+            break;
     }
+}
+
+function listarCatalogosOperario(): void
+{
+    $conectar = conectar_oll_BD();
+    $modalidades = listarCatalogoSimple($conectar, 'modalidad');
+    $bancos = listarCatalogoSimple($conectar, 'banco');
+    $tiposGestion = listarCatalogoSimple($conectar, 'tipo_gestion');
+    responder(true, 'OK', [
+        'modalidades' => $modalidades,
+        'bancos' => $bancos,
+        'tipos_gestion' => $tiposGestion,
+    ]);
+}
+
+/** Lee catálogos sencillos sin asumir que todos tengan deleted_at. */
+function listarCatalogoSimple(PDO $conectar, string $tabla): array
+{
+    $tablasPermitidas = ['modalidad', 'banco', 'tipo_gestion'];
+    if (!in_array($tabla, $tablasPermitidas, true)) return [];
+
+    $existe = executeQuery($conectar, "
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = :tabla
+        LIMIT 1
+    ", ['tabla' => $tabla]);
+    if (empty($existe)) {
+        error_log("No existe la tabla de catálogo public.{$tabla}; se devolverá vacía.");
+        return [];
+    }
+
+    $columnas = executeQuery($conectar, "
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = :tabla
+    ", ['tabla' => $tabla]);
+    $tieneDeletedAt = in_array('deleted_at', array_column($columnas, 'column_name'), true);
+    $filtro = $tieneDeletedAt ? 'WHERE deleted_at IS NULL' : '';
+    return executeQuery($conectar, "SELECT nombre FROM public.{$tabla} {$filtro} ORDER BY nombre");
 }
 
 function compararCambios(array $anterior, array $nuevo, array $mapaCampos): array
@@ -304,7 +356,7 @@ function listarOperarios()
     $params = [];
 
     if ($texto !== '') {
-        $where[] = "(LOWER(o.nombre_completo) LIKE LOWER(:texto) OR LOWER(c.nombre) LIKE LOWER(:texto))";
+        $where[] = "(LOWER(o.nombre_completo) LIKE LOWER(:texto) OR LOWER(COALESCE(o.apodo, '')) LIKE LOWER(:texto) OR LOWER(c.nombre) LIKE LOWER(:texto))";
         $params['texto'] = "%$texto%";
     }
     if ($visibilidad === 'eliminadas') {
@@ -368,18 +420,38 @@ function obtenerOperario($id)
  */
 function decodificarJsonFilas(array $filas): array
 {
-    $columnasJson = ['js_sucursales', 'js_etapas_relacionadas', 'js_marcacion'];
+    $columnasJson = ['js_sucursales', 'js_etapas_relacionadas', 'js_marcacion', 'banco', 'js_detalle_egreso'];
     foreach ($filas as &$fila) {
         foreach ($columnasJson as $col) {
             if (isset($fila[$col]) && is_string($fila[$col])) {
                 $fila[$col] = json_decode($fila[$col], true) ?: [];
-            } elseif (!isset($fila[$col])) {
+            } elseif (!isset($fila[$col]) && !in_array($col, ['banco', 'js_detalle_egreso'], true)) {
                 $fila[$col] = [];
             }
         }
     }
     unset($fila);
     return $filas;
+}
+
+/** Fecha opcional enviada por input[type=date]; false indica formato inválido. */
+function fechaIsoOpcional(string $campo)
+{
+    $fecha = trim($_POST[$campo] ?? '');
+    if ($fecha === '') return null;
+    $valor = DateTime::createFromFormat('!Y-m-d', $fecha);
+    $errores = DateTime::getLastErrors();
+    if (!$valor || $valor->format('Y-m-d') !== $fecha || ($errores !== false && ($errores['warning_count'] || $errores['error_count']))) {
+        return false;
+    }
+    return $fecha;
+}
+
+function existeNombreCatalogo(PDO $conectar, string $tabla, string $nombre): bool
+{
+    $tablasPermitidas = ['modalidad', 'banco', 'tipo_gestion'];
+    if (!in_array($tabla, $tablasPermitidas, true)) return false;
+    return !empty(executeQuery($conectar, "SELECT nombre FROM public.{$tabla} WHERE nombre = :nombre LIMIT 1", ['nombre' => $nombre]));
 }
 
 function normalizarFechaMarcacion(string $fecha): ?string
@@ -407,7 +479,23 @@ function guardarOperario()
     $conectar = conectar_oll_BD();
 
     $id              = intval($_POST['id'] ?? 0);
-    $nombre_completo = mb_strtoupper(trim($_POST['nombre_completo'] ?? ''), 'UTF-8');
+    $nombres         = mb_strtoupper(trim($_POST['nombre_completo'] ?? ''), 'UTF-8');
+    $ape_parteno     = mb_strtoupper(trim($_POST['ape_parteno'] ?? ''), 'UTF-8');
+    $ape_marteno     = mb_strtoupper(trim($_POST['ape_marteno'] ?? ''), 'UTF-8');
+    $nombre_completo = trim(implode(' ', array_filter([$nombres, $ape_parteno, $ape_marteno], fn($v) => $v !== '')));
+    $apodo           = trim($_POST['apodo'] ?? '');
+    $fecha_nacimiento = fechaIsoOpcional('fecha_nacimiento');
+    $fecha_ingreso    = fechaIsoOpcional('fecha_ingreso');
+    $fecha_egreso     = fechaIsoOpcional('fecha_egreso');
+    $modalidad        = trim($_POST['modalidad'] ?? '');
+    $tipo_gestion     = trim($_POST['tipo_gestion'] ?? '');
+    $sueldo_bruto     = trim($_POST['sueldo_bruto'] ?? '');
+    $bancoNombre      = mb_strtoupper(trim($_POST['banco_nombre'] ?? ''), 'UTF-8');
+    $bancoCuenta      = trim($_POST['banco_cuenta'] ?? '');
+    $bancoCci         = trim($_POST['banco_cci'] ?? '');
+    $motivoEgreso     = trim($_POST['motivo_egreso'] ?? '');
+    $js_detalle_egreso = $motivoEgreso !== '' ? json_encode(['motivo' => $motivoEgreso], JSON_UNESCAPED_UNICODE) : null;
+    $banco = [];
     $cargo_id        = intval($_POST['cargo_id'] ?? 0) ?: null;
     $dni             = trim($_POST['dni'] ?? '');
     $marcacion       = strtoupper(trim($_POST['marcacion'] ?? 'S'));
@@ -425,7 +513,36 @@ function guardarOperario()
     $etapasInput = json_decode($_POST['etapas'] ?? '[]', true);
     if (!is_array($etapasInput)) $etapasInput = [];
 
-    if (empty($nombre_completo)) responder(false, 'El nombre completo es obligatorio.');
+    if (empty($nombres)) responder(false, 'Los nombres son obligatorios.');
+    if (mb_strlen($ape_parteno, 'UTF-8') > 100 || mb_strlen($ape_marteno, 'UTF-8') > 100 || mb_strlen($apodo, 'UTF-8') > 100) {
+        responder(false, 'Los apellidos y el apodo admiten hasta 100 caracteres.');
+    }
+    if ($fecha_nacimiento === false || $fecha_ingreso === false || $fecha_egreso === false) {
+        responder(false, 'Revisa las fechas personales y laborales: alguna no es válida.');
+    }
+    if ($modalidad !== '' && !existeNombreCatalogo($conectar, 'modalidad', $modalidad)) {
+        responder(false, 'Selecciona una modalidad disponible en el catálogo.');
+    }
+    if ($tipo_gestion !== '' && !existeNombreCatalogo($conectar, 'tipo_gestion', $tipo_gestion)) {
+        responder(false, 'Selecciona un tipo de gestión disponible en el catálogo.');
+    }
+    if ($bancoNombre !== '' && !existeNombreCatalogo($conectar, 'banco', $bancoNombre)) {
+        responder(false, 'Selecciona un banco disponible en el catálogo.');
+    }
+    if ($bancoCuenta !== '' && !preg_match('/^\d{6,30}$/', $bancoCuenta)) {
+        responder(false, 'El número de cuenta debe tener de 6 a 30 dígitos, sin letras, espacios ni guiones.');
+    }
+    if ($bancoCci !== '' && !preg_match('/^\d{20}$/', $bancoCci)) {
+        responder(false, 'El CCI debe contener exactamente 20 dígitos.');
+    }
+    if ($bancoNombre !== '') $banco['nombre'] = $bancoNombre;
+    if ($bancoCuenta !== '') $banco['cuenta'] = $bancoCuenta;
+    if ($bancoCci !== '') $banco['cci'] = $bancoCci;
+    $banco = !empty($banco) ? json_encode($banco, JSON_UNESCAPED_UNICODE) : null;
+    if ($sueldo_bruto !== '' && (!is_numeric($sueldo_bruto) || (float) $sueldo_bruto < 0)) {
+        responder(false, 'El sueldo bruto debe ser un número mayor o igual a cero.');
+    }
+    $sueldo_bruto = $sueldo_bruto === '' ? null : number_format((float) $sueldo_bruto, 2, '.', '');
     if (empty($dni)) {
         responder(false, 'El DNI es obligatorio: se usa para generar el usuario de acceso al sistema.');
     }
@@ -485,6 +602,17 @@ function guardarOperario()
 
     $mapaCampos = [
         'nombre_completo' => 'Nombre completo',
+        'ape_parteno'     => 'Apellido paterno',
+        'ape_marteno'     => 'Apellido materno',
+        'apodo'           => 'Apodo',
+        'fecha_nacimiento'=> 'Fecha de nacimiento',
+        'fecha_ingreso'   => 'Fecha de ingreso',
+        'fecha_egreso'    => 'Fecha de egreso',
+        'modalidad'       => 'Modalidad',
+        'tipo_gestion'    => 'Tipo de gestión',
+        'sueldo_bruto'    => 'Sueldo bruto',
+        'banco'           => 'Datos bancarios',
+        'js_detalle_egreso' => 'Detalle de egreso',
         'cargo_id'        => 'Cargo',
         'dni'             => 'DNI',
         'marcacion'       => 'Tipo de marcación',
@@ -492,6 +620,17 @@ function guardarOperario()
 
     $datosNuevos = [
         'nombre_completo' => $nombre_completo,
+        'ape_parteno'     => $ape_parteno !== '' ? $ape_parteno : null,
+        'ape_marteno'     => $ape_marteno !== '' ? $ape_marteno : null,
+        'apodo'           => $apodo !== '' ? $apodo : null,
+        'fecha_nacimiento'=> $fecha_nacimiento,
+        'fecha_ingreso'   => $fecha_ingreso,
+        'fecha_egreso'    => $fecha_egreso,
+        'modalidad'       => $modalidad !== '' ? $modalidad : null,
+        'tipo_gestion'    => $tipo_gestion !== '' ? $tipo_gestion : null,
+        'sueldo_bruto'    => $sueldo_bruto,
+        'banco'           => $banco,
+        'js_detalle_egreso' => $js_detalle_egreso,
         'cargo_id'        => $cargo_id,
         'dni'             => $dni !== '' ? $dni : null,
         'marcacion'       => $marcacion,
@@ -521,12 +660,25 @@ function guardarOperario()
 
         $result = executeQuery($conectar, "
             INSERT INTO operario
-                (nombre_completo, cargo_id, dni, marcacion, js_marcacion, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
+                (nombre_completo, ape_parteno, ape_marteno, apodo, fecha_nacimiento, banco, fecha_ingreso, fecha_egreso, js_detalle_egreso, modalidad, tipo_gestion, sueldo_bruto,
+                 cargo_id, dni, marcacion, js_marcacion, activo, created_at, js_session, js_historial, js_sucursales, js_etapas_relacionadas)
             VALUES
-                (:nombre_completo, :cargo_id, :dni, :marcacion, :js_marcacion, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
+                (:nombre_completo, :ape_parteno, :ape_marteno, :apodo, :fecha_nacimiento, CAST(:banco AS jsonb), :fecha_ingreso, :fecha_egreso, CAST(:js_detalle_egreso AS jsonb), :modalidad, :tipo_gestion, :sueldo_bruto,
+                 :cargo_id, :dni, :marcacion, :js_marcacion, true, NOW(), :js_session, :js_historial, :js_sucursales, :js_etapas_relacionadas)
             RETURNING id
         ", [
             'nombre_completo'         => $datosNuevos['nombre_completo'],
+            'ape_parteno'             => $datosNuevos['ape_parteno'],
+            'ape_marteno'             => $datosNuevos['ape_marteno'],
+            'apodo'                   => $datosNuevos['apodo'],
+            'fecha_nacimiento'        => $datosNuevos['fecha_nacimiento'],
+            'banco'                   => $datosNuevos['banco'],
+            'fecha_ingreso'           => $datosNuevos['fecha_ingreso'],
+            'fecha_egreso'            => $datosNuevos['fecha_egreso'],
+            'js_detalle_egreso'       => $datosNuevos['js_detalle_egreso'],
+            'modalidad'               => $datosNuevos['modalidad'],
+            'tipo_gestion'            => $datosNuevos['tipo_gestion'],
+            'sueldo_bruto'            => $datosNuevos['sueldo_bruto'],
             'cargo_id'                => $datosNuevos['cargo_id'],
             'dni'                     => $datosNuevos['dni'],
             'marcacion'               => $marcacion,
@@ -595,6 +747,17 @@ function guardarOperario()
         executeQuery($conectar, "
             UPDATE operario SET
                 nombre_completo         = :nombre_completo,
+                ape_parteno             = :ape_parteno,
+                ape_marteno             = :ape_marteno,
+                apodo                   = :apodo,
+                fecha_nacimiento        = :fecha_nacimiento,
+                banco                   = CAST(:banco AS jsonb),
+                fecha_ingreso           = :fecha_ingreso,
+                fecha_egreso            = :fecha_egreso,
+                js_detalle_egreso       = CAST(:js_detalle_egreso AS jsonb),
+                modalidad               = :modalidad,
+                tipo_gestion            = :tipo_gestion,
+                sueldo_bruto            = :sueldo_bruto,
                 cargo_id                = :cargo_id,
                 dni                     = :dni,
                 marcacion               = :marcacion,
@@ -607,6 +770,17 @@ function guardarOperario()
             WHERE id = :id
         ", [
             'nombre_completo'        => $datosNuevos['nombre_completo'],
+            'ape_parteno'            => $datosNuevos['ape_parteno'],
+            'ape_marteno'            => $datosNuevos['ape_marteno'],
+            'apodo'                  => $datosNuevos['apodo'],
+            'fecha_nacimiento'       => $datosNuevos['fecha_nacimiento'],
+            'banco'                  => $datosNuevos['banco'],
+            'fecha_ingreso'          => $datosNuevos['fecha_ingreso'],
+            'fecha_egreso'           => $datosNuevos['fecha_egreso'],
+            'js_detalle_egreso'      => $datosNuevos['js_detalle_egreso'],
+            'modalidad'              => $datosNuevos['modalidad'],
+            'tipo_gestion'           => $datosNuevos['tipo_gestion'],
+            'sueldo_bruto'           => $datosNuevos['sueldo_bruto'],
             'cargo_id'               => $datosNuevos['cargo_id'],
             'dni'                    => $datosNuevos['dni'],
             'marcacion'              => $marcacion,
