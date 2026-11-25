@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/../controllers/featureFlags.php';
 
 if (!empty($_SESSION['operario_id'])) {
     header('Location: panel.php');
@@ -14,6 +15,7 @@ if (!empty($_SESSION['operario_id'])) {
     <title>Ingreso operario · Plásticos Chepito</title>
     <link rel="icon" type="image/png" href="../assets/img/logo.png?v=20261028">
     <link rel="apple-touch-icon" href="../assets/img/logo.png?v=20261028">
+    <?php if (FEATURE_EFECTOS_NAVIDENOS): ?><link rel="preload" as="image" href="../assets/img/trineo-navidad.png?v=20261125"><?php endif; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/loginoperarios.css?v=<?= time() ?>">
@@ -107,8 +109,8 @@ if (!empty($_SESSION['operario_id'])) {
 
 <script src="../assets/js/device-tracking.js"></script>
 <script src="../assets/js/loginoperarios.js"></script>
-<?php require_once __DIR__ . '/../controllers/featureFlags.php'; if (FEATURE_EFECTOS_NAVIDENOS): ?>
-<script src="../assets/js/login-navidad-pinzas.js?v=20261124" defer></script>
+<?php if (FEATURE_EFECTOS_NAVIDENOS): ?>
+<script src="../assets/js/login-navidad-trineo.js?v=20261125-4" defer></script>
 <?php endif; ?>
 </body>
 </html>

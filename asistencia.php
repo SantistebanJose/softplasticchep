@@ -26,6 +26,10 @@ include 'header.php';
 .asistencia-status-btn[data-estado="D"][aria-pressed="true"] { background:#e9f5ff; border-color:#52a2e2; color:#17649d; }
 .asistencia-status-btn[data-estado="F"][aria-pressed="true"] { background:#f1eaff; border-color:#9a72dc; color:#6440a0; }
 .asistencia-comment { min-width:190px; }
+.asistencia-jornada { min-width:165px; color:#536176; font-size:12px; line-height:1.45; }
+.asistencia-jornada strong { color:#17243a; }
+.asistencia-jornada-btn { margin-top:6px; border:1px solid #b9d8c5; border-radius:8px; padding:6px 9px; background:#effaf3; color:#167342; font-size:12px; font-weight:700; cursor:pointer; }
+.asistencia-jornada-btn:disabled { opacity:.55; cursor:not-allowed; }
 .pc-btn-has-changes { box-shadow:0 0 0 3px rgba(242,166,54,.22); }
 .asistencia-empty { text-align:center; padding:44px 20px; color:#748198; }
 .asistencia-period-day { border:1px solid #e2e8f0; border-radius:13px; background:#fff; margin-bottom:10px; overflow:hidden; }
@@ -37,7 +41,7 @@ include 'header.php';
 .asistencia-period-badges { display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 12px; background:#f8fafc; }
 .asistencia-period-badge { border-radius:999px; padding:4px 8px; background:#eef2f7; color:#475569; font-size:11px; font-weight:600; }
 .asistencia-period-table { padding:0 12px 12px; overflow:auto; }
-.asistencia-period-table table { width:100%; min-width:560px; border-collapse:collapse; }
+.asistencia-period-table table { width:100%; min-width:720px; border-collapse:collapse; }
 .asistencia-period-table th,.asistencia-period-table td { padding:9px 10px; border-bottom:1px solid #edf0f4; text-align:left; font-size:13px; }
 .asistencia-period-table th { color:#708098; font-size:11px; text-transform:uppercase; }
 .asistencia-period-title { color:#17243a; font-weight:700; }
@@ -74,7 +78,7 @@ include 'header.php';
   <div id="resumenPeriodo" class="asistencia-summary d-none"></div>
   <div id="reportePeriodo" class="asistencia-period-report d-none"></div>
   <div class="pc-table-wrap pc-table-responsive-cards d-none" id="tablaAsistenciaWrap">
-    <table class="pc-table"><thead><tr><th>Operario</th><th>Cargo</th><th>Estado</th><th>Comentario</th><th>Historial</th></tr></thead><tbody id="asistenciaBody"></tbody></table>
+    <table class="pc-table"><thead><tr><th>Operario</th><th>Cargo</th><th>Estado</th><th>Comentario</th><th>Jornada</th><th>Historial</th></tr></thead><tbody id="asistenciaBody"></tbody></table>
   </div>
 </div>
 
@@ -173,8 +177,8 @@ function renderizarPeriodo() {
     const cuenta={P:0,A:0,T:0,D:0,F:0};
     a.operarios.forEach(o=>{const e=String(o.estado||'P').trim();if(cuenta[e]!==undefined)cuenta[e]++;});
     const badges=Object.entries(cuenta).map(([e,n])=>`<span class="asistencia-period-badge">${labels[e]}: ${n}</span>`).join('');
-    const rows=a.operarios.map(o=>`<tr><td><button type="button" class="asistencia-operario-link" data-operario-id="${Number(o.operario_id)}">${escAsistencia(o.nombre_completo)}</button>${o.apodo?`<div class="asistencia-sub">${escAsistencia(o.apodo)}</div>`:''}</td><td>${escAsistencia(o.cargo||'-')}</td><td>${escAsistencia(labels[String(o.estado||'P').trim()]||o.estado||'Pendiente')}</td><td>${escAsistencia(o.comentario||'-')}</td></tr>`).join('');
-    return `<details class="asistencia-period-day" ${indice===0?'open':''}><summary><span><span class="asistencia-period-title">${formatearFecha(a.fecha)} · ${escAsistencia(a.nombre)}</span><span class="asistencia-period-meta d-block">${a.operarios.length} operario(s) · creada ${formatearFechaHora(a.created_at)}</span></span></summary><div class="asistencia-period-badges">${badges}</div><div class="asistencia-period-table"><table><thead><tr><th>Operario</th><th>Cargo</th><th>Estado</th><th>Comentario</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    const rows=a.operarios.map(o=>{const jornada=obtenerJornadaAsistencia(o.js_marcador);return `<tr><td><button type="button" class="asistencia-operario-link" data-operario-id="${Number(o.operario_id)}">${escAsistencia(o.nombre_completo)}</button>${o.apodo?`<div class="asistencia-sub">${escAsistencia(o.apodo)}</div>`:''}</td><td>${escAsistencia(o.cargo||'-')}</td><td>${escAsistencia(labels[String(o.estado||'P').trim()]||o.estado||'Pendiente')}</td><td>${escAsistencia(o.comentario||'-')}</td><td>${renderJornadaAsistencia(jornada)}</td></tr>`;}).join('');
+    return `<details class="asistencia-period-day" ${indice===0?'open':''}><summary><span><span class="asistencia-period-title">${formatearFecha(a.fecha)} · ${escAsistencia(a.nombre)}</span><span class="asistencia-period-meta d-block">${a.operarios.length} operario(s) · creada ${formatearFechaHora(a.created_at)}</span></span></summary><div class="asistencia-period-badges">${badges}</div><div class="asistencia-period-table"><table><thead><tr><th>Operario</th><th>Cargo</th><th>Estado</th><th>Comentario</th><th>Jornada</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
   }).join('');
   document.querySelectorAll('#reportePeriodo .asistencia-operario-link').forEach(boton=>boton.addEventListener('click',()=>verHistorialAsistenciaOperario(Number(boton.dataset.operarioId))));
 }
@@ -192,7 +196,7 @@ function verHistorialAsistenciaOperario(operarioId) {
   const labels = { P:'Pendiente', A:'Asistió', T:'Tarde', D:'Descanso', F:'Falta' };
   const resumen = { P:0, A:0, T:0, D:0, F:0 };
   registros.forEach(registro => { const estado=String(registro.estado||'P').trim(); if (resumen[estado] !== undefined) resumen[estado]++; });
-  const html = `<div class="asistencia-personal-history"><p class="text-muted">${escAsistencia(primero.cargo||'')} · ${registros.length} día(s) en el periodo</p><div class="d-flex flex-wrap gap-2 mb-3">${Object.entries(resumen).map(([estado,cantidad])=>`<span class="asistencia-period-badge">${labels[estado]}: ${cantidad}</span>`).join('')}</div>${registros.map(registro=>{const estado=String(registro.estado||'P').trim();return `<article class="asistencia-personal-day"><div><div class="asistencia-personal-date">${formatearFechaLarga(registro.fecha_asistencia)}</div><div class="asistencia-sub">${escAsistencia(registro.nombre_asistencia||'Asistencia diaria')}</div>${registro.comentario?`<div class="mt-2">${escAsistencia(registro.comentario)}</div>`:''}</div><span class="asistencia-personal-status" data-estado="${escAsistencia(estado)}">${escAsistencia(labels[estado]||estado)}</span></article>`;}).join('')}</div>`;
+  const html = `<div class="asistencia-personal-history"><p class="text-muted">${escAsistencia(primero.cargo||'')} · ${registros.length} día(s) en el periodo</p><div class="d-flex flex-wrap gap-2 mb-3">${Object.entries(resumen).map(([estado,cantidad])=>`<span class="asistencia-period-badge">${labels[estado]}: ${cantidad}</span>`).join('')}</div>${registros.map(registro=>{const estado=String(registro.estado||'P').trim();const jornada=obtenerJornadaAsistencia(registro.js_marcador);return `<article class="asistencia-personal-day"><div><div class="asistencia-personal-date">${formatearFechaLarga(registro.fecha_asistencia)}</div><div class="asistencia-sub">${escAsistencia(registro.nombre_asistencia||'Asistencia diaria')}</div>${renderJornadaAsistencia(jornada)}${registro.comentario?`<div class="mt-2">${escAsistencia(registro.comentario)}</div>`:''}</div><span class="asistencia-personal-status" data-estado="${escAsistencia(estado)}">${escAsistencia(labels[estado]||estado)}</span></article>`;}).join('')}</div>`;
   Swal.fire({ title: nombre, html, width: 760, confirmButtonText: 'Cerrar', customClass: { popup: 'asistencia-history-popup' } });
 }
 
@@ -264,21 +268,33 @@ function renderizarOperarios() {
   document.getElementById('mensajeAsistencia').classList.toggle('d-none',!!asistenciaActual && lista.length>0);
   if (!asistenciaActual) return;
   if (!lista.length) { document.getElementById('mensajeAsistencia').textContent='No hay operarios que coincidan con la búsqueda.'; document.getElementById('mensajeAsistencia').classList.remove('d-none'); }
-  body.innerHTML=lista.map(o=>`<tr data-operario-id="${Number(o.operario_id)}">
+  body.innerHTML=lista.map(o=>{const jornada=obtenerJornadaAsistencia(o.js_marcador);const estadoActual=String(o.estado||'P').trim();return `<tr data-operario-id="${Number(o.operario_id)}">
     <td data-label="Operario"><div class="asistencia-name">${escAsistencia(o.nombre_completo)}</div>${o.apodo?`<div class="asistencia-sub">${escAsistencia(o.apodo)}</div>`:''}</td>
     <td data-label="Cargo">${escAsistencia(o.cargo||'-')}</td>
     <td data-label="Estado"><div class="asistencia-status-group" role="group" aria-label="Estado de asistencia de ${escAsistencia(o.nombre_completo)}">
       ${[['P','Pendiente'],['A','Asistió'],['T','Tarde'],['D','Descanso'],['F','Falta']].map(([estado,label])=>`<button type="button" class="asistencia-status-btn" data-estado="${estado}" aria-pressed="${String(o.estado||'P').trim()===estado}" title="Marcar ${label}">${label}</button>`).join('')}
     </div></td>
     <td data-label="Comentario"><input class="form-control asistencia-comment" maxlength="1000" placeholder="Comentario opcional" value="${escAsistencia(o.comentario||'')}"></td>
+    <td data-label="Jornada"><div>${renderJornadaAsistencia(jornada)}</div>${['A','T'].includes(estadoActual)?(jornada?(jornada.salida?'<span class="asistencia-sub">Salida registrada</span>':`<button type="button" class="asistencia-jornada-btn" data-marcar-salida="${Number(o.operario_id)}"><i class="fa-solid fa-right-from-bracket"></i> Registrar salida</button>`):'<span class="asistencia-sub">Guarda el ingreso para habilitar la salida</span>'):'<span class="asistencia-sub">No aplica</span>'}</td>
     <td data-label="Historial"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="verHistorialOperario(${Number(o.operario_id)})"><i class="fa-solid fa-clock-rotate-left"></i> Ver (${contarMarcaciones(o.js_marcador)})</button></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
   body.querySelectorAll('.asistencia-status-btn').forEach(button=>button.addEventListener('click',()=>{
     const grupo=button.closest('.asistencia-status-group');
     grupo.querySelectorAll('.asistencia-status-btn').forEach(opcion=>opcion.setAttribute('aria-pressed',String(opcion===button)));
     marcarCambiosAsistencia();
   }));
   body.querySelectorAll('input').forEach(input=>input.addEventListener('input',marcarCambiosAsistencia));
+  body.querySelectorAll('[data-marcar-salida]').forEach(button=>button.addEventListener('click',()=>registrarSalidaAsistencia(Number(button.dataset.marcarSalida))));
+}
+
+async function registrarSalidaAsistencia(operarioId){
+  const confirmacion=await Swal.fire({title:'¿Registrar salida?',text:'Se guardará la hora actual como salida de este operario y se calculará su tiempo en planta.',icon:'question',showCancelButton:true,confirmButtonText:'Registrar salida',cancelButtonText:'Cancelar',confirmButtonColor:'#167342'});
+  if(!confirmacion.isConfirmed)return;
+  const json=await llamarAsistencia('MARCARSALIDA',{asistencia_id:asistenciaActual?.id,operario_id:operarioId});
+  if(!json.success){Swal.fire('No se pudo registrar',json.message,'error');return;}
+  operariosAsistencia=json.operarios||[];
+  renderizarOperarios();
+  Swal.fire({toast:true,position:'top-end',icon:'success',title:json.message,showConfirmButton:false,timer:1800});
 }
 
 function marcarCambiosAsistencia(){
@@ -307,13 +323,28 @@ async function guardarCambiosAsistencia() {
 }
 function escAsistencia(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function decodificarMarcaciones(v){if(Array.isArray(v))return v;if(typeof v==='string'){try{const a=JSON.parse(v);return Array.isArray(a)?a:(a&&typeof a==='object'?[a]:[])}catch(_){return []}}return v&&typeof v==='object'?[v]:[];}
+function obtenerJornadaAsistencia(marcadores){
+  const eventos=decodificarMarcaciones(marcadores).filter(m=>m&&m.fecha_hora);
+  const ingresos=eventos.filter(m=>m.tipo_marcacion==='ingreso'||(['A','T'].includes(String(m.estado_nuevo||'').trim())&&!['A','T'].includes(String(m.estado_anterior||'').trim()))).map(m=>String(m.fecha_hora)).sort();
+  const ingreso=ingresos.length?ingresos[ingresos.length-1]:null;
+  if(!ingreso)return null;
+  const salidas=eventos.filter(m=>m.tipo_marcacion==='salida'&&String(m.fecha_hora)>=ingreso).map(m=>String(m.fecha_hora)).sort();
+  const salida=salidas.length?salidas[salidas.length-1]:null;
+  const inicioMs=Date.parse(ingreso),finMs=Date.parse(salida||new Date().toISOString());
+  const minutos=Number.isFinite(inicioMs)&&Number.isFinite(finMs)?Math.max(0,Math.floor((finMs-inicioMs)/60000)):0;
+  return {ingreso,salida,minutos};
+}
+function renderJornadaAsistencia(jornada){if(!jornada)return '<span class="asistencia-sub">Ingreso aún no registrado</span>';return `<div class="asistencia-jornada"><div>Entrada: <strong>${formatearHoraAsistencia(jornada.ingreso)}</strong></div><div>Salida: <strong>${jornada.salida?formatearHoraAsistencia(jornada.salida):'Pendiente'}</strong></div><div>Tiempo: <strong>${formatearDuracionAsistencia(jornada.minutos)}</strong></div></div>`;}
+function formatearHoraAsistencia(valor){if(!valor)return '-';return new Intl.DateTimeFormat('es-PE',{hour:'2-digit',minute:'2-digit',timeZone:'America/Lima'}).format(new Date(valor));}
+function formatearFechaHoraAsistencia(valor){if(!valor)return '-';return new Intl.DateTimeFormat('es-PE',{dateStyle:'short',timeStyle:'short',timeZone:'America/Lima'}).format(new Date(valor));}
+function formatearDuracionAsistencia(minutos){const horas=Math.floor(minutos/60),resto=minutos%60;return horas?`${horas} h ${resto} min`:`${resto} min`;}
 function contarMarcaciones(v){return decodificarMarcaciones(v).length;}
 function verHistorialOperario(id){
   const operario=operariosAsistencia.find(o=>Number(o.operario_id)===Number(id));
   if(!operario)return;
   const historial=decodificarMarcaciones(operario.js_marcador);
   const estados={P:'Pendiente',A:'Asistió',T:'Tarde',D:'Descanso',F:'Falta'};
-  const html=historial.length?`<div class="text-start">${historial.slice().reverse().map(m=>`<div class="border rounded p-3 mb-2"><div class="fw-semibold">${escAsistencia(estados[m.estado_anterior]||m.estado_anterior||'')} → ${escAsistencia(estados[m.estado_nuevo]||m.estado_nuevo||'')}</div><div class="small text-muted mt-1">${escAsistencia(m.nombre||m.usuario||'Usuario')} · ${escAsistencia(m.fecha_hora?new Date(m.fecha_hora).toLocaleString('es-PE'):'')}</div>${m.comentario?`<div class="mt-2">${escAsistencia(m.comentario)}</div>`:''}</div>`).join('')}</div>`:'<p class="text-muted mb-0">Todavía no hay cambios de asistencia registrados.</p>';
+  const html=historial.length?`<div class="text-start">${historial.slice().reverse().map(m=>{const evento=m.tipo_marcacion==='salida'?'Salida registrada':(m.tipo_marcacion==='ingreso'?'Ingreso registrado':`${escAsistencia(estados[m.estado_anterior]||m.estado_anterior||'')} → ${escAsistencia(estados[m.estado_nuevo]||m.estado_nuevo||'')}`);return `<div class="border rounded p-3 mb-2"><div class="fw-semibold">${evento}</div><div class="small text-muted mt-1">${escAsistencia(m.nombre||m.usuario||'Usuario')} · ${escAsistencia(formatearFechaHoraAsistencia(m.fecha_hora))}</div>${m.comentario?`<div class="mt-2">${escAsistencia(m.comentario)}</div>`:''}</div>`;}).join('')}</div>`:'<p class="text-muted mb-0">Todavía no hay cambios de asistencia registrados.</p>';
   Swal.fire({title:`Historial · ${escAsistencia(operario.nombre_completo)}`,html,width:560,confirmButtonText:'Cerrar'});
 }
 function formatearFecha(v){if(!v)return '-';const [y,m,d]=String(v).slice(0,10).split('-');return `${d}/${m}/${y}`;}

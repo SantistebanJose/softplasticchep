@@ -10,6 +10,12 @@ if (isset($_POST['accion'])) {
         controladorAsistencia((string) $_POST['accion']);
     } catch (PDOException $e) {
         error_log('Error de base de datos en clssAsistencia.php: ' . $e->getMessage());
+        if ($e->getCode() === '55P03') {
+            responderAsistencia(false, 'La asistencia está siendo actualizada por otra persona. Espera unos segundos e inténtalo nuevamente.');
+        }
+        if ($e->getCode() === '57014') {
+            responderAsistencia(false, 'El guardado tardó más de lo esperado y se canceló sin aplicar cambios. Inténtalo nuevamente.');
+        }
         responderAsistencia(false, 'Error de base de datos al procesar la asistencia.');
     } catch (Throwable $e) {
         error_log('Error inesperado en clssAsistencia.php: ' . $e->getMessage());
@@ -25,6 +31,7 @@ function controladorAsistencia(string $accion): void
         case 'OBTENERASISTENCIA': obtenerAsistencia(); break;
         case 'CREARASISTENCIA': crearAsistencia($usuario); break;
         case 'GUARDARASISTENCIA': guardarAsistencia($usuario); break;
+        case 'MARCARSALIDA': marcarSalidaAsistencia($usuario); break;
         case 'LISTARPERIODOASISTENCIA': listarPeriodoAsistencia(); break;
         default: responderAcceso(400, 'Acción no reconocida.');
     }
@@ -44,7 +51,7 @@ function listarPeriodoAsistencia(): void
     $filas = executeQuery($db, "
         SELECT a.id AS asistencia_id, a.fecha, a.nombre AS asistencia_nombre,
                a.created_at AS asistencia_creada,
-               ra.operario_id, ra.estado, ra.comentario,
+               ra.operario_id, ra.estado, ra.comentario, ra.js_marcador,
                o.nombre_completo, o.apodo, c.nombre AS cargo
         FROM public.asistencia a
         LEFT JOIN public.rel_asistencia_operario ra
@@ -75,6 +82,7 @@ function listarPeriodoAsistencia(): void
                 'cargo' => $fila['cargo'],
                 'estado' => trim((string) $fila['estado']),
                 'comentario' => $fila['comentario'],
+                'js_marcador' => $fila['js_marcador'],
             ];
         }
     }
@@ -127,7 +135,7 @@ function crearAsistencia(array $usuario): void
                 'nombre' => $usuario['nombre'],
                 'usuario' => $usuario['usuario'],
                 'accion' => 'crear_asistencia',
-                'fecha_hora' => date('c'),
+                'fecha_hora' => fechaHoraAsistencia(),
             ];
             $insertada = executeQuery($db, "
                 INSERT INTO public.asistencia (fecha, nombre, js_session, created_at)
@@ -182,61 +190,170 @@ function guardarAsistencia(array $usuario): void
     if (!$cabecera) responderAsistencia(false, 'No se encontró la asistencia del día.');
 
     $permitidos = ['P', 'A', 'T', 'D', 'F'];
-    $actorBase = ['usuario_id' => $usuario['id'], 'nombre' => $usuario['nombre'], 'usuario' => $usuario['usuario']];
-    $guardados = 0;
+    $registrosValidos = [];
+    foreach ($registros as $registro) {
+        if (!is_array($registro)) continue;
+        $operarioId = (int) ($registro['operario_id'] ?? 0);
+        $estado = strtoupper(trim((string) ($registro['estado'] ?? 'P')));
+        $comentario = trim((string) ($registro['comentario'] ?? ''));
+        if ($operarioId <= 0 || !in_array($estado, $permitidos, true)) responderAsistencia(false, 'Hay un operario o estado inválido en el formulario.');
+        if (mb_strlen($comentario, 'UTF-8') > 1000) responderAsistencia(false, 'Los comentarios admiten hasta 1000 caracteres.');
+        // Si un operario aparece repetido en el POST, se conserva el último valor recibido.
+        $registrosValidos[$operarioId] = [
+            'operario_id' => $operarioId,
+            'estado' => $estado,
+            'comentario' => $comentario,
+        ];
+    }
+
+    if (!$registrosValidos) {
+        responderAsistencia(true, 'No hay cambios por guardar.', ['operarios' => listarDetalleAsistencia($db, $asistenciaId)]);
+    }
+
+    $fechaHora = fechaHoraAsistencia();
     $db->beginTransaction();
     try {
-        foreach ($registros as $registro) {
-            if (!is_array($registro)) continue;
-            $operarioId = (int) ($registro['operario_id'] ?? 0);
-            $estado = strtoupper(trim((string) ($registro['estado'] ?? 'P')));
-            $comentario = trim((string) ($registro['comentario'] ?? ''));
-            if ($operarioId <= 0 || !in_array($estado, $permitidos, true)) responderAsistencia(false, 'Hay un operario o estado inválido en el formulario.');
-            if (mb_strlen($comentario, 'UTF-8') > 1000) responderAsistencia(false, 'Los comentarios admiten hasta 1000 caracteres.');
-
-            $actual = executeQuery($db, "
-                SELECT estado, comentario, js_marcador
-                FROM public.rel_asistencia_operario
-                WHERE asistencia_id = :asistencia_id AND operario_id = :operario_id AND deleted_at IS NULL
-                FOR UPDATE
-            ", ['asistencia_id' => $asistenciaId, 'operario_id' => $operarioId]);
-            if (!$actual) continue;
-            $anterior = $actual[0];
-            $estadoAnterior = trim((string) ($anterior['estado'] ?? 'P'));
-            $comentarioAnterior = (string) ($anterior['comentario'] ?? '');
-            if ($estado === $estadoAnterior && $comentario === $comentarioAnterior) continue;
-
-            $historial = $anterior['js_marcador'] ?? null;
-            if (is_string($historial)) $historial = json_decode($historial, true);
-            if (!is_array($historial)) $historial = [];
-            elseif (!array_is_list($historial)) $historial = [$historial];
-            $historial[] = array_merge($actorBase, [
-                'fecha_hora' => date('c'),
-                'estado_anterior' => $estadoAnterior,
-                'estado_nuevo' => $estado,
-                'comentario' => $comentario,
-            ]);
-
-            executeNonQuery($db, "
-                UPDATE public.rel_asistencia_operario
-                SET estado = :estado, comentario = :comentario,
-                    js_marcador = CAST(:js_marcador AS jsonb), updated_at = NOW()
-                WHERE asistencia_id = :asistencia_id AND operario_id = :operario_id AND deleted_at IS NULL
-            ", [
-                'estado' => $estado,
-                'comentario' => $comentario !== '' ? $comentario : null,
-                'js_marcador' => json_encode($historial, JSON_UNESCAPED_UNICODE),
-                'asistencia_id' => $asistenciaId,
-                'operario_id' => $operarioId,
-            ]);
-            $guardados++;
-        }
+        // Las asistencias viven en una BD remota. Una consulta por cada operario
+        // provocaba decenas de viajes de red y podía agotar el límite de PHP.
+        // Se actualizan todos los cambios y se agrega el marcador en una sola consulta.
+        $db->exec("SET LOCAL lock_timeout = '5s'");
+        $db->exec("SET LOCAL statement_timeout = '20s'");
+        $actualizados = executeQuery($db, "
+            WITH datos AS (
+                SELECT operario_id, estado, comentario
+                FROM jsonb_to_recordset(CAST(:registros AS jsonb))
+                    AS entrada(operario_id bigint, estado text, comentario text)
+            )
+            UPDATE public.rel_asistencia_operario AS ra
+            SET estado = datos.estado,
+                comentario = NULLIF(datos.comentario, ''),
+                js_marcador = (
+                    CASE
+                        WHEN jsonb_typeof(ra.js_marcador) = 'array' THEN ra.js_marcador
+                        WHEN jsonb_typeof(ra.js_marcador) = 'object' THEN jsonb_build_array(ra.js_marcador)
+                        ELSE '[]'::jsonb
+                    END
+                ) || jsonb_build_array(
+                    jsonb_build_object(
+                        'usuario_id', CAST(:usuario_id AS integer),
+                        'nombre', CAST(:usuario_nombre AS text),
+                        'usuario', CAST(:usuario_login AS text),
+                        'fecha_hora', CAST(:fecha_hora AS text),
+                        'estado_anterior', COALESCE(NULLIF(BTRIM(ra.estado), ''), 'P'),
+                        'estado_nuevo', datos.estado,
+                        'comentario', datos.comentario
+                    ) || CASE
+                        WHEN datos.estado IN ('A', 'T')
+                         AND COALESCE(NULLIF(BTRIM(ra.estado), ''), 'P') NOT IN ('A', 'T')
+                        THEN jsonb_build_object('tipo_marcacion', 'ingreso')
+                        ELSE '{}'::jsonb
+                    END
+                ),
+                updated_at = NOW()
+            FROM datos
+            WHERE ra.asistencia_id = :asistencia_id
+              AND ra.operario_id = datos.operario_id
+              AND ra.deleted_at IS NULL
+              AND (
+                    BTRIM(COALESCE(ra.estado, '')) IS DISTINCT FROM datos.estado
+                 OR COALESCE(ra.comentario, '') IS DISTINCT FROM datos.comentario
+              )
+            RETURNING ra.operario_id
+        ", [
+            'registros' => json_encode(array_values($registrosValidos), JSON_UNESCAPED_UNICODE),
+            'usuario_id' => (int) $usuario['id'],
+            'usuario_nombre' => (string) $usuario['nombre'],
+            'usuario_login' => (string) $usuario['usuario'],
+            'fecha_hora' => $fechaHora,
+            'asistencia_id' => $asistenciaId,
+        ]);
+        $guardados = count($actualizados);
         $db->commit();
     } catch (Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
     responderAsistencia(true, $guardados ? "Asistencia guardada. {$guardados} registro(s) actualizado(s)." : 'No hay cambios por guardar.', ['operarios' => listarDetalleAsistencia($db, $asistenciaId)]);
+}
+
+function marcarSalidaAsistencia(array $usuario): void
+{
+    $asistenciaId = (int) ($_POST['asistencia_id'] ?? 0);
+    $operarioId = (int) ($_POST['operario_id'] ?? 0);
+    if ($asistenciaId <= 0 || $operarioId <= 0) responderAsistencia(false, 'La asistencia o el operario no son válidos.');
+
+    $db = conectar_oll_BD();
+    $db->beginTransaction();
+    try {
+        $actual = executeQuery($db, "
+            SELECT estado, js_marcador
+            FROM public.rel_asistencia_operario
+            WHERE asistencia_id = :asistencia_id AND operario_id = :operario_id AND deleted_at IS NULL
+            FOR UPDATE
+        ", ['asistencia_id' => $asistenciaId, 'operario_id' => $operarioId]);
+        if (!$actual) throw new RuntimeException('No se encontró el registro del operario para esta asistencia.');
+        $estado = trim((string) ($actual[0]['estado'] ?? 'P'));
+        if (!in_array($estado, ['A', 'T'], true)) throw new RuntimeException('Marca primero al operario como Asistió o Tarde.');
+
+        $historial = $actual[0]['js_marcador'] ?? null;
+        if (is_string($historial)) $historial = json_decode($historial, true);
+        if (!is_array($historial)) $historial = [];
+        elseif (!array_is_list($historial)) $historial = [$historial];
+
+        $ingresos = [];
+        $ultimaSalida = null;
+        foreach ($historial as $marcador) {
+            if (!is_array($marcador) || empty($marcador['fecha_hora'])) continue;
+            $fechaMarcador = (string) $marcador['fecha_hora'];
+            if (($marcador['tipo_marcacion'] ?? '') === 'ingreso'
+                || (in_array(($marcador['estado_nuevo'] ?? ''), ['A', 'T'], true)
+                    && !in_array(($marcador['estado_anterior'] ?? ''), ['A', 'T'], true))) {
+                $ingresos[] = $fechaMarcador;
+            }
+            if (($marcador['tipo_marcacion'] ?? '') === 'salida'
+                && ($ultimaSalida === null || $fechaMarcador > $ultimaSalida)) {
+                $ultimaSalida = $fechaMarcador;
+            }
+        }
+        if (!$ingresos) throw new RuntimeException('No hay una hora de ingreso registrada. Guarda primero el estado Asistió o Tarde.');
+        sort($ingresos);
+        $ultimoIngreso = end($ingresos);
+        if ($ultimaSalida !== null && $ultimaSalida >= $ultimoIngreso) {
+            throw new RuntimeException('La salida de hoy ya fue registrada.');
+        }
+
+        $marcadorSalida = array_merge([
+            'tipo_marcacion' => 'salida',
+            'fecha_hora' => fechaHoraAsistencia(),
+            'estado' => $estado,
+            'comentario' => '',
+        ], [
+            'usuario_id' => $usuario['id'],
+            'nombre' => $usuario['nombre'],
+            'usuario' => $usuario['usuario'],
+        ]);
+        $historial[] = $marcadorSalida;
+        executeNonQuery($db, "
+            UPDATE public.rel_asistencia_operario
+            SET js_marcador = CAST(:js_marcador AS jsonb), updated_at = NOW()
+            WHERE asistencia_id = :asistencia_id AND operario_id = :operario_id AND deleted_at IS NULL
+        ", [
+            'js_marcador' => json_encode($historial, JSON_UNESCAPED_UNICODE),
+            'asistencia_id' => $asistenciaId,
+            'operario_id' => $operarioId,
+        ]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        if ($e instanceof RuntimeException) responderAsistencia(false, $e->getMessage());
+        throw $e;
+    }
+    responderAsistencia(true, 'Salida registrada correctamente.', ['operarios' => listarDetalleAsistencia($db, $asistenciaId)]);
+}
+
+function fechaHoraAsistencia(): string
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format(DateTimeInterface::ATOM);
 }
 
 function responderAsistencia(bool $success, string $message, array $extra = []): void

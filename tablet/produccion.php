@@ -266,7 +266,9 @@ $operarioNombre = $_SESSION['operario_nombre'] ?? 'Operario';
 .pc-prod-tag{ font-size:.75em; color:#8a8578; background:#f6f4ee; border-radius:6px; padding:4px 9px; font-weight:600; }
 .pc-prod-tag.no-ensamblaje{ background:#EEECE6; color:#6b6656; }
 .pc-prod-tag.externo-pendiente{ background:#FFF4D6; color:#9A5B00; }
-.pc-prod-corrida-line{ font-size:.82em; color:#9a9585; display:flex; align-items:center; gap:6px; }
+.pc-prod-corrida-line{ font-size:.82em; color:#9a9585; display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; flex-wrap:wrap; overflow-wrap:anywhere; }
+.pc-prod-card{ min-width:0; }
+.pc-prod-qr-passes .btn{ flex:0 0 auto; }
 .pc-prod-corrida-line b{ color:#5c5947; font-weight:600; }
 .pc-prod-operarios{ font-size:.82em; color:#9a9585; display:flex; align-items:flex-start; gap:6px; }
 .pc-prod-operarios i{ margin-top:2px; }

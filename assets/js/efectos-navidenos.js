@@ -1,5 +1,15 @@
 (() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // Se captura de inmediato: currentScript solo existe durante la ejecución inicial.
+    const scriptActual = document.currentScript && document.currentScript.src ? document.currentScript.src : '';
+    const urlTrineo = scriptActual
+        ? new URL('../img/trineo-navidad.png' + (new URL(scriptActual).search || ''), scriptActual).href
+        : '';
+
+    // El trineo avanza mirando hacia la derecha.
+    const VOLTEAR_IMAGEN = false;
+    const reducirMovimiento = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reducirMovimiento) {
         document.documentElement.classList.add('pc-navidad-reducir-movimiento');
     }
 
@@ -17,12 +27,21 @@
         .pc-navidad-prenda{position:absolute;left:50%;top:31px;width:13px;height:12px;transform:translateX(-50%);background:var(--prenda);clip-path:polygon(28% 0,42% 11%,58% 11%,72% 0,100% 24%,82% 43%,74% 34%,74% 100%,26% 100%,26% 34%,18% 43%,0 24%);}
         .pc-navidad-nieve{position:fixed;inset:0;z-index:1039;pointer-events:none;overflow:hidden;}
         .pc-navidad-copo{position:absolute;top:-12px;left:var(--left);color:#7db8e8;font-size:var(--size);opacity:var(--opacity);animation:pcNavidadCaer var(--duration) linear infinite;animation-delay:var(--delay);}
+        .pc-navidad-trineo{--alto:150px;position:fixed;top:var(--top);right:0;z-index:1041;white-space:nowrap;pointer-events:none;line-height:1;visibility:hidden;}
+        .pc-navidad-trineo.volando{visibility:visible;animation:pcNavidadCruce 14s linear forwards;}
+        .pc-navidad-trineo img{display:block;height:var(--alto);width:auto;max-width:none;filter:drop-shadow(0 4px 6px #17233a55);animation:pcNavidadFlotar 2.2s ease-in-out infinite alternate;}
+        .pc-navidad-trineo.pc-navidad-volteado img{scale:-1 1;}
+        .pc-navidad-trineo-emoji{display:block;font-size:34px;filter:drop-shadow(0 3px 5px #17233a44);}
+        .pc-navidad-trineo-emoji .pc-navidad-papa{display:inline-block;position:relative;margin-left:-14px;transform:translateY(-13px);font-size:.62em;}
+        .pc-navidad-trineo-emoji .pc-navidad-estela{margin-left:8px;color:#f2bf42;font-size:.45em;letter-spacing:3px;}
+        @keyframes pcNavidadCruce{from{transform:translateX(calc(-100vw - 100%))}to{transform:translateX(110vw)}}
+        @keyframes pcNavidadFlotar{from{transform:translateY(-5px) rotate(-1.2deg)}to{transform:translateY(6px) rotate(1.2deg)}}
         @keyframes pcNavidadBalanceo{0%,100%{rotate:-7deg}50%{rotate:7deg}}
         @keyframes pcNavidadBrillo{from{opacity:.48;filter:saturate(.75)}to{opacity:1;filter:saturate(1.25)}}
         @keyframes pcNavidadCaer{to{transform:translate3d(20px,105vh,0) rotate(180deg)}}
         .pc-navidad-reducir-movimiento .pc-navidad-gancho,.pc-navidad-reducir-movimiento .pc-navidad-luz,.pc-navidad-reducir-movimiento .pc-navidad-copo{animation:none!important}
-        @media(max-width:700px){.pc-navidad-decoracion{height:75px}.pc-navidad-cuerda{height:58px}.pc-navidad-luces{height:52px}.pc-navidad-gancho{width:26px;height:42px}.pc-navidad-gancho svg{width:26px;height:34px}.pc-navidad-prenda{top:28px;width:11px;height:10px}}
-        @media(prefers-reduced-motion:reduce){.pc-navidad-gancho,.pc-navidad-luz,.pc-navidad-copo{animation:none!important}}
+        @media(max-width:700px){.pc-navidad-decoracion{height:75px}.pc-navidad-cuerda{height:58px}.pc-navidad-luces{height:52px}.pc-navidad-gancho{width:26px;height:42px}.pc-navidad-gancho svg{width:26px;height:34px}.pc-navidad-prenda{top:28px;width:11px;height:10px}.pc-navidad-trineo{--alto:100px}.pc-navidad-trineo-emoji{font-size:27px}}
+        @media(prefers-reduced-motion:reduce){.pc-navidad-gancho,.pc-navidad-luz,.pc-navidad-copo,.pc-navidad-trineo{animation:none!important;visibility:hidden!important}.pc-navidad-trineo img{animation:none!important}}
     `;
     document.head.appendChild(estilo);
 
@@ -63,6 +82,57 @@
     nieve.className = 'pc-navidad-nieve';
     nieve.setAttribute('aria-hidden', 'true');
     document.body.append(decoracion, nieve);
+
+    const trineo = document.createElement('div');
+    trineo.className = 'pc-navidad-trineo';
+    trineo.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(trineo);
+
+    const trineoEmoji = () => {
+        trineo.classList.remove('pc-navidad-volteado');
+        trineo.innerHTML = '<span class="pc-navidad-trineo-emoji"><span>🦌🦌</span><span>🛷</span><span class="pc-navidad-papa">🎅</span><span class="pc-navidad-estela">✦ ✨ ✦</span></span>';
+    };
+
+    const volarTrineo = () => {
+        const movil = window.innerWidth <= 700;
+        const base = movil ? 50 : 60;
+        const rango = movil ? 30 : 60;
+        trineo.style.setProperty('--top', `${base + Math.random() * rango}px`);
+        trineo.classList.remove('volando');
+        void trineo.offsetWidth;
+        trineo.classList.add('volando');
+    };
+
+    // Arranca una sola vez, en cuanto el trineo está listo (imagen cargada o fallback).
+    let iniciado = false;
+    const iniciarTrineo = () => {
+        if (iniciado || reducirMovimiento) return;
+        iniciado = true;
+        volarTrineo();
+        window.setInterval(volarTrineo, 60000);
+    };
+
+    if (!reducirMovimiento) {
+        trineo.addEventListener('animationend', (evento) => {
+            if (evento.target === trineo) trineo.classList.remove('volando');
+        });
+    }
+
+    if (urlTrineo) {
+        if (VOLTEAR_IMAGEN) trineo.classList.add('pc-navidad-volteado');
+        const imagen = new Image();
+        imagen.alt = '';
+        imagen.decoding = 'async';
+        imagen.draggable = false;
+        imagen.addEventListener('load', iniciarTrineo, { once: true });
+        imagen.addEventListener('error', () => { trineoEmoji(); iniciarTrineo(); }, { once: true });
+        imagen.src = urlTrineo;
+        trineo.appendChild(imagen);
+        iniciarTrineo();
+    } else {
+        trineoEmoji();
+        iniciarTrineo();
+    }
 
     let breakpointMovil = window.innerWidth <= 700;
     window.addEventListener('resize', () => {
