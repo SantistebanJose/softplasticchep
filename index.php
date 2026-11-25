@@ -143,7 +143,7 @@ window.addEventListener('load', function () {
         <button type="button" data-dash-periodo="semana">Esta semana</button>
         <button type="button" data-dash-periodo="mes" class="activo">Este mes</button>
     </div>
-    <span class="dash-periodo-label" id="dashPeriodoLabel">Cargando periodo…</span>
+    <span class="dash-periodo-label" id="dashPeriodoLabel">Este mes</span>
 </div>
 
 <section class="dash-grid" id="dashVentas" aria-live="polite">
@@ -208,10 +208,17 @@ const dashFecha = valor => {
 
 async function cargarDashboard() {
     const body = new URLSearchParams({accion:'RESUMENDASHBOARD', periodo:periodoDashboard});
+    const periodoLabel = document.getElementById('dashPeriodoLabel');
+    if (periodoLabel) periodoLabel.textContent = 'Cargando periodo…';
     try {
         const response = await fetch(DASHBOARD_API, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body});
         const data = await response.json();
         if (!data.success) throw new Error(data.message || 'No se pudo cargar el dashboard.');
+        if (periodoLabel) {
+            const periodo = data.periodo || {};
+            const rango = periodo.desde && periodo.hasta ? `${dashFecha(periodo.desde)} – ${dashFecha(periodo.hasta)}` : '';
+            periodoLabel.textContent = [periodo.etiqueta || 'Periodo cargado', rango].filter(Boolean).join(' · ');
+        }
         const v = data.ventas || {};
         const resumenVentas = document.getElementById('dashVentas');
         if (resumenVentas) {
