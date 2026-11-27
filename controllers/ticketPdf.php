@@ -46,14 +46,42 @@ const PRECIOS_INCLUYEN_IGV  = true;   // true: el precio/monto_total ya trae IGV
 const SUNAT_URL_CONSULTA    = '';     // ej. 'www.tufacturador.pe/consulta' (la da tu OSE/facturador)
 
 $id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
-if ($id <= 0) {
+$sesionDespacho = [];
+$despachoUid = strtolower(trim((string)($_GET['despacho'] ?? '')));
+$esTraslado = preg_match('/^[a-f0-9]{32}$/', $despachoUid) === 1;
+if (!$esTraslado && $id <= 0) {
     http_response_code(400);
     die('Venta inválida.');
 }
 
 $conectar = conectar_oll_BD();
 
-$result = executeQuery($conectar, "
+if ($esTraslado) {
+    $result = executeQuery($conectar, "
+        SELECT mv.fecha_venta, mv.estado, mv.moneda, mv.js_session, mv.descuento_general,
+               mv.cliente_ruc, mv.cliente AS cliente_nombre
+        FROM movimiento_transporte_venta mv
+        WHERE mv.js_session->>'registro_uid' = :uid AND mv.deleted_at IS NULL
+    ", ['uid' => $despachoUid]);
+    if (empty($result)) { http_response_code(404); die('Carga no encontrada.'); }
+    $venta = $result[0];
+    $sesionDespacho = json_decode((string)($venta['js_session'] ?? '{}'), true) ?: [];
+    $vendedorDespacho = $sesionDespacho['vendedor']['nombre'] ?? 'No registrado';
+    $venta['codigo'] = 'CARGA-' . strtoupper(substr($despachoUid, 0, 8));
+    $venta['monto_total'] = (float)($sesionDespacho['monto_total_pen'] ?? 0);
+    $venta['vendedor_nombre'] = $vendedorDespacho;
+    $venta['cliente_ruc'] = $venta['cliente_ruc'] === '99999999' ? '' : $venta['cliente_ruc'];
+    $items = executeQuery($conectar, "SELECT producto,unidad_venta_corto,cantidad,precio_unitario_manual,sub_total_calcular,descuento FROM rel_venta_producto WHERE js_session->>'registro_uid'=:uid AND deleted_at IS NULL ORDER BY created_at", ['uid' => $despachoUid]);
+    $venta['subtotal_ticket'] = array_sum(array_map(static fn($it) => max(0,(float)$it['sub_total_calcular']-(float)$it['descuento']), $items));
+    $items = array_map(static fn($it) => ['producto'=>$it['producto'],'unidad_venta_corto'=>$it['unidad_venta_corto'],'cantidad'=>$it['cantidad'],'precio_unitario'=>$it['precio_unitario_manual'],'subtotal'=>max(0,(float)$it['sub_total_calcular']-(float)$it['descuento'])], $items);
+    $monedaCobro = strtoupper((string)($sesionDespacho['moneda_cobro'] ?? $venta['moneda'] ?? 'PEN'));
+    $monedaVenta = 'PEN';
+    $tipoCambioVenta = $sesionDespacho['tipo_cambio'] ?? [];
+    $pagosMonedaVenta = $sesionDespacho['pagos'] ?? [];
+    $pagos = array_map(static fn($p) => ['medio_pago'=>$p['medio_pago']??'','monto'=>$p['monto']??0,'referencia'=>$p['referencia']??'','cuenta_nombre'=>$p['cuenta_nombre']??''], $pagosMonedaVenta);
+    $venta['estado'] = strtoupper((string)$venta['estado']) === 'R' ? 'rechazada' : (strtoupper((string)$venta['estado']) === 'E' ? 'entregada' : 'en ruta');
+} else {
+    $result = executeQuery($conectar, "
     SELECT v.codigo, v.fecha_venta, v.monto_total, v.estado, v.js_items, v.js_session,
            v.cliente_ruc, COALESCE(p.razon_social, 'Clientes Varios') AS cliente_nombre,
            COALESCE(u.nombre_completo, 'No registrado') AS vendedor_nombre
@@ -61,28 +89,32 @@ $result = executeQuery($conectar, "
     LEFT JOIN proveedor p ON p.ruc = v.cliente_ruc
     LEFT JOIN usuario u ON u.id = v.vendedor_usuario_id
     WHERE v.id = :id
-", ['id' => $id]);
+    ", ['id' => $id]);
 
 if (empty($result)) {
     http_response_code(404);
     die('Venta no encontrada.');
 }
 
-$venta = $result[0];
-$items = json_decode($venta['js_items'], true) ?: [];
-$datosMonedaVenta = (json_decode($venta['js_session'] ?? '{}', true)['venta_moneda'] ?? []);
-$monedaCobro = strtoupper((string)($datosMonedaVenta['moneda_cobro'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
-$monedaVenta = strtoupper((string)($datosMonedaVenta['moneda_precio'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
-$simboloMonedaVenta = ticketPrefijoMoneda($monedaVenta);
-$tipoCambioVenta = $datosMonedaVenta['tipo_cambio'] ?? [];
-$pagosMonedaVenta = $datosMonedaVenta['pagos'] ?? [];
-$pagos = executeQuery($conectar, "
+    $venta = $result[0];
+    $items = json_decode($venta['js_items'], true) ?: [];
+    $datosMonedaVenta = (json_decode($venta['js_session'] ?? '{}', true)['venta_moneda'] ?? []);
+    $monedaCobro = strtoupper((string)($datosMonedaVenta['moneda_cobro'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
+    $monedaVenta = strtoupper((string)($datosMonedaVenta['moneda_precio'] ?? $datosMonedaVenta['moneda'] ?? 'PEN'));
+    $tipoCambioVenta = $datosMonedaVenta['tipo_cambio'] ?? [];
+    $pagosMonedaVenta = $datosMonedaVenta['pagos'] ?? [];
+    $pagos = executeQuery($conectar, "
     SELECT pago.medio_pago, pago.monto, pago.referencia, cuenta.nombre AS cuenta_nombre
     FROM venta_pago pago
     LEFT JOIN cuenta_receptora cuenta ON cuenta.id = pago.cuenta_receptora_id
     WHERE pago.venta_id = :venta_id
     ORDER BY pago.id
 ", ['venta_id' => $id]);
+}
+if ($esTraslado) {
+    $datosMonedaVenta = ['tipo_cambio'=>$tipoCambioVenta,'pagos'=>$pagosMonedaVenta,'monto_total_cobro'=>(float)($sesionDespacho['monto_total_cobro']??$venta['monto_total'])];
+}
+$simboloMonedaVenta = ticketPrefijoMoneda($monedaVenta);
 
 // =============================================================================
 // GENERADOR DE PDF MÍNIMO (sin librerías)
@@ -592,7 +624,7 @@ $sunat = [
     'hash'   => $venta['sunat_hash']   ?? null,   // valor resumen (DigestValue) de la firma
     'qr_png' => null,                             // bytes PNG del QR (los entrega la librería de QR / el facturador)
 ];
-$esElectronico = !empty($sunat['tipo']) && !empty($sunat['serie']) && !empty($sunat['numero']);
+$esElectronico = !$esTraslado && !empty($sunat['tipo']) && !empty($sunat['serie']) && !empty($sunat['numero']);
 
 // =============================================================================
 // ARMAR EL CONTENIDO DEL COMPROBANTE (TICKET TÉRMICO DE 80 mm)
@@ -614,7 +646,10 @@ $montoTotalPen = (float)$venta['monto_total'];
 $montoTotal = $monedaVenta === 'PEN'
     ? $montoTotalPen
     : (float)($datosMonedaVenta['monto_total_moneda'] ?? $montoTotalPen);
-if (PRECIOS_INCLUYEN_IGV) {
+if ($esTraslado) {
+    $opGravada = (float)($venta['subtotal_ticket'] ?? $montoTotal);
+    $igv = 0.0;
+} elseif (PRECIOS_INCLUYEN_IGV) {
     $opGravada = round($montoTotal / (1 + IGV_TASA), 2);
     $igv       = round($montoTotal - $opGravada, 2);
 } else {
@@ -650,7 +685,7 @@ if ($esElectronico) {
     $tituloDoc = $sunat['tipo'] === '01' ? 'FACTURA ELECTRÓNICA' : 'BOLETA DE VENTA ELECTRÓNICA';
     $numeroDoc = $sunat['serie'] . '-' . str_pad((string)$sunat['numero'], 8, '0', STR_PAD_LEFT);
 } else {
-    $tituloDoc = 'NOTA DE VENTA';
+    $tituloDoc = $esTraslado ? 'NOTA INTERNA DE CARGA' : 'NOTA DE VENTA';
     $numeroDoc = (string)$venta['codigo'];
 }
 
@@ -682,13 +717,17 @@ foreach ($etiquetas as $e) {
 }
 $xValor += 6;
 
-ticketFilaDato($t, 'Fecha emisión:', date('d/m/Y  H:i', strtotime($venta['fecha_venta'])), $xValor);
+ticketFilaDato($t, $esTraslado ? 'Fecha carga:' : 'Fecha emisión:', date('d/m/Y  H:i', strtotime($venta['fecha_venta'])), $xValor);
 ticketFilaDato($t, 'Cliente:', (string)$venta['cliente_nombre'], $xValor);
 if ($docCliente !== '') {
     ticketFilaDato($t, $etiquetaDoc, $docCliente, $xValor);
 }
 ticketFilaDato($t, 'Moneda:', $monedaVenta, $xValor);
 ticketFilaDato($t, 'Vendedor:', (string)$venta['vendedor_nombre'], $xValor);
+if ($esTraslado) {
+    ticketFilaDato($t, 'Estado:', strtoupper((string)$venta['estado']), $xValor);
+    if (!empty($sesionDespacho['ubicacion_destino'])) ticketFilaDato($t, 'Parada:', (string)$sesionDespacho['ubicacion_destino'], $xValor);
+}
 $nombresMedioPago = [
     'efectivo' => 'Efectivo',
     'deposito' => 'Depósito',
@@ -772,8 +811,13 @@ $t->y += 3;
 $t->lineaH($t->y, false, 1.0);
 $t->y += 8;
 
-ticketFilaMonto($t, 'Op. gravada', $opGravada, $monedaVenta);
-ticketFilaMonto($t, 'IGV ' . rtrim(rtrim(number_format(IGV_TASA * 100, 2, '.', ''), '0'), '.') . '%', $igv, $monedaVenta);
+if ($esTraslado) {
+    ticketFilaMonto($t, 'Subtotal del despacho', $opGravada, $monedaVenta);
+    if ((float)($venta['descuento_general'] ?? 0) > 0) ticketFilaMonto($t, 'Descuento general', -(float)$venta['descuento_general'], $monedaVenta);
+} else {
+    ticketFilaMonto($t, 'Op. gravada', $opGravada, $monedaVenta);
+    ticketFilaMonto($t, 'IGV ' . rtrim(rtrim(number_format(IGV_TASA * 100, 2, '.', ''), '0'), '.') . '%', $igv, $monedaVenta);
+}
 $t->y += 4;
 
 $totalTxt  = $simboloMonedaVenta . ' ' . number_format($montoTotal, 2);
@@ -825,9 +869,9 @@ if ($esElectronico) {
 
 // ── Pie ──────────────────────────────────────────────────────────────────────
 $t->y += 10;
-$t->parrafo('¡Gracias por su compra!', 10, true, 'center', 13);
+$t->parrafo($esTraslado ? 'Control de carga y entrega' : '¡Gracias por su compra!', 10, true, 'center', 13);
 if (!$esElectronico) {
-    $t->parrafo('Documento interno · no válido como comprobante de pago', 6.5, false, 'center', 9);
+    $t->parrafo($esTraslado ? 'Documento interno de traslado · no es comprobante tributario ni registra pago en Punto de Venta' : 'Documento interno · no válido como comprobante de pago', 6.5, false, 'center', 9);
 }
 
 $pdf = $t->generar(18.0);
