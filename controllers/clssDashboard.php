@@ -47,6 +47,19 @@ function enviarResumenDashboard(array $usuario): void
             WHERE v.estado = 'completada'
               AND v.fecha_venta >= CAST(:desde AS date)
               AND v.fecha_venta < CAST(:hasta AS date)
+        ), despachos_periodo AS (
+            SELECT mv.monto, mv.moneda, mv.js_session,
+                   COALESCE(NULLIF(mv.js_session #>> '{monto_total_pen}', '')::numeric,
+                       CASE WHEN UPPER(COALESCE(mv.moneda, 'PEN')) = 'PEN' THEN mv.monto
+                            ELSE mv.monto * COALESCE(
+                                NULLIF(mv.js_session #>> '{tipo_cambio,venta}', '')::numeric,
+                                NULLIF(mv.js_session #>> '{tipo_cambio,tasa_aplicada}', '')::numeric, 1
+                            ) END) AS monto_total_pen
+            FROM movimiento_transporte_venta mv
+            WHERE mv.deleted_at IS NULL
+              AND mv.estado IN ('C', 'E')
+              AND mv.fecha_venta >= CAST(:desde AS date)
+              AND mv.fecha_venta < CAST(:hasta AS date)
         ), pagos_moneda AS (
             SELECT UPPER(COALESCE(NULLIF(pago->>'moneda', ''), 'PEN')) AS moneda,
                    COALESCE(NULLIF(pago->>'monto', '')::numeric, 0) AS monto
@@ -63,9 +76,25 @@ function enviarResumenDashboard(array $usuario): void
                 CASE WHEN jsonb_typeof(vp.js_session #> '{venta_moneda,pagos}') = 'array'
                      THEN vp.js_session #> '{venta_moneda,pagos}' ELSE '[]'::jsonb END
             ), 0) = 0
+            UNION ALL
+            SELECT UPPER(COALESCE(NULLIF(pago->>'moneda', ''), dp.moneda, 'PEN')) AS moneda,
+                   COALESCE(NULLIF(pago->>'monto', '')::numeric, 0) AS monto
+            FROM despachos_periodo dp
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE WHEN jsonb_typeof(dp.js_session->'pagos') = 'array'
+                     THEN dp.js_session->'pagos' ELSE '[]'::jsonb END
+            ) AS detalle(pago)
+            UNION ALL
+            SELECT UPPER(COALESCE(dp.moneda, 'PEN')), COALESCE(dp.monto, 0)
+            FROM despachos_periodo dp
+            WHERE COALESCE(jsonb_array_length(
+                CASE WHEN jsonb_typeof(dp.js_session->'pagos') = 'array'
+                     THEN dp.js_session->'pagos' ELSE '[]'::jsonb END
+            ), 0) = 0
         )
-        SELECT (SELECT COUNT(*) FROM ventas_periodo) AS ventas,
-               (SELECT ROUND(COALESCE(SUM(monto_total), 0), 2) FROM ventas_periodo) AS total_pen,
+        SELECT (SELECT COUNT(*) FROM ventas_periodo) + (SELECT COUNT(*) FROM despachos_periodo) AS ventas,
+               (SELECT ROUND(COALESCE(SUM(monto_total), 0), 2) FROM ventas_periodo)
+                 + (SELECT ROUND(COALESCE(SUM(monto_total_pen), 0), 2) FROM despachos_periodo) AS total_pen,
                COALESCE((SELECT ROUND(SUM(monto), 2) FROM pagos_moneda WHERE moneda = 'PEN'), 0) AS ingresos_pen,
                COALESCE((SELECT ROUND(SUM(monto), 2) FROM pagos_moneda WHERE moneda = 'USD'), 0) AS ingresos_usd,
                COALESCE((SELECT ROUND(SUM(monto), 2) FROM pagos_moneda WHERE moneda = 'EUR'), 0) AS ingresos_eur

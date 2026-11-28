@@ -224,8 +224,8 @@ async function cargarDashboard() {
         if (resumenVentas) {
             resumenVentas.hidden = !data.ventas_visibles;
             resumenVentas.innerHTML = data.ventas_visibles ? `
-            <div class="dash-card"><div class="label">Ventas completadas</div><div class="value">${Number(v.ventas || 0).toLocaleString('es-PE')}</div><div class="note">Del periodo seleccionado</div></div>
-            <div class="dash-card"><div class="label">Equivalente en soles</div><div class="value">${dashDinero(v.total_pen)}</div><div class="note">Importe contable de las ventas</div></div>
+            <div class="dash-card"><div class="label">Ventas y despachos</div><div class="value">${Number(v.ventas || 0).toLocaleString('es-PE')}</div><div class="note">Ventas registradas y cargas no rechazadas</div></div>
+            <div class="dash-card"><div class="label">Equivalente en soles</div><div class="value">${dashDinero(v.total_pen)}</div><div class="note">Importe de ventas y despachos</div></div>
             <div class="dash-card money-pen"><div class="label">Recibido en soles</div><div class="value">${dashDinero(v.ingresos_pen, 'PEN')}</div><div class="note">Pagos en PEN</div></div>
             <div class="dash-card money-usd"><div class="label">Recibido en dólares</div><div class="value">${dashDinero(v.ingresos_usd, 'USD')}</div><div class="note">Pagos en USD</div></div>
             <div class="dash-card money-eur"><div class="label">Recibido en euros</div><div class="value">${dashDinero(v.ingresos_eur, 'EUR')}</div><div class="note">Pagos en EUR</div></div>` : '';
